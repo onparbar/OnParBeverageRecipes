@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
 
 function parseJsonLoose(text) {
   try {
@@ -177,21 +178,30 @@ function normalizeTapKey(value, { stripWallNumber = true } = {}) {
     .trim();
 }
 
-function getTapAliases(value) {
+function getTrailingWallNumber(value) {
+  const match = clean(value).match(/\s+([123])\s*$/);
+  return match ? toNumber(match[1]) : 0;
+}
+
+function getTapAliases(value, { stripWallNumber = true } = {}) {
   const text = clean(value);
   const withoutParenthetical = text.replace(/\([^)]*\)/g, " ");
   return [...new Set([
     normalizeTapKey(text, { stripWallNumber: false }),
     normalizeTapKey(withoutParenthetical, { stripWallNumber: false }),
-    normalizeTapKey(text),
-    normalizeTapKey(withoutParenthetical),
+    ...(stripWallNumber ? [
+      normalizeTapKey(text),
+      normalizeTapKey(withoutParenthetical),
+    ] : []),
   ].filter(Boolean))];
 }
 
 async function getTapLookup() {
   const csvPath = path.join(process.cwd(), "public", "data", "keg-levels-template.csv");
   const rows = parseCsv(await readFile(csvPath, "utf8"));
-  const byAlias = new Map();
+  const byExactAlias = new Map();
+  const byLooseAlias = new Map();
+  const byTap = new Map();
   let currentWall = "";
 
   rows.forEach((row) => {
@@ -208,20 +218,57 @@ async function getTapLookup() {
     if (!tapNumber || !currentWall || !type || !brand) return;
 
     const tap = { tapNumber, wall: currentWall, type, brand };
+    byTap.set(tapNumber, tap);
+    getTapAliases(brand, { stripWallNumber: false }).forEach((alias) => {
+      if (!byExactAlias.has(alias)) byExactAlias.set(alias, []);
+      byExactAlias.get(alias).push(tap);
+    });
     getTapAliases(brand).forEach((alias) => {
-      if (!byAlias.has(alias)) byAlias.set(alias, tap);
+      if (!byLooseAlias.has(alias)) byLooseAlias.set(alias, []);
+      byLooseAlias.get(alias).push(tap);
     });
   });
 
-  return byAlias;
+  return { byExactAlias, byLooseAlias, byTap };
 }
 
 function getMatchedTap(productName, tapLookup) {
-  for (const alias of getTapAliases(productName)) {
-    const match = tapLookup.get(alias);
+  const wallNumber = getTrailingWallNumber(productName);
+  for (const alias of getTapAliases(productName, { stripWallNumber: false })) {
+    const matches = tapLookup.byExactAlias.get(alias) || [];
+    const match = wallNumber
+      ? matches.find((tap) => getTrailingWallNumber(tap.brand) === wallNumber)
+      : matches[0];
     if (match) return match;
   }
+
+  if (wallNumber) return null;
+
+  for (const alias of getTapAliases(productName)) {
+    const matches = tapLookup.byLooseAlias.get(alias) || [];
+    if (matches.length === 1) return matches[0];
+  }
   return null;
+}
+
+function buildCurrentTapLookup(rows, tapLookup) {
+  const byPlu = new Map();
+  rows.forEach((row) => {
+    const plu = toNumber(row.plu);
+    const tapNumber = toNumber(row.tapNumber);
+    if (!plu || !tapNumber || row.unused) return;
+    const template = tapLookup.byTap.get(tapNumber) || {};
+    byPlu.set(plu, {
+      tapNumber,
+      wall: template.wall || "",
+      type: template.type || "",
+      brand: clean(row.product) || template.brand || "",
+      templateBrand: template.brand || "",
+      deviceId: toNumber(row.deviceId),
+      lineNum: toNumber(row.lineNum),
+    });
+  });
+  return byPlu;
 }
 
 function isLiquorTap(tapNumber) {
@@ -269,10 +316,11 @@ export async function GET() {
   try {
     const config = getConfig();
     const token = await getAuthtoken(config);
-    const [products, itemPrices, tapLookup] = await Promise.all([
+    const [products, itemPrices, tapLookup, tapConfigRows] = await Promise.all([
       postJson(config.baseUrl, "/api/productlist", { id: String(config.clientId) }, token),
       postJson(config.baseUrl, "/api/itemlist", { id: String(config.clientId) }, token),
       getTapLookup(),
+      getTapConfigRows(config).catch(() => []),
     ]);
 
     if (products.status !== 200 || !Array.isArray(products.json?.productlist)) {
@@ -280,14 +328,18 @@ export async function GET() {
     }
 
     const itemPricesByPlu = buildItemPriceMap(itemPrices.json?.itemlist || []);
+    const currentTapByPlu = buildCurrentTapLookup(tapConfigRows, tapLookup);
+    const occupiedTapNumbers = new Set([...currentTapByPlu.values()].map((tap) => toNumber(tap.tapNumber)).filter(Boolean));
 
     const items = products.json.productlist
       .map((product) => {
         const chargePerOz = getChargePerOz(product);
         const name = normalizeProductName(product.name);
         if (!name || !chargePerOz || /coming soon/i.test(name)) return null;
-        const matchedTap = getMatchedTap(name, tapLookup);
         const plu = Number(product.plu || 0) || null;
+        const currentTap = currentTapByPlu.get(plu);
+        const fallbackTap = currentTap ? null : getMatchedTap(name, tapLookup);
+        const matchedTap = currentTap || (fallbackTap && !occupiedTapNumbers.has(toNumber(fallbackTap.tapNumber)) ? fallbackTap : null);
         const portions = matchedTap?.tapNumber && isLiquorTap(matchedTap.tapNumber)
           ? itemPricesByPlu.get(plu) || []
           : [];
@@ -297,6 +349,7 @@ export async function GET() {
           wall: matchedTap?.wall || "",
           type: matchedTap?.type || "",
           matchedBrand: matchedTap?.brand || "",
+          templateBrand: matchedTap?.templateBrand || matchedTap?.brand || "",
           plu,
           name,
           chargePerOz,

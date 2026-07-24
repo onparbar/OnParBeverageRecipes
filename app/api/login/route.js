@@ -1,23 +1,9 @@
 import { NextResponse } from "next/server";
-
-const COOKIE_NAME = "onpar_dashboard_session";
-
-async function signPassword(password) {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(password),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode("onpar-dashboard-login"));
-  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
+import { DASHBOARD_SESSION_COOKIE, getDashboardRoles, signDashboardSession } from "../../../lib/dashboard-auth.mjs";
 
 export async function POST(request) {
-  const expectedPassword = process.env.DASHBOARD_PASSWORD;
-  if (!expectedPassword) {
+  const roles = getDashboardRoles();
+  if (!roles.some((entry) => entry.role === "owner")) {
     return NextResponse.json(
       { error: "DASHBOARD_PASSWORD is not configured." },
       { status: 500 },
@@ -32,14 +18,17 @@ export async function POST(request) {
     submittedPassword = "";
   }
 
-  if (submittedPassword !== expectedPassword) {
+  const matchedRole = roles.find((entry) => entry.role === "owner" && submittedPassword === entry.password)
+    || roles.find((entry) => entry.role === "employee" && submittedPassword === entry.password);
+
+  if (!matchedRole) {
     return NextResponse.json({ error: "Incorrect password." }, { status: 401 });
   }
 
-  const response = NextResponse.json({ ok: true });
+  const response = NextResponse.json({ ok: true, role: matchedRole.role });
   response.cookies.set({
-    name: COOKIE_NAME,
-    value: await signPassword(expectedPassword),
+    name: DASHBOARD_SESSION_COOKIE,
+    value: await signDashboardSession(matchedRole.role, matchedRole.password),
     httpOnly: true,
     sameSite: "strict",
     secure: process.env.NODE_ENV === "production",

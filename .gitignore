@@ -5,6 +5,7 @@ node_modules/
 Thumbs.db
 *.log
 logs/
+data/*.json
 
 .vercel
 .env.local

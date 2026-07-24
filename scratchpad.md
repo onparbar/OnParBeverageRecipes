@@ -303,6 +303,54 @@ npm.cmd run provi:extract
 - Service logs live in `/Users/onparmarketing/OnParBeverageRecipes-service/logs`.
 - The Cloudflare cert and tunnel credentials are in `~/.cloudflared` and must stay secret.
 
+## PMB Product Add Form - 2026-06-26
+
+- Added a Pour My Beer product form to the `Add Recipe` tab.
+- Route: `app/api/pmb-products/route.js`.
+- The form supports:
+  - cocktail products
+  - beer keg products
+  - charge per ounce
+  - serving ounces
+  - brewery / maker, style, ABV, IBU, notes
+  - keg ounces and keg cost fields for beer keg entry
+- Beer keg submissions also save a local custom keg-pricing item in browser storage so the keg can appear in the dashboard Pricing tab with its keg ounces / keg cost.
+- Add Recipe now has a dedicated Beer Product section.
+- Beer Product entry now only requires beer name and keg cost.
+- The dashboard generates:
+  - PMB charge per ounce from keg cost using standard 15.5 gal / 1984 oz and default 82% beer target margin
+  - 16 oz serving
+  - 1984 oz keg size
+  - style / brewery when obvious from the name
+  - description
+  - picture
+- New recipes and beer products auto-fill a generated description and default seeded picture.
+- Shuffle buttons generate a different seeded picture URL.
+- Beer product descriptions/images now come from internet lookup via `app/api/beer-lookup/route.js`.
+- Beer lookup searches web results for the product, extracts usable page metadata/body text, rejects obvious shopping/copyright/script snippets, and returns source URLs.
+- Beer lookup decodes HTML punctuation/entities such as `&rsquo;`, `&trade;`, numeric apostrophes, en/em dashes, and nested `&amp;...;` values.
+- Beer lookup normalizes selected internet images to PMB-friendly `676x540` JPEG data URLs using `sharp`; tested Garage Beer output was under 5MB.
+- Add Beer Product preview now uses the same `676/540` aspect ratio and shows the full normalized image with `object-fit: contain`, so the user can see the final crop before sending.
+- Beer image shuffle cycles through alternate internet lookup results, not generated art.
+- PMB product sends do not include the image data URL because PMB product write endpoint does not accept image blobs; the image is saved locally for Coming Soon/dashboard display.
+- Dashboard PMB send parses non-JSON responses defensively so HTML restart/login pages show a readable error instead of `Unexpected token '<'`.
+- Beer product Coming Soon cards include a margin field and Update PMB Pricing button for products with a PMB PLU.
+- New beer products and new custom recipes are saved into a Coming Soon section at the bottom of Keg Levels.
+- Coming Soon replace action locally marks a selected tap as replaced and updates the Keg Levels display; exact TTG tap-line assignment still needs a PMB endpoint if we want it to physically change the wall assignment.
+- PMB `productlist` does not expose image/photo fields; the selected image is kept in dashboard data for now, but PMB image upload needs the exact TTG image endpoint if we want it synced into PMB screens.
+- PMB field conversions used:
+  - `price_per_unit` = charge per ounce in cents
+  - `units_per_serving` = serving ounces x 100 in PMB API records
+  - `abv` = ABV percent x 100
+  - beer product type = `1`
+  - cocktail product type = `3`
+- The route fetches the current product list to generate an unused PLU, then saves through the TTG Product Database management form.
+- Verified:
+  - production build passes
+  - service copy was rebuilt and restarted
+  - `https://onparbev.com/` responds through Cloudflare
+  - authenticated local `/api/pmb-products` validation path returns the expected error for an empty product
+
 ## Provi Session Refresh - 2026-06-19
 
 - Fresh Provi browser session saved under `~/.FoodOrderAgent/provi`.
@@ -357,3 +405,132 @@ launchctl kickstart -k gui/$(id -u)/com.onpar.cloudflared
 curl -sS https://onparbev.com/api/keg-levels | head -c 500
 curl -I 'https://onparbev.com/dashboard.js?v=check'
 ```
+
+## Add Beer Product Creative Controls - 2026-06-26
+
+- Split the Add Recipe beer product shuffle control into two buttons:
+  - `Shuffle image` only advances the normalized 676x540 preview image.
+  - `Shuffle description` only advances the internet-sourced notes text.
+- The first internet lookup still fills both fields together so a new beer starts with a complete suggestion.
+
+## PMB Product Add 502 Follow-Up - 2026-06-26
+
+- PMB auth and product list are reachable from the always-on Mac at `http://192.168.10.128:8585`.
+- An attempted JSON-write fix was replaced after deeper testing showed TTG product creation is handled by the Digest-authenticated management form.
+- Rebuilt and restarted the always-on dashboard service after deploying the PMB product route fix.
+- Follow-up investigation found TTG Server `1.48.22.2` does not expose a reliable JSON product-add endpoint for this task.
+- Product creation now uses the real TTG Product Database management form at `/pages/products` with Digest auth and TTG field names (`fd_name`, `fd_price_per_unit`, `fd_units_per_serving`, `submit_saveadd_product`, etc.).
+- The dashboard verifies success by reading `/api/productlist` afterward and finding the saved PLU before reporting success.
+- Duplicate product names now return the existing PMB product instead of trying to create another copy and falling into a 502.
+- Removed the old guessed JSON write fallback paths so failures report the actual TTG form-save problem.
+- Fixed future PMB product objects to use TTG's stored `units_per_serving` scale of serving ounces x 100.
+- Final root cause for new-product 502:
+  - TTG's add-product form requires `multipart/form-data`, not URL-encoded form data.
+  - TTG also requires the `ttgsrv_sess` cookie from the initial `submit_add_product` request to be preserved into the `submit_saveadd_product` request.
+  - The save request must take a fresh Digest auth challenge; reusing/preempting the previous challenge can produce `socket hang up`.
+- Verified dashboard route success:
+  - `/api/pmb-products` created `Codex Dashboard Test Beer 20260626 2`
+  - PMB PLU `54185`
+  - price per oz cents `38`
+  - serving scale `1600`
+  - config update path `/api/configupdate`
+- Diagnostic PMB test products currently present and not assigned to taps:
+  - `Codex UI Test Beer 20260626 1` PLU `74105`
+  - `Codex Curl Test Beer 20260626 1` PLU `74106`
+  - `Codex Node Fresh Digest Beer 20260626 1` PLU `74107`
+  - `Codex Dashboard Test Beer 20260626 2` PLU `54185`
+
+## Live Wall Safety Pause - 2026-06-26
+
+- Smoke testing paused while guests are using the Pour My Beer tap walls.
+- Do not run dashboard UI smoke tests that click product creation, product replacement, manual keg level changes, or config update controls until the user says the wall is safe to test.
+- Do not call `/api/keg-config-update`, PMB `/api/configupdate`, or PMB `/m2m/api/configupdate` during business use unless the user explicitly approves that specific live-wall update.
+- PMB product creation/update must not automatically send config updates. It should only send one when the request explicitly includes `sendConfigUpdate: true`.
+- Tap replacement actions in the Keg Levels tab should save the dashboard replacement mapping only; the visible `Send config update` button is the manual live-wall push.
+- A cocktail product was created before this pause:
+  - `Codex Cocktail Recipe Test 20260626 02889` PLU `85138`
+  - image upload verified at 676x540
+  - a config update was sent during that pre-pause test
+
+## Keg Level Adjustment Work - 2026-06-26
+
+- Reverted Keg Levels display to use the exact PMB product/slot level returned by `/api/keg-levels`; removed the local manual percentage override as a display source.
+- Fixed the extra dashboard-side device/line reordering layer that made Budweiser show the wrong percent. Budweiser PLU `112145` now displays the PMB read value (`95.5%` from device `66952915836764`, line `2`) instead of the mismatched `67.4%`.
+- Added a per-tap adjustment UI:
+  - `Oz +/-`
+  - `Target %`
+  - `Push`
+  - typing `-1 oz` for Budweiser recalculates the target from `95.5%` to `95.4%` without writing to PMB.
+- Added `/api/keg-level-adjust` to resolve a tap by PLU/device/line, calculate ounces/percent, call PMB `setkeglevels`, and only then attempt targeted config update for that device.
+- Live Budweiser test result:
+  - `/api/setkeglevels` returned `401 HTTP 401 - Not Authorized`
+  - `/m2m/api/setkeglevels` returned socket/fetch failure
+  - both generated and static `PMB_AUTHTOKEN` attempts were rejected
+  - no config update was sent because the route stops before config update unless PMB accepts the one-line keg-level write.
+- Product replacement dropdown on each Keg Levels row now includes PMB beverages, wall-list beverages, and Coming Soon items; read-only browser check showed `218` options and enabled buttons after live sync.
+
+## Keg Level Adjustment Follow-Up - 2026-06-26
+
+- Reworked the manual keg-level controls so inputs no longer sit inside the narrow `Current level` table cell.
+- Each row now shows only the live PMB level plus an `Adjust` button.
+- Clicking `Adjust` opens a full-width row-level panel with:
+  - current ounces / full keg ounces
+  - PMB PLU, device id, and line number
+  - `Ounces +/-`
+  - `Target %`
+  - `Push to tap`
+  - `Close`
+- Browser layout check on Budweiser:
+  - current level displayed: `95.5%`
+  - target percent defaulted to `95.5`
+  - panel width: `1150px`
+  - all controls were on the same row at `40px` height
+- Expanded PMB 401 audit for Budweiser PLU `112145`:
+  - generated authtoken + `/api/setkeglevels` => `401`
+  - generated authtoken + `/m2m/api/setkeglevels` => socket/fetch failure
+  - configured `PMB_AUTHTOKEN` + `/api/setkeglevels` => socket/fetch failure
+  - configured `PMB_AUTHTOKEN` + `/m2m/api/setkeglevels` => `401`
+  - token-in-body variants also failed
+  - no config update was sent because `setkeglevels` never succeeded
+  - PMB level verification afterward stayed unchanged: raw `9549`, display `95.5%`, keg size `1984 oz`
+- Current blocker is PMB/TTG authorization for the private keg-level write endpoint. Reads work, product writes work through TTG management forms, but keg-level writes are rejected by TTG for this API client/token.
+
+## PMB Tap Product Replacement - 2026-06-26
+
+- Keg Levels `Change product` no longer only writes a local replacement marker.
+- Added `/api/pmb-tap-product`:
+  - reads TTG `/pages/tapconfig` via Digest auth
+  - resolves the real tap row by tap number
+  - for Budweiser/Main tap 42, resolves device `66952915836764`, line `1`, PLU `112145`
+  - overwrites the resolved tap PLU with the replacement product through the existing `/api/pmb-products` management-form writer
+  - sends only that device's TTG `/pages/tapconfig` `fd_do_sendconfigupdate` action after product save
+- Added `matchByPluOnly` to `/api/pmb-products` so tap replacement updates the tap's PLU even if another PMB product already has the same replacement name.
+- Dashboard now waits for PMB success before saving `tapReplacementOverrides`; failed PMB writes should no longer show as replaced locally.
+- Dry-run verification only, no live wall write:
+  - local service `http://127.0.0.1:3000/api/pmb-tap-product` returned `200`
+  - public Cloudflare URL `https://onparbev.com/api/pmb-tap-product` returned `200`
+  - dry-run target: replace Budweiser tap 42 with Garage Beer
+  - planned PMB product update: PLU `112145`, name `Garage Beer 1`, price `$0.38/oz`
+- Rebuilt and restarted `com.onpar.beverage-dashboard`; Cloudflare tunnel `com.onpar.cloudflared` stayed running.
+
+## Weekly Usage Product Changeovers - 2026-07-06
+
+- Added `public/data/weekly-usage-changeovers.csv` as the source of truth for historical tap product changes that cannot be inferred from a renamed weekly usage row.
+- Seeded tap `1`: `Bombay Sapphire` -> `Hennessy Cognac 3`, effective `2026-01-08`, with the change week assigned to the current product.
+- Dashboard startup and PMB weekly sync now split matching current-product history by changeover date:
+  - active Hennessy keeps week `1/5/26 - 1/11/26` and later
+  - pre-change weeks move into hidden `Replaced product history` as Bombay Sapphire
+- Browser validation on the always-on service showed:
+  - Hennessy active history: `20` weeks, oldest `1/5/26 -1/11/26`, no pre-change weeks
+  - Bombay hidden archive: `7` weeks, newest `12/22/25-12/28/25`, no current Hennessy weeks
+
+## Weekly Usage Search Cleanup - 2026-07-06
+
+- Removed the manual `Save this week` button and the live/`This week` entry column from Weekly Usage; PMB report pull is now the visible update path.
+- Weekly Usage search now includes hidden replaced-product histories only while searching.
+- Search matching now token-matches normalized names, so searches like `Jose Gold 2` can find `Jose Cuervo Gold Tequila 2`.
+- Browser validation:
+  - no `Save this week` button
+  - no `.weekly-usage-input` fields
+  - `Jose Gold 2` found the Jose Gold row
+  - `Bombay` found the archived Bombay Sapphire row marked as replaced by Hennessy

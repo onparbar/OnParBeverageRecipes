@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
 
 function parseJsonLoose(text) {
   try {
@@ -125,14 +126,33 @@ function normalizeProductName(name) {
     .trim();
 }
 
+function buildSlotMapFromTapConfig(rows) {
+  const slotByPlu = new Map();
+  rows.forEach((row) => {
+    const plu = Number(row.plu || 0);
+    const tapNumber = Number(row.tapNumber || 0);
+    const deviceId = Number(row.deviceId || 0);
+    const lineNum = Number(row.lineNum || 0);
+    if (!plu || !deviceId || !lineNum || row.unused) return;
+    slotByPlu.set(plu, {
+      deviceId,
+      lineNum,
+      tapNumber: tapNumber || null,
+      tapProduct: normalizeProductName(row.product),
+    });
+  });
+  return slotByPlu;
+}
+
 export async function GET() {
   try {
     const config = getConfig();
     const token = await getAuthtoken(config);
 
-    const [products, transactions] = await Promise.all([
+    const [products, transactions, tapConfigRows] = await Promise.all([
       postJson(config.baseUrl, "/api/productlist", { id: String(config.clientId) }, token),
       postJson(config.baseUrl, "/api/transactions", { id: config.clientId, ...getDateRange() }, token),
+      getTapConfigRows(config).catch(() => []),
     ]);
 
     if (products.status !== 200 || !Array.isArray(products.json?.productlist)) {
@@ -143,40 +163,43 @@ export async function GET() {
       throw new Error(`PMB transactions failed (${transactions.status})`);
     }
 
-    const latestDeviceByPlu = new Map();
-    transactions.json.taptransactions.forEach((transaction) => {
-      const plu = Number(transaction.plu || 0);
-      const deviceId = Number(transaction.device_id || 0);
-      const started = Number(transaction.tst_start || 0);
-      if (!plu || !deviceId) return;
+    let slotByPlu = buildSlotMapFromTapConfig(tapConfigRows);
+    if (!slotByPlu.size) {
+      const latestDeviceByPlu = new Map();
+      transactions.json.taptransactions.forEach((transaction) => {
+        const plu = Number(transaction.plu || 0);
+        const deviceId = Number(transaction.device_id || 0);
+        const started = Number(transaction.tst_start || 0);
+        if (!plu || !deviceId) return;
 
-      const existing = latestDeviceByPlu.get(plu);
-      if (!existing || started >= existing.started) {
-        latestDeviceByPlu.set(plu, { deviceId, started });
-      }
-    });
+        const existing = latestDeviceByPlu.get(plu);
+        if (!existing || started >= existing.started) {
+          latestDeviceByPlu.set(plu, { deviceId, started });
+        }
+      });
 
-    const plusByDevice = new Map();
-    products.json.productlist.forEach((product) => {
-      const plu = Number(product.plu || 0);
-      if (!plu) return;
-      const mappedDevice = latestDeviceByPlu.get(plu)?.deviceId || config.fallbackDeviceId;
-      if (!mappedDevice) return;
+      const plusByDevice = new Map();
+      products.json.productlist.forEach((product) => {
+        const plu = Number(product.plu || 0);
+        if (!plu) return;
+        const mappedDevice = latestDeviceByPlu.get(plu)?.deviceId || config.fallbackDeviceId;
+        if (!mappedDevice) return;
 
-      if (!plusByDevice.has(mappedDevice)) {
-        plusByDevice.set(mappedDevice, []);
-      }
-      plusByDevice.get(mappedDevice).push(plu);
-    });
+        if (!plusByDevice.has(mappedDevice)) {
+          plusByDevice.set(mappedDevice, []);
+        }
+        plusByDevice.get(mappedDevice).push(plu);
+      });
 
-    const slotByPlu = new Map();
-    plusByDevice.forEach((plus, deviceId) => {
-      plus
-        .sort((a, b) => b - a)
-        .forEach((plu, index) => {
-          slotByPlu.set(plu, { deviceId, lineNum: index + 1 });
-        });
-    });
+      slotByPlu = new Map();
+      plusByDevice.forEach((plus, deviceId) => {
+        plus
+          .sort((a, b) => b - a)
+          .forEach((plu, index) => {
+            slotByPlu.set(plu, { deviceId, lineNum: index + 1, tapNumber: null, tapProduct: "" });
+          });
+      });
+    }
 
     const uniqueSlots = [...new Map(
       [...slotByPlu.values()].map((slot) => [`${slot.deviceId}:${slot.lineNum}`, slot]),
@@ -232,6 +255,8 @@ export async function GET() {
           fillLevelPercent: levelBySlot.get(`${slot.deviceId}:${slot.lineNum}`)?.fillLevelPercent ?? null,
           deviceId: slot.deviceId,
           lineNum: slot.lineNum,
+          tapNumber: slot.tapNumber || null,
+          tapProduct: slot.tapProduct || "",
           volumeUnit: String(product.volume_unit || ""),
           volumeUnitDp: Number(product.volume_unit_dp || 0),
           rawPercent: levelBySlot.get(`${slot.deviceId}:${slot.lineNum}`)?.rawPercent ?? null,

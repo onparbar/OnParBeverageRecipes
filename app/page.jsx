@@ -2,10 +2,51 @@
 
 import { useEffect, useState } from "react";
 
+function OperationsBar() {
+  return (
+    <div className="operations-bar">
+      <div>
+        <p className="eyebrow">Beverage ops</p>
+        <h2>Levels, Pricing & Inventory</h2>
+      </div>
+      <div className="operation-tabs" aria-label="Beverage operations sections">
+        <button className="operation-tab is-active" data-operation-tab="keg-levels" type="button">Keg Levels</button>
+        <button className="operation-tab" data-operation-tab="inventory" type="button">Inventory</button>
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [isReady, setIsReady] = useState(false);
+  const [sessionRole, setSessionRole] = useState("");
+
+  const isEmployee = sessionRole === "employee";
 
   useEffect(() => {
+    let isMounted = true;
+
+    async function loadSessionRole() {
+      try {
+        const response = await fetch("/api/session", { cache: "no-store" });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result?.error || "Login required.");
+        if (isMounted) setSessionRole(result?.role === "employee" ? "employee" : "owner");
+      } catch {
+        window.location.assign("/login");
+      }
+    }
+
+    loadSessionRole();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sessionRole) return undefined;
+
     setIsReady(true);
 
     const existingScript = document.querySelector('script[data-dashboard-script="true"]');
@@ -20,7 +61,7 @@ export default function DashboardPage() {
     return () => {
       script.remove();
     };
-  }, []);
+  }, [sessionRole]);
 
   if (!isReady) {
     return (
@@ -41,20 +82,17 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="shell">
+    <div className="shell" data-dashboard-role={sessionRole}>
       <header className="topbar">
         <div>
-          <p className="eyebrow">Batch cocktail costing</p>
+          <p className="eyebrow">{isEmployee ? "Staff recipe view" : "Batch cocktail costing"}</p>
           <h1>Beverage Dashboard</h1>
         </div>
-        <div className="top-actions" aria-label="Dashboard controls">
+        <div className="top-actions dashboard-owner-only" aria-label="Dashboard controls">
           <button className="tab-button is-active" data-tab="recipes" type="button">Recipes</button>
-          <button className="tab-button" data-tab="pricing" type="button">Tap Wall Pricing</button>
-          <button className="tab-button" data-tab="keg-levels" type="button">Keg Levels</button>
-          <button className="tab-button" data-tab="ingredients" type="button">Pricing</button>
-          <button className="tab-button" data-tab="inventory" type="button">Inventory</button>
+          <button className="tab-button" data-tab="operations" type="button">Beverage Ops</button>
           <button className="tab-button" data-tab="weekly-usage" type="button">Weekly Usage</button>
-          <button className="tab-button" data-tab="add" type="button">Add Recipe</button>
+          <button className="tab-button" data-tab="add" type="button">Add Product</button>
           <button className="tab-button" data-tab="old" type="button">Old Recipes</button>
         </div>
       </header>
@@ -79,6 +117,7 @@ export default function DashboardPage() {
         </section>
 
         <section className="panel" id="pricing-panel" aria-labelledby="pricing-tab">
+          <OperationsBar />
           <div className="toolbar">
             <label className="search-field">
               <span>Find recipe</span>
@@ -97,10 +136,7 @@ export default function DashboardPage() {
                     <th>Product</th>
                     <th>Cost / oz</th>
                     <th>Charge</th>
-                    <th>Profit / oz</th>
                     <th>Margin</th>
-                    <th>Oz for 1.5 alcohol</th>
-                    <th>Charge / pour</th>
                   </tr>
                 </thead>
                 <tbody id="pricing-table"></tbody>
@@ -110,6 +146,7 @@ export default function DashboardPage() {
         </section>
 
         <section className="panel" id="keg-levels-panel" aria-labelledby="keg-levels-tab">
+          <OperationsBar />
           <div className="keg-layout">
             <aside className="keg-summary" id="keg-summary"></aside>
             <div className="keg-walls" id="keg-walls"></div>
@@ -117,15 +154,16 @@ export default function DashboardPage() {
         </section>
 
         <section className="panel" id="add-panel" aria-labelledby="add-tab">
+          <div className="add-workspace">
           <form className="recipe-form" id="recipe-form">
             <div className="form-header">
               <div>
-                <p className="eyebrow">Recipe builder</p>
-                <h2 id="recipe-form-title">Add a new cocktail</h2>
+                <p className="eyebrow">Product builder</p>
+                <h2 id="recipe-form-title">Add cocktail product</h2>
               </div>
               <div className="form-actions">
                 <button className="ghost-button" id="cancel-edit" type="button" hidden>Cancel edit</button>
-                <button className="primary-button" id="recipe-submit-button" type="submit">Add recipe</button>
+                <button className="primary-button" id="recipe-submit-button" type="submit">Add product</button>
               </div>
             </div>
 
@@ -146,9 +184,27 @@ export default function DashboardPage() {
                 </select>
               </label>
               <label>
-                <span>Charge per oz</span>
+                <span>Tap wall price / oz</span>
                 <input id="new-recipe-charge" type="text" inputMode="decimal" placeholder="2.49" />
               </label>
+              <label className="auto-description-field">
+                <span>Description</span>
+                <textarea id="new-recipe-description" rows="3" placeholder="Auto-created when you add the recipe"></textarea>
+              </label>
+              <div className="image-picker" data-picker="recipe">
+                <div className="image-picker__preview">
+                  <img id="new-recipe-image-preview" alt="Recipe default" />
+                </div>
+                <div className="image-picker__controls">
+                  <span>Default picture</span>
+                  <input id="new-recipe-image" type="hidden" />
+                  <div className="image-picker__actions">
+                    <button className="ghost-button" id="shuffle-recipe-image" type="button">Shuffle image</button>
+                    <button className="ghost-button" id="shuffle-recipe-description" type="button">Shuffle description</button>
+                  </div>
+                </div>
+              </div>
+              <div className="recipe-generated-summary" id="recipe-generated-summary">Recipe financials will appear here.</div>
             </div>
 
             <div className="builder-panel">
@@ -162,8 +218,10 @@ export default function DashboardPage() {
                   <thead>
                     <tr>
                       <th>Ingredient</th>
+                      <th>Cost</th>
                       <th>Bottles / gallons</th>
                       <th>Oz in recipe</th>
+                      <th>ABV %</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -172,9 +230,109 @@ export default function DashboardPage() {
               </div>
             </div>
           </form>
+
+          <form className="recipe-form pmb-product-form" id="pmb-product-form">
+            <div className="form-header">
+              <div>
+                <p className="eyebrow">Pour My Beer</p>
+                <h2>Add beer product</h2>
+              </div>
+              <div className="form-actions">
+                <button className="primary-button" id="pmb-product-submit" type="submit">Send to PMB</button>
+              </div>
+            </div>
+
+            <div className="form-grid pmb-product-grid">
+              <input id="pmb-product-kind" type="hidden" value="beer" />
+              <label>
+                <span>Beer product name</span>
+                <input id="pmb-product-name" type="text" required placeholder="Example: Garage Beer" />
+              </label>
+              <label>
+                <span>Keg cost</span>
+                <input id="pmb-product-keg-cost" type="text" inputMode="decimal" required placeholder="185" />
+              </label>
+              <label>
+                <span>Profit margin %</span>
+                <input id="pmb-product-margin" type="text" inputMode="decimal" placeholder="82" />
+              </label>
+              <div className="generated-beer-summary" id="pmb-generated-summary">Generated PMB price will appear here.</div>
+              <input id="pmb-product-price" type="hidden" />
+              <input id="pmb-product-serving" type="hidden" />
+              <input id="pmb-product-abv" type="hidden" />
+              <input id="pmb-product-brewery" type="hidden" />
+              <input id="pmb-product-style" type="hidden" />
+              <input id="pmb-product-ibu" type="hidden" />
+              <input id="pmb-product-keg-oz" type="hidden" />
+              <label className="pmb-product-notes">
+                <span>Internet description</span>
+                <textarea id="pmb-product-notes" rows="3" placeholder="Pulled from an internet source for this beer"></textarea>
+              </label>
+              <div className="image-picker pmb-product-image" data-picker="pmb-product">
+                <div className="image-picker__preview">
+                  <img id="pmb-product-image-preview" alt="Beer product default" />
+                </div>
+                <div className="image-picker__controls">
+                  <span>676x540 preview</span>
+                  <input id="pmb-product-image" type="hidden" />
+                  <div className="image-picker__actions">
+                    <button className="ghost-button" id="shuffle-pmb-product-image" type="button">Shuffle image</button>
+                    <button className="ghost-button" id="shuffle-pmb-product-description" type="button">Shuffle description</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="pmb-product-status" id="pmb-product-status">Ready to create a new beer keg product in Pour My Beer.</div>
+          </form>
+
+          <form className="recipe-form pmb-product-form liquor-product-form" id="liquor-product-form">
+            <div className="form-header">
+              <div>
+                <p className="eyebrow">Pour My Beer</p>
+                <h2>Add liquor tap</h2>
+              </div>
+              <div className="form-actions">
+                <button className="primary-button" id="liquor-product-submit" type="submit">Send to PMB</button>
+              </div>
+            </div>
+
+            <div className="form-grid liquor-product-grid">
+              <label>
+                <span>Liquor product name</span>
+                <input id="liquor-product-name" type="text" required placeholder="Example: Patron Silver" />
+              </label>
+              <label>
+                <span>Charge / oz</span>
+                <input id="liquor-product-price" type="text" inputMode="decimal" required placeholder="3.50" />
+              </label>
+              <label>
+                <span>Pour size oz</span>
+                <input id="liquor-product-serving" type="text" inputMode="decimal" placeholder="1.5" />
+              </label>
+              <label>
+                <span>ABV %</span>
+                <input id="liquor-product-abv" type="text" inputMode="decimal" placeholder="40" />
+              </label>
+              <label>
+                <span>Bottle cost</span>
+                <input id="liquor-product-bottle-cost" type="text" inputMode="decimal" placeholder="98.70" />
+              </label>
+              <label>
+                <span>Bottle oz</span>
+                <input id="liquor-product-bottle-oz" type="text" inputMode="decimal" placeholder="59.17" />
+              </label>
+              <label className="liquor-product-notes">
+                <span>Notes</span>
+                <textarea id="liquor-product-notes" rows="3" placeholder="Optional PMB tasting notes"></textarea>
+              </label>
+            </div>
+            <div className="pmb-product-status" id="liquor-product-status">Ready to create a straight liquor tap in Pour My Beer.</div>
+          </form>
+          </div>
         </section>
 
         <section className="panel" id="ingredients-panel" aria-labelledby="ingredients-tab">
+          <OperationsBar />
           <div className="toolbar">
             <label className="search-field">
               <span>Find pricing item</span>
@@ -240,6 +398,7 @@ export default function DashboardPage() {
         </section>
 
         <section className="panel" id="inventory-panel" aria-labelledby="inventory-tab">
+          <OperationsBar />
           <div className="toolbar">
             <label className="search-field">
               <span>Find inventory item</span>
@@ -256,6 +415,33 @@ export default function DashboardPage() {
                     <p className="eyebrow">Snapshot</p>
                     <h2>Current Inventory</h2>
                   </div>
+                  <form className="custom-inventory-form" id="custom-inventory-form">
+                    <label>
+                      <span>Item</span>
+                      <input id="custom-inventory-name" type="text" placeholder="Patron Silver" required />
+                    </label>
+                    <label>
+                      <span>Group</span>
+                      <select id="custom-inventory-group">
+                        <option value="Liquor Cabinet">Liquor Cabinet</option>
+                        <option value="Mixer Cabinet">Mixer Cabinet</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>On hand</span>
+                      <input id="custom-inventory-on-hand" type="number" min="0" step="1" inputMode="numeric" placeholder="1" />
+                    </label>
+                    <label>
+                      <span>Par</span>
+                      <input id="custom-inventory-par" type="number" min="0" step="1" inputMode="numeric" placeholder="0" />
+                    </label>
+                    <label>
+                      <span>Bottle cost</span>
+                      <input id="custom-inventory-unit-cost" type="text" inputMode="decimal" placeholder="0.00" />
+                    </label>
+                    <button className="primary-button" type="submit">Add item</button>
+                  </form>
                 </div>
                 <div className="inventory-table-wrap">
                   <table className="inventory-table">
@@ -318,7 +504,7 @@ export default function DashboardPage() {
               <span>Find tap or product</span>
               <input id="weekly-usage-search" type="search" placeholder="Search tap, wall, liquor, beer, cocktail..." />
             </label>
-            <button className="primary-button" id="save-weekly-usage" type="button">Save this week</button>
+            <button className="ghost-button" id="pull-pmb-weekly-usage" type="button">Pull PMB report</button>
           </div>
 
           <div className="inventory-layout">
