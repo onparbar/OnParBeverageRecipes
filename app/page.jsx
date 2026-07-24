@@ -429,28 +429,33 @@ export default function DashboardPage() {
                       </select>
                     </label>
                     <label>
-                      <span>On hand</span>
+                      <span>On hand (units)</span>
                       <input id="custom-inventory-on-hand" type="number" min="0" step="1" inputMode="numeric" placeholder="1" />
                     </label>
                     <label>
-                      <span>Par</span>
+                      <span>Par (units)</span>
                       <input id="custom-inventory-par" type="number" min="0" step="1" inputMode="numeric" placeholder="0" />
                     </label>
                     <label>
-                      <span>Bottle cost</span>
+                      <span>Pack size</span>
+                      <input id="custom-inventory-pack-size" type="number" min="1" step="1" inputMode="numeric" defaultValue="1" />
+                    </label>
+                    <label>
+                      <span>Case / unit cost</span>
                       <input id="custom-inventory-unit-cost" type="text" inputMode="decimal" placeholder="0.00" />
                     </label>
                     <button className="primary-button" type="submit">Add item</button>
                   </form>
                 </div>
                 <div className="inventory-table-wrap">
-                  <table className="inventory-table">
+                  <table className="inventory-table inventory-table--stock">
                     <thead>
                       <tr>
                         <th>Item</th>
-                        <th>On hand</th>
-                        <th>Par</th>
-                        <th>Order</th>
+                        <th>On hand (units)</th>
+                        <th>Par (units)</th>
+                        <th>Need (units)</th>
+                        <th>Pack</th>
                         <th>Unit cost</th>
                         <th>Total value</th>
                       </tr>
@@ -465,7 +470,7 @@ export default function DashboardPage() {
                   <div>
                     <p className="eyebrow">Reorder List</p>
                     <h2>Needs To Be Ordered</h2>
-                    <p className="formula-note inventory-note">Liquor orders stay in bottles. Mixer Cabinet orders round up to full cases of 12.</p>
+                    <p className="formula-note inventory-note">Counts and pars use individual units. Packaged products round up to their full case size.</p>
                   </div>
                 </div>
                 <div className="inventory-table-wrap">
@@ -473,9 +478,10 @@ export default function DashboardPage() {
                     <thead>
                       <tr>
                         <th>Item</th>
-                        <th>On hand</th>
-                        <th>Par</th>
-                        <th>Order (liquor bottles, mixer cases of 12)</th>
+                        <th>On hand (units)</th>
+                        <th>Par (units)</th>
+                        <th>Order</th>
+                        <th>Pack</th>
                         <th>Unit cost</th>
                         <th>Est. reorder cost</th>
                       </tr>

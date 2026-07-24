@@ -1775,7 +1775,7 @@ td {
 
 .custom-inventory-form {
   display: grid;
-  grid-template-columns: minmax(180px, 1.4fr) minmax(130px, 0.9fr) repeat(3, minmax(86px, 0.55fr)) auto;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(130px, 0.9fr) repeat(4, minmax(86px, 0.55fr)) auto;
   gap: 8px;
   align-items: end;
 }
@@ -1831,6 +1831,16 @@ td {
 .inventory-table th:nth-child(5),
 .inventory-table th:nth-child(6) {
   width: 14.4%;
+}
+
+.inventory-table--stock th:nth-child(1),
+.inventory-table--orders th:nth-child(1) {
+  width: 26%;
+}
+
+.inventory-table--stock th:nth-child(n + 2),
+.inventory-table--orders th:nth-child(n + 2) {
+  width: 12.333%;
 }
 
 .inventory-input {

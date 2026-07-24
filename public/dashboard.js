@@ -1,3 +1,12 @@
+import {
+  convertLegacyCaseCountToUnits,
+  getInventoryOnHandUnits,
+  getInventoryUnitCost,
+  getOrderCaseCount,
+  getRoundedOrderUnits,
+  normalizePackSize,
+} from "./inventory-calculations.mjs";
+
 const CSV_PATH = "./data/cocktail-recipes.csv";
 const NEW_COCKTAILS_CSV_PATH = "./data/new-cocktails.csv";
 const INVENTORY_CSV_PATH = "./data/inventory-2026-06-01.csv";
@@ -14,6 +23,8 @@ const INVENTORY_ON_HAND_STORAGE_KEY = "cocktail-dashboard-inventory-on-hand";
 const INVENTORY_PAR_STORAGE_KEY = "cocktail-dashboard-inventory-par";
 const INVENTORY_HISTORY_STORAGE_KEY = "cocktail-dashboard-inventory-history";
 const CUSTOM_INVENTORY_STORAGE_KEY = "cocktail-dashboard-custom-inventory";
+const INVENTORY_UNIT_MODEL_STORAGE_KEY = "cocktail-dashboard-inventory-unit-model";
+const INVENTORY_UNIT_MODEL_VERSION = "2";
 const KEG_ON_HAND_STORAGE_KEY = "cocktail-dashboard-keg-on-hand";
 const KEG_PAR_STORAGE_KEY = "cocktail-dashboard-keg-par";
 const KEG_ON_DECK_STORAGE_KEY = "cocktail-dashboard-keg-on-deck";
@@ -545,6 +556,7 @@ const customInventoryGroupInput = document.querySelector("#custom-inventory-grou
 const customInventoryOnHandInput = document.querySelector("#custom-inventory-on-hand");
 const customInventoryParInput = document.querySelector("#custom-inventory-par");
 const customInventoryUnitCostInput = document.querySelector("#custom-inventory-unit-cost");
+const customInventoryPackSizeInput = document.querySelector("#custom-inventory-pack-size");
 const inventoryTable = document.querySelector("#inventory-table");
 const inventoryOrderTable = document.querySelector("#inventory-order-table");
 const inventorySummary = document.querySelector("#inventory-summary");
@@ -711,7 +723,9 @@ async function init() {
     ...customRecipes,
   ].map(applyRecipeEdits);
   ingredients = buildIngredientCatalog(getActiveRecipes());
-  inventoryItems = mergeCustomInventoryItems(parseInventory(parseCsv(inventoryCsv)));
+  const inventoryRows = parseCsv(inventoryCsv);
+  migrateInventoryOnHandOverrides(inventoryRows);
+  inventoryItems = mergeCustomInventoryItems(parseInventory(inventoryRows));
   kegWallItems = kegLevelsCsv ? parseKegLevels(parseCsv(kegLevelsCsv)) : [];
   kegPricingItems = buildKegPricingCatalog(kegWallItems);
   weeklyUsageItems = weeklyUsageCsv ? parseWeeklyUsage(parseCsv(weeklyUsageCsv)) : [];
@@ -4416,7 +4430,10 @@ function addCustomInventoryItem(event) {
   const group = clean(customInventoryGroupInput?.value) || getInventoryGroup(name, "Custom Inventory");
   const onHandDisplay = normalizeInventoryInputValue(customInventoryOnHandInput?.value || "", false);
   const parDisplay = normalizeInventoryInputValue(customInventoryParInput?.value || "", false);
-  const unitCost = toNumber(customInventoryUnitCostInput?.value);
+  const packSize = normalizePackSize(customInventoryPackSizeInput?.value || 1);
+  const casePackaged = packSize > 1;
+  const caseCost = toNumber(customInventoryUnitCostInput?.value);
+  const unitCost = getInventoryUnitCost(caseCost, packSize);
 
   if (existing && !existing.isCustomInventory) {
     if (onHandDisplay) inventoryOnHandOverrides[id] = onHandDisplay;
@@ -4433,6 +4450,9 @@ function addCustomInventoryItem(event) {
       group,
       onHandDisplay,
       parDisplay,
+      packSize,
+      casePackaged,
+      caseCost,
       unitCost,
       updatedAt: new Date().toISOString(),
     };
@@ -4471,7 +4491,10 @@ function normalizeCustomInventoryItem(item) {
   const group = clean(item.group) || getInventoryGroup(name, "Custom Inventory");
   const onHandDisplay = inventoryOnHandOverrides[id] ?? clean(item.onHandDisplay);
   const parDisplay = inventoryParOverrides[id] ?? clean(item.parDisplay);
-  const unitCost = toNumber(item.unitCost);
+  const packSize = normalizePackSize(item.packSize || 1);
+  const casePackaged = Boolean(item.casePackaged) || packSize > 1;
+  const caseCost = toNumber(item.caseCost) || (toNumber(item.unitCost) * packSize);
+  const unitCost = getInventoryUnitCost(caseCost, packSize);
   const normalized = {
     id,
     name,
@@ -4479,6 +4502,10 @@ function normalizeCustomInventoryItem(item) {
     allowsDecimal: false,
     sourceSection: "Custom Inventory",
     onHandDisplay,
+    casePackaged,
+    packSize,
+    legacyPackSize: 1,
+    caseCost,
     baseUnitCost: unitCost,
     unitCost,
     parDisplay,
@@ -4504,7 +4531,7 @@ function renderInventoryOrderTable(reorderItems) {
   inventoryOrderTable.innerHTML = "";
 
   if (!reorderItems.length) {
-    inventoryOrderTable.innerHTML = `<tr><td colspan="6" class="muted">Nothing needs to be ordered right now.</td></tr>`;
+    inventoryOrderTable.innerHTML = `<tr><td colspan="7" class="muted">Nothing needs to be ordered right now.</td></tr>`;
     return;
   }
 
@@ -4526,7 +4553,7 @@ function renderInventoryOrderTable(reorderItems) {
 function createInventoryGroupRow(groupName) {
   const row = document.createElement("tr");
   row.className = "inventory-group-row";
-  row.innerHTML = `<td colspan="6">${escapeHtml(groupName)}</td>`;
+  row.innerHTML = `<td colspan="7">${escapeHtml(groupName)}</td>`;
   return row;
 }
 
@@ -4534,7 +4561,7 @@ function createInventoryTotalRow(label, value, className = "inventory-total-row"
   const row = document.createElement("tr");
   row.className = className;
   row.innerHTML = `
-    <td colspan="5"><strong>${escapeHtml(label)}</strong></td>
+    <td colspan="6"><strong>${escapeHtml(label)}</strong></td>
     <td><strong>${escapeHtml(value)}</strong></td>
   `;
   return row;
@@ -4557,6 +4584,10 @@ function createInventoryRow(item, mode) {
   const row = document.createElement("tr");
   const orderQuantityForMode = mode === "order" ? getInventoryRoundedOrderQuantity(item) : item.orderQuantity;
   const costCell = mode === "order" ? money(orderQuantityForMode * item.unitCost) : money(item.totalValue);
+  const orderCell = mode === "order"
+    ? getInventoryOrderCell(item, orderQuantityForMode)
+    : formatInventoryQuantity(item.orderDisplay);
+  const packLabel = item.casePackaged ? `${formatNumber(item.packSize)} / case` : "Each";
   row.className = mode === "order" && item.orderQuantity > 0 ? "inventory-row--order" : "";
   const inputMode = item.allowsDecimal ? "decimal" : "numeric";
   const isParEditable = Boolean(inventoryParEditState[item.id]);
@@ -4566,7 +4597,8 @@ function createInventoryRow(item, mode) {
     <td><strong>${escapeHtml(item.name)}</strong>${item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${linkedNotes.join("")}</td>
     <td>${mode === "stock" ? `<input class="inventory-input" data-field="onHand" type="text" inputmode="${inputMode}" value="${escapeHtml(item.onHandDisplay)}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>
     <td>${mode === "stock" ? `<div class="inventory-par-cell"><input class="inventory-input inventory-input--par ${isParEditable ? "is-editing" : "is-locked"}" data-field="par" type="text" inputmode="${inputMode}" value="${escapeHtml(item.parDisplay)}" aria-label="Par for ${escapeHtml(item.name)}" ${isParEditable ? "" : "readonly"}><button class="mini-button inventory-par-toggle" data-par-toggle="${escapeHtml(item.id)}" type="button">${isParEditable ? "Done" : "Edit"}</button></div>` : formatInventoryQuantity(item.parDisplay)}</td>
-    <td data-cell="order" class="${item.orderQuantity > 0 ? "inventory-order-flag" : "muted"}">${formatInventoryQuantity(mode === "order" ? orderQuantityForMode : item.orderDisplay)}</td>
+    <td data-cell="order" class="${item.orderQuantity > 0 ? "inventory-order-flag" : "muted"}">${orderCell}</td>
+    <td>${escapeHtml(packLabel)}</td>
     <td>${money(item.unitCost)}</td>
     <td data-cell="cost">${costCell}</td>
   `;
@@ -4590,9 +4622,17 @@ function createInventoryRow(item, mode) {
 }
 
 function getInventoryRoundedOrderQuantity(item) {
-  if (!item?.orderQuantity || item.orderQuantity <= 0) return 0;
-  if (item.group !== "Mixer Cabinet") return item.orderQuantity;
-  return Math.ceil(item.orderQuantity / 12) * 12;
+  if (!item) return 0;
+  return getRoundedOrderUnits(item.orderQuantity, item.packSize, item.casePackaged);
+}
+
+function getInventoryOrderCell(item, orderUnits) {
+  const unitLabel = `${formatInventoryQuantity(orderUnits)} unit${orderUnits === 1 ? "" : "s"}`;
+  if (!item.casePackaged) return escapeHtml(unitLabel);
+
+  const caseCount = getOrderCaseCount(orderUnits, item.packSize);
+  const caseLabel = `${formatNumber(caseCount)} case${caseCount === 1 ? "" : "s"}`;
+  return `<strong>${escapeHtml(unitLabel)}</strong><span class="table-note">${escapeHtml(caseLabel)}</span>`;
 }
 
 function previewInventoryValue(id, field, value, row) {
@@ -4733,6 +4773,7 @@ function saveInventorySnapshot() {
   const snapshot = {
     id: `inventory-${Date.now()}`,
     savedAt: new Date().toISOString(),
+    unitModelVersion: Number(INVENTORY_UNIT_MODEL_VERSION),
     items: getInventorySnapshotItems(),
   };
 
@@ -4748,7 +4789,10 @@ function getInventorySnapshotItems() {
     group: item.group,
     onHandDisplay: item.onHandDisplay,
     parDisplay: item.parDisplay,
-    orderDisplay: item.orderDisplay,
+    orderDisplay: String(getInventoryRoundedOrderQuantity(item)),
+    shortageDisplay: item.orderDisplay,
+    packSize: item.packSize,
+    casePackaged: item.casePackaged,
     unitCost: item.unitCost,
     totalValue: item.totalValue,
     note: item.note,
@@ -4868,7 +4912,12 @@ function restoreInventorySnapshot(snapshotId) {
   snapshot.items.forEach((item) => {
     const id = slugify(item.name);
     if (clean(item.onHandDisplay)) {
-      inventoryOnHandOverrides[id] = clean(item.onHandDisplay);
+      const currentItem = findInventoryItem(id);
+      const onHandDisplay = snapshot.unitModelVersion === Number(INVENTORY_UNIT_MODEL_VERSION)
+        || !currentItem?.casePackaged
+        ? clean(item.onHandDisplay)
+        : String(convertLegacyCaseCountToUnits(item.onHandDisplay, currentItem.legacyPackSize));
+      inventoryOnHandOverrides[id] = onHandDisplay;
     }
     if (clean(item.parDisplay)) {
       inventoryParOverrides[id] = clean(item.parDisplay);
@@ -6870,14 +6919,23 @@ function parseInventory(rows) {
     if (isInventoryHeaderRow(first)) return;
 
     const normalizedName = normalizeInventoryName(first);
-    const unitCost = toNumber(row[3]);
+    const casePackaged = currentSection === "Juices and Mixers";
+    const packSize = casePackaged ? normalizePackSize(row[4]) : 1;
+    const caseCost = toNumber(row[3]);
+    const unitCost = getInventoryUnitCost(caseCost, packSize);
     let note = clean(row[10]);
     if (normalizedName === "Bombay Sapphire" && /do not order for now/i.test(note)) {
       note = "";
     }
     const group = getInventoryGroup(normalizedName, currentSection);
     const id = slugify(normalizedName);
-    const onHandDisplay = inventoryOnHandOverrides[id] ?? clean(row[1]);
+    const sourceOnHandUnits = getInventoryOnHandUnits({
+      caseEquivalent: row[1],
+      individualUnits: row[2],
+      packSize,
+      casePackaged,
+    });
+    const onHandDisplay = inventoryOnHandOverrides[id] ?? String(sourceOnHandUnits);
     const parDisplay = inventoryParOverrides[id] ?? clean(row[7]);
 
     if (group === "Bottle Service" || group === "Bubbly") return;
@@ -6887,9 +6945,13 @@ function parseInventory(rows) {
       id,
       name: normalizedName,
       group,
-      allowsDecimal: normalizedName === "Sour Mix",
+      allowsDecimal: false,
       sourceSection: currentSection,
       onHandDisplay,
+      casePackaged,
+      packSize,
+      legacyPackSize: getLegacyInventoryPackSize(normalizedName, packSize, casePackaged),
+      caseCost,
       baseUnitCost: unitCost,
       unitCost,
       parDisplay,
@@ -6911,6 +6973,46 @@ function parseInventory(rows) {
   });
 
   return items;
+}
+
+function migrateInventoryOnHandOverrides(rows) {
+  if (localStorage.getItem(INVENTORY_UNIT_MODEL_STORAGE_KEY) === INVENTORY_UNIT_MODEL_VERSION) return;
+
+  let currentSection = "Liquor";
+  let changed = false;
+
+  rows.forEach((row) => {
+    const first = clean(row[0]);
+    const last = clean(row[row.length - 1]);
+    if (!first) return;
+
+    if (isInventorySectionRow(first, last)) {
+      currentSection = first;
+      return;
+    }
+
+    if (currentSection !== "Juices and Mixers" || isInventoryHeaderRow(first)) return;
+
+    const normalizedName = normalizeInventoryName(first);
+    const id = slugify(normalizedName);
+    if (!Object.prototype.hasOwnProperty.call(inventoryOnHandOverrides, id)) return;
+
+    const packSize = normalizePackSize(row[4]);
+    const legacyPackSize = getLegacyInventoryPackSize(normalizedName, packSize, true);
+    inventoryOnHandOverrides[id] = String(
+      convertLegacyCaseCountToUnits(inventoryOnHandOverrides[id], legacyPackSize),
+    );
+    changed = true;
+  });
+
+  if (changed) saveInventoryOnHandOverrides();
+  localStorage.setItem(INVENTORY_UNIT_MODEL_STORAGE_KEY, INVENTORY_UNIT_MODEL_VERSION);
+}
+
+function getLegacyInventoryPackSize(name, packSize, casePackaged) {
+  if (!casePackaged) return 1;
+  if (name === "Cold Brew") return 1;
+  return normalizePackSize(packSize);
 }
 
 function parseKegLevels(rows) {
@@ -7221,6 +7323,10 @@ function ensureInventoryPlaceholder(items, config) {
     allowsDecimal: false,
     sourceSection: config.group,
     onHandDisplay: inventoryOnHandOverrides[id] ?? "0",
+    casePackaged: false,
+    packSize: 1,
+    legacyPackSize: 1,
+    caseCost: config.unitCost || 0,
     baseUnitCost: config.unitCost || 0,
     unitCost: config.unitCost || 0,
     parDisplay: inventoryParOverrides[id] ?? "0",
