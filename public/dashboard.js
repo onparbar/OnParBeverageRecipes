@@ -643,6 +643,12 @@ let customInventoryItems = loadCustomInventoryItems();
 let inventoryOnHandOverrides = loadInventoryOnHandOverrides();
 let inventoryParOverrides = loadInventoryParOverrides();
 let inventoryHistory = loadInventoryHistory();
+let inventorySourceRows = [];
+let inventorySharedUpdatedAt = "";
+let inventorySharedMessage = "Loading shared inventory...";
+let inventorySharedSaving = false;
+const inventoryFieldSyncTimers = new Map();
+let inventoryFieldSyncQueue = Promise.resolve();
 let kegOnHandOverrides = loadKegOnHandOverrides();
 let kegParOverrides = loadKegParOverrides();
 let kegOnDeckOverrides = loadKegOnDeckOverrides();
@@ -723,9 +729,11 @@ async function init() {
     ...customRecipes,
   ].map(applyRecipeEdits);
   ingredients = buildIngredientCatalog(getActiveRecipes());
-  const inventoryRows = parseCsv(inventoryCsv);
-  migrateInventoryOnHandOverrides(inventoryRows);
-  inventoryItems = mergeCustomInventoryItems(parseInventory(inventoryRows));
+  inventorySourceRows = parseCsv(inventoryCsv);
+  migrateInventoryOnHandOverrides(inventorySourceRows);
+  inventoryItems = mergeCustomInventoryItems(parseInventory(inventorySourceRows));
+  await loadSharedInventoryState();
+  inventoryItems = mergeCustomInventoryItems(parseInventory(inventorySourceRows));
   kegWallItems = kegLevelsCsv ? parseKegLevels(parseCsv(kegLevelsCsv)) : [];
   kegPricingItems = buildKegPricingCatalog(kegWallItems);
   weeklyUsageItems = weeklyUsageCsv ? parseWeeklyUsage(parseCsv(weeklyUsageCsv)) : [];
@@ -4380,6 +4388,158 @@ function getKegLevelClass(value) {
   return "keg-level-ok";
 }
 
+async function requestSharedInventory(body = null) {
+  const response = await fetch("/api/inventory-state", {
+    method: body ? "POST" : "GET",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+    cache: "no-store",
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result.error || `Shared inventory request failed (${response.status}).`);
+  }
+  return result;
+}
+
+async function loadSharedInventoryState() {
+  try {
+    let state = await requestSharedInventory();
+    const hasLocalInventoryState = Object.keys(inventoryOnHandOverrides).length
+      || Object.keys(inventoryParOverrides).length
+      || customInventoryItems.length
+      || inventoryHistory.length;
+    if (!state.initialized && hasLocalInventoryState) {
+      state = await requestSharedInventory({
+        action: "hydrate",
+        onHandOverrides: inventoryOnHandOverrides,
+        parOverrides: inventoryParOverrides,
+        customItems: customInventoryItems,
+        snapshots: getMigratedInventoryHistory(),
+      });
+    }
+    if (state.initialized) {
+      applySharedInventoryState(state);
+      inventorySharedMessage = "Shared inventory is available on all signed-in manager devices.";
+    } else {
+      inventorySharedMessage = "Shared inventory is ready and will start with the first manager edit or Monday snapshot.";
+    }
+  } catch (error) {
+    inventorySharedMessage = `Shared inventory unavailable. Changes are saved on this device only: ${error.message}`;
+  }
+}
+
+function getMigratedInventoryHistory() {
+  return inventoryHistory.map((snapshot) => {
+    const isCurrentUnitModel = Number(snapshot.unitModelVersion) === Number(INVENTORY_UNIT_MODEL_VERSION);
+    return {
+      ...snapshot,
+      unitModelVersion: Number(INVENTORY_UNIT_MODEL_VERSION),
+      items: (snapshot.items || []).map((snapshotItem) => {
+        const id = snapshotItem.id || slugify(snapshotItem.name);
+        const currentItem = findInventoryItem(id);
+        const onHandDisplay = isCurrentUnitModel || !currentItem?.casePackaged
+          ? clean(snapshotItem.onHandDisplay)
+          : String(convertLegacyCaseCountToUnits(snapshotItem.onHandDisplay, currentItem.legacyPackSize));
+        const onHand = toNumber(onHandDisplay);
+        const par = toNumber(snapshotItem.parDisplay);
+        const shortage = Math.max(0, par - onHand);
+        const orderUnits = currentItem
+          ? getRoundedOrderUnits(shortage, currentItem.packSize, currentItem.casePackaged)
+          : shortage;
+        return {
+          ...snapshotItem,
+          id,
+          onHandDisplay,
+          shortageDisplay: String(shortage),
+          orderDisplay: String(orderUnits),
+          totalValue: onHand * toNumber(snapshotItem.unitCost),
+        };
+      }),
+    };
+  });
+}
+
+function applySharedInventoryState(state, { rebuild = false } = {}) {
+  inventoryOnHandOverrides = { ...(state.current?.onHandOverrides || {}) };
+  inventoryParOverrides = { ...(state.current?.parOverrides || {}) };
+  customInventoryItems = Array.isArray(state.current?.customItems) ? state.current.customItems : [];
+  inventoryHistory = Array.isArray(state.snapshots) ? state.snapshots : [];
+  inventorySharedUpdatedAt = state.current?.updatedAt || "";
+  saveInventoryOnHandOverrides();
+  saveInventoryParOverrides();
+  saveCustomInventoryItems();
+  saveInventoryHistory();
+
+  if (rebuild && inventorySourceRows.length) {
+    inventoryItems = mergeCustomInventoryItems(parseInventory(inventorySourceRows));
+    syncInventoryItemCatalogLinks();
+  }
+}
+
+function setInventorySharedStatus(message, saving = false) {
+  inventorySharedMessage = message;
+  inventorySharedSaving = saving;
+  renderInventoryPanels();
+}
+
+async function runSharedInventoryAction(body, {
+  successMessage = "Shared inventory saved.",
+  applyState = true,
+  rebuild = false,
+  flushFields = true,
+} = {}) {
+  if (flushFields) await flushPendingInventoryFieldSyncs();
+  setInventorySharedStatus("Saving shared inventory...", true);
+  try {
+    const state = await requestSharedInventory(body);
+    if (applyState) applySharedInventoryState(state, { rebuild });
+    else inventorySharedUpdatedAt = state.current?.updatedAt || inventorySharedUpdatedAt;
+    inventorySharedMessage = successMessage;
+    inventorySharedSaving = false;
+    return state;
+  } catch (error) {
+    inventorySharedMessage = `Could not save shared inventory. This device still has your change: ${error.message}`;
+    inventorySharedSaving = false;
+    return null;
+  } finally {
+    renderInventoryPanels();
+  }
+}
+
+function scheduleInventoryFieldSync(id, field, value) {
+  const key = `${id}:${field}`;
+  clearTimeout(inventoryFieldSyncTimers.get(key)?.timer);
+  inventorySharedMessage = "Saving shared inventory...";
+  inventorySharedSaving = true;
+  const payload = { action: "update-field", id, field, value };
+  const timer = setTimeout(() => {
+    inventoryFieldSyncTimers.delete(key);
+    inventoryFieldSyncQueue = inventoryFieldSyncQueue.then(() =>
+      runSharedInventoryAction(
+        payload,
+        { successMessage: "Shared inventory saved.", applyState: false, flushFields: false },
+      ),
+    );
+  }, 500);
+  inventoryFieldSyncTimers.set(key, { timer, payload });
+}
+
+async function flushPendingInventoryFieldSyncs() {
+  const pending = [...inventoryFieldSyncTimers.values()];
+  inventoryFieldSyncTimers.clear();
+  pending.forEach(({ timer }) => clearTimeout(timer));
+  pending.forEach(({ payload }) => {
+    inventoryFieldSyncQueue = inventoryFieldSyncQueue.then(() =>
+      runSharedInventoryAction(
+        payload,
+        { successMessage: "Shared inventory saved.", applyState: false, flushFields: false },
+      ),
+    );
+  });
+  await inventoryFieldSyncQueue;
+}
+
 function renderInventorySummary(visibleItems, reorderItems) {
   const totalValue = sum(visibleItems.filter((item) => !item.excludeFromInventoryValue).map((item) => item.totalValue));
   const reorderCost = sum(reorderItems.filter((item) => !item.excludeFromInventoryValue).map((item) => getInventoryRoundedOrderQuantity(item) * item.unitCost));
@@ -4394,9 +4554,10 @@ function renderInventorySummary(visibleItems, reorderItems) {
     <div class="summary-line"><span>Total units to order</span><strong>${formatNumber(reorderUnits)}</strong></div>
     <div class="summary-line"><span>Estimated reorder cost</span><strong>${money(reorderCost)}</strong></div>
     <div class="sync-panel inventory-actions-panel">
-      <button class="primary-button" id="save-inventory-snapshot" type="button">Save Weekly Snapshot</button>
-      <p class="sync-copy">This saves the current inventory in this browser so you can look back week by week.</p>
-      <p class="sync-status">${latestSnapshot ? `Last saved ${escapeHtml(formatUpdatedAt(latestSnapshot.savedAt))}` : "No weekly snapshots saved yet."}</p>
+      <button class="primary-button" id="save-inventory-snapshot" type="button"${inventorySharedSaving ? " disabled" : ""}>${inventorySharedSaving ? "Saving..." : "Save Monday Snapshot"}</button>
+      <p class="sync-copy">Counts, pars, custom items, and Monday snapshots are shared across signed-in manager devices.</p>
+      <p class="sync-status">${escapeHtml(inventorySharedMessage)}${inventorySharedUpdatedAt ? ` Last synced ${escapeHtml(formatUpdatedAt(inventorySharedUpdatedAt))}.` : ""}</p>
+      <p class="sync-status">${latestSnapshot ? `Latest Monday snapshot: ${escapeHtml(formatInventorySnapshotLabel(getInventorySnapshotDate(latestSnapshot)))}` : "No Monday snapshots saved yet."}</p>
     </div>
   `;
 
@@ -4420,7 +4581,7 @@ function renderInventoryStockTable(groupedItems) {
   inventoryTable.append(createInventoryTotalRow("Current bottle inventory total", money(totalValue)));
 }
 
-function addCustomInventoryItem(event) {
+async function addCustomInventoryItem(event) {
   event.preventDefault();
   const name = normalizeInventoryName(customInventoryNameInput?.value || "");
   if (!name) return;
@@ -4443,6 +4604,8 @@ function addCustomInventoryItem(event) {
     existing.onHandDisplay = inventoryOnHandOverrides[id] ?? existing.onHandDisplay;
     existing.parDisplay = inventoryParOverrides[id] ?? existing.parDisplay;
     recalculateInventoryItem(existing);
+    if (onHandDisplay) scheduleInventoryFieldSync(id, "onHand", onHandDisplay);
+    if (parDisplay) scheduleInventoryFieldSync(id, "par", parDisplay);
   } else {
     const nextItem = {
       id,
@@ -4466,6 +4629,10 @@ function addCustomInventoryItem(event) {
     saveInventoryOnHandOverrides();
     saveInventoryParOverrides();
     inventoryItems = mergeCustomInventoryItems(inventoryItems.filter((item) => !item.isCustomInventory));
+    await runSharedInventoryAction(
+      { action: "upsert-custom", item: nextItem },
+      { successMessage: `${name} was added to shared inventory.` },
+    );
   }
 
   customInventoryForm?.reset();
@@ -4516,7 +4683,7 @@ function normalizeCustomInventoryItem(item) {
   return normalized;
 }
 
-function deleteCustomInventoryItem(id) {
+async function deleteCustomInventoryItem(id) {
   customInventoryItems = customInventoryItems.filter((item) => item.id !== id);
   delete inventoryOnHandOverrides[id];
   delete inventoryParOverrides[id];
@@ -4525,6 +4692,10 @@ function deleteCustomInventoryItem(id) {
   saveInventoryParOverrides();
   inventoryItems = inventoryItems.filter((item) => item.id !== id);
   renderInventory();
+  await runSharedInventoryAction(
+    { action: "delete-custom", id },
+    { successMessage: "The custom item was removed from shared inventory." },
+  );
 }
 
 function renderInventoryOrderTable(reorderItems) {
@@ -4731,9 +4902,10 @@ function getInventoryDisplayValue(item, field) {
 function persistInventoryField(id, field, value) {
   if (field === "par") {
     persistInventoryOverride(inventoryParOverrides, saveInventoryParOverrides, id, value);
-    return;
+  } else {
+    persistInventoryOverride(inventoryOnHandOverrides, saveInventoryOnHandOverrides, id, value);
   }
-  persistInventoryOverride(inventoryOnHandOverrides, saveInventoryOnHandOverrides, id, value);
+  scheduleInventoryFieldSync(id, field, clean(value));
 }
 
 function persistInventoryOverride(store, saveFn, id, value) {
@@ -4769,22 +4941,17 @@ function toggleInventoryParEdit(id) {
   renderInventory();
 }
 
-function saveInventorySnapshot() {
-  const snapshot = {
-    id: `inventory-${Date.now()}`,
-    savedAt: new Date().toISOString(),
-    unitModelVersion: Number(INVENTORY_UNIT_MODEL_VERSION),
-    items: getInventorySnapshotItems(),
-  };
-
-  inventoryHistory = [snapshot, ...inventoryHistory];
-  saveInventoryHistory();
-  renderInventorySummary(getVisibleInventoryItems(), getInventoryReorderItems(getVisibleInventoryItems()));
-  renderInventoryHistory();
+async function saveInventorySnapshot() {
+  const state = await runSharedInventoryAction(
+    { action: "save-snapshot", items: getInventorySnapshotItems() },
+    { successMessage: "This week's Monday snapshot is saved for all managers." },
+  );
+  if (state) renderInventoryHistory();
 }
 
 function getInventorySnapshotItems() {
   return groupInventoryForDisplay([...inventoryItems]).flatMap(([, items]) => items).map((item) => ({
+    id: item.id,
     name: item.name,
     group: item.group,
     onHandDisplay: item.onHandDisplay,
@@ -4803,7 +4970,7 @@ function renderInventoryHistory() {
   if (!inventoryHistoryList) return;
 
   if (!inventoryHistory.length) {
-    inventoryHistoryList.innerHTML = `<div class="empty-state">Save a weekly snapshot here each Monday and your past inventory counts will stay available on this computer.</div>`;
+    inventoryHistoryList.innerHTML = `<div class="empty-state">Save a Monday snapshot to create a shared week-by-week inventory history for managers.</div>`;
     return;
   }
 
@@ -4816,8 +4983,9 @@ function renderInventoryHistory() {
       <details class="inventory-history-card"${index === 0 ? " open" : ""}>
         <summary>
           <div class="inventory-history-heading">
-            <strong>${escapeHtml(formatInventorySnapshotLabel(snapshot.savedAt))}</strong>
+            <strong>Week of ${escapeHtml(formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot)))}</strong>
             <span>Saved ${escapeHtml(formatUpdatedAt(snapshot.savedAt))}</span>
+            <span>Shared manager snapshot</span>
             <span>${snapshot.items.length} items saved</span>
           </div>
           <div class="inventory-history-stats">
@@ -4887,7 +5055,11 @@ function groupInventorySnapshotItems(sourceItems) {
     grouped.get(item.group).push(item);
   });
 
-  return ["Liquor Cabinet", "Mixer Cabinet"]
+  const preferredGroups = ["Liquor Cabinet", "Mixer Cabinet"];
+  const remainingGroups = [...grouped.keys()]
+    .filter((groupName) => !preferredGroups.includes(groupName))
+    .sort((a, b) => a.localeCompare(b));
+  return [...preferredGroups, ...remainingGroups]
     .map((groupName) => [
       groupName,
       (grouped.get(groupName) || []).sort((a, b) => getInventorySortKey(a).localeCompare(getInventorySortKey(b))),
@@ -4895,43 +5067,25 @@ function groupInventorySnapshotItems(sourceItems) {
     .filter(([, items]) => items.length);
 }
 
-function deleteInventorySnapshot(snapshotId) {
-  inventoryHistory = inventoryHistory.filter((snapshot) => snapshot.id !== snapshotId);
-  saveInventoryHistory();
-  renderInventoryHistory();
-  renderInventorySummary(getVisibleInventoryItems(), getInventoryReorderItems(getVisibleInventoryItems()));
+async function deleteInventorySnapshot(snapshotId) {
+  const state = await runSharedInventoryAction(
+    { action: "delete-snapshot", id: snapshotId },
+    { successMessage: "The shared Monday snapshot was deleted." },
+  );
+  if (state) renderInventoryHistory();
 }
 
-function restoreInventorySnapshot(snapshotId) {
+async function restoreInventorySnapshot(snapshotId) {
   const snapshot = inventoryHistory.find((entry) => entry.id === snapshotId);
   if (!snapshot) return;
-
-  inventoryOnHandOverrides = {};
-  inventoryParOverrides = {};
-
-  snapshot.items.forEach((item) => {
-    const id = slugify(item.name);
-    if (clean(item.onHandDisplay)) {
-      const currentItem = findInventoryItem(id);
-      const onHandDisplay = snapshot.unitModelVersion === Number(INVENTORY_UNIT_MODEL_VERSION)
-        || !currentItem?.casePackaged
-        ? clean(item.onHandDisplay)
-        : String(convertLegacyCaseCountToUnits(item.onHandDisplay, currentItem.legacyPackSize));
-      inventoryOnHandOverrides[id] = onHandDisplay;
-    }
-    if (clean(item.parDisplay)) {
-      inventoryParOverrides[id] = clean(item.parDisplay);
-    }
-  });
-
-  saveInventoryOnHandOverrides();
-  saveInventoryParOverrides();
-  inventoryItems.forEach((item) => {
-    item.onHandDisplay = inventoryOnHandOverrides[item.id] ?? "";
-    item.parDisplay = inventoryParOverrides[item.id] ?? "";
-    recalculateInventoryItem(item);
-  });
-  renderInventory();
+  const state = await runSharedInventoryAction(
+    { action: "restore-snapshot", id: snapshotId },
+    {
+      successMessage: `Restored the shared inventory from ${formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot))}.`,
+      rebuild: true,
+    },
+  );
+  if (state) renderInventory();
 }
 
 function saveIngredientOverride(id, bottleOz, bottlePrice) {
@@ -8171,6 +8325,10 @@ function formatInventorySnapshotLabel(value) {
     day: "numeric",
     year: "numeric",
   }).format(date);
+}
+
+function getInventorySnapshotDate(snapshot) {
+  return snapshot?.weekOf ? `${snapshot.weekOf}T12:00:00` : snapshot?.savedAt;
 }
 
 function formatBatchLabel(value) {
