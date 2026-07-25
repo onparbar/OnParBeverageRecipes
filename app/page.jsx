@@ -510,6 +510,14 @@ export default function DashboardPage() {
               <span>Find tap or product</span>
               <input id="weekly-usage-search" type="search" placeholder="Search tap, wall, liquor, beer, cocktail..." />
             </label>
+            <label className="select-field weekly-usage-range-field">
+              <span>History shown</span>
+              <select id="weekly-usage-range" defaultValue="0">
+                <option value="6">Recent 6 weeks</option>
+                <option value="12">Recent 12 weeks</option>
+                <option value="0">All history</option>
+              </select>
+            </label>
             <button className="ghost-button" id="pull-pmb-weekly-usage" type="button">Pull PMB report</button>
           </div>
 

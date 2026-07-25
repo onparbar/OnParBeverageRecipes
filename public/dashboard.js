@@ -565,6 +565,7 @@ const inventoryHistoryList = document.querySelector("#inventory-history-list");
 const kegSummary = document.querySelector("#keg-summary");
 const kegWalls = document.querySelector("#keg-walls");
 const weeklyUsageSearch = document.querySelector("#weekly-usage-search");
+const weeklyUsageRangeInput = document.querySelector("#weekly-usage-range");
 const weeklyUsageHead = document.querySelector("#weekly-usage-head");
 const pullPmbWeeklyUsageButton = document.querySelector("#pull-pmb-weekly-usage");
 const weeklyUsageSummary = document.querySelector("#weekly-usage-summary");
@@ -630,6 +631,7 @@ let weeklyUsageArchivedItems = loadWeeklyUsageArchivedItems();
 let weeklyUsageSyncLoading = false;
 let weeklyUsageSyncMessage = "Automatic PMB check will run when the dashboard opens.";
 let weeklyUsageLastSyncAt = loadWeeklyUsageLastSyncAt();
+let weeklyUsageHistoryLimit = window.matchMedia("(max-width: 720px)").matches ? 6 : 0;
 let kegPricingItems = [];
 let priceOverrides = loadOverrides();
 let kegPriceOverrides = loadKegPriceOverrides();
@@ -779,6 +781,10 @@ function bindEvents() {
   inventorySearch.addEventListener("input", renderInventory);
   customInventoryForm?.addEventListener("submit", addCustomInventoryItem);
   weeklyUsageSearch?.addEventListener("input", renderWeeklyUsage);
+  weeklyUsageRangeInput?.addEventListener("change", () => {
+    weeklyUsageHistoryLimit = Math.max(0, toNumber(weeklyUsageRangeInput.value));
+    renderWeeklyUsage();
+  });
   pullPmbWeeklyUsageButton?.addEventListener("click", runPmbWeeklyUsageSync);
   recipeForm.addEventListener("submit", addCustomRecipe);
   addIngredientRowButton.addEventListener("click", addIngredientRow);
@@ -1968,21 +1974,32 @@ function renderWeeklyUsage() {
   const activeRows = visibleItems.filter((item) => !item.isArchivedSearchResult).length;
   const searchArchiveRows = visibleItems.filter((item) => item.isArchivedSearchResult).length;
   const averageWeeks = trackedWeeks.length ? sum(trackedWeeks) / trackedWeeks.length : 0;
-  const historyHeaders = getWeeklyUsageHistoryHeaders(visibleItems);
+  const allHistoryHeaders = getWeeklyUsageHistoryHeaders(visibleItems);
+  const historyHeaders = weeklyUsageHistoryLimit
+    ? allHistoryHeaders.slice(0, weeklyUsageHistoryLimit)
+    : allHistoryHeaders;
+  const compactUsageTable = window.matchMedia("(max-width: 720px)").matches;
+  const usageColumnWidths = compactUsageTable
+    ? { tap: 46, product: 150, average: 82, week: 90 }
+    : { tap: 70, product: 340, average: 120, week: 112 };
   const weeklyUsageTableElement = weeklyUsageHead.closest("table");
   if (weeklyUsageTableElement) {
-    const tableWidth = `${530 + (historyHeaders.length * 112)}px`;
+    const tableWidth = `${usageColumnWidths.tap + usageColumnWidths.product + usageColumnWidths.average + (historyHeaders.length * usageColumnWidths.week)}px`;
     weeklyUsageTableElement.style.width = tableWidth;
     weeklyUsageTableElement.style.minWidth = tableWidth;
     weeklyUsageTableElement.querySelector("colgroup")?.remove();
     weeklyUsageTableElement.insertAdjacentHTML("afterbegin", `
       <colgroup>
-        <col style="width: 70px;">
-        <col style="width: 340px;">
-        <col style="width: 120px;">
-        ${historyHeaders.map(() => '<col style="width: 112px;">').join("")}
+        <col style="width: ${usageColumnWidths.tap}px;">
+        <col style="width: ${usageColumnWidths.product}px;">
+        <col style="width: ${usageColumnWidths.average}px;">
+        ${historyHeaders.map(() => `<col style="width: ${usageColumnWidths.week}px;">`).join("")}
       </colgroup>
     `);
+  }
+
+  if (weeklyUsageRangeInput) {
+    weeklyUsageRangeInput.value = String(weeklyUsageHistoryLimit);
   }
 
   if (pullPmbWeeklyUsageButton) {
@@ -2004,6 +2021,7 @@ function renderWeeklyUsage() {
       <div><strong>${searchArchiveRows}</strong><span>Search history</span></div>
     </div>
     <div class="summary-line"><span>Avg weeks tracked</span><strong>${trackedWeeks.length ? formatNumber(averageWeeks) : "0"}</strong></div>
+    <div class="summary-line"><span>Weeks displayed</span><strong>${historyHeaders.length}${historyHeaders.length !== allHistoryHeaders.length ? ` of ${allHistoryHeaders.length}` : ""}</strong></div>
     <div class="summary-line"><span>Replaced histories</span><strong>${formatNumber(archivedCount)}</strong></div>
     <div class="summary-line"><span>Last successful PMB sync</span><strong>${weeklyUsageLastSyncAt ? escapeHtml(formatUpdatedAt(weeklyUsageLastSyncAt)) : "Not yet"}</strong></div>
     <div class="sync-panel sync-panel--weekly-usage">

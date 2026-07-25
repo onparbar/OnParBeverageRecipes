@@ -2397,12 +2397,21 @@ td {
     grid-template-columns: 1fr;
   }
 
+  #keg-levels-panel .keg-layout {
+    grid-template-columns: 1fr;
+  }
+
   .ingredient-summary,
   .pricing-summary,
   .inventory-summary,
   .keg-summary,
   .weekly-usage-summary {
     position: static;
+  }
+
+  #keg-levels-panel .keg-summary {
+    max-height: none;
+    overflow-y: visible;
   }
 
   #ingredients-panel .ingredient-layout {
@@ -2515,6 +2524,14 @@ td {
     grid-template-columns: 1fr;
   }
 
+  .custom-inventory-form input,
+  .custom-inventory-form select,
+  .custom-inventory-form .primary-button,
+  .inventory-input,
+  .inventory-par-toggle {
+    min-height: 44px;
+  }
+
   .tap-change-controls {
     grid-template-columns: 1fr;
   }
@@ -2578,6 +2595,159 @@ td {
   }
 
   .inventory-table {
-    min-width: 860px;
+    min-width: 740px;
+  }
+
+  .inventory-table--stock,
+  .inventory-table--orders,
+  .keg-table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .inventory-table--stock,
+  .inventory-table--orders {
+    min-width: 710px;
+  }
+
+  .inventory-table--stock th,
+  .inventory-table--stock td,
+  .inventory-table--orders th,
+  .inventory-table--orders td {
+    padding: 8px;
+  }
+
+  .inventory-table--stock th:nth-child(1),
+  .inventory-table--orders th:nth-child(1) {
+    width: 160px;
+  }
+
+  .inventory-table--stock th:nth-child(2),
+  .inventory-table--orders th:nth-child(2) {
+    width: 88px;
+  }
+
+  .inventory-table--stock th:nth-child(3),
+  .inventory-table--orders th:nth-child(3) {
+    width: 126px;
+  }
+
+  .inventory-table--stock th:nth-child(4),
+  .inventory-table--orders th:nth-child(4),
+  .inventory-table--stock th:nth-child(5),
+  .inventory-table--orders th:nth-child(5) {
+    width: 78px;
+  }
+
+  .inventory-table--stock th:nth-child(6),
+  .inventory-table--orders th:nth-child(6) {
+    width: 82px;
+  }
+
+  .inventory-table--stock th:nth-child(7),
+  .inventory-table--orders th:nth-child(7) {
+    width: 98px;
+  }
+
+  .inventory-table--stock thead th,
+  .inventory-table--orders thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #f8f1e3;
+  }
+
+  .inventory-table--stock thead th:first-child,
+  .inventory-table--orders thead th:first-child {
+    left: 0;
+    z-index: 4;
+  }
+
+  .inventory-table--stock tbody tr:not(.inventory-group-row):not(.inventory-total-row):not(.inventory-subtotal-row) > td:first-child,
+  .inventory-table--orders tbody tr:not(.inventory-group-row):not(.inventory-total-row):not(.inventory-subtotal-row) > td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    overflow: hidden;
+    border-right: 1px solid rgba(24, 33, 31, 0.12);
+    background: #fffdf7;
+    overflow-wrap: anywhere;
+  }
+
+  .weekly-usage-range-field {
+    width: 100%;
+  }
+
+  .weekly-usage-table {
+    min-width: 908px;
+  }
+
+  .weekly-usage-table th,
+  .weekly-usage-table td {
+    padding: 9px 7px;
+  }
+
+  .weekly-usage-table th:nth-child(1),
+  .weekly-usage-table td:nth-child(1) {
+    width: 46px;
+  }
+
+  .weekly-usage-table th:nth-child(2),
+  .weekly-usage-table td:nth-child(2) {
+    left: 46px;
+    min-width: 150px;
+    max-width: 150px;
+  }
+
+  .weekly-usage-table th:nth-child(3),
+  .weekly-usage-table td:nth-child(3),
+  .weekly-usage-table th.weekly-usage-average,
+  .weekly-usage-table td.weekly-usage-average {
+    width: 82px;
+  }
+
+  .weekly-usage-table th.weekly-usage-week,
+  .weekly-usage-table td.weekly-usage-week {
+    min-width: 90px;
+  }
+
+  .weekly-usage-product strong {
+    max-width: 136px;
+    text-overflow: ellipsis;
+  }
+
+  .weekly-usage-product span {
+    max-width: 136px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .keg-table {
+    min-width: 920px;
+  }
+
+  .inventory-table.keg-table th:nth-child(1),
+  .inventory-table.keg-table td:nth-child(1) {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    width: 48px;
+    background: rgba(255, 253, 247, 0.98);
+  }
+
+  .inventory-table.keg-table th:nth-child(2),
+  .inventory-table.keg-table td:nth-child(2) {
+    position: sticky;
+    left: 48px;
+    z-index: 2;
+    width: 190px;
+    border-right: 1px solid rgba(24, 33, 31, 0.12);
+    background: rgba(255, 253, 247, 0.98);
+  }
+
+  .inventory-table.keg-table thead th:nth-child(1),
+  .inventory-table.keg-table thead th:nth-child(2) {
+    z-index: 3;
+    background: #f8f1e3;
   }
 }
