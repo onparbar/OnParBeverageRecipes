@@ -548,6 +548,7 @@ const isEmployeeDashboard = dashboardRole === "employee";
 const recipeGrid = document.querySelector("#recipe-grid");
 const oldRecipeGrid = document.querySelector("#old-recipe-grid");
 const statsGrid = document.querySelector("#stats-grid");
+const recipeCoverageAlert = document.querySelector("#recipe-coverage-alert");
 const categoryFilter = document.querySelector("#category-filter");
 const recipeSearch = document.querySelector("#recipe-search");
 const oldSearch = document.querySelector("#old-search");
@@ -714,9 +715,10 @@ init();
 
 async function init() {
   if (isEmployeeDashboard) {
-    const [csv, newCocktailsCsv] = await Promise.all([
+    const [csv, newCocktailsCsv, kegLevelsCsv] = await Promise.all([
       fetchCsv(CSV_PATH),
       fetchCsv(NEW_COCKTAILS_CSV_PATH),
+      fetchOptionalCsv(KEG_LEVELS_CSV_PATH),
     ]);
 
     recipes = [
@@ -725,6 +727,7 @@ async function init() {
       ...customRecipes,
     ].map(applyRecipeEdits);
     ingredients = buildIngredientCatalog(getActiveRecipes());
+    kegWallItems = kegLevelsCsv ? parseKegLevels(parseCsv(kegLevelsCsv)) : [];
     hydrateCategoryFilter(recipes);
     bindEvents();
     renderEmployeeDashboard();
@@ -786,6 +789,7 @@ function bindEvents() {
 
   recipeSearch.addEventListener("input", renderRecipes);
   categoryFilter.addEventListener("change", renderRecipes);
+  recipeCoverageAlert?.addEventListener("click", handleRecipeCoverageAction);
 
   if (isEmployeeDashboard) return;
 
@@ -942,11 +946,130 @@ function renderRecipes() {
   });
 
   recipeGrid.innerHTML = "";
+  renderRecipeCoverageAlert();
 
   visibleRecipes.forEach((recipe) => {
     const card = createRecipeCard(recipe, "active");
     recipeGrid.append(card);
   });
+}
+
+function getWallCocktailRecipeCoverage() {
+  const records = kegWallItems
+    .map((item) => {
+      const liveRow = getKegLiveRow(item);
+      const displayBrand = getKegDisplayBrand(item, liveRow);
+      const context = getKegCostContext(item, displayBrand);
+      if (context.kind !== "cocktail") return null;
+      const productName = getKegDisplayName(context.livePrice?.name || displayBrand || item.brand);
+      const inactiveRecipe = context.recipe ? null : findRecipeForWallProduct(getInactiveRecipes(), productName);
+      return {
+        item,
+        productName,
+        recipe: context.recipe,
+        inactiveRecipe,
+      };
+    })
+    .filter(Boolean);
+
+  const missingByProduct = new Map();
+  records
+    .filter((record) => !record.recipe)
+    .forEach((record) => {
+      const key = getTapPriceAliases(record.productName)[0] || slugify(record.productName);
+      const existing = missingByProduct.get(key) || {
+        name: record.productName,
+        locations: [],
+        inactiveRecipeId: record.inactiveRecipe?.id || "",
+      };
+      existing.locations.push(`${record.item.wall} tap ${record.item.tapNumber}`);
+      if (!existing.inactiveRecipeId && record.inactiveRecipe?.id) {
+        existing.inactiveRecipeId = record.inactiveRecipe.id;
+      }
+      missingByProduct.set(key, existing);
+    });
+
+  return {
+    totalTaps: records.length,
+    coveredTaps: records.filter((record) => record.recipe).length,
+    missing: [...missingByProduct.values()].sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+function findRecipeForWallProduct(sourceRecipes, productName) {
+  const aliases = getTapPriceAliases(productName);
+  return sourceRecipes.find((recipe) => {
+    const recipeAliases = getTapPriceAliases(recipe.title);
+    return aliases.some((alias) => recipeAliases.includes(alias));
+  }) || null;
+}
+
+function renderRecipeCoverageAlert() {
+  if (!recipeCoverageAlert || !kegWallItems.length) return;
+  const coverage = getWallCocktailRecipeCoverage();
+  recipeCoverageAlert.hidden = false;
+  recipeCoverageAlert.classList.toggle("is-complete", coverage.missing.length === 0);
+
+  if (!coverage.missing.length) {
+    recipeCoverageAlert.innerHTML = `
+      <div class="recipe-coverage-alert__header">
+        <div>
+          <h2>Wall recipe check complete</h2>
+          <p>All ${coverage.totalTaps} cocktail taps have an active recipe card.</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  recipeCoverageAlert.innerHTML = `
+    <div class="recipe-coverage-alert__header">
+      <div>
+        <h2>${coverage.missing.length} wall cocktail${coverage.missing.length === 1 ? "" : "s"} need recipe cards</h2>
+        <p>${coverage.coveredTaps} of ${coverage.totalTaps} cocktail taps are covered. Counts refresh from ${isEmployeeDashboard ? "the current wall configuration" : "the current wall and Pour My Beer data"}.</p>
+      </div>
+    </div>
+    <div class="recipe-coverage-alert__list">
+      ${coverage.missing.map((item) => `
+        <div class="recipe-coverage-alert__item">
+          <div>
+            <strong>${escapeHtml(item.name)}</strong>
+            <span>${escapeHtml(item.locations.join(", "))}</span>
+          </div>
+          ${isEmployeeDashboard
+            ? '<span class="table-note table-note--accent">Manager action needed</span>'
+            : `
+              <button
+                class="mini-button"
+                type="button"
+                ${item.inactiveRecipeId
+                  ? `data-reactivate-wall-recipe="${escapeHtml(item.inactiveRecipeId)}"`
+                  : `data-create-wall-recipe="${escapeHtml(item.name)}"`}
+              >${item.inactiveRecipeId ? "Reactivate recipe" : "Create recipe"}</button>
+            `}
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function handleRecipeCoverageAction(event) {
+  const reactivateButton = event.target.closest("[data-reactivate-wall-recipe]");
+  if (reactivateButton) {
+    reactivateRecipe(reactivateButton.dataset.reactivateWallRecipe);
+    return;
+  }
+
+  const createButton = event.target.closest("[data-create-wall-recipe]");
+  if (!createButton) return;
+  resetRecipeForm();
+  newRecipeTitleInput.value = createButton.dataset.createWallRecipe || "";
+  newRecipeCategoryInput.value = "Other";
+  syncRecipeCreativeDefaults({ preserveDescription: false, preserveImage: false });
+  scheduleRecipeImageLookup();
+  syncRecipeBuilderSummary();
+  switchTab("add");
+  newRecipeTitleInput.focus();
 }
 
 function renderOldRecipes() {
@@ -1399,6 +1522,7 @@ function renderKegLevels() {
   const liveCount = kegWallItems.filter((item) => getKegLiveRow(item)).length;
   const reorderCount = kegWallItems.filter((item) => getKegNeed(item) > 0).length;
   const currentInventoryValue = sum(kegWallItems.map((item) => getKegCurrentValue(item, getKegLiveRow(item))));
+  const recipeCoverage = getWallCocktailRecipeCoverage();
 
   kegSummary.innerHTML = `
     <h2>Keg Levels</h2>
@@ -1418,8 +1542,15 @@ function renderKegLevels() {
       <div class="summary-line"><span>Shot lines</span><strong>${shotCount}</strong></div>
       <div class="summary-line"><span>Live levels found</span><strong>${liveCount}</strong></div>
       <div class="summary-line"><span>Kegs below par</span><strong>${reorderCount}</strong></div>
+      <div class="summary-line"><span>Missing recipe cards</span><strong>${recipeCoverage.missing.length}</strong></div>
       <div class="summary-line"><span>Current line value</span><strong>${money(currentInventoryValue)}</strong></div>
     </div>
+    ${recipeCoverage.missing.length ? `
+      <div class="recipe-coverage-summary">
+        <p>${recipeCoverage.missing.length} wall cocktail${recipeCoverage.missing.length === 1 ? "" : "s"} need attention.</p>
+        <button class="mini-button" id="view-missing-recipes" type="button">View missing recipes</button>
+      </div>
+    ` : ""}
     ${renderParAgentPanel()}
     ${renderCocktailsToMakePanel()}
   `;
@@ -3363,6 +3494,10 @@ async function pushKegLevelAdjustment(key) {
 }
 
 function bindKegLevelEvents() {
+  document.querySelector("#view-missing-recipes")?.addEventListener("click", () => {
+    switchTab("recipes");
+    recipeCoverageAlert?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   document.querySelector("#refresh-keg-levels")?.addEventListener("click", () => {
     runKegLevelSync();
   });

@@ -507,6 +507,75 @@ td {
   font-weight: 800;
 }
 
+.recipe-coverage-alert {
+  margin: 14px 0 18px;
+  border: 1px solid rgba(166, 56, 43, 0.42);
+  border-left: 5px solid var(--tomato);
+  background: rgba(166, 56, 43, 0.07);
+  padding: 14px 16px;
+}
+
+.recipe-coverage-alert.is-complete {
+  border-color: rgba(31, 95, 84, 0.35);
+  border-left-color: var(--juniper);
+  background: rgba(31, 95, 84, 0.07);
+}
+
+.recipe-coverage-alert__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recipe-coverage-alert h2,
+.recipe-coverage-alert p {
+  margin: 0;
+}
+
+.recipe-coverage-alert h2 {
+  font-size: 1.05rem;
+}
+
+.recipe-coverage-alert p {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.recipe-coverage-alert__list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.recipe-coverage-alert__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid rgba(166, 56, 43, 0.18);
+  padding-top: 8px;
+}
+
+.recipe-coverage-alert__item span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.recipe-coverage-summary {
+  margin-top: 10px;
+  border: 1px solid rgba(166, 56, 43, 0.32);
+  background: rgba(166, 56, 43, 0.07);
+  padding: 10px;
+}
+
+.recipe-coverage-summary p {
+  margin: 0 0 8px;
+  color: var(--tomato);
+  font-weight: 800;
+}
+
 .ingredient-layout,
 .pricing-layout,
 .inventory-layout,
@@ -2809,6 +2878,17 @@ td {
 
   .inventory-drag-handle {
     display: none;
+  }
+
+  .recipe-coverage-alert__header,
+  .recipe-coverage-alert__item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .recipe-coverage-alert__item .mini-button {
+    min-height: 44px;
+    width: 100%;
   }
 
   .weekly-usage-range-field {

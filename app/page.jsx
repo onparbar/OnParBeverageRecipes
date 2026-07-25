@@ -113,6 +113,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="stats-grid" id="stats-grid"></div>
+          <section className="recipe-coverage-alert" id="recipe-coverage-alert" aria-live="polite" hidden></section>
           <div className="recipe-grid" id="recipe-grid"></div>
         </section>
 
