@@ -4,6 +4,7 @@ import {
   deleteInventorySnapshotState,
   hydrateInventoryState,
   readInventoryState,
+  reorderInventoryItems,
   restoreInventorySnapshotState,
   saveInventorySnapshot,
   updateInventoryField,
@@ -66,6 +67,9 @@ export async function POST(request) {
         break;
       case "delete-custom":
         state = await deleteCustomInventoryItemState(body.id, role);
+        break;
+      case "reorder-items":
+        state = await reorderInventoryItems(body.itemOrder, role);
         break;
       case "save-snapshot":
         state = await saveInventorySnapshot(body.items, role, new Date(), body.summary);

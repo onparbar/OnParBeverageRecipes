@@ -441,10 +441,13 @@ export default function DashboardPage() {
                       <input id="custom-inventory-pack-size" type="number" min="1" step="1" inputMode="numeric" defaultValue="1" />
                     </label>
                     <label>
-                      <span>Case / unit cost</span>
+                      <span>Case / unit cost (optional)</span>
                       <input id="custom-inventory-unit-cost" type="text" inputMode="decimal" placeholder="0.00" />
                     </label>
-                    <button className="primary-button" type="submit">Add item</button>
+                    <div className="custom-inventory-form__actions">
+                      <button className="primary-button" id="custom-inventory-submit" type="submit">Add item</button>
+                      <button className="ghost-button" id="custom-inventory-cancel" type="button" hidden>Cancel</button>
+                    </div>
                   </form>
                 </div>
                 <div className="inventory-table-wrap">

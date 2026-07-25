@@ -23,6 +23,7 @@ const INVENTORY_ON_HAND_STORAGE_KEY = "cocktail-dashboard-inventory-on-hand";
 const INVENTORY_PAR_STORAGE_KEY = "cocktail-dashboard-inventory-par";
 const INVENTORY_HISTORY_STORAGE_KEY = "cocktail-dashboard-inventory-history";
 const CUSTOM_INVENTORY_STORAGE_KEY = "cocktail-dashboard-custom-inventory";
+const INVENTORY_ORDER_STORAGE_KEY = "cocktail-dashboard-inventory-order";
 const INVENTORY_UNIT_MODEL_STORAGE_KEY = "cocktail-dashboard-inventory-unit-model";
 const INVENTORY_UNIT_MODEL_VERSION = "2";
 const PRICE_OVERRIDE_MODEL_STORAGE_KEY = "cocktail-dashboard-price-override-model";
@@ -565,6 +566,8 @@ const customInventoryOnHandInput = document.querySelector("#custom-inventory-on-
 const customInventoryParInput = document.querySelector("#custom-inventory-par");
 const customInventoryUnitCostInput = document.querySelector("#custom-inventory-unit-cost");
 const customInventoryPackSizeInput = document.querySelector("#custom-inventory-pack-size");
+const customInventorySubmitButton = document.querySelector("#custom-inventory-submit");
+const customInventoryCancelButton = document.querySelector("#custom-inventory-cancel");
 const inventoryTable = document.querySelector("#inventory-table");
 const inventoryOrderTable = document.querySelector("#inventory-order-table");
 const inventorySummary = document.querySelector("#inventory-summary");
@@ -651,6 +654,7 @@ let customRecipes = loadCustomRecipes();
 let inactiveRecipeIds = loadInactiveRecipeIds();
 let editedRecipes = loadEditedRecipes();
 let customInventoryItems = loadCustomInventoryItems();
+let inventoryItemOrder = loadInventoryItemOrder();
 let inventoryOnHandOverrides = loadInventoryOnHandOverrides();
 let inventoryParOverrides = loadInventoryParOverrides();
 let inventoryHistory = loadInventoryHistory();
@@ -664,6 +668,9 @@ let kegOnHandOverrides = loadKegOnHandOverrides();
 let kegParOverrides = loadKegParOverrides();
 let kegOnDeckOverrides = loadKegOnDeckOverrides();
 let inventoryParEditState = {};
+let editingCustomInventoryId = "";
+let draggedInventoryItemId = "";
+const customInventoryPriceStatus = new Map();
 let editingRecipeId = null;
 let vendorSyncScope = "all";
 let vendorSyncMessage = "Press sync to check mapped vendors automatically. Vendors without a supported connection will report what is still needed.";
@@ -787,6 +794,7 @@ function bindEvents() {
   ingredientSearch.addEventListener("input", renderIngredients);
   inventorySearch.addEventListener("input", renderInventory);
   customInventoryForm?.addEventListener("submit", addCustomInventoryItem);
+  customInventoryCancelButton?.addEventListener("click", resetCustomInventoryForm);
   weeklyUsageSearch?.addEventListener("input", renderWeeklyUsage);
   weeklyUsageRangeInput?.addEventListener("change", () => {
     weeklyUsageHistoryLimit = Math.max(0, toNumber(weeklyUsageRangeInput.value));
@@ -4457,6 +4465,7 @@ async function loadSharedInventoryState() {
     const hasLocalInventoryState = Object.keys(inventoryOnHandOverrides).length
       || Object.keys(inventoryParOverrides).length
       || customInventoryItems.length
+      || inventoryItemOrder.length
       || inventoryHistory.length;
     if (!state.initialized && hasLocalInventoryState) {
       state = await requestSharedInventory({
@@ -4464,6 +4473,7 @@ async function loadSharedInventoryState() {
         onHandOverrides: inventoryOnHandOverrides,
         parOverrides: inventoryParOverrides,
         customItems: customInventoryItems,
+        itemOrder: inventoryItemOrder,
         snapshots: getMigratedInventoryHistory(),
       });
     }
@@ -4513,11 +4523,13 @@ function applySharedInventoryState(state, { rebuild = false } = {}) {
   inventoryOnHandOverrides = { ...(state.current?.onHandOverrides || {}) };
   inventoryParOverrides = { ...(state.current?.parOverrides || {}) };
   customInventoryItems = Array.isArray(state.current?.customItems) ? state.current.customItems : [];
+  inventoryItemOrder = Array.isArray(state.current?.itemOrder) ? state.current.itemOrder : [];
   inventoryHistory = Array.isArray(state.snapshots) ? state.snapshots : [];
   inventorySharedUpdatedAt = state.current?.updatedAt || "";
   saveInventoryOnHandOverrides();
   saveInventoryParOverrides();
   saveCustomInventoryItems();
+  saveInventoryItemOrder();
   saveInventoryHistory();
 
   if (rebuild && inventorySourceRows.length) {
@@ -4632,10 +4644,10 @@ function renderInventoryStockTable(groupedItems) {
 
 async function addCustomInventoryItem(event) {
   event.preventDefault();
-  const name = normalizeInventoryName(customInventoryNameInput?.value || "");
+  const name = clean(customInventoryNameInput?.value || "");
   if (!name) return;
 
-  const id = slugify(name);
+  const id = editingCustomInventoryId || slugify(name);
   const existing = findInventoryItem(id);
   const group = clean(customInventoryGroupInput?.value) || getInventoryGroup(name, "Custom Inventory");
   const onHandDisplay = normalizeInventoryInputValue(customInventoryOnHandInput?.value || "", false);
@@ -4644,8 +4656,9 @@ async function addCustomInventoryItem(event) {
   const casePackaged = packSize > 1;
   const caseCost = toNumber(customInventoryUnitCostInput?.value);
   const unitCost = getInventoryUnitCost(caseCost, packSize);
+  const vendorProduct = getCustomInventoryVendorProduct(name, group);
 
-  if (existing && !existing.isCustomInventory) {
+  if (existing && !existing.isCustomInventory && !editingCustomInventoryId) {
     if (onHandDisplay) inventoryOnHandOverrides[id] = onHandDisplay;
     if (parDisplay) inventoryParOverrides[id] = parDisplay;
     saveInventoryOnHandOverrides();
@@ -4666,12 +4679,14 @@ async function addCustomInventoryItem(event) {
       casePackaged,
       caseCost,
       unitCost,
+      vendorProduct,
       updatedAt: new Date().toISOString(),
     };
     customInventoryItems = [
       ...customInventoryItems.filter((item) => item.id !== id),
       nextItem,
     ];
+    if (unitCost > 0) customInventoryPriceStatus.delete(id);
     saveCustomInventoryItems();
     if (onHandDisplay) inventoryOnHandOverrides[id] = onHandDisplay;
     if (parDisplay) inventoryParOverrides[id] = parDisplay;
@@ -4680,11 +4695,20 @@ async function addCustomInventoryItem(event) {
     inventoryItems = mergeCustomInventoryItems(inventoryItems.filter((item) => !item.isCustomInventory));
     await runSharedInventoryAction(
       { action: "upsert-custom", item: nextItem },
-      { successMessage: `${name} was added to shared inventory.` },
+      {
+        successMessage: editingCustomInventoryId
+          ? `${name} was updated in shared inventory.`
+          : `${name} was added to shared inventory.`,
+        rebuild: true,
+      },
     );
+
+    if (unitCost <= 0 && vendorProduct) {
+      await syncCustomInventoryPrice(id, { automatic: true });
+    }
   }
 
-  customInventoryForm?.reset();
+  resetCustomInventoryForm();
   renderInventory();
 }
 
@@ -4701,7 +4725,7 @@ function mergeCustomInventoryItems(baseItems) {
 }
 
 function normalizeCustomInventoryItem(item) {
-  const name = normalizeInventoryName(item?.name || "");
+  const name = clean(item?.name || "");
   if (!name) return null;
   const id = item.id || slugify(name);
   const group = clean(item.group) || getInventoryGroup(name, "Custom Inventory");
@@ -4724,12 +4748,137 @@ function normalizeCustomInventoryItem(item) {
     caseCost,
     baseUnitCost: unitCost,
     unitCost,
+    vendorProduct: item.vendorProduct || getCustomInventoryVendorProduct(name, group),
     parDisplay,
-    note: "Custom item",
+    note: unitCost > 0
+      ? `${item.priceUpdatedAt ? item.vendorProduct?.vendor || "Vendor" : "Manual"} price`
+      : "Price needed",
     isCustomInventory: true,
+    matchedSku: clean(item.matchedSku),
+    priceUpdatedAt: clean(item.priceUpdatedAt),
   };
   recalculateInventoryItem(normalized);
   return normalized;
+}
+
+function editCustomInventoryItem(id) {
+  const item = customInventoryItems.find((entry) => entry.id === id);
+  if (!item) return;
+  editingCustomInventoryId = id;
+  customInventoryNameInput.value = item.name || "";
+  customInventoryGroupInput.value = item.group || "Other";
+  customInventoryOnHandInput.value = item.onHandDisplay || "";
+  customInventoryParInput.value = item.parDisplay || "";
+  customInventoryPackSizeInput.value = String(item.packSize || 1);
+  customInventoryUnitCostInput.value = toNumber(item.caseCost) > 0 ? String(item.caseCost) : "";
+  customInventorySubmitButton.textContent = "Update item";
+  customInventoryCancelButton.hidden = false;
+  customInventoryNameInput.focus();
+}
+
+function resetCustomInventoryForm() {
+  editingCustomInventoryId = "";
+  customInventoryForm?.reset();
+  if (customInventoryPackSizeInput) customInventoryPackSizeInput.value = "1";
+  if (customInventorySubmitButton) customInventorySubmitButton.textContent = "Add item";
+  if (customInventoryCancelButton) customInventoryCancelButton.hidden = true;
+}
+
+function getCustomInventoryVendorProduct(name, group) {
+  const bottleOz = getBottleOzFromInventoryName(name);
+  if (bottleOz <= 0) return null;
+  const syncVendor = group === "Liquor Cabinet" ? "OHLQ" : "Provi";
+  return {
+    vendor: syncVendor,
+    syncVendor,
+    productName: clean(name),
+    bottleOz,
+  };
+}
+
+function getBottleOzFromInventoryName(name) {
+  const text = clean(name);
+  const literMatch = text.match(/(\d+(?:\.\d+)?)\s*l\b/i);
+  if (literMatch) return Number.parseFloat(literMatch[1]) * 33.814;
+  const mlMatch = text.match(/(\d+(?:\.\d+)?)\s*ml\b/i);
+  if (mlMatch) return Number.parseFloat(mlMatch[1]) * 0.033814;
+  const ozMatch = text.match(/(\d+(?:\.\d+)?)\s*oz\b/i);
+  return ozMatch ? Number.parseFloat(ozMatch[1]) : 0;
+}
+
+async function syncCustomInventoryPrice(id, { automatic = false } = {}) {
+  const item = customInventoryItems.find((entry) => entry.id === id);
+  if (!item) return;
+  const vendorProduct = item.vendorProduct || getCustomInventoryVendorProduct(item.name, item.group);
+  if (!vendorProduct?.bottleOz) {
+    customInventoryPriceStatus.set(id, "Add the bottle size to the item name before finding a price.");
+    renderInventory();
+    return;
+  }
+
+  customInventoryPriceStatus.set(id, `Checking ${vendorProduct.syncVendor}...`);
+  renderInventory();
+
+  try {
+    const response = await fetch("/api/vendor-sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: vendorProduct.syncVendor,
+        items: [{
+          id,
+          name: item.name,
+          priceType: "ingredient",
+          syncVendor: vendorProduct.syncVendor,
+          vendorProduct,
+        }],
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result?.error || "Price lookup failed.");
+    const update = (result.updates || []).find((entry) => entry.id === id);
+    if (!update || !isRoughlyEqual(update.bottleOz, vendorProduct.bottleOz)) {
+      throw new Error(`No exact ${formatPackageSizeFromOz(vendorProduct.bottleOz)} match was found.`);
+    }
+
+    const nextItem = {
+      ...item,
+      caseCost: update.bottlePrice * normalizePackSize(item.packSize),
+      unitCost: update.bottlePrice,
+      vendorProduct: {
+        ...vendorProduct,
+        preferredSku: update.matchedSku || vendorProduct.preferredSku || "",
+      },
+      matchedSku: update.matchedSku || "",
+      priceUpdatedAt: update.updatedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    customInventoryItems = [
+      ...customInventoryItems.filter((entry) => entry.id !== id),
+      nextItem,
+    ];
+    saveCustomInventoryItems();
+    inventoryItems = mergeCustomInventoryItems(inventoryItems.filter((entry) => !entry.isCustomInventory));
+    customInventoryPriceStatus.set(
+      id,
+      `${update.matchedProductName || item.name} ${update.matchedSize || ""} linked at ${money(update.bottlePrice)}.`,
+    );
+    await runSharedInventoryAction(
+      { action: "upsert-custom", item: nextItem },
+      {
+        successMessage: `${item.name} pricing was linked from ${vendorProduct.syncVendor}.`,
+        rebuild: true,
+      },
+    );
+  } catch (error) {
+    customInventoryPriceStatus.set(
+      id,
+      automatic
+        ? `Count saved. Price still needed: ${error.message}`
+        : error.message,
+    );
+    renderInventory();
+  }
 }
 
 async function deleteCustomInventoryItem(id) {
@@ -4740,6 +4889,10 @@ async function deleteCustomInventoryItem(id) {
   saveInventoryOnHandOverrides();
   saveInventoryParOverrides();
   inventoryItems = inventoryItems.filter((item) => item.id !== id);
+  inventoryItemOrder = inventoryItemOrder.filter((itemId) => itemId !== id);
+  saveInventoryItemOrder();
+  customInventoryPriceStatus.delete(id);
+  if (editingCustomInventoryId === id) resetCustomInventoryForm();
   renderInventory();
   await runSharedInventoryAction(
     { action: "delete-custom", id },
@@ -4803,7 +4956,9 @@ function getInventoryVendorTotals(items) {
 function createInventoryRow(item, mode) {
   const row = document.createElement("tr");
   const orderQuantityForMode = mode === "order" ? getInventoryRoundedOrderQuantity(item) : item.orderQuantity;
-  const costCell = mode === "order" ? money(orderQuantityForMode * item.unitCost) : money(item.totalValue);
+  const costCell = item.unitCost > 0
+    ? (mode === "order" ? money(orderQuantityForMode * item.unitCost) : money(item.totalValue))
+    : '<span class="inventory-order-zero">Price needed</span>';
   const orderCell = mode === "order"
     ? getInventoryOrderCell(item, orderQuantityForMode)
     : formatInventoryQuantity(item.orderDisplay);
@@ -4812,14 +4967,31 @@ function createInventoryRow(item, mode) {
   const inputMode = item.allowsDecimal ? "decimal" : "numeric";
   const isParEditable = Boolean(inventoryParEditState[item.id]);
   const linkedNotes = [];
-  if (item.isCustomInventory && mode === "stock") linkedNotes.push(`<button class="mini-button mini-button--danger custom-inventory-delete" data-custom-inventory-id="${escapeHtml(item.id)}" type="button">Remove</button>`);
+  if (mode === "stock") {
+    linkedNotes.push(`
+      <div class="inventory-row-controls">
+        <span class="inventory-drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag ${escapeHtml(item.name)} to reorder">::</span>
+        <button class="icon-button inventory-move-up" type="button" title="Move up" aria-label="Move ${escapeHtml(item.name)} up">&uarr;</button>
+        <button class="icon-button inventory-move-down" type="button" title="Move down" aria-label="Move ${escapeHtml(item.name)} down">&darr;</button>
+        ${item.isCustomInventory ? `
+          <button class="mini-button custom-inventory-edit" type="button">Edit</button>
+          <button class="mini-button custom-inventory-price" type="button">Find price</button>
+          <button class="mini-button mini-button--danger custom-inventory-delete" data-custom-inventory-id="${escapeHtml(item.id)}" type="button">Remove</button>
+        ` : ""}
+      </div>
+      ${customInventoryPriceStatus.has(item.id) ? `<span class="table-note">${escapeHtml(customInventoryPriceStatus.get(item.id))}</span>` : ""}
+    `);
+  }
+  const unitCostCell = item.unitCost > 0
+    ? money(item.unitCost)
+    : '<span class="inventory-order-zero">Price needed</span>';
   row.innerHTML = `
     <td><strong>${escapeHtml(item.name)}</strong>${item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${linkedNotes.join("")}</td>
     <td>${mode === "stock" ? `<input class="inventory-input" data-field="onHand" type="text" inputmode="${inputMode}" value="${escapeHtml(item.onHandDisplay)}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>
     <td>${mode === "stock" ? `<div class="inventory-par-cell"><input class="inventory-input inventory-input--par ${isParEditable ? "is-editing" : "is-locked"}" data-field="par" type="text" inputmode="${inputMode}" value="${escapeHtml(item.parDisplay)}" aria-label="Par for ${escapeHtml(item.name)}" ${isParEditable ? "" : "readonly"}><button class="mini-button inventory-par-toggle" data-par-toggle="${escapeHtml(item.id)}" type="button">${isParEditable ? "Done" : "Edit"}</button></div>` : formatInventoryQuantity(item.parDisplay)}</td>
     <td data-cell="order" class="${item.orderQuantity > 0 ? "inventory-order-flag" : "muted"}">${orderCell}</td>
     <td>${escapeHtml(packLabel)}</td>
-    <td>${money(item.unitCost)}</td>
+    <td>${unitCostCell}</td>
     <td data-cell="cost">${costCell}</td>
   `;
   if (mode === "stock") {
@@ -4836,9 +5008,86 @@ function createInventoryRow(item, mode) {
       });
     });
     row.querySelector('[data-par-toggle]')?.addEventListener("click", () => toggleInventoryParEdit(item.id));
+    row.querySelector(".custom-inventory-edit")?.addEventListener("click", () => editCustomInventoryItem(item.id));
+    row.querySelector(".custom-inventory-price")?.addEventListener("click", () => syncCustomInventoryPrice(item.id));
     row.querySelector(".custom-inventory-delete")?.addEventListener("click", () => deleteCustomInventoryItem(item.id));
+    row.querySelector(".inventory-move-up")?.addEventListener("click", () => moveInventoryItem(item.id, -1));
+    row.querySelector(".inventory-move-down")?.addEventListener("click", () => moveInventoryItem(item.id, 1));
+    row.querySelector(".inventory-drag-handle")?.addEventListener("dragstart", (event) => {
+      draggedInventoryItemId = item.id;
+      row.classList.add("is-dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", item.id);
+    });
+    row.querySelector(".inventory-drag-handle")?.addEventListener("dragend", () => {
+      draggedInventoryItemId = "";
+      row.classList.remove("is-dragging");
+      document.querySelectorAll(".inventory-row--drag-target").forEach((target) => target.classList.remove("inventory-row--drag-target"));
+    });
+    row.addEventListener("dragover", (event) => {
+      if (!canReorderInventoryItems(draggedInventoryItemId, item.id)) return;
+      event.preventDefault();
+      row.classList.add("inventory-row--drag-target");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("inventory-row--drag-target"));
+    row.addEventListener("drop", (event) => {
+      event.preventDefault();
+      row.classList.remove("inventory-row--drag-target");
+      reorderInventoryItemBefore(draggedInventoryItemId, item.id);
+    });
   }
   return row;
+}
+
+function getSortedInventoryGroupItems(group) {
+  return inventoryItems
+    .filter((item) => item.group === group)
+    .sort((a, b) => getInventorySortKey(a).localeCompare(getInventorySortKey(b)));
+}
+
+function canReorderInventoryItems(sourceId, targetId) {
+  if (!sourceId || !targetId || sourceId === targetId) return false;
+  const source = findInventoryItem(sourceId);
+  const target = findInventoryItem(targetId);
+  return Boolean(source && target && source.group === target.group);
+}
+
+function moveInventoryItem(id, direction) {
+  const item = findInventoryItem(id);
+  if (!item) return;
+  const groupItems = getSortedInventoryGroupItems(item.group);
+  const currentIndex = groupItems.findIndex((entry) => entry.id === id);
+  const target = groupItems[currentIndex + direction];
+  if (!target) return;
+  const fullOrder = getCompleteInventoryItemOrder();
+  const sourceIndex = fullOrder.indexOf(id);
+  const targetIndex = fullOrder.indexOf(target.id);
+  [fullOrder[sourceIndex], fullOrder[targetIndex]] = [fullOrder[targetIndex], fullOrder[sourceIndex]];
+  persistInventoryItemOrder(fullOrder);
+}
+
+function reorderInventoryItemBefore(sourceId, targetId) {
+  if (!canReorderInventoryItems(sourceId, targetId)) return;
+  const fullOrder = getCompleteInventoryItemOrder().filter((id) => id !== sourceId);
+  const targetIndex = fullOrder.indexOf(targetId);
+  fullOrder.splice(targetIndex, 0, sourceId);
+  draggedInventoryItemId = "";
+  persistInventoryItemOrder(fullOrder);
+}
+
+function getCompleteInventoryItemOrder() {
+  return ["Liquor Cabinet", "Mixer Cabinet", "Other"]
+    .flatMap((group) => getSortedInventoryGroupItems(group).map((item) => item.id));
+}
+
+function persistInventoryItemOrder(itemOrder) {
+  inventoryItemOrder = [...new Set(itemOrder)];
+  saveInventoryItemOrder();
+  renderInventory();
+  runSharedInventoryAction(
+    { action: "reorder-items", itemOrder: inventoryItemOrder },
+    { successMessage: "Cabinet order saved for all managers.", applyState: false },
+  );
 }
 
 function getInventoryRoundedOrderQuantity(item) {
@@ -7797,8 +8046,10 @@ function getIngredientSortKey(ingredient) {
 }
 
 function getInventorySortKey(item) {
+  const sharedIndex = inventoryItemOrder.indexOf(item.id);
+  if (sharedIndex >= 0) return `${String(sharedIndex).padStart(4, "0")}-${item.name.toLowerCase()}`;
   const cabinetIndex = INVENTORY_CABINET_ORDER.indexOf(item.name);
-  if (cabinetIndex >= 0) return `${String(cabinetIndex).padStart(3, "0")}-${item.name.toLowerCase()}`;
+  if (cabinetIndex >= 0) return `a-${String(cabinetIndex).padStart(3, "0")}-${item.name.toLowerCase()}`;
   return `zzz-${item.name.toLowerCase()}`;
 }
 
@@ -8263,6 +8514,18 @@ function loadCustomInventoryItems() {
 
 function saveCustomInventoryItems() {
   localStorage.setItem(CUSTOM_INVENTORY_STORAGE_KEY, JSON.stringify(customInventoryItems));
+}
+
+function loadInventoryItemOrder() {
+  try {
+    return JSON.parse(localStorage.getItem(INVENTORY_ORDER_STORAGE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveInventoryItemOrder() {
+  localStorage.setItem(INVENTORY_ORDER_STORAGE_KEY, JSON.stringify(inventoryItemOrder));
 }
 
 function loadInventoryOnHandOverrides() {

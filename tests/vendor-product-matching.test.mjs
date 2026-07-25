@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { selectBottleCandidate } from "../lib/vendor-product-matching.mjs";
+import { getProductLineScore, selectBottleCandidate } from "../lib/vendor-product-matching.mjs";
 
 function inventoryProduct({ id, size, bottleOz, sku, price }) {
   return {
@@ -41,4 +41,9 @@ test("mapped bottle products do not fall back to a different size", () => {
     }),
     null,
   );
+});
+
+test("an exact bottle size does not make an unrelated brand a valid match", () => {
+  assert.equal(getProductLineScore("Remy Martin VSOP", "Bacardi", "Bacardi 1L"), 0);
+  assert.equal(getProductLineScore("Bacardi Superior White Rum", "Bacardi", "Bacardi 1L"), 80);
 });

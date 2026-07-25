@@ -8,9 +8,11 @@ import {
   getMondayDate,
   hydrateInventoryState,
   readInventoryState,
+  reorderInventoryItems,
   restoreInventorySnapshotState,
   saveInventorySnapshot,
   updateInventoryField,
+  upsertCustomInventoryItem,
 } from "../lib/inventory-store.mjs";
 
 async function useTemporaryState() {
@@ -43,6 +45,44 @@ test("serializes concurrent field updates without losing either item", async () 
   assert.deepEqual(state.current.onHandOverrides, { vodka: "2", gin: "4" });
   const storedJson = await readFile(statePath, "utf8");
   assert.doesNotThrow(() => JSON.parse(storedJson));
+});
+
+test("persists custom item edits and shared cabinet order", async () => {
+  await useTemporaryState();
+  await hydrateInventoryState({});
+  await upsertCustomInventoryItem({
+    id: "bacardi-1l",
+    name: "Bacardi 1L",
+    group: "Liquor Cabinet",
+    onHandDisplay: "3",
+    parDisplay: "",
+    packSize: 1,
+    unitCost: 0,
+  });
+  await upsertCustomInventoryItem({
+    id: "bacardi-1l",
+    name: "Bacardi Superior 1L",
+    group: "Liquor Cabinet",
+    onHandDisplay: "3",
+    parDisplay: "6",
+    packSize: 1,
+    unitCost: 18.5,
+    vendorProduct: {
+      vendor: "OHLQ",
+      syncVendor: "OHLQ",
+      productName: "Bacardi Superior White Rum 1L",
+      bottleOz: 33.814,
+    },
+    matchedSku: "BACARDI-1L",
+  });
+  const state = await reorderInventoryItems(["tito-s", "bacardi-1l"]);
+  const customItem = state.current.customItems[0];
+  assert.equal(customItem.name, "Bacardi Superior 1L");
+  assert.equal(customItem.unitCost, 18.5);
+  assert.equal(customItem.vendorProduct.bottleOz, 33.814);
+  assert.equal(state.current.onHandOverrides["bacardi-1l"], "3");
+  assert.equal(state.current.parOverrides["bacardi-1l"], "6");
+  assert.deepEqual(state.current.itemOrder, ["tito-s", "bacardi-1l"]);
 });
 
 test("uses Monday as the snapshot week and replaces that week's prior save", async () => {

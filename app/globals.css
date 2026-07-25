@@ -1810,6 +1810,18 @@ td {
   white-space: nowrap;
 }
 
+.custom-inventory-form__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.custom-inventory-form__actions .ghost-button {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  background: var(--paper-strong);
+}
+
 .inventory-note {
   margin-top: 10px;
   margin-bottom: 0;
@@ -1877,9 +1889,41 @@ td {
   white-space: nowrap;
 }
 
-.custom-inventory-delete {
-  width: fit-content;
+.inventory-row-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
   margin-top: 6px;
+}
+
+.inventory-row-controls .icon-button {
+  width: 34px;
+  min-height: 34px;
+}
+
+.inventory-drag-handle {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--paper-strong);
+  cursor: grab;
+  font-weight: 900;
+}
+
+.inventory-drag-handle:active {
+  cursor: grabbing;
+}
+
+.inventory-table tr.is-dragging {
+  opacity: 0.55;
+}
+
+.inventory-table tr.inventory-row--drag-target td {
+  box-shadow: inset 0 3px 0 var(--juniper);
 }
 
 .inventory-group-row td {
@@ -2606,9 +2650,19 @@ td {
   .custom-inventory-form input,
   .custom-inventory-form select,
   .custom-inventory-form .primary-button,
+  .custom-inventory-form .ghost-button,
   .inventory-input,
-  .inventory-par-toggle {
+  .inventory-par-toggle,
+  .inventory-row-controls .mini-button,
+  .inventory-row-controls .icon-button,
+  .inventory-drag-handle {
     min-height: 44px;
+  }
+
+  .inventory-row-controls .icon-button,
+  .inventory-drag-handle {
+    width: 44px;
+    height: 44px;
   }
 
   .tap-change-controls {
@@ -2698,7 +2752,7 @@ td {
 
   .inventory-table--stock th:nth-child(1),
   .inventory-table--orders th:nth-child(1) {
-    width: 160px;
+    width: 190px;
   }
 
   .inventory-table--stock th:nth-child(2),
@@ -2751,6 +2805,10 @@ td {
     border-right: 1px solid rgba(24, 33, 31, 0.12);
     background: #fffdf7;
     overflow-wrap: anywhere;
+  }
+
+  .inventory-drag-handle {
+    display: none;
   }
 
   .weekly-usage-range-field {

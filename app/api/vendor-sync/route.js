@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { NextResponse } from "next/server";
 
-import { selectBottleCandidate } from "../../../lib/vendor-product-matching.mjs";
+import { getProductLineScore, selectBottleCandidate } from "../../../lib/vendor-product-matching.mjs";
 
 const PROVI_BASE_URL = "https://app.provi.com";
 const PROVI_CAPTURE_PATH = path.join(os.homedir(), ".FoodOrderAgent", "provi", "captures", "latest-provi-capture.json");
@@ -117,6 +117,8 @@ async function syncVendorWithProvi(items, context) {
         bottlePrice,
         bottleOz,
         matchedSku: String(matchedProduct.variant.inventory?.sku || ""),
+        matchedProductName: String(matchedProduct.line?.name || matchedProduct.variant.product?.name || ""),
+        matchedSize: String(matchedProduct.variant.product?.container_size || ""),
         updatedAt: new Date().toISOString(),
       });
     } catch (error) {
@@ -202,7 +204,13 @@ function findMatchingProviProductLine(results, item, distributorHints = []) {
       const distributorName = normalizeName(line?.distributor_info?.distributor_name || line?.distributor?.name || "");
       return normalizedHints.some((hint) => distributorName.includes(hint));
     })
-    .sort((a, b) => getProductLineScore(b, expectedName, expectedIngredientName) - getProductLineScore(a, expectedName, expectedIngredientName));
+    .map((line) => ({
+      line,
+      score: getProductLineScore(line?.name, expectedName, expectedIngredientName),
+    }))
+    .filter((entry) => entry.score >= 50)
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.line);
 
   for (const line of candidateLines) {
     const matchedVariant = selectMatchingProduct(line?.products || [], item, targetBottleOz);
@@ -215,17 +223,6 @@ function findMatchingProviProductLine(results, item, distributorHints = []) {
   }
 
   return null;
-}
-
-function getProductLineScore(line, expectedName, expectedIngredientName) {
-  const lineName = normalizeName(line?.name || "");
-  if (!lineName) return 0;
-  if (lineName === expectedName) return 100;
-  if (lineName.includes(expectedName)) return 80;
-  if (expectedName.includes(lineName)) return 70;
-  if (lineName === expectedIngredientName) return 60;
-  if (lineName.includes(expectedIngredientName)) return 50;
-  return 10;
 }
 
 function selectMatchingProduct(products, item, targetBottleOz) {
