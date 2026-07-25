@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { NextResponse } from "next/server";
 
+import { selectBottleCandidate } from "../../../lib/vendor-product-matching.mjs";
+
 const PROVI_BASE_URL = "https://app.provi.com";
 const PROVI_CAPTURE_PATH = path.join(os.homedir(), ".FoodOrderAgent", "provi", "captures", "latest-provi-capture.json");
 const PROVI_SESSION_PATH = path.join(os.homedir(), ".FoodOrderAgent", "provi", "provi_session_state.json");
@@ -114,6 +116,7 @@ async function syncVendorWithProvi(items, context) {
         priceType: item.priceType || "ingredient",
         bottlePrice,
         bottleOz,
+        matchedSku: String(matchedProduct.variant.inventory?.sku || ""),
         updatedAt: new Date().toISOString(),
       });
     } catch (error) {
@@ -227,6 +230,7 @@ function getProductLineScore(line, expectedName, expectedIngredientName) {
 
 function selectMatchingProduct(products, item, targetBottleOz) {
   const expectedSizeText = extractSizeLabel(item?.vendorProduct?.productName || "");
+  const preferredSku = normalizeSku(item?.vendorProduct?.preferredSku);
   const candidates = (products || [])
     .map((product) => ({
       product,
@@ -246,21 +250,11 @@ function selectMatchingProduct(products, item, targetBottleOz) {
       null;
   }
 
-  const exactByOz = candidates.find((entry) => isRoughlyEqual(entry.bottleOz, targetBottleOz));
-  if (exactByOz) return exactByOz;
-
-  if (expectedSizeText) {
-    const normalizedExpectedSize = normalizeName(expectedSizeText);
-    const exactBySizeLabel = candidates.find((entry) => entry.sizeLabel === normalizedExpectedSize);
-    if (exactBySizeLabel) return exactBySizeLabel;
-  }
-
-  const closestByOz = candidates
-    .filter((entry) => entry.bottleOz > 0 && targetBottleOz > 0)
-    .sort((a, b) => Math.abs(a.bottleOz - targetBottleOz) - Math.abs(b.bottleOz - targetBottleOz))[0];
-  if (closestByOz) return closestByOz;
-
-  return candidates[0];
+  return selectBottleCandidate(candidates, {
+    targetBottleOz,
+    preferredSku,
+    expectedSizeLabel: expectedSizeText,
+  });
 }
 
 function isKegSyncItem(item) {
@@ -278,6 +272,13 @@ function getExpectedKegOz(item, fallbackOz = 0) {
 
 function getPreferredInventory(product, item) {
   const inventory = Array.isArray(product?.inventory) ? product.inventory : [];
+  const preferredSku = normalizeSku(item?.vendorProduct?.preferredSku);
+  if (preferredSku) {
+    const preferredInventory = inventory.find(
+      (entry) => normalizeSku(entry?.sku) === preferredSku && getInventoryPrice(entry, item) > 0,
+    );
+    if (preferredInventory) return preferredInventory;
+  }
   return inventory.find((entry) => getInventoryPrice(entry, item) > 0) || inventory[0] || null;
 }
 
@@ -448,6 +449,10 @@ function normalizeName(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+function normalizeSku(value) {
+  return String(value || "").trim().toUpperCase();
 }
 
 function isRoughlyEqual(left, right) {

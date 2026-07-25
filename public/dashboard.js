@@ -25,6 +25,8 @@ const INVENTORY_HISTORY_STORAGE_KEY = "cocktail-dashboard-inventory-history";
 const CUSTOM_INVENTORY_STORAGE_KEY = "cocktail-dashboard-custom-inventory";
 const INVENTORY_UNIT_MODEL_STORAGE_KEY = "cocktail-dashboard-inventory-unit-model";
 const INVENTORY_UNIT_MODEL_VERSION = "2";
+const PRICE_OVERRIDE_MODEL_STORAGE_KEY = "cocktail-dashboard-price-override-model";
+const PRICE_OVERRIDE_MODEL_VERSION = "2";
 const KEG_ON_HAND_STORAGE_KEY = "cocktail-dashboard-keg-on-hand";
 const KEG_PAR_STORAGE_KEY = "cocktail-dashboard-keg-par";
 const KEG_ON_DECK_STORAGE_KEY = "cocktail-dashboard-keg-on-deck";
@@ -149,6 +151,11 @@ const DEFAULT_PRICE_OVERRIDES = {
     bottleOz: "2304",
     bottlePrice: "85",
     updatedAt: "Default pricing",
+  },
+  "tito-s": {
+    bottleOz: "59.17",
+    bottlePrice: "34.78",
+    updatedAt: "OHLQ pricing 2026-07-25",
   },
   vanilla: {
     bottleOz: "1",
@@ -442,7 +449,7 @@ const OHLQ_MAPPINGS = {
   "pink-whitney": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "New Amsterdam Pink Whitney Vodka 1.75L", bottleOz: 59.1745 },
   screwball: { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Skrewball Peanut Butter Whiskey 750mL", bottleOz: 25.3605 },
   "svedka-blue-raspberry-vodka": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Svedka Blue Raspberry Vodka 750mL", bottleOz: 25.36 },
-  "tito-s": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Tito's Handmade Vodka 1.75L", bottleOz: 59.17 },
+  "tito-s": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Tito's Handmade Vodka 1.75L", bottleOz: 59.17, preferredSku: "9232D" },
 };
 const INGREDIENT_ABV_PERCENT = {
   "1800-reposado": 40,
@@ -7901,9 +7908,19 @@ async function runVendorSync() {
       throw new Error(result?.error || "Vendor sync failed.");
     }
 
+    const candidatesByKey = new Map(
+      candidates.map((item) => [`${item.priceType || "ingredient"}:${item.id}`, item]),
+    );
     let applied = 0;
+    let rejected = 0;
     (result.updates || []).forEach((update) => {
       if (!update.id || !Number.isFinite(update.bottleOz) || !Number.isFinite(update.bottlePrice)) return;
+      const candidate = candidatesByKey.get(`${update.priceType || "ingredient"}:${update.id}`);
+      const expectedBottleOz = toNumber(candidate?.vendorProduct?.bottleOz);
+      if (expectedBottleOz > 0 && !isRoughlyEqual(update.bottleOz, expectedBottleOz)) {
+        rejected += 1;
+        return;
+      }
       if (update.priceType === "keg") {
         const existingOverride = kegPriceOverrides[update.id] || {};
         const previousKegPrice = toNumber(existingOverride.kegPrice);
@@ -7932,6 +7949,7 @@ async function runVendorSync() {
         bottleOz: String(update.bottleOz),
         bottlePrice: String(update.bottlePrice),
         updatedAt: update.updatedAt || new Date().toISOString(),
+        matchedSku: update.matchedSku || "",
         previousBottlePrice: didPriceChange ? String(previousBottlePrice) : "",
         previousUpdatedAt: didPriceChange ? existingOverride.updatedAt || "" : "",
       };
@@ -7949,8 +7967,11 @@ async function runVendorSync() {
       .join(" ");
     const blockedStatuses = vendorStatuses.filter((status) => ["blocked", "pending"].includes(status.status));
 
+    const rejectionNote = rejected
+      ? ` Rejected ${rejected} price${rejected === 1 ? "" : "s"} because the bottle size did not match the mapped product.`
+      : "";
     vendorSyncMessage = applied || !blockedStatuses.length
-      ? `Applied ${applied} price${applied === 1 ? "" : "s"}.${statusNotes ? ` ${statusNotes}` : ""}`
+      ? `Applied ${applied} price${applied === 1 ? "" : "s"}.${rejectionNote}${statusNotes ? ` ${statusNotes}` : ""}`
       : statusNotes || "No prices were applied because the selected vendor connection is not ready.";
     render();
   } catch (error) {
@@ -8081,9 +8102,23 @@ function getMetricNumber(metrics, label) {
 
 function loadOverrides() {
   try {
+    const savedOverrides = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    const needsKnownBadOverrideRepair =
+      localStorage.getItem(PRICE_OVERRIDE_MODEL_STORAGE_KEY) !== PRICE_OVERRIDE_MODEL_VERSION;
+
+    if (
+      needsKnownBadOverrideRepair &&
+      isRoughlyEqual(toNumber(savedOverrides["tito-s"]?.bottleOz), 59.17) &&
+      Math.abs(toNumber(savedOverrides["tito-s"]?.bottlePrice) - 25.85) < 0.001
+    ) {
+      savedOverrides["tito-s"] = DEFAULT_PRICE_OVERRIDES["tito-s"];
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(savedOverrides));
+    }
+    localStorage.setItem(PRICE_OVERRIDE_MODEL_STORAGE_KEY, PRICE_OVERRIDE_MODEL_VERSION);
+
     return {
       ...DEFAULT_PRICE_OVERRIDES,
-      ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"),
+      ...savedOverrides,
     };
   } catch {
     return { ...DEFAULT_PRICE_OVERRIDES };
