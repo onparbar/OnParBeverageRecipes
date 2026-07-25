@@ -49,12 +49,23 @@ test("uses Monday as the snapshot week and replaces that week's prior save", asy
   await useTemporaryState();
   await hydrateInventoryState({});
   const items = [{ name: "Vodka", group: "Liquor Cabinet", onHandDisplay: "2", parDisplay: "4" }];
-  await saveInventorySnapshot(items, "owner", new Date(2026, 6, 24, 12));
-  await saveInventorySnapshot([{ ...items[0], onHandDisplay: "3" }], "owner", new Date(2026, 6, 26, 12));
+  const summary = {
+    bottleInventoryValue: 100,
+    connectedLineValue: 200,
+    backupKegValue: 300,
+    currentLineValue: 500,
+    totalBeverageInventoryValue: 600,
+    pmbUpdatedAt: "2026-07-24T12:00:00.000Z",
+    liveTapCount: 102,
+    tapCount: 102,
+  };
+  await saveInventorySnapshot(items, "owner", new Date(2026, 6, 24, 12), summary);
+  await saveInventorySnapshot([{ ...items[0], onHandDisplay: "3" }], "owner", new Date(2026, 6, 26, 12), summary);
   const state = await readInventoryState();
   assert.equal(getMondayDate(new Date(2026, 6, 24, 12)), "2026-07-20");
   assert.equal(state.snapshots.length, 1);
   assert.equal(state.snapshots[0].items[0].onHandDisplay, "3");
+  assert.deepEqual(state.snapshots[0].summary, summary);
 });
 
 test("restores and deletes a snapshot", async () => {
@@ -62,11 +73,46 @@ test("restores and deletes a snapshot", async () => {
   await hydrateInventoryState({ onHandOverrides: { vodka: "9" } });
   const state = await saveInventorySnapshot([
     { name: "Vodka", group: "Liquor Cabinet", onHandDisplay: "2", parDisplay: "4" },
-  ], "owner", new Date(2026, 6, 24, 12));
+  ], "owner", new Date(2026, 6, 24, 12), {
+    bottleInventoryValue: 20,
+    connectedLineValue: 30,
+    backupKegValue: 10,
+    currentLineValue: 999,
+    totalBeverageInventoryValue: 999,
+    liveTapCount: 1,
+    tapCount: 1,
+  });
   await updateInventoryField({ id: "vodka", field: "onHand", value: "7" });
   const restored = await restoreInventorySnapshotState(state.snapshots[0].id);
   assert.equal(restored.current.onHandOverrides.vodka, "2");
   assert.equal(restored.current.parOverrides.vodka, "4");
   const deleted = await deleteInventorySnapshotState(state.snapshots[0].id);
   assert.equal(deleted.snapshots.length, 0);
+});
+
+test("rejects incomplete PMB coverage and recomputes derived beverage totals", async () => {
+  await useTemporaryState();
+  await hydrateInventoryState({});
+  const items = [{ name: "Vodka", group: "Liquor Cabinet", onHandDisplay: "2", parDisplay: "4" }];
+  await assert.rejects(
+    saveInventorySnapshot(items, "owner", new Date(2026, 6, 24, 12), {
+      bottleInventoryValue: 20,
+      connectedLineValue: 30,
+      backupKegValue: 10,
+      liveTapCount: 100,
+      tapCount: 102,
+    }),
+    /Complete PMB tap coverage/,
+  );
+  const state = await saveInventorySnapshot(items, "owner", new Date(2026, 6, 24, 12), {
+    bottleInventoryValue: 20,
+    connectedLineValue: 30,
+    backupKegValue: 10,
+    currentLineValue: 999,
+    totalBeverageInventoryValue: 999,
+    liveTapCount: 102,
+    tapCount: 102,
+  });
+  assert.equal(state.snapshots[0].summary.currentLineValue, 40);
+  assert.equal(state.snapshots[0].summary.totalBeverageInventoryValue, 60);
 });

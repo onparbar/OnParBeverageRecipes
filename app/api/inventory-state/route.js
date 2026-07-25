@@ -68,7 +68,7 @@ export async function POST(request) {
         state = await deleteCustomInventoryItemState(body.id, role);
         break;
       case "save-snapshot":
-        state = await saveInventorySnapshot(body.items, role);
+        state = await saveInventorySnapshot(body.items, role, new Date(), body.summary);
         break;
       case "delete-snapshot":
         state = await deleteInventorySnapshotState(body.id, role);

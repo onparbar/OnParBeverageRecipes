@@ -4050,6 +4050,7 @@ async function runKegLevelSync() {
   kegSyncLoading = true;
   kegSyncMessage = "Checking Pour My Beer for live keg levels...";
   renderKegLevels();
+  let succeeded = false;
 
   try {
     const response = await fetch("/api/keg-levels");
@@ -4063,12 +4064,14 @@ async function runKegLevelSync() {
     kegTemplateAssignments = buildKegTemplateAssignments();
     kegUpdatedAt = result.updatedAt || new Date().toISOString();
     kegSyncMessage = `Found live levels for ${result.items?.length || 0} products.`;
+    succeeded = true;
   } catch (error) {
     kegSyncMessage = error.message || "Could not load live keg levels.";
   } finally {
     kegSyncLoading = false;
     renderKegLevels();
   }
+  return succeeded;
 }
 
 async function runTapPricingSync() {
@@ -4367,24 +4370,35 @@ function getKegCurrentFraction(item, liveRow) {
   return percent > 0 ? percent / 100 : 0;
 }
 
-function getKegCurrentValue(item, liveRow) {
+function getKegCurrentValueBreakdown(item, liveRow) {
   const replacement = tapReplacementOverrides[getKegItemKey(item)];
   const onHandKegs = toNumber(getKegOnHandDisplay(item));
   if (replacement?.comingSoonId) {
     const comingSoonItem = comingSoonItems.find((entry) => entry.id === replacement.comingSoonId);
     const replacementCost = toNumber(comingSoonItem?.batchCost || comingSoonItem?.kegCost);
     const fraction = getKegCurrentFraction(item, liveRow);
-    if (replacementCost) return (replacementCost * (fraction || 0)) + (replacementCost * onHandKegs);
+    if (replacementCost) {
+      return {
+        connectedValue: replacementCost * (fraction || 0),
+        backupValue: replacementCost * onHandKegs,
+      };
+    }
   }
 
   const displayBrand = getKegDisplayBrand(item, liveRow);
   const currentOunces = getKegCurrentLevelOz(liveRow, item);
   const fullOunces = getKegFullOunces(liveRow, item) || getDefaultKegLevelSize(item);
   const costPerOz = getKegWallPricing(item, displayBrand).costPerOz;
-  if (!costPerOz) return 0;
-  const liveValue = Number.isFinite(currentOunces) && currentOunces ? currentOunces * costPerOz : 0;
-  const onHandValue = onHandKegs && fullOunces ? onHandKegs * fullOunces * costPerOz : 0;
-  return liveValue + onHandValue;
+  if (!costPerOz) return { connectedValue: 0, backupValue: 0 };
+  return {
+    connectedValue: Number.isFinite(currentOunces) && currentOunces ? currentOunces * costPerOz : 0,
+    backupValue: onHandKegs && fullOunces ? onHandKegs * fullOunces * costPerOz : 0,
+  };
+}
+
+function getKegCurrentValue(item, liveRow) {
+  const values = getKegCurrentValueBreakdown(item, liveRow);
+  return values.connectedValue + values.backupValue;
 }
 
 function findKegPricingItem(name) {
@@ -4970,11 +4984,52 @@ function toggleInventoryParEdit(id) {
 }
 
 async function saveInventorySnapshot() {
+  if (kegSyncLoading) {
+    setInventorySharedStatus("PMB keg levels are still loading. Save the Monday snapshot after the refresh finishes.");
+    return;
+  }
+
+  setInventorySharedStatus("Refreshing PMB keg levels before saving the Monday snapshot...", true);
+  const levelsLoaded = await runKegLevelSync();
+  const summary = getInventorySnapshotSummary();
+  if (!levelsLoaded || summary.liveTapCount !== summary.tapCount) {
+    inventorySharedSaving = false;
+    inventorySharedMessage = levelsLoaded
+      ? `Monday snapshot not saved: PMB returned ${summary.liveTapCount} of ${summary.tapCount} configured taps. Refresh Keg Levels and try again.`
+      : `Monday snapshot not saved: ${kegSyncMessage}`;
+    renderInventoryPanels();
+    return;
+  }
+
   const state = await runSharedInventoryAction(
-    { action: "save-snapshot", items: getInventorySnapshotItems() },
-    { successMessage: "This week's Monday snapshot is saved for all managers." },
+    { action: "save-snapshot", items: getInventorySnapshotItems(), summary },
+    { successMessage: "This week's Monday snapshot, including PMB line value, is saved for all managers." },
   );
   if (state) renderInventoryHistory();
+}
+
+function getInventorySnapshotSummary() {
+  const bottleInventoryValue = sum(
+    inventoryItems
+      .filter((item) => !item.excludeFromInventoryValue)
+      .map((item) => item.totalValue),
+  );
+  const lineValues = kegWallItems.reduce((totals, item) => {
+    const values = getKegCurrentValueBreakdown(item, getKegLiveRow(item));
+    totals.connectedLineValue += values.connectedValue;
+    totals.backupKegValue += values.backupValue;
+    return totals;
+  }, { connectedLineValue: 0, backupKegValue: 0 });
+  const currentLineValue = lineValues.connectedLineValue + lineValues.backupKegValue;
+  return {
+    bottleInventoryValue,
+    ...lineValues,
+    currentLineValue,
+    totalBeverageInventoryValue: bottleInventoryValue + currentLineValue,
+    pmbUpdatedAt: kegUpdatedAt,
+    liveTapCount: kegWallItems.filter((item) => getKegLiveRow(item)).length,
+    tapCount: kegWallItems.length,
+  };
 }
 
 function getInventorySnapshotItems() {
@@ -5006,6 +5061,7 @@ function renderInventoryHistory() {
     const reorderItems = snapshot.items.filter((item) => toNumber(item.orderDisplay) > 0);
     const totalValue = sum(snapshot.items.map((item) => item.totalValue));
     const reorderCost = sum(reorderItems.map((item) => toNumber(item.orderDisplay) * item.unitCost));
+    const valueSummary = snapshot.summary;
 
     return `
       <details class="inventory-history-card"${index === 0 ? " open" : ""}>
@@ -5018,10 +5074,13 @@ function renderInventoryHistory() {
           </div>
           <div class="inventory-history-stats">
             <span>${money(totalValue)} on hand</span>
+            ${valueSummary ? `<span>${money(valueSummary.currentLineValue)} current line</span>` : ""}
+            ${valueSummary ? `<strong>${money(valueSummary.totalBeverageInventoryValue)} total beverage</strong>` : ""}
             <span>${money(reorderCost)} to reorder</span>
           </div>
         </summary>
         <div class="inventory-history-card__body">
+          ${valueSummary ? renderInventorySnapshotValueSummary(valueSummary) : ""}
           <div class="inventory-history-actions">
             <button class="ghost-button inventory-history-restore" data-snapshot-id="${escapeHtml(snapshot.id)}" type="button">Recall Snapshot</button>
             <button class="ghost-button inventory-history-delete" data-snapshot-id="${escapeHtml(snapshot.id)}" type="button">Delete snapshot</button>
@@ -5054,6 +5113,19 @@ function renderInventoryHistory() {
   inventoryHistoryList.querySelectorAll(".inventory-history-delete").forEach((button) => {
     button.addEventListener("click", () => deleteInventorySnapshot(button.dataset.snapshotId));
   });
+}
+
+function renderInventorySnapshotValueSummary(summary) {
+  return `
+    <div class="inventory-history-value-summary">
+      <div><span>Bottle inventory</span><strong>${money(summary.bottleInventoryValue)}</strong></div>
+      <div><span>Connected contents</span><strong>${money(summary.connectedLineValue)}</strong></div>
+      <div><span>Full cooler backups</span><strong>${money(summary.backupKegValue)}</strong></div>
+      <div><span>Current line value</span><strong>${money(summary.currentLineValue)}</strong></div>
+      <div class="inventory-history-value-summary__total"><span>Total beverage inventory</span><strong>${money(summary.totalBeverageInventoryValue)}</strong></div>
+      <p>PMB levels ${formatNumber(summary.liveTapCount)} of ${formatNumber(summary.tapCount)} taps${summary.pmbUpdatedAt ? ` | Updated ${escapeHtml(formatUpdatedAt(summary.pmbUpdatedAt))}` : ""}</p>
+    </div>
+  `;
 }
 
 function renderInventoryHistoryRows(items) {
