@@ -36,6 +36,7 @@ const TAP_REPLACEMENT_STORAGE_KEY = "cocktail-dashboard-tap-replacements";
 const WEEKLY_USAGE_CURRENT_STORAGE_KEY = "cocktail-dashboard-weekly-usage-current";
 const WEEKLY_USAGE_HISTORY_STORAGE_KEY = "cocktail-dashboard-weekly-usage-history";
 const WEEKLY_USAGE_ARCHIVE_STORAGE_KEY = "cocktail-dashboard-weekly-usage-archive";
+const WEEKLY_USAGE_LAST_SYNC_STORAGE_KEY = "cocktail-dashboard-weekly-usage-last-sync";
 const WEEKLY_USAGE_SYNC_LOOKBACK_WEEKS = 12;
 const STANDARD_BEER_KEG_OZ = 15.5 * 128;
 const STANDARD_COCKTAIL_KEG_OZ = 12 * 128;
@@ -627,7 +628,8 @@ let weeklyUsageCurrentOverrides = loadWeeklyUsageCurrentOverrides();
 let weeklyUsageHistoryOverrides = loadWeeklyUsageHistoryOverrides();
 let weeklyUsageArchivedItems = loadWeeklyUsageArchivedItems();
 let weeklyUsageSyncLoading = false;
-let weeklyUsageSyncMessage = "Pull missing completed Monday-Sunday volume reports from Pour My Beer.";
+let weeklyUsageSyncMessage = "Automatic PMB check will run when the dashboard opens.";
+let weeklyUsageLastSyncAt = loadWeeklyUsageLastSyncAt();
 let kegPricingItems = [];
 let priceOverrides = loadOverrides();
 let kegPriceOverrides = loadKegPriceOverrides();
@@ -753,6 +755,7 @@ async function init() {
   syncRecipeBuilderSummary();
   clearBeerLookupResult();
   render();
+  runPmbWeeklyUsageSync({ automatic: true });
   runKegLevelSync();
   runTapPricingSync();
 }
@@ -2002,8 +2005,9 @@ function renderWeeklyUsage() {
     </div>
     <div class="summary-line"><span>Avg weeks tracked</span><strong>${trackedWeeks.length ? formatNumber(averageWeeks) : "0"}</strong></div>
     <div class="summary-line"><span>Replaced histories</span><strong>${formatNumber(archivedCount)}</strong></div>
+    <div class="summary-line"><span>Last successful PMB sync</span><strong>${weeklyUsageLastSyncAt ? escapeHtml(formatUpdatedAt(weeklyUsageLastSyncAt)) : "Not yet"}</strong></div>
     <div class="sync-panel sync-panel--weekly-usage">
-      <p class="sync-copy">Pulls missing completed Monday-Sunday PMB Reporting volume and saves each week into this tracker.</p>
+      <p class="sync-copy">Automatically checks PMB for missing completed Monday-Sunday reports when a manager opens the dashboard. The current week is never included.</p>
       <p class="sync-status">${escapeHtml(weeklyUsageSyncMessage)}</p>
     </div>
     ${renderWeeklyUsageArchiveSummary()}
@@ -2096,18 +2100,18 @@ function getWeeklyUsageCurrentDisplay(item) {
   return clean(weeklyUsageCurrentOverrides[item.id] ?? item.currentDisplayValue ?? "");
 }
 
-async function runPmbWeeklyUsageSync() {
+async function runPmbWeeklyUsageSync({ automatic = false } = {}) {
   if (weeklyUsageSyncLoading) return;
 
   const weekStarts = getPmbSyncWeekStarts();
   if (!weekStarts.length) {
-    weeklyUsageSyncMessage = "All recent completed Monday-Sunday weeks are already saved.";
+    weeklyUsageSyncMessage = `${automatic ? "Automatic PMB check complete. " : ""}All recent completed Monday-Sunday weeks are already saved.`;
     renderWeeklyUsage();
     return;
   }
 
   weeklyUsageSyncLoading = true;
-  weeklyUsageSyncMessage = `Pulling ${weekStarts.length} completed PMB week${weekStarts.length === 1 ? "" : "s"}...`;
+  weeklyUsageSyncMessage = `${automatic ? "Automatically checking" : "Pulling"} ${weekStarts.length} completed PMB week${weekStarts.length === 1 ? "" : "s"}...`;
   renderWeeklyUsage();
 
   try {
@@ -2127,11 +2131,17 @@ async function runPmbWeeklyUsageSync() {
     }
 
     const applied = applyPmbWeeklyUsageSync(result);
+    weeklyUsageLastSyncAt = result.updatedAt || new Date().toISOString();
+    saveWeeklyUsageLastSyncAt();
+    const successPrefix = automatic ? "Automatic PMB check complete. " : "";
     weeklyUsageSyncMessage = applied.matched
-      ? `Saved ${applied.matched} PMB row${applied.matched === 1 ? "" : "s"} across ${applied.reports} week${applied.reports === 1 ? "" : "s"}. ${applied.archived ? `${applied.archived} old/replaced product row${applied.archived === 1 ? "" : "s"} went to hidden history.` : ""}`
+      ? `${successPrefix}Saved ${applied.matched} PMB row${applied.matched === 1 ? "" : "s"} across ${applied.reports} week${applied.reports === 1 ? "" : "s"}. ${applied.archived ? `${applied.archived} old/replaced product row${applied.archived === 1 ? "" : "s"} went to hidden history.` : ""}`
       : `PMB returned ${applied.reportItems} product row${applied.reportItems === 1 ? "" : "s"} across ${applied.reports} week${applied.reports === 1 ? "" : "s"}, but none matched the active tracker.`;
   } catch (error) {
-    weeklyUsageSyncMessage = error.message || "Could not pull PMB weekly usage.";
+    const message = error.message || "Could not pull PMB weekly usage.";
+    weeklyUsageSyncMessage = automatic
+      ? `Automatic PMB check failed: ${message} Existing saved usage remains visible.`
+      : message;
   } finally {
     weeklyUsageSyncLoading = false;
     renderWeeklyUsage();
@@ -8196,6 +8206,14 @@ function loadWeeklyUsageArchivedItems() {
 
 function saveWeeklyUsageArchivedItems() {
   localStorage.setItem(WEEKLY_USAGE_ARCHIVE_STORAGE_KEY, JSON.stringify(weeklyUsageArchivedItems));
+}
+
+function loadWeeklyUsageLastSyncAt() {
+  return clean(localStorage.getItem(WEEKLY_USAGE_LAST_SYNC_STORAGE_KEY) || "");
+}
+
+function saveWeeklyUsageLastSyncAt() {
+  localStorage.setItem(WEEKLY_USAGE_LAST_SYNC_STORAGE_KEY, weeklyUsageLastSyncAt);
 }
 
 function loadKegOnHandOverrides() {

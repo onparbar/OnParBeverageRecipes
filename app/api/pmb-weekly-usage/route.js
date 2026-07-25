@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
+import { isCompletedMondayWeekStart } from "../../../lib/weekly-usage-periods.mjs";
 
 export const runtime = "nodejs";
 
@@ -279,6 +280,12 @@ function getLastCompletedWeekRange() {
   return buildWeekRange(start);
 }
 
+function invalidWeeklyUsageRange(message) {
+  const error = new Error(message);
+  error.status = 400;
+  return error;
+}
+
 function getRequestedDateRanges(request) {
   const url = new URL(request.url);
   const weeksParam = clean(url.searchParams.get("weeks"));
@@ -293,10 +300,17 @@ function getRequestedDateRanges(request) {
       .map((value) => buildWeekRange(new Date(`${value}T00:00:00`)))
       .filter((range) => Number.isFinite(range.start.getTime()));
 
+    const completedRanges = ranges
+      .filter((range) => isCompletedMondayWeekStart(range.start))
+      .sort((a, b) => a.start.getTime() - b.start.getTime())
+      .filter((range, index, all) => index === 0 || formatDate(range.start) !== formatDate(all[index - 1].start))
+      .slice(-12);
+
+    if (completedRanges.length && completedRanges.length === ranges.length) {
+      return completedRanges;
+    }
     if (ranges.length) {
-      return ranges
-        .sort((a, b) => a.start.getTime() - b.start.getTime())
-        .filter((range, index, all) => index === 0 || formatDate(range.start) !== formatDate(all[index - 1].start));
+      throw invalidWeeklyUsageRange("PMB weekly usage only accepts completed Monday-Sunday weeks.");
     }
   }
 
@@ -305,6 +319,13 @@ function getRequestedDateRanges(request) {
     const endInclusive = startOfDay(new Date(`${endParam}T00:00:00`));
     const endExclusive = new Date(endInclusive);
     endExclusive.setDate(endExclusive.getDate() + 1);
+    const isMondaySundayWeek = start.getDay() === 1
+      && endInclusive.getDay() === 0
+      && Math.round((endExclusive.getTime() - start.getTime()) / 86400000) === 7
+      && isCompletedMondayWeekStart(start);
+    if (!isMondaySundayWeek) {
+      throw invalidWeeklyUsageRange("PMB weekly usage only accepts a completed Monday-Sunday range.");
+    }
     return [{ start, endExclusive, endInclusive }];
   }
 
@@ -390,9 +411,9 @@ function buildWeeklyReport(range, transactions, productByPlu, context) {
 
 export async function GET(request) {
   try {
+    const ranges = getRequestedDateRanges(request);
     const config = getConfig();
     const token = await getAuthtoken(config);
-    const ranges = getRequestedDateRanges(request);
 
     const [products, tapLookup] = await Promise.all([
       postJson(config.baseUrl, "/api/productlist", { id: String(config.clientId) }, token),
@@ -450,7 +471,7 @@ export async function GET(request) {
   } catch (error) {
     return NextResponse.json(
       { error: error.message || "Could not pull PMB weekly usage." },
-      { status: 500 },
+      { status: error.status || 500 },
     );
   }
 }
