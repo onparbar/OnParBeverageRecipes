@@ -13,12 +13,15 @@
     "provi:extract": "node scripts/provi/extract_provi_values.mjs"
   },
   "dependencies": {
-    "next": "^15.5.6",
+    "next": "15.5.21",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "sharp": "^0.35.2"
   },
   "devDependencies": {
     "playwright": "^1.60.0"
+  },
+  "overrides": {
+    "postcss": "8.5.18"
   }
 }
