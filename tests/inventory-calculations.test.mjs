@@ -3,11 +3,20 @@ import test from "node:test";
 
 import {
   convertLegacyCaseCountToUnits,
+  getInventoryItemId,
   getInventoryOnHandUnits,
   getInventoryUnitCost,
   getOrderCaseCount,
   getRoundedOrderUnits,
+  normalizeInventoryBaseName,
 } from "../public/inventory-calculations.mjs";
+
+test("keeps 1.75-liter inventory labels on their legacy item IDs", () => {
+  assert.equal(normalizeInventoryBaseName("Tito's 1.75L"), "Tito's");
+  assert.equal(normalizeInventoryBaseName("Tito's 1.75ml"), "Tito's");
+  assert.equal(normalizeInventoryBaseName("Crown Apple 1.75"), "Crown Apple");
+  assert.equal(getInventoryItemId("Tito's 1.75L"), "tito-s");
+});
 
 test("uses the individual column as the authoritative packaged-product count", () => {
   assert.equal(getInventoryOnHandUnits({

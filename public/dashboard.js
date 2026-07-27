@@ -1,9 +1,11 @@
 import {
   convertLegacyCaseCountToUnits,
+  getInventoryItemId,
   getInventoryOnHandUnits,
   getInventoryUnitCost,
   getOrderCaseCount,
   getRoundedOrderUnits,
+  normalizeInventoryBaseName,
   normalizePackSize,
 } from "./inventory-calculations.mjs";
 
@@ -7573,7 +7575,7 @@ function parseInventory(rows) {
       note = "";
     }
     const group = getInventoryGroup(normalizedName, currentSection);
-    const id = slugify(normalizedName);
+    const id = getInventoryItemId(normalizedName);
     const sourceOnHandUnits = getInventoryOnHandUnits({
       caseEquivalent: row[1],
       individualUnits: row[2],
@@ -7639,7 +7641,7 @@ function migrateInventoryOnHandOverrides(rows) {
     if (currentSection !== "Juices and Mixers" || isInventoryHeaderRow(first)) return;
 
     const normalizedName = normalizeInventoryName(first);
-    const id = slugify(normalizedName);
+    const id = getInventoryItemId(normalizedName);
     if (!Object.prototype.hasOwnProperty.call(inventoryOnHandOverrides, id)) return;
 
     const packSize = normalizePackSize(row[4]);
@@ -7994,10 +7996,7 @@ function isInventoryHeaderRow(first) {
 }
 
 function normalizeInventoryName(name) {
-  const normalized = clean(name)
-    .replace(/\b1\.75ml\b/i, "")
-    .replace(/\b1\.75\b/i, "")
-    .trim();
+  const normalized = normalizeInventoryBaseName(clean(name));
 
   return normalizeIngredientAlias(normalized);
 }

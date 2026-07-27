@@ -5,6 +5,20 @@ function toFiniteNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+export function normalizeInventoryBaseName(value) {
+  return String(value ?? "")
+    .replace(/\b1\.75(?:\s*(?:ml|l))?\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function getInventoryItemId(value) {
+  return normalizeInventoryBaseName(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 export function normalizePackSize(value) {
   const packSize = toFiniteNumber(value);
   if (!packSize || packSize <= 0) return 1;
