@@ -8,6 +8,10 @@ import {
   normalizeInventoryBaseName,
   normalizePackSize,
 } from "./inventory-calculations.mjs";
+import {
+  getRecipeBuilderPackageSizeOz,
+  repairLegacyGallonRecipeIngredients,
+} from "./recipe-builder-calculations.mjs";
 
 const CSV_PATH = "./data/cocktail-recipes.csv";
 const NEW_COCKTAILS_CSV_PATH = "./data/new-cocktails.csv";
@@ -6618,7 +6622,11 @@ function getRecipeBuilderPackageConfig(name) {
   const overrideBottleOz = toNumber(override?.bottleOz);
   const mappedBottleOz = toNumber(getVendorMapping(id)?.bottleOz);
   const isGallon = getIngredientGroup(normalizedName) === "Buckeye Beverage";
-  const sizeOz = isGallon ? (overrideBottleOz || 128) : (overrideBottleOz || mappedBottleOz);
+  const sizeOz = getRecipeBuilderPackageSizeOz({
+    isGallon,
+    overrideBottleOz,
+    mappedBottleOz,
+  });
 
   if (!sizeOz) return null;
 
@@ -6807,6 +6815,12 @@ function applyRecipeOrder(sourceRecipes, order) {
 function applyRecipeEdits(recipe) {
   const edits = editedRecipes[recipe.id];
   if (!edits) return recipe;
+  const repaired = repairLegacyGallonRecipeIngredients(edits.ingredients || [], recipe.ingredients || []);
+  if (repaired.repaired) {
+    edits.ingredients = repaired.ingredients;
+    editedRecipes[recipe.id] = edits;
+    saveEditedRecipes();
+  }
 
   return {
     ...recipe,
