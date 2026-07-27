@@ -9,9 +9,20 @@ import {
   normalizePackSize,
 } from "./inventory-calculations.mjs";
 import {
+  getRecipeBuilderPackageQuantity,
   getRecipeBuilderPackageSizeOz,
+  getRecipeBuilderPackageUnitHint,
+  repairKnownRecipeFormulaEdits,
   repairLegacyGallonRecipeIngredients,
 } from "./recipe-builder-calculations.mjs";
+import {
+  getCocktailAwareKegFullOunces,
+  getCocktailRecipeYieldOz,
+} from "./cocktail-recipe-yields.mjs";
+import {
+  buildKegOnDeckOptions,
+  resolveKegOnDeckOption,
+} from "./keg-on-deck-options.mjs";
 
 const CSV_PATH = "./data/cocktail-recipes.csv";
 const NEW_COCKTAILS_CSV_PATH = "./data/new-cocktails.csv";
@@ -1826,6 +1837,7 @@ function buildWeeklyUsageItemFromAssignment(assignment, matches = []) {
     tapNumber: toNumber(assignment.tapNumber),
     type: assignment.type || best.type,
     displayUnit,
+    currentName,
   }), {
     tapNumber: toNumber(assignment.tapNumber),
     name: currentName,
@@ -1922,7 +1934,7 @@ function normalizeCurrentTapAssignment(source) {
   return {
     tapNumber,
     plu: toNumber(source?.plu),
-    name: clean(source?.name || source?.brand || source?.product),
+    name: clean(source?.currentName || source?.name || source?.brand || source?.product),
     wall: clean(source?.wall),
     type: clean(source?.type),
     templateBrand: clean(source?.templateBrand || source?.matchedBrand),
@@ -2648,7 +2660,13 @@ function normalizeWeeklyUsageHistoryForDisplayUnit(history, item) {
 function getWeeklyUsageFullOunces(item) {
   const kegItem = kegWallItems.find((entry) => toNumber(entry.tapNumber) === toNumber(item.tapNumber));
   if (!kegItem) return item.displayUnit === "kegs" ? STANDARD_BEER_KEG_OZ : 0;
-  if (normalizeTitle(kegItem.type) === "cocktail") return STANDARD_COCKTAIL_KEG_OZ;
+  if (normalizeTitle(kegItem.type) === "cocktail") {
+    return getCocktailAwareKegFullOunces(
+      item,
+      kegItem,
+      STANDARD_COCKTAIL_KEG_OZ,
+    );
+  }
   return getDefaultKegSizeOz(kegItem);
 }
 
@@ -3347,12 +3365,8 @@ function renderKegEditFinancialPanel(item, displayBrand = item?.brand) {
 function renderKegOnDeckControl(item) {
   const itemKey = getKegItemKey(item);
   const onDeck = getKegOnDeckItem(item);
-  const activeItems = comingSoonItems.filter((entry) => !entry.replacedAt);
+  const options = getKegOnDeckOptions(item);
   const selectedId = onDeck?.comingSoonId || "";
-  const selectedArchived = selectedId && !activeItems.some((entry) => entry.id === selectedId)
-    ? comingSoonItems.find((entry) => entry.id === selectedId)
-    : null;
-  const options = [...activeItems, selectedArchived].filter(Boolean);
   return `
     <label class="keg-on-deck-control">
       <span>On Deck product</span>
@@ -3429,7 +3443,7 @@ function syncKegAdjustPercentInput(key) {
     return;
   }
 
-  const currentOunces = getKegCurrentLevelOz(liveRow);
+  const currentOunces = getKegCurrentLevelOz(liveRow, item);
   const fullOunces = getKegFullOunces(liveRow, item);
   if (!Number.isFinite(currentOunces) || !fullOunces) return;
 
@@ -4306,14 +4320,13 @@ function getKegOnDeckItem(itemOrKey) {
   const key = typeof itemOrKey === "string" ? itemOrKey : getKegItemKey(itemOrKey);
   const saved = kegOnDeckOverrides[key];
   if (!saved) return null;
-  const comingSoonId = typeof saved === "string" ? saved : saved.comingSoonId;
-  const comingSoonItem = comingSoonItems.find((entry) => entry.id === comingSoonId);
-  if (comingSoonItem) {
+  const option = resolveKegOnDeckOption(getKegOnDeckOptions(key), saved);
+  if (option) {
     return {
-      comingSoonId: comingSoonItem.id,
-      name: comingSoonItem.name,
-      kind: comingSoonItem.kind,
-      plu: toNumber(comingSoonItem.plu),
+      comingSoonId: option.id,
+      name: option.name,
+      kind: option.kind,
+      plu: toNumber(option.plu),
     };
   }
   return typeof saved === "object" && clean(saved.name)
@@ -4321,8 +4334,17 @@ function getKegOnDeckItem(itemOrKey) {
     : null;
 }
 
+function getKegOnDeckOptions(itemOrKey) {
+  const key = typeof itemOrKey === "string" ? itemOrKey : getKegItemKey(itemOrKey);
+  return buildKegOnDeckOptions({
+    comingSoonItems,
+    recipes,
+    selected: kegOnDeckOverrides[key],
+  });
+}
+
 function setKegOnDeckItem(key, comingSoonId) {
-  const item = comingSoonItems.find((entry) => entry.id === comingSoonId);
+  const item = resolveKegOnDeckOption(getKegOnDeckOptions(key), comingSoonId);
   if (!key) return;
   if (!item) {
     delete kegOnDeckOverrides[key];
@@ -4388,7 +4410,9 @@ function getKegLiveRow(item) {
 
 function getDefaultKegLevelSize(item) {
   if (isLiquorOunceTap(toNumber(item?.tapNumber))) return 500;
-  if (normalizeTitle(item?.type) === "cocktail") return STANDARD_COCKTAIL_KEG_OZ;
+  if (normalizeTitle(item?.type) === "cocktail") {
+    return getCocktailRecipeYieldOz(item) || STANDARD_COCKTAIL_KEG_OZ;
+  }
   return getDefaultKegSizeOz(item);
 }
 
@@ -4488,12 +4512,11 @@ function isLiquorOunceTap(tapNumber) {
 
 function getKegFullOunces(liveRow, item = null) {
   if (!liveRow) return null;
-  const rawKegSize = toNumber(liveRow.rawKegSize);
-  if (rawKegSize) {
-    const decimalPlaces = Math.max(0, Math.round(toNumber(liveRow.rawKegSizeDp)));
-    return decimalPlaces ? rawKegSize / (10 ** decimalPlaces) : rawKegSize;
-  }
-  return item ? getDefaultKegLevelSize(item) : null;
+  return getCocktailAwareKegFullOunces(
+    liveRow,
+    item,
+    item ? getDefaultKegLevelSize(item) : 0,
+  ) || null;
 }
 
 function getKegCurrentLevelOz(liveRow, item = null) {
@@ -6433,9 +6456,13 @@ function addIngredientRow(ingredient = null) {
   const row = document.createElement("tr");
   const isFirstRow = newIngredientRows.children.length === 0;
   if (isFirstRow) row.classList.add("primary-liquor-row");
-  const packageConfig = getRecipeBuilderPackageConfig(ingredient?.name || "");
+  const packageUnitHint = getRecipeBuilderPackageUnitHint(ingredient || {});
+  const packageConfig = getRecipeBuilderPackageConfig(ingredient?.name || "", ingredient);
+  row.dataset.packageUnitHint = packageUnitHint || packageConfig?.unitLabel || "";
   const quantityValue = getRecipeBuilderQuantityValue(ingredient, packageConfig);
-  const ozValue = packageConfig ? calculateRecipeBuilderOunces(quantityValue, packageConfig) || ingredient?.oz || "" : ingredient?.oz || "";
+  const ozValue = ingredient?.oz
+    || (packageConfig ? calculateRecipeBuilderOunces(quantityValue, packageConfig) : "")
+    || "";
   const costValue = ingredient?.manualCost ? ingredient.cost : "";
   const abvValue = ingredient?.manualAbvPercent === "" || ingredient?.manualAbvPercent == null ? "" : ingredient.manualAbvPercent;
   row.innerHTML = `
@@ -6467,6 +6494,7 @@ function addIngredientRow(ingredient = null) {
   const ozInput = row.querySelector('[data-field="ingredient-oz"]');
   const abvInput = row.querySelector('[data-field="ingredient-abv"]');
   nameInput.addEventListener("input", () => {
+    row.dataset.packageUnitHint = "";
     syncRecipeBuilderRow(row);
     syncRecipeCreativeDefaults({ preserveDescription: true, preserveImage: true });
     scheduleRecipeImageLookup();
@@ -6487,7 +6515,10 @@ function addIngredientRow(ingredient = null) {
     syncRecipeCreativeDefaults({ preserveDescription: true, preserveImage: true });
     syncRecipeBuilderSummary();
   });
-  syncRecipeBuilderRow(row, { preserveManualOz: true });
+  syncRecipeBuilderRow(row, {
+    preserveExistingOz: Boolean(toNumber(ingredient?.oz)),
+    preserveManualOz: true,
+  });
   newIngredientRows.append(row);
   syncRecipeBuilderSummary();
 }
@@ -6502,15 +6533,19 @@ function syncRecipeBuilderRow(row, options = {}) {
   const abvNote = row.querySelector('[data-field="abv-note"]');
   const packageNote = row.querySelector('[data-field="package-note"]');
   const ozNote = row.querySelector('[data-field="oz-note"]');
-  const packageConfig = getRecipeBuilderPackageConfig(nameInput.value);
+  const packageConfig = getRecipeBuilderPackageConfig(nameInput.value, {
+    packageUnit: row.dataset.packageUnitHint,
+  });
 
   if (packageNote) packageNote.textContent = getRecipeBuilderPackageNote(packageConfig);
   if (ozNote) ozNote.textContent = getRecipeBuilderOzNote(packageConfig);
 
   if (packageConfig) {
     ozInput.readOnly = true;
-    const ounces = calculateRecipeBuilderOunces(quantityInput.value, packageConfig);
-    ozInput.value = ounces ? formatNumber(ounces) : "";
+    if (!options.preserveExistingOz || !toNumber(ozInput.value)) {
+      const ounces = calculateRecipeBuilderOunces(quantityInput.value, packageConfig);
+      ozInput.value = ounces ? formatNumber(ounces) : "";
+    }
   } else {
     ozInput.readOnly = false;
     if (!options.preserveManualOz) {
@@ -6555,7 +6590,9 @@ function getRecipeBuilderIngredientFromRow(row) {
   const abvInput = row.querySelector('[data-field="ingredient-abv"]');
   const inputName = clean(nameInput?.value);
   const name = normalizeIngredientAlias(inputName);
-  const packageConfig = getRecipeBuilderPackageConfig(name);
+  const packageConfig = getRecipeBuilderPackageConfig(name, {
+    packageUnit: row.dataset.packageUnitHint,
+  });
   const packageCount = clean(quantityInput?.value);
   const oz = toNumber(ozInput?.value);
   const manualCostValue = clean(costInput?.value);
@@ -6613,7 +6650,7 @@ function syncRecipeBuilderSummary() {
   `;
 }
 
-function getRecipeBuilderPackageConfig(name) {
+function getRecipeBuilderPackageConfig(name, ingredient = null) {
   const normalizedName = normalizeIngredientAlias(clean(name));
   if (!normalizedName) return null;
 
@@ -6621,7 +6658,10 @@ function getRecipeBuilderPackageConfig(name) {
   const override = priceOverrides[id];
   const overrideBottleOz = toNumber(override?.bottleOz);
   const mappedBottleOz = toNumber(getVendorMapping(id)?.bottleOz);
-  const isGallon = getIngredientGroup(normalizedName) === "Buckeye Beverage";
+  const unitHint = getRecipeBuilderPackageUnitHint(ingredient || {});
+  if (unitHint === "ounces") return null;
+  const isGallon = unitHint === "gallons"
+    || (!unitHint && getIngredientGroup(normalizedName) === "Buckeye Beverage");
   const sizeOz = getRecipeBuilderPackageSizeOz({
     isGallon,
     overrideBottleOz,
@@ -6638,13 +6678,14 @@ function getRecipeBuilderPackageConfig(name) {
 }
 
 function getRecipeBuilderQuantityValue(ingredient, packageConfig) {
-  if (!ingredient) return "";
-  if (clean(ingredient.packageCount)) return clean(ingredient.packageCount);
-  if (!packageConfig || !ingredient.oz) return "";
-
-  const count = ingredient.oz / packageConfig.sizeOz;
-  if (!Number.isFinite(count) || count <= 0) return "";
-  return formatNumber(count);
+  if (!ingredient || !packageConfig) return "";
+  return getRecipeBuilderPackageQuantity({
+    packageCount: ingredient.packageCount,
+    raw: ingredient.raw,
+    oz: ingredient.oz,
+    packageSizeOz: packageConfig.sizeOz,
+    packageUnit: packageConfig.unitLabel,
+  });
 }
 
 function calculateRecipeBuilderOunces(quantityValue, packageConfig) {
@@ -6815,9 +6856,17 @@ function applyRecipeOrder(sourceRecipes, order) {
 function applyRecipeEdits(recipe) {
   const edits = editedRecipes[recipe.id];
   if (!edits) return recipe;
-  const repaired = repairLegacyGallonRecipeIngredients(edits.ingredients || [], recipe.ingredients || []);
-  if (repaired.repaired) {
-    edits.ingredients = repaired.ingredients;
+  const repairedGallons = repairLegacyGallonRecipeIngredients(
+    edits.ingredients || [],
+    recipe.ingredients || [],
+  );
+  const repairedFormula = repairKnownRecipeFormulaEdits(
+    recipe.id,
+    repairedGallons.ingredients,
+    recipe.ingredients || [],
+  );
+  if (repairedGallons.repaired || repairedFormula.repaired) {
+    edits.ingredients = repairedFormula.ingredients;
     editedRecipes[recipe.id] = edits;
     saveEditedRecipes();
   }
@@ -6828,7 +6877,11 @@ function applyRecipeEdits(recipe) {
     ingredients: (edits.ingredients || []).map((ingredient) => ({
       ...ingredient,
       id: slugify(ingredient.name),
-      raw: ingredient.raw || buildRecipeIngredientRaw(ingredient.name, ingredient.packageCount, getRecipeBuilderPackageConfig(ingredient.name)),
+      raw: ingredient.raw || buildRecipeIngredientRaw(
+        ingredient.name,
+        ingredient.packageCount,
+        getRecipeBuilderPackageConfig(ingredient.name, ingredient),
+      ),
       name: ingredient.name,
       cost: toNumber(ingredient.cost),
       manualCost: Boolean(ingredient.manualCost),

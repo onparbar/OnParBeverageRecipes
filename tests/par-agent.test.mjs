@@ -6,6 +6,7 @@ import {
   getCocktailRecipeYieldOz,
   getKegFullOunces,
 } from "../lib/par-agent.mjs";
+import { COCKTAIL_RECIPE_YIELDS } from "../public/cocktail-recipe-yields.mjs";
 
 function cocktailTap(name, tapNumber) {
   return {
@@ -60,8 +61,18 @@ test("recognizes the Pink Lemonade display alias as the Strawberry recipe", () =
   assert.equal(getCocktailRecipeYieldOz(tap), 1379);
 });
 
+test("par-agent sizing covers every canonical cocktail source and display alias", () => {
+  COCKTAIL_RECIPE_YIELDS.forEach(({ sourceTitle, yieldOz, aliases }) => {
+    [sourceTitle, ...aliases].forEach((name, index) => {
+      const tap = cocktailTap(`${name} ${index % 2 ? 2 : 1}`, 200 + index);
+      assert.equal(getCocktailRecipeYieldOz(tap), yieldOz, name);
+      assert.equal(getKegFullOunces({ rawKegSize: 1536 }, tap), yieldOz, name);
+    });
+  });
+});
+
 test("keeps PMB and standard size fallbacks for other cocktails", () => {
-  const tap = cocktailTap("House Margarita (Tequila) 1", 59);
+  const tap = cocktailTap("Generic Cocktail (Vodka) 1", 59);
   assert.equal(getCocktailRecipeYieldOz(tap), 0);
   assert.equal(getKegFullOunces({ rawKegSize: 1400 }, tap), 1400);
   assert.equal(getKegFullOunces(null, tap), 1536);
@@ -76,4 +87,33 @@ test("corrected Strawberry threshold produces the required make recommendation",
   assert.equal(result.rawOrderQty, 1);
   assert.equal(result.orderQty, 1);
   assert.match(result.reason, /below 0\.64: 0\.388\/week/);
+});
+
+test("uses On Par Tee and Whiskey Smash as saved On Deck make choices", () => {
+  ["On Par Tee", "Whiskey Smash"].forEach((onDeckName, index) => {
+    const tap = cocktailTap("SPIKED STRAWBERRY LEMONADE (TITO'S) 1", 65 + index);
+    const result = buildRawRecommendation(
+      tap,
+      { fillLevelPercent: 60, rawKegSize: 1536, rawKegSizeDp: 0 },
+      [{ volumeOz: 535 }],
+      {
+        onHandOverrides: {},
+        onDeckOverrides: {
+          [tap.key]: {
+            comingSoonId: `recipe:${onDeckName.toLowerCase().replaceAll(" ", "-")}`,
+            name: onDeckName,
+            kind: "recipe",
+            plu: 0,
+          },
+        },
+      },
+      {},
+    );
+
+    assert.equal(result.actionType, "make");
+    assert.equal(result.orderQty, 1);
+    assert.equal(result.orderProductName, onDeckName);
+    assert.equal(result.onDeckProduct?.name, onDeckName);
+    assert.match(result.reason, new RegExp(`Make ${onDeckName} from On Deck`));
+  });
 });
