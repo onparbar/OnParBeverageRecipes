@@ -124,6 +124,12 @@ This also creates an empty container only. Import the saved Weekly Usage data
 from the service computer using the manager-only button in Weekly Usage; do
 not initialize it from a home browser with incomplete PMB history.
 
+Before sharing Keg Levels backup counts, pars, on-deck choices, and par-agent
+recommendations, apply
+`supabase/migrations/20260731020000_create_keg_par_agent_shared_state.sql`.
+This creates an empty container only. Use the manager-only Keg Levels import
+button from the service computer; do not initialize it from a home browser.
+
 ### 10. Local network note
 
 For Pour My Beer / keg level work:
@@ -134,6 +140,7 @@ For Pour My Beer / keg level work:
 - shared prices, recipes, and product setup use Supabase and remain available away from the work network when internet access is available
 - after its one-time service-computer import, shared inventory also uses Supabase; saving a Monday snapshot still requires complete live PMB tap coverage
 - after its one-time service-computer import, Weekly Usage reports use Supabase and can be viewed away from work; new PMB reports can still be pulled only while connected to the local PMB network
+- after its one-time service-computer import, Keg Levels counts, pars, on-deck choices, cooler capacity, and recommendations use Supabase; live keg refreshes and par-agent PMB reads still require the work network
 - the service computer being offline does not block Supabase-backed dashboard work, but it does block live Pour My Beer reads and writes
 
 ### 11. Provi security

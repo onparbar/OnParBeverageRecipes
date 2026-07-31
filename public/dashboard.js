@@ -86,6 +86,7 @@ const SHARED_DASHBOARD_FIELD_PATHS = Object.freeze([
 const SHARED_DASHBOARD_IMPORT_PHRASE = "IMPORT FROM SERVICE COMPUTER";
 const INVENTORY_SHARED_IMPORT_PHRASE = "IMPORT INVENTORY FROM SERVICE COMPUTER";
 const WEEKLY_USAGE_SHARED_IMPORT_PHRASE = "IMPORT WEEKLY USAGE FROM SERVICE COMPUTER";
+const KEG_LEVELS_SHARED_IMPORT_PHRASE = "IMPORT KEG LEVELS FROM SERVICE COMPUTER";
 const STANDARD_BEER_KEG_OZ = 15.5 * 128;
 const STANDARD_COCKTAIL_KEG_OZ = 12 * 128;
 const DEFAULT_BEER_TARGET_MARGIN = 82;
@@ -5270,6 +5271,9 @@ function bindKegLevelEvents() {
   document.querySelector("#run-par-agent")?.addEventListener("click", () => {
     runKegParAgent();
   });
+  document.querySelector("#initialize-shared-keg-levels")?.addEventListener("click", () => {
+    initializeSharedKegLevelsFromServiceComputer();
+  });
   document.querySelector("#par-agent-cooler-capacity")?.addEventListener("input", (event) => {
     parAgentState = {
       ...(parAgentState || {}),
@@ -5844,26 +5848,27 @@ async function loadParAgentState() {
 
 function applyParAgentState(state, { hydrate = false } = {}) {
   parAgentState = state || {};
+  if (!parAgentState.initialized) {
+    parAgentMessage = "Setup needed: import Keg Levels only from the service computer. Counts and par choices stay on this device until then.";
+    return;
+  }
   const serverOnHand = parAgentState.onHandOverrides || {};
   const serverPars = parAgentState.parOverrides || {};
   const serverOnDeck = parAgentState.onDeckOverrides || {};
-  const hasServerInventory = Object.keys(serverOnHand).length || Object.keys(serverPars).length || Object.keys(serverOnDeck).length;
-
-  if (hasServerInventory) {
-    kegOnHandOverrides = { ...serverOnHand };
-    kegParOverrides = { ...serverPars };
-    kegOnDeckOverrides = { ...serverOnDeck };
-    saveKegOnHandOverrides();
-    saveKegParOverrides();
-    saveKegOnDeckOverrides();
-  } else if (hydrate && (Object.keys(kegOnHandOverrides).length || Object.keys(kegParOverrides).length || Object.keys(kegOnDeckOverrides).length)) {
-    scheduleParAgentStateSync();
-  }
+  kegOnHandOverrides = { ...serverOnHand };
+  kegParOverrides = { ...serverPars };
+  kegOnDeckOverrides = { ...serverOnDeck };
+  saveKegOnHandOverrides();
+  saveKegParOverrides();
+  saveKegOnDeckOverrides();
 
   parAgentMessage = getParAgentStatusMessage();
 }
 
 function getParAgentStatusMessage() {
+  if (!parAgentState?.initialized) {
+    return "Setup needed: import Keg Levels only from the service computer. Counts and par choices stay on this device until then.";
+  }
   const recommendations = parAgentState?.recommendations;
   if (!recommendations?.generatedAt) {
     return "Weekly par agent has not run yet. Set cooler capacity if you want capacity-aware trimming.";
@@ -5900,6 +5905,7 @@ function renderParAgentPanel() {
         </label>
       </div>
       <p class="sync-copy">Sets weekly par from PMB usage, current keg level, backup kegs on hand, and cooler capacity. Capacity limits trim lower-priority orders instead of blindly filling every formula gap.</p>
+      ${parAgentState?.initialized === false ? '<button class="ghost-button" id="initialize-shared-keg-levels" type="button">Import from service computer</button>' : ""}
       <p class="sync-status">${escapeHtml(parAgentMessage)}</p>
     </div>
   `;
@@ -5949,6 +5955,13 @@ function scheduleParAgentStateSync() {
 }
 
 async function syncParAgentState({ silent = false } = {}) {
+  if (!parAgentState?.initialized) {
+    if (!silent) {
+      parAgentMessage = getParAgentStatusMessage();
+      renderKegLevels();
+    }
+    return;
+  }
   const settings = getParAgentSettings();
   try {
     const response = await fetch("/api/keg-par-agent", {
@@ -5960,6 +5973,7 @@ async function syncParAgentState({ silent = false } = {}) {
       },
       body: JSON.stringify({
         action: "sync-state",
+        expectedRevision: parAgentState.revision,
         onHandOverrides: kegOnHandOverrides,
         parOverrides: kegParOverrides,
         onDeckOverrides: kegOnDeckOverrides,
@@ -5978,6 +5992,11 @@ async function syncParAgentState({ silent = false } = {}) {
 }
 
 async function runKegParAgent() {
+  if (!parAgentState?.initialized) {
+    parAgentMessage = getParAgentStatusMessage();
+    renderKegLevels();
+    return;
+  }
   if (parAgentRunning) return;
   parAgentRunning = true;
   parAgentMessage = "Pulling PMB levels and recent Monday-Sunday usage for par recommendations...";
@@ -5993,6 +6012,7 @@ async function runKegParAgent() {
       },
       body: JSON.stringify({
         action: "run",
+        expectedRevision: parAgentState.revision,
         onHandOverrides: kegOnHandOverrides,
         parOverrides: kegParOverrides,
         onDeckOverrides: kegOnDeckOverrides,
@@ -6010,6 +6030,43 @@ async function runKegParAgent() {
     parAgentRunning = false;
     renderKegLevels();
   }
+}
+
+async function initializeSharedKegLevelsFromServiceComputer() {
+  if (parAgentState?.initialized || !parAgentState) return;
+  const count = Object.keys(kegOnHandOverrides).length;
+  if (!confirmDashboardAction(
+    "Make this browser's Keg Levels choices the official shared version?",
+    [
+      "Source: the saved keg counts, pars, on-deck selections, and cooler setting in this browser.",
+      `${count} backup/on-hand count${count === 1 ? "" : "s"} will be published for all signed-in managers.",
+      "Only continue while using the service computer with the complete current keg setup.",
+    ],
+    "If you are at home or unsure, cancel and wait until you are back at the service computer.",
+  )) return;
+  const phrase = window.prompt(`Type ${KEG_LEVELS_SHARED_IMPORT_PHRASE} to confirm this is the service computer.`);
+  if (clean(phrase) !== KEG_LEVELS_SHARED_IMPORT_PHRASE) {
+    parAgentMessage = "Keg Levels import canceled. Shared Keg Levels remain uninitialized.";
+    renderKegLevels();
+    return;
+  }
+  parAgentMessage = "Importing the service computer's Keg Levels choices...";
+  renderKegLevels();
+  try {
+    const response = await fetch("/api/keg-par-agent", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ action: "initialize", expectedRevision: 0, onHandOverrides: kegOnHandOverrides, parOverrides: kegParOverrides, onDeckOverrides: kegOnDeckOverrides, settings: getParAgentSettings() }),
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) throw new Error(result?.error || "Could not import Keg Levels.");
+    applyParAgentState(result);
+    parAgentMessage = "Service-computer Keg Levels imported. Counts, pars, on-deck choices, and recommendations are now shared.";
+  } catch (error) {
+    parAgentMessage = `Keg Levels import failed. Nothing was published from this browser: ${error.message}`;
+  }
+  renderKegLevels();
 }
 
 async function runKegLevelSync() {
