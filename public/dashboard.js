@@ -85,6 +85,7 @@ const SHARED_DASHBOARD_FIELD_PATHS = Object.freeze([
 ]);
 const SHARED_DASHBOARD_IMPORT_PHRASE = "IMPORT FROM SERVICE COMPUTER";
 const INVENTORY_SHARED_IMPORT_PHRASE = "IMPORT INVENTORY FROM SERVICE COMPUTER";
+const WEEKLY_USAGE_SHARED_IMPORT_PHRASE = "IMPORT WEEKLY USAGE FROM SERVICE COMPUTER";
 const STANDARD_BEER_KEG_OZ = 15.5 * 128;
 const STANDARD_COCKTAIL_KEG_OZ = 12 * 128;
 const DEFAULT_BEER_TARGET_MARGIN = 82;
@@ -692,10 +693,18 @@ let weeklyUsageCurrentOverrides = loadWeeklyUsageCurrentOverrides();
 let weeklyUsageHistoryOverrides = loadWeeklyUsageHistoryOverrides();
 let weeklyUsageArchivedItems = loadWeeklyUsageArchivedItems();
 let weeklyUsageSyncLoading = false;
-let weeklyUsageSyncMessage = "Open Weekly Usage on the work network to check Pour My Beer. Saved history remains available anywhere.";
+let weeklyUsageSyncMessage = "Open Weekly Usage on the work network to check Pour My Beer. After the service-computer import, saved reports remain available anywhere.";
 let weeklyUsageLastSyncAt = loadWeeklyUsageLastSyncAt();
 let weeklyUsageSyncAttempted = false;
 let weeklyUsageHistoryLimit = window.matchMedia("(max-width: 720px)").matches ? 6 : 0;
+let weeklyUsageSharedRevision = 0;
+let weeklyUsageSharedInitialized = false;
+let weeklyUsageSharedProvisioned = false;
+let weeklyUsageSharedSaving = false;
+let weeklyUsageSharedMessage = "Loading shared Weekly Usage...";
+let weeklyUsageApplyingSharedState = false;
+let weeklyUsageSharedSaveTimer = null;
+let weeklyUsageSharedWriteQueue = Promise.resolve();
 let kegPricingItems = [];
 let priceOverrides = loadOverrides();
 let kegPriceOverrides = loadKegPriceOverrides();
@@ -872,6 +881,7 @@ async function init() {
   }
   weeklyUsageChangeovers = weeklyUsageChangeoversCsv ? parseWeeklyUsageChangeovers(parseCsv(weeklyUsageChangeoversCsv)) : [];
   applyWeeklyUsageProductChangeovers();
+  await loadSharedWeeklyUsageState();
   await loadParAgentState();
   hydrateCategoryFilter(recipes);
   bindEvents();
@@ -3728,6 +3738,9 @@ function renderWeeklyUsage() {
     <div class="sync-panel sync-panel--weekly-usage">
       <p class="sync-copy">Automatically checks PMB for missing completed Monday-Sunday reports when a manager opens Weekly Usage. The current week is never included.</p>
       <p class="sync-status">${escapeHtml(weeklyUsageSyncMessage)}</p>
+      <p class="sync-copy">${weeklyUsageSharedInitialized ? "Saved PMB reports, current tap assignments, and replaced-product history are shared across signed-in manager devices." : "Weekly Usage stays on this device until the service computer performs the one-time shared import."}</p>
+      ${weeklyUsageSharedProvisioned && !weeklyUsageSharedInitialized ? '<button class="ghost-button" id="initialize-shared-weekly-usage" type="button">Import from service computer</button>' : ""}
+      <p class="sync-status">${escapeHtml(weeklyUsageSharedMessage)}</p>
     </div>
     ${renderWeeklyUsageArchiveSummary()}
   `;
@@ -3770,6 +3783,11 @@ function renderWeeklyUsage() {
       `;
     })
     .join("") || `<tr><td colspan="${3 + historyHeaders.length}" class="empty-state">No weekly usage rows match that search.</td></tr>`;
+
+  document.querySelector("#initialize-shared-weekly-usage")?.addEventListener(
+    "click",
+    initializeSharedWeeklyUsageFromServiceComputer,
+  );
 }
 
 function weeklyUsageItemMatchesSearch(item, rawSearchTerm) {
@@ -3827,6 +3845,161 @@ function getPmbConnectionErrorMessage(error, fallback, { writeAttempted = false 
       : "Pour My Beer is reachable only from the work network. Showing saved dashboard data; no live values were changed.";
   }
   return message || fallback;
+}
+
+async function requestSharedWeeklyUsage(body = null) {
+  const response = await fetch("/api/weekly-usage-state", {
+    method: body ? "POST" : "GET",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+    cache: "no-store",
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(result.error || `Shared Weekly Usage request failed (${response.status}).`);
+    error.code = result.code || "WEEKLY_USAGE_STATE_ERROR";
+    error.status = response.status;
+    error.currentRevision = result.currentRevision;
+    throw error;
+  }
+  return result;
+}
+
+function cloneWeeklyUsageValue(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function getSharedWeeklyUsageData() {
+  return {
+    activeItems: cloneWeeklyUsageValue(weeklyUsageItems),
+    archivedItems: cloneWeeklyUsageValue(weeklyUsageArchivedItems),
+    currentOverrides: cloneWeeklyUsageValue(weeklyUsageCurrentOverrides),
+    historyOverrides: cloneWeeklyUsageValue(weeklyUsageHistoryOverrides),
+    lastSyncAt: clean(weeklyUsageLastSyncAt),
+  };
+}
+
+function applySharedWeeklyUsageState(state) {
+  const data = state?.data || {};
+  weeklyUsageApplyingSharedState = true;
+  try {
+    weeklyUsageSharedRevision = Number(state.revision) || 0;
+    weeklyUsageSharedInitialized = Boolean(state.initialized);
+    weeklyUsageSharedProvisioned = true;
+    weeklyUsageItems = Array.isArray(data.activeItems) ? cloneWeeklyUsageValue(data.activeItems) : [];
+    weeklyUsageArchivedItems = Array.isArray(data.archivedItems)
+      ? cloneWeeklyUsageValue(data.archivedItems)
+      : [];
+    weeklyUsageCurrentOverrides = data.currentOverrides && typeof data.currentOverrides === "object"
+      ? cloneWeeklyUsageValue(data.currentOverrides)
+      : {};
+    weeklyUsageHistoryOverrides = data.historyOverrides && typeof data.historyOverrides === "object"
+      ? cloneWeeklyUsageValue(data.historyOverrides)
+      : {};
+    weeklyUsageLastSyncAt = clean(data.lastSyncAt);
+    saveWeeklyUsageCurrentOverrides();
+    saveWeeklyUsageHistoryOverrides();
+    saveWeeklyUsageArchivedItems();
+    saveWeeklyUsageLastSyncAt();
+  } finally {
+    weeklyUsageApplyingSharedState = false;
+  }
+}
+
+async function loadSharedWeeklyUsageState() {
+  try {
+    const state = await requestSharedWeeklyUsage();
+    weeklyUsageSharedProvisioned = true;
+    weeklyUsageSharedInitialized = Boolean(state.initialized);
+    weeklyUsageSharedRevision = Number(state.revision) || 0;
+    if (state.initialized) {
+      applySharedWeeklyUsageState(state);
+      weeklyUsageSharedMessage = "Shared Weekly Usage is available on all signed-in manager devices.";
+    } else {
+      weeklyUsageSharedMessage = "Setup needed: import Weekly Usage only from the service computer. Until then, reports stay on this device.";
+    }
+  } catch (error) {
+    weeklyUsageSharedProvisioned = false;
+    weeklyUsageSharedInitialized = false;
+    weeklyUsageSharedMessage = `Shared Weekly Usage unavailable. Reports remain saved on this device only: ${error.message}`;
+  }
+}
+
+function scheduleSharedWeeklyUsageSave() {
+  if (weeklyUsageApplyingSharedState) return;
+  if (!weeklyUsageSharedInitialized) {
+    weeklyUsageSharedMessage = "Shared Weekly Usage is not initialized. Reports remain saved on this device only.";
+    return;
+  }
+
+  clearTimeout(weeklyUsageSharedSaveTimer);
+  weeklyUsageSharedSaving = true;
+  weeklyUsageSharedMessage = "Saving shared Weekly Usage...";
+  weeklyUsageSharedSaveTimer = setTimeout(() => {
+    weeklyUsageSharedWriteQueue = weeklyUsageSharedWriteQueue.then(async () => {
+      try {
+        const state = await requestSharedWeeklyUsage({
+          action: "replace",
+          expectedRevision: weeklyUsageSharedRevision,
+          data: getSharedWeeklyUsageData(),
+        });
+        applySharedWeeklyUsageState(state);
+        weeklyUsageSharedMessage = "Shared Weekly Usage saved.";
+      } catch (error) {
+        weeklyUsageSharedMessage = error.code === "WEEKLY_USAGE_STATE_REVISION_CONFLICT"
+          ? "Another manager changed Weekly Usage first. This device kept its saved report; reload before deciding what to publish."
+          : `Could not save shared Weekly Usage. This device kept its saved report: ${error.message}`;
+      } finally {
+        weeklyUsageSharedSaving = false;
+        renderWeeklyUsage();
+      }
+    });
+  }, 350);
+}
+
+async function initializeSharedWeeklyUsageFromServiceComputer() {
+  if (!weeklyUsageSharedProvisioned || weeklyUsageSharedInitialized || weeklyUsageSharedSaving) return;
+  const data = getSharedWeeklyUsageData();
+  const reportCount = data.activeItems.reduce((total, item) => total + (item.history || []).length, 0);
+
+  if (!confirmDashboardAction(
+    "Make this browser's Weekly Usage reports the official shared version?",
+    [
+      "Source: saved Weekly Usage data in this browser (not a live PMB read).",
+      `${data.activeItems.length} current tap row${data.activeItems.length === 1 ? "" : "s"}, ${reportCount} saved weekly report${reportCount === 1 ? "" : "s"}, and ${data.archivedItems.length} replaced-product history row${data.archivedItems.length === 1 ? "" : "s"}.`,
+      "Only continue while using the service computer with its complete saved PMB history.",
+    ],
+    "If you are at home or unsure, cancel and wait until you are back at the service computer.",
+  )) return;
+
+  const phrase = window.prompt(
+    `Type ${WEEKLY_USAGE_SHARED_IMPORT_PHRASE} to confirm that this is the service computer and its Weekly Usage history is complete.`,
+  );
+  if (clean(phrase) !== WEEKLY_USAGE_SHARED_IMPORT_PHRASE) {
+    weeklyUsageSharedMessage = "Weekly Usage import canceled. Shared reports remain uninitialized.";
+    renderWeeklyUsage();
+    return;
+  }
+
+  weeklyUsageSharedSaving = true;
+  weeklyUsageSharedMessage = "Importing the service computer's Weekly Usage reports...";
+  renderWeeklyUsage();
+  try {
+    const state = await requestSharedWeeklyUsage({
+      action: "initialize",
+      expectedRevision: 0,
+      data,
+    });
+    applySharedWeeklyUsageState(state);
+    weeklyUsageSharedMessage = "Service-computer Weekly Usage imported. PMB reports and replaced-product history are now shared.";
+  } catch (error) {
+    weeklyUsageSharedMessage = error.code === "WEEKLY_USAGE_STATE_ALREADY_INITIALIZED"
+      ? "Shared Weekly Usage was already initialized in another session. Reload to use the official version."
+      : `Weekly Usage import failed. Nothing was published from this browser: ${error.message}`;
+  } finally {
+    weeklyUsageSharedSaving = false;
+    renderWeeklyUsage();
+  }
 }
 
 async function runPmbWeeklyUsageSync({ automatic = false } = {}) {
@@ -11012,6 +11185,7 @@ function loadWeeklyUsageCurrentOverrides() {
 
 function saveWeeklyUsageCurrentOverrides() {
   localStorage.setItem(WEEKLY_USAGE_CURRENT_STORAGE_KEY, JSON.stringify(weeklyUsageCurrentOverrides));
+  scheduleSharedWeeklyUsageSave();
 }
 
 function loadWeeklyUsageHistoryOverrides() {
@@ -11024,6 +11198,7 @@ function loadWeeklyUsageHistoryOverrides() {
 
 function saveWeeklyUsageHistoryOverrides() {
   localStorage.setItem(WEEKLY_USAGE_HISTORY_STORAGE_KEY, JSON.stringify(weeklyUsageHistoryOverrides));
+  scheduleSharedWeeklyUsageSave();
 }
 
 function loadWeeklyUsageArchivedItems() {
@@ -11036,6 +11211,7 @@ function loadWeeklyUsageArchivedItems() {
 
 function saveWeeklyUsageArchivedItems() {
   localStorage.setItem(WEEKLY_USAGE_ARCHIVE_STORAGE_KEY, JSON.stringify(weeklyUsageArchivedItems));
+  scheduleSharedWeeklyUsageSave();
 }
 
 function loadWeeklyUsageLastSyncAt() {
@@ -11044,6 +11220,7 @@ function loadWeeklyUsageLastSyncAt() {
 
 function saveWeeklyUsageLastSyncAt() {
   localStorage.setItem(WEEKLY_USAGE_LAST_SYNC_STORAGE_KEY, weeklyUsageLastSyncAt);
+  scheduleSharedWeeklyUsageSave();
 }
 
 function loadKegOnHandOverrides() {

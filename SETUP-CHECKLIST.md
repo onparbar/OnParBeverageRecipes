@@ -118,6 +118,12 @@ the service computer, using the manager-only `Import from service computer`
 button in Inventory. Until then, inventory edits remain saved only in the
 browser where they were made.
 
+Before sharing PMB Weekly Usage reports and replaced-product history, apply
+`supabase/migrations/20260731010000_create_weekly_usage_shared_state.sql`.
+This also creates an empty container only. Import the saved Weekly Usage data
+from the service computer using the manager-only button in Weekly Usage; do
+not initialize it from a home browser with incomplete PMB history.
+
 ### 10. Local network note
 
 For Pour My Beer / keg level work:
@@ -127,6 +133,7 @@ For Pour My Beer / keg level work:
 - live PMB calls begin only when you open a PMB-backed section or press its refresh button
 - shared prices, recipes, and product setup use Supabase and remain available away from the work network when internet access is available
 - after its one-time service-computer import, shared inventory also uses Supabase; saving a Monday snapshot still requires complete live PMB tap coverage
+- after its one-time service-computer import, Weekly Usage reports use Supabase and can be viewed away from work; new PMB reports can still be pulled only while connected to the local PMB network
 - the service computer being offline does not block Supabase-backed dashboard work, but it does block live Pour My Beer reads and writes
 
 ### 11. Provi security
