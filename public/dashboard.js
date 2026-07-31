@@ -884,6 +884,7 @@ async function init() {
   applyWeeklyUsageProductChangeovers();
   await loadSharedWeeklyUsageState();
   await loadParAgentState();
+  renderDashboardSharedStateStatus();
   hydrateCategoryFilter(recipes);
   bindEvents();
   switchAddProductType(activeAddProductType);
@@ -1517,6 +1518,41 @@ function ensureDashboardSharedStatePanel() {
   return panel;
 }
 
+function getServiceComputerReadiness() {
+  const state = (name, provisioned, initialized) => ({
+    name,
+    status: initialized ? "ready" : provisioned ? "import" : "unavailable",
+    label: initialized ? "Ready" : provisioned ? "Import at work" : "Unavailable",
+  });
+  return [
+    state("Dashboard setup", true, dashboardSharedState.initialized),
+    state("Inventory", inventorySharedProvisioned, inventorySharedInitialized),
+    state("Weekly Usage", weeklyUsageSharedProvisioned, weeklyUsageSharedInitialized),
+    state("Keg Levels", Boolean(parAgentState), Boolean(parAgentState?.initialized)),
+  ];
+}
+
+function renderServiceComputerReadiness() {
+  if (isEmployeeDashboard) return "";
+  const items = getServiceComputerReadiness();
+  const importsNeeded = items.filter((item) => item.status === "import");
+  const unavailable = items.filter((item) => item.status === "unavailable");
+  const message = importsNeeded.length
+    ? "When you are back at work, import in order: Dashboard setup, Inventory, Weekly Usage, then Keg Levels."
+    : unavailable.length
+      ? "Some shared areas could not be checked right now. Your saved home-browser data remains unchanged."
+      : "All shared areas are ready. Live Pour My Beer reads and writes still require the work network.";
+  return `
+    <div class="service-computer-readiness">
+      <p class="service-computer-readiness__title">Service-computer readiness</p>
+      <div class="service-computer-readiness__items">
+        ${items.map((item) => `<span class="service-computer-readiness__item service-computer-readiness__item--${item.status}">${escapeHtml(item.name)} · ${escapeHtml(item.label)}</span>`).join("")}
+      </div>
+      <p class="sync-status">${escapeHtml(message)}</p>
+    </div>
+  `;
+}
+
 function renderDashboardSharedStateStatus() {
   const panel = ensureDashboardSharedStatePanel();
   if (!panel) return;
@@ -1551,6 +1587,7 @@ function renderDashboardSharedStateStatus() {
     <div>
       <h2>Shared data · ${escapeHtml(labels[dashboardSharedSyncStatus] || "Status")}</h2>
       <p class="sync-status">${escapeHtml(dashboardSharedSyncMessage)}</p>
+      ${renderServiceComputerReadiness()}
       ${!isEmployeeDashboard && !dashboardSharedState.initialized ? `
         <p class="sync-status"><strong>Import source:</strong> saved data in this browser (not a live read from the offline service computer).</p>
         ${importSummary.text.split("\n").map((line) => `<p class="sync-status">${escapeHtml(line)}</p>`).join("")}

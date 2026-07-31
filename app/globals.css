@@ -184,6 +184,50 @@ h1 {
   line-height: 1;
 }
 
+.service-computer-readiness {
+  margin-top: 14px;
+}
+
+.service-computer-readiness__title {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.service-computer-readiness__items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.service-computer-readiness__item {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.service-computer-readiness__item--ready {
+  border-color: rgba(45, 116, 74, 0.42);
+  color: #1f6b42;
+  background: rgba(211, 238, 217, 0.72);
+}
+
+.service-computer-readiness__item--import {
+  border-color: rgba(157, 102, 17, 0.42);
+  color: #805000;
+  background: rgba(250, 232, 184, 0.72);
+}
+
+.service-computer-readiness__item--unavailable {
+  color: var(--muted);
+  background: rgba(232, 229, 221, 0.72);
+}
+
 .operation-tabs {
   display: inline-flex;
   flex-wrap: wrap;
