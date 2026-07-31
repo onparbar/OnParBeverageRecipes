@@ -63,3 +63,21 @@ test("Keg Levels requires an explicit service-computer initialization before sav
   assert.equal(patch.url.searchParams.get("initialized"), "eq.false");
   await assert.rejects(shared.replace({ expectedRevision: 0, data }), (error) => assertError(error, "KEG_STATE_REVISION_CONFLICT"));
 });
+
+test("Keg Levels rejects unknown shared fields before writing anything", async () => {
+  const fetchImpl = fetchFor({ id: "keg-par-agent", revision: 0, initialized: false, data: {}, initialized_at: null, updated_at: "2026-07-31T12:00:00.000Z", updated_by_role: "" });
+  const data = { ...createEmptyKegParAgentData(), unknownField: true };
+  await assert.rejects(
+    store(fetchImpl).initialize({ expectedRevision: 0, data }),
+    (error) => assertError(error, "INVALID_KEG_STATE"),
+  );
+  assert.deepEqual(fetchImpl.calls.map((call) => call.method), ["GET"]);
+});
+
+test("Keg Levels fails closed when shared storage is unavailable", async () => {
+  const unavailableFetch = async () => response({ code: "PGRST205" }, 404);
+  await assert.rejects(
+    store(unavailableFetch).read(),
+    (error) => assertError(error, "KEG_STATE_UNAVAILABLE"),
+  );
+});
