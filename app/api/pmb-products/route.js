@@ -69,6 +69,7 @@ async function postJson(baseUrl, path, body, token = "") {
       },
       body: JSON.stringify(body),
       cache: "no-store",
+      signal: AbortSignal.timeout(15000),
     });
 
     const raw = await response.text();
@@ -671,6 +672,39 @@ async function trySendConfigUpdate(config, token) {
     return await sendConfigUpdate(config, token);
   } catch {
     return "";
+  }
+}
+
+export async function GET() {
+  try {
+    const config = getConfig();
+    const token = await getAuthtoken(config);
+    const products = await getProductList(config, token);
+    const productCount = Array.isArray(products.productlist) ? products.productlist.length : 0;
+    return NextResponse.json(
+      {
+        ok: true,
+        message: `Pour My Beer is connected on the work network (${productCount} products available).`,
+        productCount,
+      },
+      {
+        headers: { "Cache-Control": "no-store" },
+      },
+    );
+  } catch (error) {
+    const message = error.message || "Could not connect to Pour My Beer.";
+    const status = /^Missing PMB_API_BASE_URL/.test(message) ? 500 : 503;
+    return NextResponse.json(
+      {
+        ok: false,
+        error: message,
+        code: "PMB_CONNECTION_UNAVAILABLE",
+      },
+      {
+        status,
+        headers: { "Cache-Control": "no-store" },
+      },
+    );
   }
 }
 

@@ -290,7 +290,7 @@ export default function DashboardPage() {
                 <h2>Add beer product</h2>
               </div>
               <div className="form-actions">
-                <button className="primary-button" id="pmb-product-submit" type="submit">Create PMB beer</button>
+                <button className="primary-button" id="pmb-product-submit" type="submit">Save beer to queue</button>
               </div>
             </div>
 
@@ -354,7 +354,7 @@ export default function DashboardPage() {
                 </div>
               </div>
             </div>
-            <div className="pmb-product-status" id="pmb-product-status">Ready to create a new beer keg product in Pour My Beer.</div>
+            <div className="pmb-product-status" id="pmb-product-status">Ready to save a beer for later Pour My Beer publishing.</div>
           </form>
 
           <form
@@ -371,7 +371,7 @@ export default function DashboardPage() {
                 <h2>Add liquor tap</h2>
               </div>
               <div className="form-actions">
-                <button className="primary-button" id="liquor-product-submit" type="submit">Create PMB liquor</button>
+                <button className="primary-button" id="liquor-product-submit" type="submit">Save liquor to queue</button>
               </div>
             </div>
 
@@ -417,8 +417,24 @@ export default function DashboardPage() {
                 <textarea id="liquor-product-notes" rows="3" placeholder="Optional PMB tasting notes"></textarea>
               </label>
             </div>
-            <div className="pmb-product-status" id="liquor-product-status">Ready to create a straight liquor tap in Pour My Beer.</div>
+            <div className="pmb-product-status" id="liquor-product-status">Ready to save a straight liquor tap for later Pour My Beer publishing.</div>
           </form>
+
+          <section className="pmb-publish-queue dashboard-owner-only" aria-labelledby="pmb-publish-queue-title">
+            <div className="pmb-publish-queue__header">
+              <div>
+                <p className="eyebrow">Work-network handoff</p>
+                <h2 id="pmb-publish-queue-title">Pour My Beer publishing queue</h2>
+                <p>Prepare products anywhere. Nothing is sent until an owner reviews one item and publishes it while connected to the work network.</p>
+              </div>
+              <button className="ghost-button" id="check-pmb-queue-connection" type="button">Check PMB connection</button>
+            </div>
+            <div className="pmb-queue-connection" id="pmb-queue-connection" data-state="idle" aria-live="polite">
+              Connection not checked. Publishing remains locked until this dashboard reaches Pour My Beer.
+            </div>
+            <div className="pmb-publish-queue__summary" id="pmb-publish-queue-summary"></div>
+            <div className="pmb-publish-queue__list" id="pmb-publish-queue-list"></div>
+          </section>
           </div>
         </section>
 

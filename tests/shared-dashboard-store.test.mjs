@@ -305,6 +305,25 @@ test("replaces multiple cross-slice fields in one atomic revision update", async
   assert.equal(fetchImpl.calls.filter((call) => call.method === "PATCH").length, 1);
 });
 
+test("backfills an empty PMB queue when reading shared state written before the queue existed", async () => {
+  const legacyData = createEmptySharedDashboardData();
+  delete legacyData.products.pmbPublishQueue;
+  const fetchImpl = createSupabaseFetch(makeRow({
+    revision: 2,
+    initialized: true,
+    initialized_at: "2026-07-29T12:00:00.000Z",
+    data: legacyData,
+  }));
+  const store = createSharedDashboardStore({
+    env: makeEnvironment(),
+    fetchImpl,
+  });
+
+  const state = await store.read();
+  assert.deepEqual(state.data.products.pmbPublishQueue, []);
+  assert.equal(state.revision, 2);
+});
+
 test("same-revision concurrent writers cannot silently overwrite one another", async () => {
   const data = createEmptySharedDashboardData();
   const fetchImpl = createSupabaseFetch(makeRow({
@@ -400,6 +419,11 @@ test("employee projection returns operational recipes without live pricing or pr
   data.products.customBeerKegs = [{ id: "lager", kegCost: 135, targetMargin: 82 }];
   data.products.customLiquorTaps = [{ id: "vodka-tap", bottleCost: 25.85 }];
   data.products.comingSoonItems = [{ id: "secret-beer", pricePerOz: 0.42 }];
+  data.products.pmbPublishQueue = [{
+    id: "queued-secret",
+    name: "Private queued beer",
+    payload: { kegCost: 185 },
+  }];
   data.products.tapReplacementOverrides = { "tap-1": { newChargePerOz: 0.42 } };
   data.recipes.customRecipes = [{
     id: "profit-punch",
@@ -493,6 +517,7 @@ test("employee projection returns operational recipes without live pricing or pr
   assert.equal(edits.ingredients[0].oz, 90);
 
   assert.equal(JSON.stringify(projected).includes("secret-beer"), false);
+  assert.equal(JSON.stringify(projected).includes("queued-secret"), false);
   assert.equal(JSON.stringify(projected).includes("25.85"), false);
   assert.equal(JSON.stringify(projected).includes("$41.35"), false);
   assert.equal(data.recipes.customRecipes[0].batchCost, 43.5);

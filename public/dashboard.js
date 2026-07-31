@@ -23,6 +23,14 @@ import {
   buildKegOnDeckOptions,
   resolveKegOnDeckOption,
 } from "./keg-on-deck-options.mjs";
+import {
+  enqueuePmbPublishItem,
+  getPmbPublishQueueCounts,
+  markPmbPublishFailed,
+  markPmbPublished,
+  normalizePmbPublishQueue,
+  removePmbPublishItem,
+} from "./pmb-publish-queue.mjs";
 
 const CSV_PATH = "./data/cocktail-recipes.csv";
 const NEW_COCKTAILS_CSV_PATH = "./data/new-cocktails.csv";
@@ -51,6 +59,7 @@ const KEG_ON_DECK_STORAGE_KEY = "cocktail-dashboard-keg-on-deck";
 const KEG_PRICE_STORAGE_KEY = "cocktail-dashboard-keg-prices";
 const CUSTOM_BEER_KEG_STORAGE_KEY = "cocktail-dashboard-custom-beer-kegs";
 const CUSTOM_LIQUOR_TAP_STORAGE_KEY = "cocktail-dashboard-custom-liquor-taps";
+const PMB_PUBLISH_QUEUE_STORAGE_KEY = "cocktail-dashboard-pmb-publish-queue";
 const COMING_SOON_STORAGE_KEY = "cocktail-dashboard-coming-soon";
 const TAP_REPLACEMENT_STORAGE_KEY = "cocktail-dashboard-tap-replacements";
 const DASHBOARD_STATE_OUTBOX_STORAGE_KEY = "cocktail-dashboard-shared-state-outbox";
@@ -70,6 +79,7 @@ const SHARED_DASHBOARD_FIELD_PATHS = Object.freeze([
   "recipes.editedRecipes",
   "products.customBeerKegs",
   "products.customLiquorTaps",
+  "products.pmbPublishQueue",
   "products.comingSoonItems",
   "products.tapReplacementOverrides",
 ]);
@@ -663,6 +673,10 @@ const liquorProductNotesInput = document.querySelector("#liquor-product-notes");
 const liquorProductSubmitButton = document.querySelector("#liquor-product-submit");
 const liquorProductStatus = document.querySelector("#liquor-product-status");
 const liquorUntappdResults = document.querySelector("#liquor-untappd-results");
+const pmbPublishQueueSummary = document.querySelector("#pmb-publish-queue-summary");
+const pmbPublishQueueList = document.querySelector("#pmb-publish-queue-list");
+const pmbQueueConnection = document.querySelector("#pmb-queue-connection");
+const checkPmbQueueConnectionButton = document.querySelector("#check-pmb-queue-connection");
 const addProductTypeButtons = [...document.querySelectorAll("[data-add-product-type]")];
 const addProductForms = [...document.querySelectorAll("[data-add-product-form]")];
 const cardTemplate = document.querySelector("#recipe-card-template");
@@ -687,6 +701,7 @@ let kegPriceOverrides = loadKegPriceOverrides();
 let chargeOverrides = loadChargeOverrides();
 let customBeerKegs = loadCustomBeerKegs();
 let customLiquorTaps = loadCustomLiquorTaps();
+let pmbPublishQueue = loadPmbPublishQueue();
 let comingSoonItems = loadComingSoonItems();
 let tapReplacementOverrides = loadTapReplacementOverrides();
 let customRecipes = loadCustomRecipes();
@@ -719,6 +734,7 @@ let dashboardSharedState = {
   products: {
     customBeerKegs: [],
     customLiquorTaps: [],
+    pmbPublishQueue: [],
     comingSoonItems: [],
     tapReplacementOverrides: {},
   },
@@ -763,6 +779,9 @@ let parAgentStateSyncTimer = null;
 let activeKegAdjustKey = "";
 let pmbProductSaving = false;
 let liquorProductSaving = false;
+let activePmbQueuePublishId = "";
+let pmbQueueConnectionState = "idle";
+let pmbQueueConnectionMessage = "Connection not checked. Publishing remains locked until this dashboard reaches Pour My Beer.";
 let recipeImageShuffleIndex = 1;
 let pmbProductImageShuffleIndex = 1;
 let lastGeneratedRecipeDescription = "";
@@ -910,6 +929,7 @@ function normalizeDashboardSharedState(state = {}) {
     products: {
       customBeerKegs: Array.isArray(products.customBeerKegs) ? cloneDashboardStateValue(products.customBeerKegs) : [],
       customLiquorTaps: Array.isArray(products.customLiquorTaps) ? cloneDashboardStateValue(products.customLiquorTaps) : [],
+      pmbPublishQueue: normalizePmbPublishQueue(products.pmbPublishQueue),
       comingSoonItems: Array.isArray(products.comingSoonItems)
         ? cloneDashboardStateValue(products.comingSoonItems)
         : Array.isArray(products.comingSoon)
@@ -1044,6 +1064,9 @@ function getSharedDashboardImportSnapshot() {
     products: {
       customBeerKegs: readDashboardLocalStorageValue(CUSTOM_BEER_KEG_STORAGE_KEY, []),
       customLiquorTaps: readDashboardLocalStorageValue(CUSTOM_LIQUOR_TAP_STORAGE_KEY, []),
+      pmbPublishQueue: normalizePmbPublishQueue(
+        readDashboardLocalStorageValue(PMB_PUBLISH_QUEUE_STORAGE_KEY, []),
+      ),
       comingSoonItems: readDashboardLocalStorageValue(COMING_SOON_STORAGE_KEY, []),
       tapReplacementOverrides: readDashboardLocalStorageValue(TAP_REPLACEMENT_STORAGE_KEY, {}),
     },
@@ -1062,6 +1085,7 @@ function getSharedDashboardImportSummary(data = getSharedDashboardImportSnapshot
     editedRecipes: Object.keys(data.recipes.editedRecipes).length,
     beerKegs: data.products.customBeerKegs.length,
     liquorTaps: data.products.customLiquorTaps.length,
+    pmbQueue: data.products.pmbPublishQueue.length,
     comingSoon: data.products.comingSoonItems.length,
     tapReplacements: Object.keys(data.products.tapReplacementOverrides).length,
   };
@@ -1078,7 +1102,7 @@ function getSharedDashboardImportSummary(data = getSharedDashboardImportSnapshot
     text: [
       `Pricing: ${counts.ingredientPrices} ingredient, ${counts.kegPrices} keg, ${counts.chargePrices} charge override${counts.chargePrices === 1 ? "" : "s"}`,
       `Recipes: ${counts.customRecipes} custom, ${counts.editedRecipes} edited, ${counts.inactiveRecipes} inactive`,
-      `Products: ${counts.beerKegs} beer, ${counts.liquorTaps} liquor, ${counts.comingSoon} coming soon, ${counts.tapReplacements} tap replacement${counts.tapReplacements === 1 ? "" : "s"}`,
+      `Products: ${counts.beerKegs} beer, ${counts.liquorTaps} liquor, ${counts.pmbQueue} PMB queue, ${counts.comingSoon} coming soon, ${counts.tapReplacements} tap replacement${counts.tapReplacements === 1 ? "" : "s"}`,
       excludedLegacyDefaults > 0
         ? `Excluded from import: ${excludedLegacyDefaults} bundled or ambiguous legacy price default${excludedLegacyDefaults === 1 ? "" : "s"}`
         : "Excluded from import: no bundled legacy price defaults found",
@@ -1106,6 +1130,7 @@ function getSharedDashboardProductSnapshot() {
   return {
     customBeerKegs: cloneDashboardStateValue(customBeerKegs),
     customLiquorTaps: cloneDashboardStateValue(customLiquorTaps),
+    pmbPublishQueue: cloneDashboardStateValue(pmbPublishQueue),
     comingSoonItems: cloneDashboardStateValue(comingSoonItems),
     tapReplacementOverrides: cloneDashboardStateValue(tapReplacementOverrides),
   };
@@ -1162,6 +1187,7 @@ function isSharedDashboardArrayField(path) {
     "recipes.inactiveRecipeIds",
     "products.customBeerKegs",
     "products.customLiquorTaps",
+    "products.pmbPublishQueue",
     "products.comingSoonItems",
   ].includes(path);
 }
@@ -1230,9 +1256,14 @@ function stageDashboardSharedOutbox(patch, touchedFields, { requiresReview = fal
 
     const existing = dashboardSharedOutbox.entries[path];
     const canonicalBase = getSharedDashboardStateField(dashboardSharedState, path);
+    const base = existing?.base ?? canonicalBase;
+    if (isValidSharedDashboardFieldValue(path, base) && areDashboardStateValuesEqual(desired, base)) {
+      delete dashboardSharedOutbox.entries[path];
+      return;
+    }
     dashboardSharedOutbox.entries[path] = {
       desired: cloneDashboardStateValue(desired),
-      base: cloneDashboardStateValue(existing?.base ?? canonicalBase),
+      base: cloneDashboardStateValue(base),
       baseRevision: existing?.baseRevision ?? dashboardSharedState.revision,
       requiresReview: existing?.requiresReview === true || requiresReview,
       updatedAt: new Date().toISOString(),
@@ -1391,6 +1422,7 @@ function mirrorSharedDashboardState(state) {
       [EDITED_RECIPE_STORAGE_KEY, state.recipes.editedRecipes],
       [CUSTOM_BEER_KEG_STORAGE_KEY, state.products.customBeerKegs],
       [CUSTOM_LIQUOR_TAP_STORAGE_KEY, state.products.customLiquorTaps],
+      [PMB_PUBLISH_QUEUE_STORAGE_KEY, state.products.pmbPublishQueue],
       [COMING_SOON_STORAGE_KEY, state.products.comingSoonItems],
       [TAP_REPLACEMENT_STORAGE_KEY, state.products.tapReplacementOverrides],
     ];
@@ -1449,6 +1481,7 @@ function applySharedDashboardState(rawState) {
   editedRecipes = cloneDashboardStateValue(effectiveState.recipes.editedRecipes);
   customBeerKegs = cloneDashboardStateValue(effectiveState.products.customBeerKegs);
   customLiquorTaps = cloneDashboardStateValue(effectiveState.products.customLiquorTaps);
+  pmbPublishQueue = normalizePmbPublishQueue(effectiveState.products.pmbPublishQueue);
   comingSoonItems = cloneDashboardStateValue(effectiveState.products.comingSoonItems);
   tapReplacementOverrides = cloneDashboardStateValue(effectiveState.products.tapReplacementOverrides);
   mirrorSharedDashboardState(effectiveState);
@@ -1618,6 +1651,7 @@ function getDashboardSharedFieldLabel(path) {
     "recipes.editedRecipes": "recipe edits",
     "products.customBeerKegs": "beer products",
     "products.customLiquorTaps": "liquor products",
+    "products.pmbPublishQueue": "PMB publishing queue",
     "products.comingSoonItems": "coming-soon products",
     "products.tapReplacementOverrides": "tap replacements",
   }[path] || path;
@@ -2006,6 +2040,7 @@ function scheduleSharedDashboardStateSync(...slices) {
       "recipes.editedRecipes",
       "products.customBeerKegs",
       "products.customLiquorTaps",
+      "products.pmbPublishQueue",
       "products.comingSoonItems",
       "products.tapReplacementOverrides",
     ].includes(slice))
@@ -2030,6 +2065,11 @@ function scheduleSharedDashboardStateSync(...slices) {
         setDashboardSharedSyncStatus(
           "offline",
           "This draft could not be backed up in browser storage. Keep this page open and record the change before reloading.",
+        );
+      } else if (!hasDashboardSharedOutbox()) {
+        setDashboardSharedSyncStatus(
+          "setup",
+          "Shared setup is not initialized, and this browser has no unpublished local drafts.",
         );
       } else if (dashboardSharedSyncStatus !== "offline") {
         setDashboardSharedSyncStatus(
@@ -2273,6 +2313,10 @@ function bindEvents() {
     }
     scheduleUntappdProductSearch("liquor");
   });
+  checkPmbQueueConnectionButton?.addEventListener("click", () => {
+    checkPmbQueueConnection();
+  });
+  pmbPublishQueueList?.addEventListener("click", handlePmbPublishQueueAction);
   beerUntappdResults?.addEventListener("click", (event) => selectUntappdSearchResult(event, "beer"));
   liquorUntappdResults?.addEventListener("click", (event) => selectUntappdSearchResult(event, "liquor"));
   shufflePmbProductImageButton?.addEventListener("click", () => {
@@ -2391,6 +2435,7 @@ function render() {
   renderKegLevels();
   renderWeeklyUsage();
   renderOldRecipes();
+  renderPmbPublishQueue();
 }
 
 function renderEmployeeDashboard() {
@@ -7348,100 +7393,63 @@ async function addPmbProduct(event) {
   const targetMargin = getBeerTargetMargin();
   const pricePerOz = getGeneratedBeerChargePerOz(kegCost, targetMargin, kegOz);
   if (!name || kegCost <= 0 || kegOz <= 0 || pricePerOz <= 0 || abvPercent <= 0 || abvPercent > 100) {
-    setPmbProductStatus("Add a beer name, positive keg cost, correct keg size, and a verified ABV from Untappd before sending to PMB.", "error");
+    setPmbProductStatus("Add a beer name, positive keg cost, correct keg size, and a verified ABV from Untappd before saving it to the queue.", "error");
     return;
   }
-
-  if (!clean(pmbProductNotesInput?.value) || !clean(pmbProductImageInput?.value)) {
-    await ensureBeerProductLookup({ force: true });
-  }
-
-  if (!clean(pmbProductNotesInput?.value) || !clean(pmbProductImageInput?.value)) {
-    setPmbProductStatus("I could not find both an internet description and image for that beer yet. Try the full beer name or click Shuffle image after lookup.", "error");
-    return;
-  }
-
-  const localImageUrl = clean(document.querySelector("#pmb-product-image")?.value);
-  const payload = {
-    productKind,
-    name,
-    pricePerOz,
-    servingOz: document.querySelector("#pmb-product-serving")?.value,
-    brewery: document.querySelector("#pmb-product-brewery")?.value,
-    style: document.querySelector("#pmb-product-style")?.value,
-    abvPercent,
-    ibu: document.querySelector("#pmb-product-ibu")?.value,
-    kegOz,
-    kegCost,
-    targetMargin,
-    notes: document.querySelector("#pmb-product-notes")?.value,
-    imageUrl: localImageUrl,
-  };
-
-  if (!confirmDashboardAction(
-    `Create or update “${name}” in Pour My Beer?`,
-    [
-      `Type: Beer keg`,
-      `Charge: ${money(pricePerOz)} / oz`,
-      `Keg cost: ${money(kegCost)}`,
-      `Keg size: ${formatNumber(kegOz)} oz`,
-      `ABV: ${formatNumber(abvPercent)}%`,
-      `Target margin: ${formatNumber(targetMargin)}%`,
-    ],
-    "If an exact-name PMB product already exists, its values may be updated.",
-  )) return;
 
   pmbProductSaving = true;
-  if (pmbProductSubmitButton) pmbProductSubmitButton.textContent = "Sending...";
+  if (pmbProductSubmitButton) pmbProductSubmitButton.textContent = "Saving...";
   if (pmbProductSubmitButton) pmbProductSubmitButton.disabled = true;
-  setPmbProductStatus("Sending product to Pour My Beer...", "loading");
+  setPmbProductStatus("Preparing the beer for the Pour My Beer queue...", "loading");
 
   try {
-    const response = await fetch("/api/pmb-products", {
-      method: "POST",
-      credentials: "same-origin",
-      redirect: "manual",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-    const result = await parseJsonResponse(response);
-
-    if (!response.ok) {
-      const attemptSummary = (result.attempts || [])
-        .map((attempt) => {
-          const responseText = clean(attempt.response);
-          return `${attempt.path}: ${attempt.status || "failed"}${responseText ? ` (${responseText.slice(0, 120)})` : ""}`;
-        })
-        .join(", ");
-      throw new Error(`${result.error || "PMB product add failed."}${attemptSummary ? ` Tried ${attemptSummary}.` : ""}`);
+    if (!clean(pmbProductNotesInput?.value) || !clean(pmbProductImageInput?.value)) {
+      await ensureBeerProductLookup({ force: true });
     }
 
-    if (productKind === "beer") {
-      saveCustomBeerKegFromPmbProduct(payload, result.product);
-      addComingSoonItemFromPmbProduct(payload, result.product);
+    if (!clean(pmbProductNotesInput?.value) || !clean(pmbProductImageInput?.value)) {
+      setPmbProductStatus("I could not find both an internet description and image for that beer yet. Try the full beer name or click Shuffle image after lookup.", "error");
+      return;
     }
 
-    setPmbProductStatus(result.message || `${name} was sent to Pour My Beer.`, "success");
+    const localImageUrl = clean(document.querySelector("#pmb-product-image")?.value);
+    const payload = {
+      productKind,
+      name,
+      pricePerOz,
+      servingOz: document.querySelector("#pmb-product-serving")?.value,
+      brewery: document.querySelector("#pmb-product-brewery")?.value,
+      style: document.querySelector("#pmb-product-style")?.value,
+      abvPercent,
+      ibu: document.querySelector("#pmb-product-ibu")?.value,
+      kegOz,
+      kegCost,
+      targetMargin,
+      notes: document.querySelector("#pmb-product-notes")?.value,
+      imageUrl: localImageUrl,
+    };
+
+    const queued = enqueuePmbPublishItem(pmbPublishQueue, payload);
+    pmbPublishQueue = queued.queue;
+    savePmbPublishQueue();
+
+    setPmbProductStatus(
+      `${name} was ${queued.replaced ? "updated in" : "saved to"} the PMB publishing queue. Nothing was sent to Pour My Beer.`,
+      "success",
+    );
+    cancelUntappdProductSearch("beer");
     pmbProductForm.reset();
     syncPmbProductDefaults();
     clearBeerLookupResult();
     render();
-    runTapPricingSync();
   } catch (error) {
     setPmbProductStatus(
-      getPmbConnectionErrorMessage(
-        error,
-        "Could not send product to Pour My Beer.",
-        { writeAttempted: true },
-      ),
+      clean(error?.message) || "Could not save the beer to the PMB publishing queue.",
       "error",
     );
   } finally {
     pmbProductSaving = false;
-    if (pmbProductSubmitButton) pmbProductSubmitButton.textContent = "Create PMB beer";
+    if (pmbProductSubmitButton) pmbProductSubmitButton.textContent = "Save beer to queue";
     if (pmbProductSubmitButton) pmbProductSubmitButton.disabled = false;
   }
 }
@@ -7468,7 +7476,7 @@ async function addLiquorProduct(event) {
     || abvPercent <= 0
     || abvPercent > 100
   ) {
-    setLiquorProductStatus("Enter a name plus positive charge, pour size, bottle cost, bottle size, and an ABV above 0 and no more than 100 before sending to PMB.", "error");
+    setLiquorProductStatus("Enter a name plus positive charge, pour size, bottle cost, bottle size, and an ABV above 0 and no more than 100 before saving it to the queue.", "error");
     return;
   }
 
@@ -7482,26 +7490,210 @@ async function addLiquorProduct(event) {
     abvPercent,
     ibu: 0,
     kegOz: bottleOz,
+    bottleCost,
+    bottleOz,
     notes,
   };
 
+  liquorProductSaving = true;
+  if (liquorProductSubmitButton) liquorProductSubmitButton.textContent = "Saving...";
+  if (liquorProductSubmitButton) liquorProductSubmitButton.disabled = true;
+  setLiquorProductStatus("Saving the liquor tap to the Pour My Beer queue...", "loading");
+
+  try {
+    const queued = enqueuePmbPublishItem(pmbPublishQueue, payload);
+    pmbPublishQueue = queued.queue;
+    savePmbPublishQueue();
+
+    setLiquorProductStatus(
+      `${name} was ${queued.replaced ? "updated in" : "saved to"} the PMB publishing queue. Nothing was sent to Pour My Beer.`,
+      "success",
+    );
+    cancelUntappdProductSearch("liquor");
+    liquorProductForm.reset();
+    selectedUntappdLiquor = null;
+    render();
+  } catch (error) {
+    setLiquorProductStatus(
+      clean(error?.message) || "Could not save the liquor tap to the PMB publishing queue.",
+      "error",
+    );
+  } finally {
+    liquorProductSaving = false;
+    if (liquorProductSubmitButton) liquorProductSubmitButton.textContent = "Save liquor to queue";
+    if (liquorProductSubmitButton) liquorProductSubmitButton.disabled = false;
+  }
+}
+
+function getPmbQueueStatusLabel(status) {
+  return {
+    ready: "Ready",
+    failed: "Needs retry",
+    published: "Published",
+  }[status] || "Ready";
+}
+
+function getPmbQueueItemMeta(item) {
+  const payload = item.payload || {};
+  const parts = [
+    item.kind === "liquor" ? "Liquor tap" : "Beer keg",
+    toNumber(payload.pricePerOz) ? `${money(payload.pricePerOz)} / oz` : "",
+    toNumber(payload.abvPercent) ? `${formatNumber(payload.abvPercent)}% ABV` : "",
+  ];
+  if (item.kind === "beer") {
+    if (toNumber(payload.kegCost)) parts.push(`${money(payload.kegCost)} keg`);
+    if (toNumber(payload.kegOz)) parts.push(`${formatNumber(payload.kegOz)} oz`);
+  } else {
+    if (toNumber(payload.bottleCost)) parts.push(`${money(payload.bottleCost)} bottle`);
+    if (toNumber(payload.bottleOz)) parts.push(`${formatNumber(payload.bottleOz)} oz bottle`);
+  }
+  return parts.filter(Boolean).join(" · ");
+}
+
+function renderPmbPublishQueue() {
+  if (!pmbPublishQueueList || !pmbPublishQueueSummary || !pmbQueueConnection) return;
+
+  pmbPublishQueue = normalizePmbPublishQueue(pmbPublishQueue);
+  const counts = getPmbPublishQueueCounts(pmbPublishQueue);
+  const pendingCount = counts.ready + counts.failed;
+  pmbPublishQueueSummary.textContent = pendingCount
+    ? `${pendingCount} waiting for PMB review · ${counts.published} published record${counts.published === 1 ? "" : "s"}`
+    : counts.published
+      ? `No products waiting · ${counts.published} published record${counts.published === 1 ? "" : "s"}`
+      : "No products are waiting. Save a beer or liquor tap above to prepare it for the service computer.";
+  pmbQueueConnection.dataset.state = pmbQueueConnectionState;
+  pmbQueueConnection.textContent = pmbQueueConnectionMessage;
+  if (checkPmbQueueConnectionButton) {
+    checkPmbQueueConnectionButton.disabled = pmbQueueConnectionState === "checking";
+    checkPmbQueueConnectionButton.textContent = pmbQueueConnectionState === "checking"
+      ? "Checking..."
+      : "Check PMB connection";
+  }
+
+  const sortedItems = [...pmbPublishQueue].sort((left, right) => {
+    if (left.status === "published" && right.status !== "published") return 1;
+    if (left.status !== "published" && right.status === "published") return -1;
+    return String(right.updatedAt || "").localeCompare(String(left.updatedAt || ""));
+  });
+  if (!sortedItems.length) {
+    pmbPublishQueueList.innerHTML = '<div class="pmb-queue-empty">The publishing queue is empty.</div>';
+    return;
+  }
+
+  pmbPublishQueueList.innerHTML = sortedItems.map((item) => {
+    const isPublishing = activePmbQueuePublishId === item.id;
+    const publishedPlu = toNumber(item.publishedProduct?.plu);
+    const timing = item.status === "published"
+      ? `Published ${formatUpdatedAt(item.publishedAt)}${publishedPlu ? ` · PMB PLU ${publishedPlu}` : ""}`
+      : `Saved ${formatUpdatedAt(item.updatedAt)}${item.attempts ? ` · ${item.attempts} publish attempt${item.attempts === 1 ? "" : "s"}` : ""}`;
+    return `
+      <article class="pmb-queue-item" data-status="${escapeHtml(item.status)}">
+        <div class="pmb-queue-item__details">
+          <div class="pmb-queue-item__title">
+            <strong>${escapeHtml(item.name)}</strong>
+            <span class="pmb-queue-badge">${escapeHtml(getPmbQueueStatusLabel(item.status))}</span>
+          </div>
+          <div class="pmb-queue-item__meta">${escapeHtml(getPmbQueueItemMeta(item))}</div>
+          <div class="pmb-queue-item__meta">${escapeHtml(timing)}</div>
+          ${item.lastError ? `<div class="pmb-queue-item__error">${escapeHtml(item.lastError)}</div>` : ""}
+        </div>
+        <div class="pmb-queue-item__actions">
+          ${item.status !== "published" ? `
+            <button
+              class="primary-button"
+              type="button"
+              data-pmb-queue-action="publish"
+              data-pmb-queue-id="${escapeHtml(item.id)}"
+              ${isPublishing ? "disabled" : ""}
+            >${isPublishing ? "Publishing..." : item.status === "failed" ? "Check & retry" : "Check & publish"}</button>
+          ` : ""}
+          <button
+            class="ghost-button"
+            type="button"
+            data-pmb-queue-action="remove"
+            data-pmb-queue-id="${escapeHtml(item.id)}"
+            ${isPublishing ? "disabled" : ""}
+          >${item.status === "published" ? "Remove history" : "Remove"}</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+async function checkPmbQueueConnection() {
+  if (pmbQueueConnectionState === "checking") return false;
+  pmbQueueConnectionState = "checking";
+  pmbQueueConnectionMessage = "Checking the service-computer connection to Pour My Beer...";
+  renderPmbPublishQueue();
+
+  try {
+    const response = await fetch("/api/pmb-products", {
+      method: "GET",
+      cache: "no-store",
+      credentials: "same-origin",
+      redirect: "manual",
+      headers: { Accept: "application/json" },
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok || result.ok !== true) {
+      throw new Error(result.error || `PMB connection check failed (${response.status}).`);
+    }
+    pmbQueueConnectionState = "connected";
+    pmbQueueConnectionMessage = result.message || "Pour My Beer is reachable from this computer. Queue publishing is available.";
+    renderPmbPublishQueue();
+    return true;
+  } catch (error) {
+    pmbQueueConnectionState = "offline";
+    pmbQueueConnectionMessage = getPmbConnectionErrorMessage(
+      error,
+      "Pour My Beer is not reachable. The queue is unchanged; try again on the work network.",
+    ).replace(
+      "Showing saved dashboard data; no live values were changed.",
+      "The queue is unchanged; no product was published.",
+    );
+    renderPmbPublishQueue();
+    return false;
+  }
+}
+
+function handlePmbPublishQueueAction(event) {
+  const button = event.target.closest("[data-pmb-queue-action]");
+  if (!button) return;
+  const id = clean(button.dataset.pmbQueueId);
+  if (!id) return;
+
+  if (button.dataset.pmbQueueAction === "publish") {
+    publishPmbQueueItem(id);
+  } else if (button.dataset.pmbQueueAction === "remove") {
+    removePmbQueueItemWithConfirmation(id);
+  }
+}
+
+async function publishPmbQueueItem(id) {
+  if (activePmbQueuePublishId) return;
+  const item = pmbPublishQueue.find((entry) => entry.id === id);
+  if (!item || item.status === "published") return;
+
+  const connected = await checkPmbQueueConnection();
+  if (!connected) return;
+
+  const payload = item.payload || {};
   if (!confirmDashboardAction(
-    `Create or update “${name}” in Pour My Beer?`,
+    `Publish “${item.name}” to Pour My Beer now?`,
     [
-      "Type: Straight liquor tap",
-      `Charge: ${money(pricePerOz)} / oz`,
-      `Pour size: ${formatNumber(servingOz)} oz`,
-      `ABV: ${formatNumber(abvPercent)}%`,
-      bottleCost ? `Bottle cost: ${money(bottleCost)}` : "",
-      `Bottle size: ${formatNumber(bottleOz)} oz`,
+      item.kind === "liquor" ? "Type: Straight liquor tap" : "Type: Beer keg",
+      `Charge: ${money(payload.pricePerOz)} / oz`,
+      `Serving size: ${formatNumber(payload.servingOz)} oz`,
+      `ABV: ${formatNumber(payload.abvPercent)}%`,
+      item.kind === "beer" && toNumber(payload.kegCost) ? `Keg cost: ${money(payload.kegCost)}` : "",
+      item.kind === "liquor" && toNumber(payload.bottleCost) ? `Bottle cost: ${money(payload.bottleCost)}` : "",
     ],
-    "If an exact-name PMB product already exists, its values may be updated.",
+    "This sends immediately. If an exact-name PMB product already exists, its values may be updated.",
   )) return;
 
-  liquorProductSaving = true;
-  if (liquorProductSubmitButton) liquorProductSubmitButton.textContent = "Sending...";
-  if (liquorProductSubmitButton) liquorProductSubmitButton.disabled = true;
-  setLiquorProductStatus("Sending liquor tap to Pour My Beer...", "loading");
+  activePmbQueuePublishId = id;
+  pmbQueueConnectionMessage = `Publishing ${item.name} to Pour My Beer...`;
+  renderPmbPublishQueue();
 
   try {
     const response = await fetch("/api/pmb-products", {
@@ -7515,48 +7707,76 @@ async function addLiquorProduct(event) {
       body: JSON.stringify(payload),
     });
     const result = await parseJsonResponse(response);
-
-    if (!response.ok) {
+    if (!response.ok || result.ok !== true) {
       const attemptSummary = (result.attempts || [])
         .map((attempt) => {
           const responseText = clean(attempt.response);
           return `${attempt.path}: ${attempt.status || "failed"}${responseText ? ` (${responseText.slice(0, 120)})` : ""}`;
         })
         .join(", ");
-      throw new Error(`${result.error || "PMB liquor tap add failed."}${attemptSummary ? ` Tried ${attemptSummary}.` : ""}`);
+      throw new Error(`${result.error || "PMB product publish failed."}${attemptSummary ? ` Tried ${attemptSummary}.` : ""}`);
     }
 
-    saveCustomLiquorTapFromPmbProduct({
-      ...payload,
-      bottleCost,
-      bottleOz,
-    }, result.product);
-    if (bottleCost && bottleOz) {
-      saveIngredientOverride(slugify(name), String(bottleOz), String(bottleCost));
+    if (item.kind === "beer") {
+      saveCustomBeerKegFromPmbProduct(payload, result.product);
+      addComingSoonItemFromPmbProduct(payload, result.product);
+    } else {
+      saveCustomLiquorTapFromPmbProduct(payload, result.product);
+      if (toNumber(payload.bottleCost) && toNumber(payload.bottleOz)) {
+        saveIngredientOverride(
+          slugify(item.name),
+          String(payload.bottleOz),
+          String(payload.bottleCost),
+        );
+      }
     }
 
-    setLiquorProductStatus(result.message || `${name} was sent to Pour My Beer.`, "success");
-    liquorProductForm.reset();
-    selectedUntappdLiquor = null;
-    liquorUntappdItems = [];
-    hideUntappdSearchResults("liquor");
+    pmbPublishQueue = markPmbPublished(pmbPublishQueue, id, result.product);
+    savePmbPublishQueue();
+    pmbQueueConnectionState = "connected";
+    pmbQueueConnectionMessage = result.message || `${item.name} was published to Pour My Beer.`;
     ingredients = buildIngredientCatalog(getActiveRecipes());
     render();
     runTapPricingSync();
   } catch (error) {
-    setLiquorProductStatus(
-      getPmbConnectionErrorMessage(
-        error,
-        "Could not send liquor tap to Pour My Beer.",
-        { writeAttempted: true },
-      ),
-      "error",
+    const message = getPmbConnectionErrorMessage(
+      error,
+      "Could not publish the queued PMB product.",
+      { writeAttempted: true },
     );
+    pmbPublishQueue = markPmbPublishFailed(pmbPublishQueue, id, message);
+    savePmbPublishQueue();
+    if (/work network|could not confirm/i.test(message)) {
+      pmbQueueConnectionState = "offline";
+    }
+    pmbQueueConnectionMessage = message;
+    renderPmbPublishQueue();
   } finally {
-    liquorProductSaving = false;
-    if (liquorProductSubmitButton) liquorProductSubmitButton.textContent = "Create PMB liquor";
-    if (liquorProductSubmitButton) liquorProductSubmitButton.disabled = false;
+    activePmbQueuePublishId = "";
+    renderPmbPublishQueue();
   }
+}
+
+function removePmbQueueItemWithConfirmation(id) {
+  if (activePmbQueuePublishId === id) return;
+  const item = pmbPublishQueue.find((entry) => entry.id === id);
+  if (!item) return;
+  const prompt = item.status === "published"
+    ? `Remove the published queue history for “${item.name}”?`
+    : `Remove “${item.name}” from the PMB publishing queue?`;
+  const warning = item.status === "published"
+    ? "This only removes the dashboard history. It does not delete anything from Pour My Beer."
+    : "The product has not been sent to Pour My Beer.";
+  if (!confirmDashboardAction(prompt, [], warning)) return;
+
+  pmbPublishQueue = removePmbPublishItem(pmbPublishQueue, id);
+  savePmbPublishQueue();
+  if (item.kind === "beer") {
+    setPmbProductStatus(`${item.name} was removed from the PMB publishing queue.`, "success");
+  } else {
+    setLiquorProductStatus(`${item.name} was removed from the PMB publishing queue.`, "success");
+  }
+  renderPmbPublishQueue();
 }
 
 function saveCustomBeerKegFromPmbProduct(payload, product = null) {
@@ -7904,6 +8124,21 @@ function hideUntappdSearchResults(kind = "") {
     if (results) results.hidden = true;
     input?.setAttribute("aria-expanded", "false");
   });
+}
+
+function cancelUntappdProductSearch(kind) {
+  if (kind === "liquor") {
+    clearTimeout(liquorUntappdSearchTimer);
+    liquorUntappdSearchTimer = null;
+    liquorUntappdRequestId += 1;
+    liquorUntappdItems = [];
+  } else {
+    clearTimeout(beerUntappdSearchTimer);
+    beerUntappdSearchTimer = null;
+    beerUntappdRequestId += 1;
+    beerUntappdItems = [];
+  }
+  hideUntappdSearchResults(kind);
 }
 
 function selectUntappdSearchResult(event, kind) {
@@ -10524,6 +10759,22 @@ function loadCustomLiquorTaps() {
 function saveCustomLiquorTaps() {
   writeDashboardLocalStorageValue(CUSTOM_LIQUOR_TAP_STORAGE_KEY, customLiquorTaps);
   scheduleSharedDashboardStateSync("products.customLiquorTaps");
+}
+
+function loadPmbPublishQueue() {
+  try {
+    return normalizePmbPublishQueue(
+      JSON.parse(localStorage.getItem(PMB_PUBLISH_QUEUE_STORAGE_KEY) || "[]"),
+    );
+  } catch {
+    return [];
+  }
+}
+
+function savePmbPublishQueue() {
+  pmbPublishQueue = normalizePmbPublishQueue(pmbPublishQueue);
+  writeDashboardLocalStorageValue(PMB_PUBLISH_QUEUE_STORAGE_KEY, pmbPublishQueue);
+  scheduleSharedDashboardStateSync("products.pmbPublishQueue");
 }
 
 function loadComingSoonItems() {
