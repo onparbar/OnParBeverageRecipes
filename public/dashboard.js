@@ -755,6 +755,7 @@ let dashboardSharedState = {
 };
 let dashboardSharedSyncStatus = "loading";
 let dashboardSharedSyncMessage = "Checking the shared dashboard configuration...";
+let dashboardSharedProvisioned = false;
 let dashboardSharedMutationGeneration = 0;
 let dashboardSharedPatchScheduled = false;
 let dashboardSharedPatchQueue = Promise.resolve();
@@ -1525,7 +1526,7 @@ function getServiceComputerReadiness() {
     label: initialized ? "Ready" : provisioned ? "Import at work" : "Unavailable",
   });
   return [
-    state("Dashboard setup", true, dashboardSharedState.initialized),
+    state("Dashboard setup", dashboardSharedProvisioned, dashboardSharedState.initialized),
     state("Inventory", inventorySharedProvisioned, inventorySharedInitialized),
     state("Weekly Usage", weeklyUsageSharedProvisioned, weeklyUsageSharedInitialized),
     state("Keg Levels", Boolean(parAgentState), Boolean(parAgentState?.initialized)),
@@ -1915,6 +1916,7 @@ async function loadSharedDashboardState() {
   renderDashboardSharedStateStatus();
   try {
     const result = await requestDashboardSharedState();
+    dashboardSharedProvisioned = true;
     dashboardSharedState = result.state;
     if (!result.state.initialized) {
       if (isEmployeeDashboard) applyEmployeeSharedRecipeCache();
@@ -1965,6 +1967,7 @@ async function loadSharedDashboardState() {
         : `Shared configuration is current${result.state.updatedAt ? ` as of ${formatUpdatedAt(result.state.updatedAt)}` : ""}.`,
     );
   } catch (error) {
+    dashboardSharedProvisioned = false;
     if (isEmployeeDashboard) {
       applyEmployeeSharedRecipeCache();
       setDashboardSharedSyncStatus(
@@ -6044,9 +6047,18 @@ async function syncParAgentState({ silent = false } = {}) {
       }),
     });
     const result = await parseJsonResponse(response);
-    if (!response.ok) throw new Error(result?.error || "Could not save par agent state.");
+    if (!response.ok) {
+      const error = new Error(result?.error || "Could not save par agent state.");
+      error.code = result?.code;
+      throw error;
+    }
     applyParAgentState(result);
   } catch (error) {
+    if (error.code === "KEG_STATE_REVISION_CONFLICT") {
+      parAgentMessage = "Another manager changed Keg Levels first. This device kept its local choices; reload before deciding what to publish.";
+      renderKegLevels();
+      return;
+    }
     if (!silent) {
       parAgentMessage = error.message || "Could not save par agent state.";
       renderKegLevels();
@@ -6083,12 +6095,18 @@ async function runKegParAgent() {
       }),
     });
     const result = await parseJsonResponse(response);
-    if (!response.ok) throw new Error(result?.error || "Could not run par agent.");
+    if (!response.ok) {
+      const error = new Error(result?.error || "Could not run par agent.");
+      error.code = result?.code;
+      throw error;
+    }
 
     applyParAgentState(result);
     parAgentMessage = getParAgentStatusMessage();
   } catch (error) {
-    parAgentMessage = error.message || "Could not run par agent.";
+    parAgentMessage = error.code === "KEG_STATE_REVISION_CONFLICT"
+      ? "Another manager changed Keg Levels first. Reload before running the agent again."
+      : error.message || "Could not run par agent.";
   } finally {
     parAgentRunning = false;
     renderKegLevels();
@@ -6126,11 +6144,17 @@ async function initializeSharedKegLevelsFromServiceComputer() {
       body: JSON.stringify({ action: "initialize", expectedRevision: 0, onHandOverrides: kegOnHandOverrides, parOverrides: kegParOverrides, onDeckOverrides: kegOnDeckOverrides, settings: getParAgentSettings() }),
     });
     const result = await parseJsonResponse(response);
-    if (!response.ok) throw new Error(result?.error || "Could not import Keg Levels.");
+    if (!response.ok) {
+      const error = new Error(result?.error || "Could not import Keg Levels.");
+      error.code = result?.code;
+      throw error;
+    }
     applyParAgentState(result);
     parAgentMessage = "Service-computer Keg Levels imported. Counts, pars, on-deck choices, and recommendations are now shared.";
   } catch (error) {
-    parAgentMessage = `Keg Levels import failed. Nothing was published from this browser: ${error.message}`;
+    parAgentMessage = error.code === "KEG_STATE_ALREADY_INITIALIZED"
+      ? "Shared Keg Levels was already initialized in another session. Reload to use the official version."
+      : `Keg Levels import failed. Nothing was published from this browser: ${error.message}`;
   }
   renderKegLevels();
 }

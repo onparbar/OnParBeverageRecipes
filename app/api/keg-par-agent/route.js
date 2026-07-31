@@ -4,6 +4,13 @@ import { DASHBOARD_SESSION_COOKIE, getDashboardSessionRole } from "../../../lib/
 
 export const runtime = "nodejs";
 
+function jsonResponse(body, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
+}
+
 async function getBody(request) {
   try {
     return await request.json();
@@ -23,16 +30,22 @@ async function requireOwner(request) {
   return role;
 }
 
+function errorResponse(error) {
+  const details = error?.details && typeof error.details === "object" ? error.details : {};
+  return jsonResponse({
+    error: error?.message || "Could not update par agent state.",
+    code: error?.code || "KEG_PAR_AGENT_ERROR",
+    ...details,
+  }, error?.status || 500);
+}
+
 export async function GET(request) {
   try {
     await requireOwner(request);
     const state = await readParAgentState();
-    return NextResponse.json(state);
+    return jsonResponse(state);
   } catch (error) {
-    return NextResponse.json(
-      { error: error.message || "Could not load par agent state." },
-      { status: 500 },
-    );
+    return errorResponse(error);
   }
 }
 
@@ -55,7 +68,7 @@ export async function POST(request) {
         expectedRevision: body.expectedRevision,
         role,
       });
-      return NextResponse.json(state);
+      return jsonResponse(state);
     }
 
     const state = await syncParAgentState(patch, {
@@ -63,11 +76,8 @@ export async function POST(request) {
       role,
       initialize: action === "initialize",
     });
-    return NextResponse.json(state);
+    return jsonResponse(state);
   } catch (error) {
-    return NextResponse.json(
-      { error: error.message || "Could not update par agent state." },
-      { status: 500 },
-    );
+    return errorResponse(error);
   }
 }
