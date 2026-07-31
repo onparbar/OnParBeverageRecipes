@@ -109,6 +109,15 @@ the Supabase SQL editor. The dashboard will then show a manager-only import
 button; import from the service computer unless another browser definitely has
 the complete saved setup.
 
+Before enabling shared counts, pars, custom inventory items, and Monday
+snapshots, also apply
+`supabase/migrations/20260731000000_create_inventory_shared_state.sql`. This
+creates only an empty shared container. The dashboard will not automatically
+copy a browser's inventory into it. Perform the one-time inventory import from
+the service computer, using the manager-only `Import from service computer`
+button in Inventory. Until then, inventory edits remain saved only in the
+browser where they were made.
+
 ### 10. Local network note
 
 For Pour My Beer / keg level work:
@@ -117,6 +126,7 @@ For Pour My Beer / keg level work:
 - the PMB local IP must still be reachable
 - live PMB calls begin only when you open a PMB-backed section or press its refresh button
 - shared prices, recipes, and product setup use Supabase and remain available away from the work network when internet access is available
+- after its one-time service-computer import, shared inventory also uses Supabase; saving a Monday snapshot still requires complete live PMB tap coverage
 - the service computer being offline does not block Supabase-backed dashboard work, but it does block live Pour My Beer reads and writes
 
 ### 11. Provi security

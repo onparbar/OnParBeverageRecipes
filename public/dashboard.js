@@ -84,6 +84,7 @@ const SHARED_DASHBOARD_FIELD_PATHS = Object.freeze([
   "products.tapReplacementOverrides",
 ]);
 const SHARED_DASHBOARD_IMPORT_PHRASE = "IMPORT FROM SERVICE COMPUTER";
+const INVENTORY_SHARED_IMPORT_PHRASE = "IMPORT INVENTORY FROM SERVICE COMPUTER";
 const STANDARD_BEER_KEG_OZ = 15.5 * 128;
 const STANDARD_COCKTAIL_KEG_OZ = 12 * 128;
 const DEFAULT_BEER_TARGET_MARGIN = 82;
@@ -716,6 +717,9 @@ let inventorySourceRows = [];
 let inventorySharedUpdatedAt = "";
 let inventorySharedMessage = "Loading shared inventory...";
 let inventorySharedSaving = false;
+let inventorySharedInitialized = false;
+let inventorySharedProvisioned = false;
+let inventorySharedRevision = 0;
 let dashboardSharedState = {
   version: 1,
   revision: 0,
@@ -6252,36 +6256,30 @@ async function requestSharedInventory(body = null) {
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(result.error || `Shared inventory request failed (${response.status}).`);
+    const error = new Error(result.error || `Shared inventory request failed (${response.status}).`);
+    error.code = result.code || "INVENTORY_STATE_ERROR";
+    error.status = response.status;
+    error.currentRevision = result.currentRevision;
+    throw error;
   }
   return result;
 }
 
 async function loadSharedInventoryState() {
   try {
-    let state = await requestSharedInventory();
-    const hasLocalInventoryState = Object.keys(inventoryOnHandOverrides).length
-      || Object.keys(inventoryParOverrides).length
-      || customInventoryItems.length
-      || inventoryItemOrder.length
-      || inventoryHistory.length;
-    if (!state.initialized && hasLocalInventoryState) {
-      state = await requestSharedInventory({
-        action: "hydrate",
-        onHandOverrides: inventoryOnHandOverrides,
-        parOverrides: inventoryParOverrides,
-        customItems: customInventoryItems,
-        itemOrder: inventoryItemOrder,
-        snapshots: getMigratedInventoryHistory(),
-      });
-    }
+    const state = await requestSharedInventory();
+    inventorySharedProvisioned = true;
+    inventorySharedInitialized = Boolean(state.initialized);
+    inventorySharedRevision = Number(state.revision) || 0;
     if (state.initialized) {
       applySharedInventoryState(state);
       inventorySharedMessage = "Shared inventory is available on all signed-in manager devices.";
     } else {
-      inventorySharedMessage = "Shared inventory is ready and will start with the first manager edit or Monday snapshot.";
+      inventorySharedMessage = "Setup needed: import inventory only from the service computer. Until then, changes stay on this device.";
     }
   } catch (error) {
+    inventorySharedProvisioned = false;
+    inventorySharedInitialized = false;
     inventorySharedMessage = `Shared inventory unavailable. Changes are saved on this device only: ${error.message}`;
   }
 }
@@ -6318,6 +6316,9 @@ function getMigratedInventoryHistory() {
 }
 
 function applySharedInventoryState(state, { rebuild = false } = {}) {
+  inventorySharedProvisioned = true;
+  inventorySharedInitialized = Boolean(state.initialized);
+  inventorySharedRevision = Number(state.revision) || 0;
   inventoryOnHandOverrides = { ...(state.current?.onHandOverrides || {}) };
   inventoryParOverrides = { ...(state.current?.parOverrides || {}) };
   customInventoryItems = Array.isArray(state.current?.customItems) ? state.current.customItems : [];
@@ -6336,6 +6337,61 @@ function applySharedInventoryState(state, { rebuild = false } = {}) {
   }
 }
 
+function getInventorySharedImportSnapshot() {
+  return {
+    onHandOverrides: { ...inventoryOnHandOverrides },
+    parOverrides: { ...inventoryParOverrides },
+    customItems: [...customInventoryItems],
+    itemOrder: [...inventoryItemOrder],
+    snapshots: getMigratedInventoryHistory(),
+  };
+}
+
+async function initializeSharedInventoryFromServiceComputer() {
+  if (!inventorySharedProvisioned || inventorySharedInitialized || inventorySharedSaving) return;
+  const data = getInventorySharedImportSnapshot();
+  const savedCountCount = Object.keys(data.onHandOverrides).length;
+  const parCount = Object.keys(data.parOverrides).length;
+
+  if (!confirmDashboardAction(
+    "Make this browser's saved inventory the official shared inventory?",
+    [
+      "Source: saved inventory data in this browser (not a live read from the service computer).",
+      `${savedCountCount} saved count${savedCountCount === 1 ? "" : "s"}, ${parCount} par override${parCount === 1 ? "" : "s"}, ${data.customItems.length} custom item${data.customItems.length === 1 ? "" : "s"}, and ${data.snapshots.length} Monday snapshot${data.snapshots.length === 1 ? "" : "s"}.`,
+      "Only continue while using the service computer with its complete saved inventory.",
+    ],
+    "If you are at home or unsure, cancel and wait until you are back at the service computer.",
+  )) return;
+
+  const phrase = window.prompt(
+    `Type ${INVENTORY_SHARED_IMPORT_PHRASE} to confirm that this is the service computer and its saved inventory is complete.`,
+  );
+  if (clean(phrase) !== INVENTORY_SHARED_IMPORT_PHRASE) {
+    inventorySharedMessage = "Inventory import canceled. Shared inventory remains uninitialized.";
+    renderInventoryPanels();
+    return;
+  }
+
+  setInventorySharedStatus("Importing the service computer's saved inventory...", true);
+  try {
+    const state = await requestSharedInventory({
+      action: "initialize",
+      expectedRevision: 0,
+      data,
+    });
+    applySharedInventoryState(state, { rebuild: true });
+    inventorySharedMessage = "Service-computer inventory imported. Counts, pars, custom items, and Monday snapshots are now shared.";
+    inventorySharedSaving = false;
+  } catch (error) {
+    inventorySharedMessage = error.code === "INVENTORY_STATE_ALREADY_INITIALIZED"
+      ? "Shared inventory was already initialized in another session. Reload to use the official version."
+      : `Inventory import failed. Nothing was published from this browser: ${error.message}`;
+    inventorySharedSaving = false;
+  } finally {
+    renderInventoryPanels();
+  }
+}
+
 function setInventorySharedStatus(message, saving = false) {
   inventorySharedMessage = message;
   inventorySharedSaving = saving;
@@ -6348,12 +6404,21 @@ async function runSharedInventoryAction(body, {
   rebuild = false,
   flushFields = true,
 } = {}) {
+  if (!inventorySharedInitialized) {
+    inventorySharedMessage = "Shared inventory is not initialized. This change remains saved on this device only; import later from the service computer.";
+    inventorySharedSaving = false;
+    renderInventoryPanels();
+    return null;
+  }
   if (flushFields) await flushPendingInventoryFieldSyncs();
   setInventorySharedStatus("Saving shared inventory...", true);
   try {
     const state = await requestSharedInventory(body);
     if (applyState) applySharedInventoryState(state, { rebuild });
-    else inventorySharedUpdatedAt = state.current?.updatedAt || inventorySharedUpdatedAt;
+    else {
+      inventorySharedRevision = Number(state.revision) || inventorySharedRevision;
+      inventorySharedUpdatedAt = state.current?.updatedAt || inventorySharedUpdatedAt;
+    }
     inventorySharedMessage = successMessage;
     inventorySharedSaving = false;
     return state;
@@ -6367,6 +6432,11 @@ async function runSharedInventoryAction(body, {
 }
 
 function scheduleInventoryFieldSync(id, field, value) {
+  if (!inventorySharedInitialized) {
+    inventorySharedMessage = "Shared inventory is not initialized. Changes remain saved on this device only.";
+    inventorySharedSaving = false;
+    return;
+  }
   const key = `${id}:${field}`;
   clearTimeout(inventoryFieldSyncTimers.get(key)?.timer);
   inventorySharedMessage = "Saving shared inventory...";
@@ -6413,8 +6483,9 @@ function renderInventorySummary(visibleItems, reorderItems) {
     <div class="summary-line"><span>Total units to order</span><strong>${formatNumber(reorderUnits)}</strong></div>
     <div class="summary-line"><span>Estimated reorder cost</span><strong>${money(reorderCost)}</strong></div>
     <div class="sync-panel inventory-actions-panel">
-      <button class="primary-button" id="save-inventory-snapshot" type="button"${inventorySharedSaving ? " disabled" : ""}>${inventorySharedSaving ? "Saving..." : "Save Monday Snapshot"}</button>
-      <p class="sync-copy">Counts, pars, custom items, and Monday snapshots are shared across signed-in manager devices.</p>
+      <button class="primary-button" id="save-inventory-snapshot" type="button"${inventorySharedSaving || !inventorySharedInitialized ? " disabled" : ""}>${inventorySharedSaving ? "Saving..." : inventorySharedInitialized ? "Save Monday Snapshot" : "Shared setup required"}</button>
+      ${inventorySharedProvisioned && !inventorySharedInitialized ? '<button class="ghost-button" id="initialize-shared-inventory" type="button">Import from service computer</button>' : ""}
+      <p class="sync-copy">${inventorySharedInitialized ? "Counts, pars, custom items, and Monday snapshots are shared across signed-in manager devices." : "Inventory stays on this device until the service computer performs the one-time shared import."}</p>
       <p class="sync-status">${escapeHtml(inventorySharedMessage)}${inventorySharedUpdatedAt ? ` Last synced ${escapeHtml(formatUpdatedAt(inventorySharedUpdatedAt))}.` : ""}</p>
       <p class="sync-status">${latestSnapshot ? `Latest Monday snapshot: ${escapeHtml(formatInventorySnapshotLabel(getInventorySnapshotDate(latestSnapshot)))}` : "No Monday snapshots saved yet."}</p>
     </div>
@@ -6425,6 +6496,10 @@ function renderInventorySummary(visibleItems, reorderItems) {
 
 function bindInventorySummaryEvents() {
   document.querySelector("#save-inventory-snapshot")?.addEventListener("click", saveInventorySnapshot);
+  document.querySelector("#initialize-shared-inventory")?.addEventListener(
+    "click",
+    initializeSharedInventoryFromServiceComputer,
+  );
 }
 
 function renderInventoryStockTable(groupedItems) {
@@ -7045,6 +7120,10 @@ function toggleInventoryParEdit(id) {
 }
 
 async function saveInventorySnapshot() {
+  if (!inventorySharedInitialized) {
+    setInventorySharedStatus("Monday snapshots cannot be shared until the service computer completes the one-time inventory import.");
+    return;
+  }
   if (kegSyncLoading) {
     setInventorySharedStatus("PMB keg levels are still loading. Save the Monday snapshot after the refresh finishes.");
     return;
