@@ -3885,6 +3885,29 @@ function getPmbConnectionErrorMessage(error, fallback, { writeAttempted = false 
   return message || fallback;
 }
 
+async function requirePmbWorkNetworkForServiceImport() {
+  let response;
+  let result = {};
+  try {
+    response = await fetch("/api/pmb-products", {
+      method: "GET",
+      cache: "no-store",
+      credentials: "same-origin",
+      redirect: "manual",
+    });
+    result = await parseJsonResponse(response);
+  } catch (error) {
+    throw new Error(getPmbConnectionErrorMessage(error, "Pour My Beer could not be reached."));
+  }
+  if (!response.ok || !result?.ok) {
+    throw new Error(getPmbConnectionErrorMessage(
+      result?.error || `PMB connection check failed (${response.status}).`,
+      "Pour My Beer could not be reached.",
+    ));
+  }
+  return result;
+}
+
 async function requestSharedWeeklyUsage(body = null) {
   const response = await fetch("/api/weekly-usage-state", {
     method: body ? "POST" : "GET",
@@ -4020,9 +4043,12 @@ async function initializeSharedWeeklyUsageFromServiceComputer() {
   }
 
   weeklyUsageSharedSaving = true;
-  weeklyUsageSharedMessage = "Importing the service computer's Weekly Usage reports...";
+  weeklyUsageSharedMessage = "Checking the service-computer connection to Pour My Beer...";
   renderWeeklyUsage();
   try {
+    await requirePmbWorkNetworkForServiceImport();
+    weeklyUsageSharedMessage = "Importing the service computer's Weekly Usage reports...";
+    renderWeeklyUsage();
     const state = await requestSharedWeeklyUsage({
       action: "initialize",
       expectedRevision: 0,
@@ -6087,9 +6113,12 @@ async function initializeSharedKegLevelsFromServiceComputer() {
     renderKegLevels();
     return;
   }
-  parAgentMessage = "Importing the service computer's Keg Levels choices...";
+  parAgentMessage = "Checking the service-computer connection to Pour My Beer...";
   renderKegLevels();
   try {
+    await requirePmbWorkNetworkForServiceImport();
+    parAgentMessage = "Importing the service computer's Keg Levels choices...";
+    renderKegLevels();
     const response = await fetch("/api/keg-par-agent", {
       method: "POST",
       credentials: "same-origin",
@@ -6639,8 +6668,10 @@ async function initializeSharedInventoryFromServiceComputer() {
     return;
   }
 
-  setInventorySharedStatus("Importing the service computer's saved inventory...", true);
+  setInventorySharedStatus("Checking the service-computer connection to Pour My Beer...", true);
   try {
+    await requirePmbWorkNetworkForServiceImport();
+    setInventorySharedStatus("Importing the service computer's saved inventory...", true);
     const state = await requestSharedInventory({
       action: "initialize",
       expectedRevision: 0,
