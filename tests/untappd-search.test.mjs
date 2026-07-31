@@ -4,6 +4,7 @@ import {
   buildUntappdSearchResults,
   isUntappdItemKind,
   normalizeUntappdItem,
+  normalizeUntappdDescription,
 } from "../lib/untappd-search.mjs";
 
 test("normalizes Untappd beer metadata for the Add Beer form", () => {
@@ -26,6 +27,49 @@ test("normalizes Untappd beer metadata for the Add Beer form", () => {
   assert.equal(item.imageUrl, "https://beer.untappd.com/labels/2799860?size=hd");
   assert.equal(isUntappdItemKind(item, "beer"), true);
   assert.equal(isUntappdItemKind(item, "liquor"), false);
+});
+
+test("repairs malformed escaped quotation marks in Untappd descriptions", () => {
+  const item = normalizeUntappdItem({
+    untappd_id: 3811,
+    name: "Miller Lite",
+    type: "beer",
+    brewery: "Miller Brewing Company",
+    description: String.raw`Consumers choose it because:\r\n\Miller Lite is the better beer choice.\" What's our proof?`,
+  });
+
+  assert.equal(
+    item.description,
+    'Consumers choose it because: "Miller Lite is the better beer choice." What\'s our proof?',
+  );
+});
+
+test("description cleanup preserves intentional punctuation and unrelated backslashes", () => {
+  const cleanPunctuation = "Brewer's “No. 1” lager — crisp & clean.";
+  const pathLikeText = String.raw`Stored at C:\Batch\42 with a \u2019 marker.`;
+
+  assert.equal(normalizeUntappdDescription(cleanPunctuation), cleanPunctuation);
+  assert.equal(normalizeUntappdDescription(pathLikeText), pathLikeText);
+  assert.equal(
+    normalizeUntappdDescription("First line\r\nSecond line"),
+    "First line Second line",
+  );
+});
+
+test("description cleanup is idempotent and applies to custom and carried descriptions", () => {
+  const escaped = String.raw`A carried spirit.\r\n\"Serve chilled.\"`;
+  const normalized = normalizeUntappdDescription(escaped);
+  assert.equal(normalized, 'A carried spirit. "Serve chilled."');
+  assert.equal(normalizeUntappdDescription(normalized), normalized);
+
+  const item = normalizeUntappdItem({
+    id: 9,
+    name: "House Spirit",
+    type: "spirit",
+    description: "Fallback description",
+    custom_description: escaped,
+  }, { carried: true });
+  assert.equal(item.description, normalized);
 });
 
 test("normalizes carried Untappd spirits for the Add Liquor form", () => {
@@ -114,4 +158,69 @@ test("carried records rank ahead of global beer matches and duplicate menu copie
   assert.match(results[0].menuName, /Main/);
   assert.match(results[0].menuName, /Karaoke/);
   assert.equal(results.filter((item) => item.untappdId === 2799860).length, 1);
+});
+
+test("visually identical beers with different Untappd IDs collapse to the richer record", () => {
+  const results = buildUntappdSearchResults({
+    query: "Miller Lite",
+    kind: "beer",
+    globalItems: [
+      {
+        untappd_id: 3811,
+        name: "Miller Lite",
+        type: "beer",
+        brewery: "Miller Brewing Company",
+        description: "The original light lager.",
+        label_image_hd: "https://example.com/miller-lite.png",
+        abv: "4.2",
+      },
+      {
+        untappd_id: 6633200,
+        name: "Miller Lite",
+        type: "beer",
+        brewery: "Miller Brewing Company",
+        abv: "4.2",
+      },
+    ],
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].untappdId, 3811);
+  assert.equal(results[0].description, "The original light lager.");
+  assert.equal(results[0].imageUrl, "https://example.com/miller-lite.png");
+});
+
+test("an ID-less duplicate merges while identical beer names from different breweries stay separate", () => {
+  const results = buildUntappdSearchResults({
+    query: "House Lager",
+    kind: "beer",
+    globalItems: [
+      {
+        untappd_id: 100,
+        name: "House Lager",
+        type: "beer",
+        brewery: "Brewery One",
+        description: "Crisp and clean.",
+      },
+      {
+        name: "House Lager",
+        type: "beer",
+        brewery: "Brewery One",
+        label_image_hd: "https://example.com/house-lager.png",
+      },
+      {
+        untappd_id: 200,
+        name: "House Lager",
+        type: "beer",
+        brewery: "Brewery Two",
+      },
+    ],
+  });
+
+  assert.equal(results.length, 2);
+  const breweryOne = results.find((item) => item.producer === "Brewery One");
+  assert.equal(breweryOne.untappdId, 100);
+  assert.equal(breweryOne.description, "Crisp and clean.");
+  assert.equal(breweryOne.imageUrl, "https://example.com/house-lager.png");
+  assert.ok(results.some((item) => item.producer === "Brewery Two"));
 });
