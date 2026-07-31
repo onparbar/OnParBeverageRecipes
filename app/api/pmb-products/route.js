@@ -458,10 +458,21 @@ function buildProduct(input, plu) {
   const pricePerOz = toNumber(input.pricePerOz);
   const servingOz = toNumber(input.servingOz) || (isBeer ? 16 : isLiquor ? 1.5 : 5.8);
   const abvPercent = toNumber(input.abvPercent);
-  const ibu = input.ibu === "" || input.ibu == null ? 0 : Math.max(0, Math.round(toNumber(input.ibu)));
+  const ibu = input.ibu === "" || input.ibu == null ? 0 : Math.round(toNumber(input.ibu));
 
   if (!name) throw new Error("Product name is required.");
-  if (!pricePerOz) throw new Error("Charge per oz is required.");
+  if (pricePerOz <= 0 || pricePerOz > 100) {
+    throw new Error("Charge per oz must be greater than $0 and no more than $100.");
+  }
+  if (servingOz <= 0 || servingOz > 128) {
+    throw new Error("Serving size must be greater than 0 and no more than 128 oz.");
+  }
+  if ((isBeer || isLiquor) && (abvPercent <= 0 || abvPercent > 100)) {
+    throw new Error("Beer and liquor ABV must be greater than 0 and no more than 100%.");
+  }
+  if (ibu < 0 || ibu > 200) {
+    throw new Error("IBU must be between 0 and 200.");
+  }
 
   return {
     plu,
@@ -710,7 +721,7 @@ export async function POST(request) {
     );
   } catch (error) {
     const message = error.message || "Could not send product to Pour My Beer.";
-    const status = /required/i.test(message) ? 400 : 502;
+    const status = error instanceof SyntaxError || /required|must be|invalid/i.test(message) ? 400 : 502;
     return NextResponse.json(
       {
         error: message,

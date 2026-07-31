@@ -96,6 +96,18 @@ Important ones used in this project include:
 - `PMB_API_CLIENT_ID`
 - `PMB_API_CLIENT_NAME`
 - `PMB_KEG_DEVICE_ID`
+- `UNTAPPD_BUSINESS_EMAIL`
+- `UNTAPPD_BUSINESS_API_TOKEN`
+- `SUPABASE_URL`
+- `SUPABASE_SECRET_KEY` (server-only; never use a `NEXT_PUBLIC_` prefix)
+- `PROVI_CAPTURE_RETENTION_DAYS` (defaults to `30`)
+- `PROVI_CAPTURE_MAX_FILES` (defaults to `20`)
+
+Before enabling shared prices, recipes, and product setup for the first time,
+apply `supabase/migrations/20260730000000_create_dashboard_shared_state.sql` in
+the Supabase SQL editor. The dashboard will then show a manager-only import
+button; import from the service computer unless another browser definitely has
+the complete saved setup.
 
 ### 10. Local network note
 
@@ -103,19 +115,30 @@ For Pour My Beer / keg level work:
 
 - the computer must be on the same network as the PMB server
 - the PMB local IP must still be reachable
+- live PMB calls begin only when you open a PMB-backed section or press its refresh button
+- shared prices, recipes, and product setup use Supabase and remain available away from the work network when internet access is available
+- the service computer being offline does not block Supabase-backed dashboard work, but it does block live Pour My Beer reads and writes
 
-### 11. Helpful files
+### 11. Provi security
+
+- Run `npm run provi:session` under the same Windows account that will run the service
+- The setup automatically locks `.FoodOrderAgent\provi` to that Windows account, `SYSTEM`, and local Administrators
+- Provi diagnostic captures redact login, cookie, token, personal, and payment fields
+- Old capture JSON files are removed after the configured retention window/count
+- Do not copy or share the `.FoodOrderAgent\provi` folder; the live browser session state is still a credential
+
+### 12. Helpful files
 
 - [scratchpad.md](C:\Users\info\Projects\OnParBeverageRecipes\scratchpad.md)
 - [app/page.jsx](C:\Users\info\Projects\OnParBeverageRecipes\app\page.jsx)
 - [app/globals.css](C:\Users\info\Projects\OnParBeverageRecipes\app\globals.css)
 - [public/dashboard.js](C:\Users\info\Projects\OnParBeverageRecipes\public\dashboard.js)
 
-### 12. Quick sanity check after setup
+### 13. Quick sanity check after setup
 
 - Open the dashboard
 - Check `Recipes`
-- Check `Cocktail Ingredients`
+- Check `Ingredient & Keg Costs`
 - Check `Inventory`
 - Check `Keg Levels`
 - Run a vendor sync test

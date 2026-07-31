@@ -3,8 +3,11 @@ import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { chromium } from "playwright";
 import {
+  agentRoot,
   alternateProviLocationNames,
   captureDir,
+  captureRetentionDays,
+  captureRetentionMaxFiles,
   chromeExecutableCandidates,
   chromeProfileDir,
   latestCapturePath,
@@ -13,7 +16,20 @@ import {
   proviHostPattern,
   proviStartUrl,
 } from "./paths.mjs";
-import { ensureDir, extractInterestingValues, looksLikeJson, nowStamp, safeJsonParse, writeJson } from "./utils.mjs";
+import {
+  cleanupCaptureFiles,
+  ensureDir,
+  extractInterestingValues,
+  hardenPrivateRoot,
+  hardenPrivateTree,
+  looksLikeJson,
+  nowStamp,
+  redactSensitiveHeaders,
+  redactSensitiveUrl,
+  safeJsonParse,
+  sanitizeCapturedData,
+  writeJson,
+} from "./utils.mjs";
 
 function resolveChromeExecutable() {
   return chromeExecutableCandidates.find((candidate) => fs.existsSync(candidate)) || null;
@@ -27,7 +43,15 @@ async function main() {
   const executablePath = resolveChromeExecutable();
   if (!executablePath) throw new Error("Chrome executable was not found on this machine.");
 
+  await ensureDir(agentRoot);
+  await hardenPrivateRoot(agentRoot);
   await ensureDir(captureDir);
+  await hardenPrivateTree(chromeProfileDir);
+  await cleanupCaptureFiles(captureDir, {
+    maxAgeDays: captureRetentionDays,
+    maxFiles: captureRetentionMaxFiles,
+    preservePaths: [latestCapturePath, latestExtractPath],
+  });
 
   console.log("Opening Chrome with the saved Provi session...");
   console.log(`1. Make sure the active Provi location is "${preferredProviLocationName}".`);
@@ -52,21 +76,26 @@ async function main() {
     const url = request.url();
     if (!isInterestingUrl(url)) return;
 
-    const headers = await request.allHeaders();
+    const headers = redactSensitiveHeaders(await request.allHeaders());
     const postData = request.postData() || "";
     const parsedPostData = safeJsonParse(postData);
-    if (parsedPostData) {
-      candidateValues.push(...extractInterestingValues(parsedPostData, [], ["requestBody"]));
+    const storedPostData = parsedPostData && typeof parsedPostData === "object"
+      ? sanitizeCapturedData(parsedPostData)
+      : null;
+    if (storedPostData) {
+      candidateValues.push(...extractInterestingValues(storedPostData, [], ["requestBody"]));
     }
 
     requestLog.push({
       type: "request",
       capturedAt: nowStamp(),
       method: request.method(),
-      url,
+      url: redactSensitiveUrl(url),
       resourceType: request.resourceType(),
       headers,
-      postData: parsedPostData || postData || null,
+      postData: storedPostData,
+      postDataOmitted: Boolean(postData && !storedPostData),
+      postDataBytes: postData ? Buffer.byteLength(postData, "utf8") : 0,
     });
   });
 
@@ -76,11 +105,18 @@ async function main() {
 
     const contentType = response.headers()["content-type"] || "";
     let body = null;
+    let bodyOmitted = false;
+    let bodyBytes = 0;
 
     try {
       if (looksLikeJson(contentType)) {
         const text = await response.text();
-        body = safeJsonParse(text) || text;
+        bodyBytes = Buffer.byteLength(text, "utf8");
+        const parsedBody = safeJsonParse(text);
+        body = parsedBody && typeof parsedBody === "object"
+          ? sanitizeCapturedData(parsedBody)
+          : null;
+        bodyOmitted = Boolean(text && !body);
         if (body && typeof body === "object") {
           candidateValues.push(...extractInterestingValues(body, [], ["responseBody"]));
         }
@@ -91,37 +127,50 @@ async function main() {
       type: "response",
       capturedAt: nowStamp(),
       status: response.status(),
-      url,
-      headers: response.headers(),
+      url: redactSensitiveUrl(url),
+      headers: redactSensitiveHeaders(response.headers()),
       body,
+      bodyOmitted,
+      bodyBytes,
     });
   });
 
-  const page = context.pages()[0] || (await context.newPage());
-  await page.goto(proviStartUrl, { waitUntil: "domcontentloaded" });
-  const rl = readline.createInterface({ input, output });
+  let rl;
   try {
+    const page = context.pages()[0] || (await context.newPage());
+    await page.goto(proviStartUrl, { waitUntil: "domcontentloaded" });
+    rl = readline.createInterface({ input, output });
     await rl.question("Press Enter after you have finished the Provi checkout/account capture on On Par Entertainment...");
+
+    const summary = {
+      capturedAt: nowStamp(),
+      totalEvents: requestLog.length,
+      interestingValues: dedupeValues(candidateValues).slice(0, 200),
+      events: requestLog,
+    };
+
+    await writeJson(latestCapturePath, summary);
+    await writeJson(latestExtractPath, {
+      capturedAt: summary.capturedAt,
+      interestingValues: summary.interestingValues,
+    });
+    await cleanupCaptureFiles(captureDir, {
+      maxAgeDays: captureRetentionDays,
+      maxFiles: captureRetentionMaxFiles,
+      preservePaths: [latestCapturePath, latestExtractPath],
+    });
+
+    console.log(`Saved Provi capture to ${latestCapturePath}`);
+    console.log(`Saved extracted values to ${latestExtractPath}`);
   } finally {
-    rl.close();
+    rl?.close();
+    try {
+      await context.close();
+    } finally {
+      await hardenPrivateTree(chromeProfileDir);
+      await hardenPrivateRoot(agentRoot);
+    }
   }
-
-  const summary = {
-    capturedAt: nowStamp(),
-    totalEvents: requestLog.length,
-    interestingValues: dedupeValues(candidateValues).slice(0, 200),
-    events: requestLog,
-  };
-
-  await writeJson(latestCapturePath, summary);
-  await writeJson(latestExtractPath, {
-    capturedAt: summary.capturedAt,
-    interestingValues: summary.interestingValues,
-  });
-
-  console.log(`Saved Provi capture to ${latestCapturePath}`);
-  console.log(`Saved extracted values to ${latestExtractPath}`);
-  await context.close();
 }
 
 function dedupeValues(values) {

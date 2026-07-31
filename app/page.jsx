@@ -11,6 +11,8 @@ function OperationsBar() {
       </div>
       <div className="operation-tabs" aria-label="Beverage operations sections">
         <button className="operation-tab is-active" data-operation-tab="keg-levels" type="button">Keg Levels</button>
+        <button className="operation-tab" data-operation-tab="pricing" type="button">Tap Pricing</button>
+        <button className="operation-tab" data-operation-tab="ingredients" type="button">Ingredient &amp; Keg Costs</button>
         <button className="operation-tab" data-operation-tab="inventory" type="button">Inventory</button>
       </div>
     </div>
@@ -156,7 +158,49 @@ export default function DashboardPage() {
 
         <section className="panel" id="add-panel" aria-labelledby="add-tab">
           <div className="add-workspace">
-          <form className="recipe-form" id="recipe-form">
+          <div className="add-product-switcher" role="tablist" aria-label="Choose a product type">
+            <button
+              className="add-product-switcher__button is-active"
+              id="add-product-cocktail-tab"
+              data-add-product-type="cocktail"
+              type="button"
+              role="tab"
+              aria-controls="recipe-form"
+              aria-selected="true"
+            >
+              Cocktail recipe
+            </button>
+            <button
+              className="add-product-switcher__button"
+              id="add-product-beer-tab"
+              data-add-product-type="beer"
+              type="button"
+              role="tab"
+              aria-controls="pmb-product-form"
+              aria-selected="false"
+            >
+              Beer keg
+            </button>
+            <button
+              className="add-product-switcher__button"
+              id="add-product-liquor-tab"
+              data-add-product-type="liquor"
+              type="button"
+              role="tab"
+              aria-controls="liquor-product-form"
+              aria-selected="false"
+            >
+              Liquor tap
+            </button>
+          </div>
+
+          <form
+            className="recipe-form add-product-form"
+            id="recipe-form"
+            data-add-product-form="cocktail"
+            role="tabpanel"
+            aria-labelledby="add-product-cocktail-tab"
+          >
             <div className="form-header">
               <div>
                 <p className="eyebrow">Product builder</p>
@@ -164,7 +208,7 @@ export default function DashboardPage() {
               </div>
               <div className="form-actions">
                 <button className="ghost-button" id="cancel-edit" type="button" hidden>Cancel edit</button>
-                <button className="primary-button" id="recipe-submit-button" type="submit">Add product</button>
+                <button className="primary-button" id="recipe-submit-button" type="submit">Save recipe draft</button>
               </div>
             </div>
 
@@ -232,26 +276,54 @@ export default function DashboardPage() {
             </div>
           </form>
 
-          <form className="recipe-form pmb-product-form" id="pmb-product-form">
+          <form
+            className="recipe-form pmb-product-form add-product-form"
+            id="pmb-product-form"
+            data-add-product-form="beer"
+            role="tabpanel"
+            aria-labelledby="add-product-beer-tab"
+            hidden
+          >
             <div className="form-header">
               <div>
                 <p className="eyebrow">Pour My Beer</p>
                 <h2>Add beer product</h2>
               </div>
               <div className="form-actions">
-                <button className="primary-button" id="pmb-product-submit" type="submit">Send to PMB</button>
+                <button className="primary-button" id="pmb-product-submit" type="submit">Create PMB beer</button>
               </div>
             </div>
 
             <div className="form-grid pmb-product-grid">
               <input id="pmb-product-kind" type="hidden" value="beer" />
-              <label>
-                <span>Beer product name</span>
-                <input id="pmb-product-name" type="text" required placeholder="Example: Garage Beer" />
-              </label>
+              <div className="form-field untappd-search-field">
+                <label htmlFor="pmb-product-name">Beer product name</label>
+                <input
+                  id="pmb-product-name"
+                  type="search"
+                  required
+                  autoComplete="off"
+                  placeholder="Search Untappd, e.g. Garage Beer"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded="false"
+                  aria-controls="beer-untappd-results"
+                />
+                <span className="untappd-search-hint">Searches the official Untappd beer database.</span>
+                <div className="untappd-search-results" id="beer-untappd-results" role="listbox" hidden></div>
+              </div>
               <label>
                 <span>Keg cost</span>
                 <input id="pmb-product-keg-cost" type="text" inputMode="decimal" required placeholder="185" />
+              </label>
+              <label>
+                <span>Keg size</span>
+                <select id="pmb-product-keg-oz" required defaultValue="1984">
+                  <option value="1984">15.5 gal half barrel</option>
+                  <option value="1690.7">50 L import keg</option>
+                  <option value="992">7.75 gal quarter barrel</option>
+                  <option value="661">5.16 gal sixth barrel</option>
+                </select>
               </label>
               <label>
                 <span>Profit margin %</span>
@@ -264,7 +336,6 @@ export default function DashboardPage() {
               <input id="pmb-product-brewery" type="hidden" />
               <input id="pmb-product-style" type="hidden" />
               <input id="pmb-product-ibu" type="hidden" />
-              <input id="pmb-product-keg-oz" type="hidden" />
               <label className="pmb-product-notes">
                 <span>Internet description</span>
                 <textarea id="pmb-product-notes" rows="3" placeholder="Pulled from an internet source for this beer"></textarea>
@@ -286,41 +357,60 @@ export default function DashboardPage() {
             <div className="pmb-product-status" id="pmb-product-status">Ready to create a new beer keg product in Pour My Beer.</div>
           </form>
 
-          <form className="recipe-form pmb-product-form liquor-product-form" id="liquor-product-form">
+          <form
+            className="recipe-form pmb-product-form liquor-product-form add-product-form"
+            id="liquor-product-form"
+            data-add-product-form="liquor"
+            role="tabpanel"
+            aria-labelledby="add-product-liquor-tab"
+            hidden
+          >
             <div className="form-header">
               <div>
                 <p className="eyebrow">Pour My Beer</p>
                 <h2>Add liquor tap</h2>
               </div>
               <div className="form-actions">
-                <button className="primary-button" id="liquor-product-submit" type="submit">Send to PMB</button>
+                <button className="primary-button" id="liquor-product-submit" type="submit">Create PMB liquor</button>
               </div>
             </div>
 
             <div className="form-grid liquor-product-grid">
-              <label>
-                <span>Liquor product name</span>
-                <input id="liquor-product-name" type="text" required placeholder="Example: Patron Silver" />
-              </label>
+              <div className="form-field untappd-search-field">
+                <label htmlFor="liquor-product-name">Liquor product name</label>
+                <input
+                  id="liquor-product-name"
+                  type="search"
+                  required
+                  autoComplete="off"
+                  placeholder="Search On Par products in Untappd"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded="false"
+                  aria-controls="liquor-untappd-results"
+                />
+                <span className="untappd-search-hint">Searches spirits already carried on On Par’s Untappd menus.</span>
+                <div className="untappd-search-results" id="liquor-untappd-results" role="listbox" hidden></div>
+              </div>
               <label>
                 <span>Charge / oz</span>
                 <input id="liquor-product-price" type="text" inputMode="decimal" required placeholder="3.50" />
               </label>
               <label>
                 <span>Pour size oz</span>
-                <input id="liquor-product-serving" type="text" inputMode="decimal" placeholder="1.5" />
+                <input id="liquor-product-serving" type="text" inputMode="decimal" required defaultValue="1.5" />
               </label>
               <label>
                 <span>ABV %</span>
-                <input id="liquor-product-abv" type="text" inputMode="decimal" placeholder="40" />
+                <input id="liquor-product-abv" type="text" inputMode="decimal" required defaultValue="40" />
               </label>
               <label>
                 <span>Bottle cost</span>
-                <input id="liquor-product-bottle-cost" type="text" inputMode="decimal" placeholder="98.70" />
+                <input id="liquor-product-bottle-cost" type="text" inputMode="decimal" required placeholder="98.70" />
               </label>
               <label>
                 <span>Bottle oz</span>
-                <input id="liquor-product-bottle-oz" type="text" inputMode="decimal" placeholder="59.17" />
+                <input id="liquor-product-bottle-oz" type="text" inputMode="decimal" required defaultValue="59.17" />
               </label>
               <label className="liquor-product-notes">
                 <span>Notes</span>

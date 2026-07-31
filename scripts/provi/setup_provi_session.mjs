@@ -14,7 +14,14 @@ import {
   sessionStatePath,
   storageDumpPath,
 } from "./paths.mjs";
-import { ensureDir, nowStamp, writeJson } from "./utils.mjs";
+import {
+  ensureDir,
+  hardenPrivateRoot,
+  hardenPrivateTree,
+  nowStamp,
+  sanitizeWebStorage,
+  writeJson,
+} from "./utils.mjs";
 
 function resolveChromeExecutable() {
   return chromeExecutableCandidates.find((candidate) => fs.existsSync(candidate)) || null;
@@ -33,7 +40,11 @@ async function dumpStorage(context) {
       localStorage: { ...localStorage },
       sessionStorage: { ...sessionStorage },
     }));
-    storage.push(result);
+    storage.push({
+      ...result,
+      localStorage: sanitizeWebStorage(result.localStorage),
+      sessionStorage: sanitizeWebStorage(result.sessionStorage),
+    });
   }
 
   return storage;
@@ -46,6 +57,7 @@ async function main() {
   }
 
   await ensureDir(agentRoot);
+  await hardenPrivateRoot(agentRoot);
   await fsPromises.rm(chromeProfileDir, { recursive: true, force: true });
   await ensureDir(chromeProfileDir);
 
@@ -85,7 +97,12 @@ async function main() {
     });
   } finally {
     rl.close();
-    await context.close();
+    try {
+      await context.close();
+    } finally {
+      await hardenPrivateTree(chromeProfileDir);
+      await hardenPrivateRoot(agentRoot);
+    }
   }
 
   console.log(`Saved Provi session state to ${sessionStatePath}`);

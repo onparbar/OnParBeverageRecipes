@@ -53,11 +53,27 @@ const CUSTOM_BEER_KEG_STORAGE_KEY = "cocktail-dashboard-custom-beer-kegs";
 const CUSTOM_LIQUOR_TAP_STORAGE_KEY = "cocktail-dashboard-custom-liquor-taps";
 const COMING_SOON_STORAGE_KEY = "cocktail-dashboard-coming-soon";
 const TAP_REPLACEMENT_STORAGE_KEY = "cocktail-dashboard-tap-replacements";
+const DASHBOARD_STATE_OUTBOX_STORAGE_KEY = "cocktail-dashboard-shared-state-outbox";
+const EMPLOYEE_SHARED_RECIPE_CACHE_STORAGE_KEY = "cocktail-dashboard-employee-shared-recipes";
+const DASHBOARD_STATE_REQUEST_TIMEOUT_MS = 6000;
 const WEEKLY_USAGE_CURRENT_STORAGE_KEY = "cocktail-dashboard-weekly-usage-current";
 const WEEKLY_USAGE_HISTORY_STORAGE_KEY = "cocktail-dashboard-weekly-usage-history";
 const WEEKLY_USAGE_ARCHIVE_STORAGE_KEY = "cocktail-dashboard-weekly-usage-archive";
 const WEEKLY_USAGE_LAST_SYNC_STORAGE_KEY = "cocktail-dashboard-weekly-usage-last-sync";
 const WEEKLY_USAGE_SYNC_LOOKBACK_WEEKS = 12;
+const SHARED_DASHBOARD_FIELD_PATHS = Object.freeze([
+  "pricing.ingredientPriceOverrides",
+  "pricing.kegPriceOverrides",
+  "pricing.chargeOverrides",
+  "recipes.customRecipes",
+  "recipes.inactiveRecipeIds",
+  "recipes.editedRecipes",
+  "products.customBeerKegs",
+  "products.customLiquorTaps",
+  "products.comingSoonItems",
+  "products.tapReplacementOverrides",
+]);
+const SHARED_DASHBOARD_IMPORT_PHRASE = "IMPORT FROM SERVICE COMPUTER";
 const STANDARD_BEER_KEG_OZ = 15.5 * 128;
 const STANDARD_COCKTAIL_KEG_OZ = 12 * 128;
 const DEFAULT_BEER_TARGET_MARGIN = 82;
@@ -635,6 +651,7 @@ const pmbProductSubmitButton = document.querySelector("#pmb-product-submit");
 const pmbProductStatus = document.querySelector("#pmb-product-status");
 const shufflePmbProductImageButton = document.querySelector("#shuffle-pmb-product-image");
 const shufflePmbProductDescriptionButton = document.querySelector("#shuffle-pmb-product-description");
+const beerUntappdResults = document.querySelector("#beer-untappd-results");
 const liquorProductForm = document.querySelector("#liquor-product-form");
 const liquorProductNameInput = document.querySelector("#liquor-product-name");
 const liquorProductPriceInput = document.querySelector("#liquor-product-price");
@@ -645,6 +662,9 @@ const liquorProductBottleOzInput = document.querySelector("#liquor-product-bottl
 const liquorProductNotesInput = document.querySelector("#liquor-product-notes");
 const liquorProductSubmitButton = document.querySelector("#liquor-product-submit");
 const liquorProductStatus = document.querySelector("#liquor-product-status");
+const liquorUntappdResults = document.querySelector("#liquor-untappd-results");
+const addProductTypeButtons = [...document.querySelectorAll("[data-add-product-type]")];
+const addProductForms = [...document.querySelectorAll("[data-add-product-form]")];
 const cardTemplate = document.querySelector("#recipe-card-template");
 
 let recipes = [];
@@ -657,8 +677,9 @@ let weeklyUsageCurrentOverrides = loadWeeklyUsageCurrentOverrides();
 let weeklyUsageHistoryOverrides = loadWeeklyUsageHistoryOverrides();
 let weeklyUsageArchivedItems = loadWeeklyUsageArchivedItems();
 let weeklyUsageSyncLoading = false;
-let weeklyUsageSyncMessage = "Automatic PMB check will run when the dashboard opens.";
+let weeklyUsageSyncMessage = "Open Weekly Usage on the work network to check Pour My Beer. Saved history remains available anywhere.";
 let weeklyUsageLastSyncAt = loadWeeklyUsageLastSyncAt();
+let weeklyUsageSyncAttempted = false;
 let weeklyUsageHistoryLimit = window.matchMedia("(max-width: 720px)").matches ? 6 : 0;
 let kegPricingItems = [];
 let priceOverrides = loadOverrides();
@@ -680,6 +701,40 @@ let inventorySourceRows = [];
 let inventorySharedUpdatedAt = "";
 let inventorySharedMessage = "Loading shared inventory...";
 let inventorySharedSaving = false;
+let dashboardSharedState = {
+  version: 1,
+  revision: 0,
+  initialized: false,
+  updatedAt: "",
+  pricing: {
+    ingredientPriceOverrides: {},
+    kegPriceOverrides: {},
+    chargeOverrides: {},
+  },
+  recipes: {
+    customRecipes: [],
+    inactiveRecipeIds: [],
+    editedRecipes: {},
+  },
+  products: {
+    customBeerKegs: [],
+    customLiquorTaps: [],
+    comingSoonItems: [],
+    tapReplacementOverrides: {},
+  },
+};
+let dashboardSharedSyncStatus = "loading";
+let dashboardSharedSyncMessage = "Checking the shared dashboard configuration...";
+let dashboardSharedMutationGeneration = 0;
+let dashboardSharedPatchScheduled = false;
+let dashboardSharedPatchQueue = Promise.resolve();
+let dashboardSharedOptimisticState = null;
+let dashboardSharedWritesPaused = false;
+let dashboardSharedWritePauseReason = "";
+let dashboardSharedOutbox = loadDashboardSharedOutbox();
+let dashboardSharedOutboxDurable = true;
+let dashboardSharedLocalCacheDurable = true;
+const dashboardSharedPendingSlices = new Set();
 const inventoryFieldSyncTimers = new Map();
 let inventoryFieldSyncQueue = Promise.resolve();
 let kegOnHandOverrides = loadKegOnHandOverrides();
@@ -696,6 +751,7 @@ let vendorSyncRunning = false;
 let kegLiveLevels = new Map();
 let kegSyncMessage = "Refresh keg levels to pull current percentages from Pour My Beer.";
 let kegSyncLoading = false;
+let kegSyncAttempted = false;
 let kegUpdatedAt = "";
 let kegConfigUpdateRunning = false;
 let kegDeviceLevels = new Map();
@@ -722,15 +778,28 @@ let beerLookupImageIndex = 0;
 let beerLookupDescriptionIndex = 0;
 let beerLookupTimer = null;
 let beerLookupRequestId = 0;
+let beerUntappdItems = [];
+let liquorUntappdItems = [];
+let beerUntappdSearchTimer = null;
+let liquorUntappdSearchTimer = null;
+let beerUntappdRequestId = 0;
+let liquorUntappdRequestId = 0;
+let selectedUntappdBeer = null;
+let selectedUntappdLiquor = null;
 let liveTapPrices = new Map();
 let liveTapPriceItems = [];
-let liveTapPricingMessage = "Checking Pour My Beer for current tap prices...";
+let liveTapPricingMessage = "Open Tap Pricing on the work network to load current Pour My Beer prices.";
 let liveTapPricingUpdatedAt = "";
+let tapPricingSyncAttempted = false;
+let tapPricingSyncLoading = false;
 let activeOperationsTab = "keg-levels";
+let activeAddProductType = "cocktail";
 
 init();
 
 async function init() {
+  await loadSharedDashboardState();
+
   if (isEmployeeDashboard) {
     const [csv, newCocktailsCsv, kegLevelsCsv] = await Promise.all([
       fetchCsv(CSV_PATH),
@@ -783,6 +852,7 @@ async function init() {
   await loadParAgentState();
   hydrateCategoryFilter(recipes);
   bindEvents();
+  switchAddProductType(activeAddProductType);
   addIngredientRow();
   addIngredientRow();
   addIngredientRow();
@@ -791,9 +861,1337 @@ async function init() {
   syncRecipeBuilderSummary();
   clearBeerLookupResult();
   render();
-  runPmbWeeklyUsageSync({ automatic: true });
-  runKegLevelSync();
-  runTapPricingSync();
+}
+
+function cloneDashboardStateValue(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function isPlainDashboardRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeDashboardSharedState(state = {}) {
+  const data = isPlainDashboardRecord(state.data) ? state.data : state;
+  const pricing = isPlainDashboardRecord(data.pricing) ? data.pricing : {};
+  const recipeState = isPlainDashboardRecord(data.recipes) ? data.recipes : {};
+  const products = isPlainDashboardRecord(data.products) ? data.products : {};
+
+  return {
+    version: Math.max(1, toNumber(state.version) || 1),
+    id: clean(state.id),
+    revision: Math.max(0, toNumber(state.revision)),
+    initialized: state.initialized === true,
+    initializedAt: clean(state.initializedAt),
+    updatedAt: clean(state.updatedAt),
+    updatedByRole: clean(state.updatedByRole),
+    pricing: {
+      ingredientPriceOverrides: isPlainDashboardRecord(pricing.ingredientPriceOverrides)
+        ? cloneDashboardStateValue(pricing.ingredientPriceOverrides)
+        : isPlainDashboardRecord(pricing.ingredientPrices)
+          ? cloneDashboardStateValue(pricing.ingredientPrices)
+          : {},
+      kegPriceOverrides: isPlainDashboardRecord(pricing.kegPriceOverrides)
+        ? cloneDashboardStateValue(pricing.kegPriceOverrides)
+        : isPlainDashboardRecord(pricing.kegPrices)
+          ? cloneDashboardStateValue(pricing.kegPrices)
+          : {},
+      chargeOverrides: isPlainDashboardRecord(pricing.chargeOverrides)
+        ? cloneDashboardStateValue(pricing.chargeOverrides)
+        : isPlainDashboardRecord(pricing.chargePrices)
+          ? cloneDashboardStateValue(pricing.chargePrices)
+          : {},
+    },
+    recipes: {
+      customRecipes: Array.isArray(recipeState.customRecipes) ? cloneDashboardStateValue(recipeState.customRecipes) : [],
+      inactiveRecipeIds: Array.isArray(recipeState.inactiveRecipeIds) ? cloneDashboardStateValue(recipeState.inactiveRecipeIds) : [],
+      editedRecipes: isPlainDashboardRecord(recipeState.editedRecipes) ? cloneDashboardStateValue(recipeState.editedRecipes) : {},
+    },
+    products: {
+      customBeerKegs: Array.isArray(products.customBeerKegs) ? cloneDashboardStateValue(products.customBeerKegs) : [],
+      customLiquorTaps: Array.isArray(products.customLiquorTaps) ? cloneDashboardStateValue(products.customLiquorTaps) : [],
+      comingSoonItems: Array.isArray(products.comingSoonItems)
+        ? cloneDashboardStateValue(products.comingSoonItems)
+        : Array.isArray(products.comingSoon)
+          ? cloneDashboardStateValue(products.comingSoon)
+          : [],
+      tapReplacementOverrides: isPlainDashboardRecord(products.tapReplacementOverrides)
+        ? cloneDashboardStateValue(products.tapReplacementOverrides)
+        : isPlainDashboardRecord(products.tapReplacements)
+          ? cloneDashboardStateValue(products.tapReplacements)
+          : {},
+    },
+  };
+}
+
+function isSameDashboardRecord(left, right) {
+  if (!isPlainDashboardRecord(left) || !isPlainDashboardRecord(right)) return false;
+  const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
+  return keys.every((key) => String(left[key] ?? "") === String(right[key] ?? ""));
+}
+
+function isConservativeBundledPriceDefault(
+  id,
+  override,
+  defaults,
+  { excludeAmbiguous = true } = {},
+) {
+  const defaultOverride = defaults[id];
+  if (!defaultOverride || !isPlainDashboardRecord(override)) return false;
+  if (
+    id === "tito-s"
+    && isRoughlyEqual(toNumber(override.bottleOz), 59.17)
+    && Math.abs(toNumber(override.bottlePrice) - 25.85) < 0.001
+    && ["", "1683D"].includes(clean(override.matchedSku))
+  ) return true;
+  if (isSameDashboardRecord(override, defaultOverride)) return true;
+
+  const marker = clean(override.updatedAt);
+  const bundledLabels = new Set([
+    "default pricing",
+    "default ohlq pricing",
+    "default heidelberg provi pricing",
+    "bonbright manual pricing 2026-07-24",
+    "ohlq pricing 2026-07-25",
+    "bonbright invoice 2026-07-08",
+  ]);
+  if (bundledLabels.has(marker.toLowerCase()) || /^default\b/i.test(marker)) return true;
+
+  const hasPositiveProvenance = (
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(marker)
+    || Boolean(clean(override.matchedSku))
+    || Boolean(clean(override.previousBottlePrice))
+    || Boolean(clean(override.previousKegPrice))
+    || Boolean(clean(override.previousUpdatedAt))
+  );
+  return excludeAmbiguous && !hasPositiveProvenance;
+}
+
+function filterBundledPriceDefaults(source, defaults, options = {}) {
+  return Object.fromEntries(
+    Object.entries(isPlainDashboardRecord(source) ? source : {}).filter(
+      ([id, override]) => !isConservativeBundledPriceDefault(id, override, defaults, options),
+    ),
+  );
+}
+
+function getUserIngredientPriceOverrides(source = priceOverrides) {
+  return filterBundledPriceDefaults(source, DEFAULT_PRICE_OVERRIDES);
+}
+
+function getUserKegPriceOverrides(source = kegPriceOverrides) {
+  return filterBundledPriceDefaults(source, DEFAULT_KEG_PRICE_OVERRIDES);
+}
+
+function getLocalIngredientPriceOverrides(source = priceOverrides) {
+  return filterBundledPriceDefaults(
+    source,
+    DEFAULT_PRICE_OVERRIDES,
+    { excludeAmbiguous: false },
+  );
+}
+
+function getLocalKegPriceOverrides(source = kegPriceOverrides) {
+  return filterBundledPriceDefaults(
+    source,
+    DEFAULT_KEG_PRICE_OVERRIDES,
+    { excludeAmbiguous: false },
+  );
+}
+
+function getAmbiguousLegacyPriceOverrides(source, defaults) {
+  return Object.fromEntries(
+    Object.entries(isPlainDashboardRecord(source) ? source : {}).filter(([id, override]) => (
+      isConservativeBundledPriceDefault(id, override, defaults)
+      && !isConservativeBundledPriceDefault(
+        id,
+        override,
+        defaults,
+        { excludeAmbiguous: false },
+      )
+    )),
+  );
+}
+
+function readDashboardLocalStorageValue(key, fallback) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
+    if (Array.isArray(fallback)) return Array.isArray(parsed) ? parsed : fallback;
+    return isPlainDashboardRecord(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function getSharedDashboardImportSnapshot() {
+  return {
+    pricing: {
+      ingredientPriceOverrides: filterBundledPriceDefaults(
+        readDashboardLocalStorageValue(STORAGE_KEY, {}),
+        DEFAULT_PRICE_OVERRIDES,
+      ),
+      kegPriceOverrides: filterBundledPriceDefaults(
+        readDashboardLocalStorageValue(KEG_PRICE_STORAGE_KEY, {}),
+        DEFAULT_KEG_PRICE_OVERRIDES,
+      ),
+      chargeOverrides: readDashboardLocalStorageValue(CHARGE_STORAGE_KEY, {}),
+    },
+    recipes: {
+      customRecipes: readDashboardLocalStorageValue(CUSTOM_RECIPE_STORAGE_KEY, []),
+      inactiveRecipeIds: readDashboardLocalStorageValue(INACTIVE_RECIPE_STORAGE_KEY, []),
+      editedRecipes: readDashboardLocalStorageValue(EDITED_RECIPE_STORAGE_KEY, {}),
+    },
+    products: {
+      customBeerKegs: readDashboardLocalStorageValue(CUSTOM_BEER_KEG_STORAGE_KEY, []),
+      customLiquorTaps: readDashboardLocalStorageValue(CUSTOM_LIQUOR_TAP_STORAGE_KEY, []),
+      comingSoonItems: readDashboardLocalStorageValue(COMING_SOON_STORAGE_KEY, []),
+      tapReplacementOverrides: readDashboardLocalStorageValue(TAP_REPLACEMENT_STORAGE_KEY, {}),
+    },
+  };
+}
+
+function getSharedDashboardImportSummary(data = getSharedDashboardImportSnapshot()) {
+  const rawIngredientPrices = readDashboardLocalStorageValue(STORAGE_KEY, {});
+  const rawKegPrices = readDashboardLocalStorageValue(KEG_PRICE_STORAGE_KEY, {});
+  const counts = {
+    ingredientPrices: Object.keys(data.pricing.ingredientPriceOverrides).length,
+    kegPrices: Object.keys(data.pricing.kegPriceOverrides).length,
+    chargePrices: Object.keys(data.pricing.chargeOverrides).length,
+    customRecipes: data.recipes.customRecipes.length,
+    inactiveRecipes: data.recipes.inactiveRecipeIds.length,
+    editedRecipes: Object.keys(data.recipes.editedRecipes).length,
+    beerKegs: data.products.customBeerKegs.length,
+    liquorTaps: data.products.customLiquorTaps.length,
+    comingSoon: data.products.comingSoonItems.length,
+    tapReplacements: Object.keys(data.products.tapReplacementOverrides).length,
+  };
+  const excludedLegacyDefaults = (
+    Object.keys(rawIngredientPrices).length
+    - Object.keys(data.pricing.ingredientPriceOverrides).length
+    + Object.keys(rawKegPrices).length
+    - Object.keys(data.pricing.kegPriceOverrides).length
+  );
+  return {
+    counts,
+    total: Object.values(counts).reduce((total, count) => total + count, 0),
+    excludedLegacyDefaults,
+    text: [
+      `Pricing: ${counts.ingredientPrices} ingredient, ${counts.kegPrices} keg, ${counts.chargePrices} charge override${counts.chargePrices === 1 ? "" : "s"}`,
+      `Recipes: ${counts.customRecipes} custom, ${counts.editedRecipes} edited, ${counts.inactiveRecipes} inactive`,
+      `Products: ${counts.beerKegs} beer, ${counts.liquorTaps} liquor, ${counts.comingSoon} coming soon, ${counts.tapReplacements} tap replacement${counts.tapReplacements === 1 ? "" : "s"}`,
+      excludedLegacyDefaults > 0
+        ? `Excluded from import: ${excludedLegacyDefaults} bundled or ambiguous legacy price default${excludedLegacyDefaults === 1 ? "" : "s"}`
+        : "Excluded from import: no bundled legacy price defaults found",
+    ].join("\n"),
+  };
+}
+
+function getSharedDashboardPricingSnapshot() {
+  return {
+    ingredientPriceOverrides: cloneDashboardStateValue(getUserIngredientPriceOverrides()),
+    kegPriceOverrides: cloneDashboardStateValue(getUserKegPriceOverrides()),
+    chargeOverrides: cloneDashboardStateValue(chargeOverrides),
+  };
+}
+
+function getSharedDashboardRecipeSnapshot() {
+  return {
+    customRecipes: cloneDashboardStateValue(customRecipes),
+    inactiveRecipeIds: cloneDashboardStateValue(inactiveRecipeIds),
+    editedRecipes: cloneDashboardStateValue(editedRecipes),
+  };
+}
+
+function getSharedDashboardProductSnapshot() {
+  return {
+    customBeerKegs: cloneDashboardStateValue(customBeerKegs),
+    customLiquorTaps: cloneDashboardStateValue(customLiquorTaps),
+    comingSoonItems: cloneDashboardStateValue(comingSoonItems),
+    tapReplacementOverrides: cloneDashboardStateValue(tapReplacementOverrides),
+  };
+}
+
+function getSharedDashboardConfigSnapshot() {
+  return {
+    pricing: getSharedDashboardPricingSnapshot(),
+    recipes: getSharedDashboardRecipeSnapshot(),
+    products: getSharedDashboardProductSnapshot(),
+  };
+}
+
+function getSharedDashboardPatch(slices) {
+  const snapshot = getSharedDashboardConfigSnapshot();
+  const patch = {};
+  slices.forEach((path) => {
+    const [group, field] = path.split(".");
+    if (!snapshot[group] || !Object.hasOwn(snapshot[group], field)) return;
+    patch[group] ||= {};
+    patch[group][field] = cloneDashboardStateValue(snapshot[group][field]);
+  });
+  return patch;
+}
+
+function getSharedDashboardStateField(state, path) {
+  const [group, field] = path.split(".");
+  return state?.[group]?.[field];
+}
+
+function areDashboardStateValuesEqual(left, right) {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => areDashboardStateValuesEqual(value, right[index]));
+  }
+  if (isPlainDashboardRecord(left) || isPlainDashboardRecord(right)) {
+    if (!isPlainDashboardRecord(left) || !isPlainDashboardRecord(right)) return false;
+    const leftKeys = Object.keys(left).sort();
+    const rightKeys = Object.keys(right).sort();
+    return leftKeys.length === rightKeys.length
+      && leftKeys.every((key, index) => (
+        key === rightKeys[index]
+        && areDashboardStateValuesEqual(left[key], right[key])
+      ));
+  }
+  return Object.is(left, right);
+}
+
+function isSharedDashboardArrayField(path) {
+  return [
+    "recipes.customRecipes",
+    "recipes.inactiveRecipeIds",
+    "products.customBeerKegs",
+    "products.customLiquorTaps",
+    "products.comingSoonItems",
+  ].includes(path);
+}
+
+function isValidSharedDashboardFieldValue(path, value) {
+  return isSharedDashboardArrayField(path)
+    ? Array.isArray(value)
+    : isPlainDashboardRecord(value);
+}
+
+function loadDashboardSharedOutbox() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DASHBOARD_STATE_OUTBOX_STORAGE_KEY) || "{}");
+    const entries = isPlainDashboardRecord(parsed.entries) ? parsed.entries : {};
+    const validEntries = {};
+
+    SHARED_DASHBOARD_FIELD_PATHS.forEach((path) => {
+      const entry = entries[path];
+      if (!isPlainDashboardRecord(entry)) return;
+      if (!isValidSharedDashboardFieldValue(path, entry.desired)) return;
+      if (!isValidSharedDashboardFieldValue(path, entry.base)) return;
+      validEntries[path] = {
+        desired: cloneDashboardStateValue(entry.desired),
+        base: cloneDashboardStateValue(entry.base),
+        baseRevision: Math.max(0, toNumber(entry.baseRevision)),
+        requiresReview: entry.requiresReview === true,
+        updatedAt: clean(entry.updatedAt),
+      };
+    });
+
+    return { version: 1, entries: validEntries };
+  } catch {
+    return { version: 1, entries: {} };
+  }
+}
+
+function saveDashboardSharedOutbox() {
+  try {
+    const paths = Object.keys(dashboardSharedOutbox.entries);
+    if (!paths.length) {
+      localStorage.removeItem(DASHBOARD_STATE_OUTBOX_STORAGE_KEY);
+    } else {
+      localStorage.setItem(DASHBOARD_STATE_OUTBOX_STORAGE_KEY, JSON.stringify(dashboardSharedOutbox));
+    }
+    dashboardSharedOutboxDurable = true;
+    return true;
+  } catch {
+    dashboardSharedOutboxDurable = false;
+    return false;
+  }
+}
+
+function getDashboardSharedOutboxPaths() {
+  return SHARED_DASHBOARD_FIELD_PATHS.filter((path) => dashboardSharedOutbox.entries[path]);
+}
+
+function hasDashboardSharedOutbox() {
+  return getDashboardSharedOutboxPaths().length > 0;
+}
+
+function stageDashboardSharedOutbox(patch, touchedFields, { requiresReview = false } = {}) {
+  touchedFields.forEach((path) => {
+    const [group, field] = path.split(".");
+    const desired = patch?.[group]?.[field];
+    if (!isValidSharedDashboardFieldValue(path, desired)) return;
+
+    const existing = dashboardSharedOutbox.entries[path];
+    const canonicalBase = getSharedDashboardStateField(dashboardSharedState, path);
+    dashboardSharedOutbox.entries[path] = {
+      desired: cloneDashboardStateValue(desired),
+      base: cloneDashboardStateValue(existing?.base ?? canonicalBase),
+      baseRevision: existing?.baseRevision ?? dashboardSharedState.revision,
+      requiresReview: existing?.requiresReview === true || requiresReview,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+  return saveDashboardSharedOutbox();
+}
+
+function getDashboardSharedOutboxPatch(paths = getDashboardSharedOutboxPaths()) {
+  const patch = {};
+  paths.forEach((path) => {
+    const entry = dashboardSharedOutbox.entries[path];
+    if (!entry) return;
+    const [group, field] = path.split(".");
+    patch[group] ||= {};
+    patch[group][field] = cloneDashboardStateValue(entry.desired);
+  });
+  return patch;
+}
+
+function mergeDashboardSharedOutboxIntoState(rawState, paths = getDashboardSharedOutboxPaths()) {
+  const patch = getDashboardSharedOutboxPatch(paths);
+  return mergeSharedDashboardPatchIntoState(rawState, patch);
+}
+
+function clearCommittedDashboardSharedOutboxFields(paths, committedPatch, canonicalState) {
+  let changed = false;
+  paths.forEach((path) => {
+    const entry = dashboardSharedOutbox.entries[path];
+    if (!entry) return;
+    const [group, field] = path.split(".");
+    const committedValue = committedPatch?.[group]?.[field];
+    if (!areDashboardStateValuesEqual(
+      getSharedDashboardStateField(canonicalState, path),
+      committedValue,
+    )) return;
+
+    if (areDashboardStateValuesEqual(entry.desired, committedValue)) {
+      delete dashboardSharedOutbox.entries[path];
+      changed = true;
+      return;
+    }
+
+    entry.base = cloneDashboardStateValue(committedValue);
+    entry.baseRevision = canonicalState.revision;
+    changed = true;
+  });
+  if (changed) saveDashboardSharedOutbox();
+}
+
+function reconcileDashboardSharedOutboxWithCanonical(rawState) {
+  const canonicalState = normalizeDashboardSharedState(rawState);
+  const safePaths = [];
+  const conflictPaths = [];
+  let changed = false;
+
+  getDashboardSharedOutboxPaths().forEach((path) => {
+    const entry = dashboardSharedOutbox.entries[path];
+    const canonicalValue = getSharedDashboardStateField(canonicalState, path);
+    if (areDashboardStateValuesEqual(canonicalValue, entry.desired)) {
+      delete dashboardSharedOutbox.entries[path];
+      changed = true;
+      return;
+    }
+    if (
+      !entry.requiresReview
+      && areDashboardStateValuesEqual(canonicalValue, entry.base)
+    ) {
+      safePaths.push(path);
+      return;
+    }
+    conflictPaths.push(path);
+  });
+
+  if (changed) saveDashboardSharedOutbox();
+  return { canonicalState, safePaths, conflictPaths };
+}
+
+function mergeSharedDashboardPatchIntoState(rawState, patch) {
+  const next = normalizeDashboardSharedState(rawState);
+  Object.entries(patch).forEach(([group, fields]) => {
+    Object.entries(fields).forEach(([field, value]) => {
+      next[group][field] = cloneDashboardStateValue(value);
+    });
+  });
+  return next;
+}
+
+function getSharedDashboardBaseValues(state, paths) {
+  return Object.fromEntries(
+    paths.map((path) => [path, cloneDashboardStateValue(getSharedDashboardStateField(state, path))]),
+  );
+}
+
+function hasSharedDashboardFieldConflict(state, baseValues, paths) {
+  return paths.some((path) => !areDashboardStateValuesEqual(
+    getSharedDashboardStateField(state, path),
+    baseValues[path],
+  ));
+}
+
+function loadEmployeeSharedRecipeCache() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(EMPLOYEE_SHARED_RECIPE_CACHE_STORAGE_KEY) || "{}");
+    return {
+      customRecipes: Array.isArray(parsed.customRecipes) ? parsed.customRecipes : [],
+      inactiveRecipeIds: Array.isArray(parsed.inactiveRecipeIds) ? parsed.inactiveRecipeIds : [],
+      editedRecipes: isPlainDashboardRecord(parsed.editedRecipes) ? parsed.editedRecipes : {},
+    };
+  } catch {
+    return {
+      customRecipes: [],
+      inactiveRecipeIds: [],
+      editedRecipes: {},
+    };
+  }
+}
+
+function applyEmployeeSharedRecipeCache() {
+  const cache = loadEmployeeSharedRecipeCache();
+  customRecipes = cloneDashboardStateValue(cache.customRecipes);
+  inactiveRecipeIds = cloneDashboardStateValue(cache.inactiveRecipeIds);
+  editedRecipes = cloneDashboardStateValue(cache.editedRecipes);
+}
+
+function saveEmployeeSharedRecipeCache() {
+  dashboardSharedLocalCacheDurable = writeDashboardLocalStorageValue(
+    EMPLOYEE_SHARED_RECIPE_CACHE_STORAGE_KEY,
+    {
+    customRecipes,
+    inactiveRecipeIds,
+    editedRecipes,
+    },
+  );
+}
+
+function writeDashboardLocalStorageValue(storageKey, value) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(value));
+    return true;
+  } catch {
+    dashboardSharedLocalCacheDurable = false;
+    return false;
+  }
+}
+
+function mirrorSharedDashboardState(state) {
+  const entries = isEmployeeDashboard
+    ? [[EMPLOYEE_SHARED_RECIPE_CACHE_STORAGE_KEY, state.recipes]]
+    : [
+      [STORAGE_KEY, state.pricing.ingredientPriceOverrides],
+      [KEG_PRICE_STORAGE_KEY, state.pricing.kegPriceOverrides],
+      [CHARGE_STORAGE_KEY, state.pricing.chargeOverrides],
+      [CUSTOM_RECIPE_STORAGE_KEY, state.recipes.customRecipes],
+      [INACTIVE_RECIPE_STORAGE_KEY, state.recipes.inactiveRecipeIds],
+      [EDITED_RECIPE_STORAGE_KEY, state.recipes.editedRecipes],
+      [CUSTOM_BEER_KEG_STORAGE_KEY, state.products.customBeerKegs],
+      [CUSTOM_LIQUOR_TAP_STORAGE_KEY, state.products.customLiquorTaps],
+      [COMING_SOON_STORAGE_KEY, state.products.comingSoonItems],
+      [TAP_REPLACEMENT_STORAGE_KEY, state.products.tapReplacementOverrides],
+    ];
+  const results = entries.map(([storageKey, value]) => (
+    writeDashboardLocalStorageValue(storageKey, value)
+  ));
+  dashboardSharedLocalCacheDurable = results.every(Boolean);
+  return dashboardSharedLocalCacheDurable;
+}
+
+function applySharedDashboardState(rawState) {
+  const state = normalizeDashboardSharedState(rawState);
+  dashboardSharedState = state;
+  if (!state.initialized) return state;
+
+  const syncState = isEmployeeDashboard
+    ? state
+    : mergeDashboardSharedOutboxIntoState(state);
+
+  if (isEmployeeDashboard) {
+    customRecipes = cloneDashboardStateValue(syncState.recipes.customRecipes);
+    inactiveRecipeIds = cloneDashboardStateValue(syncState.recipes.inactiveRecipeIds);
+    editedRecipes = cloneDashboardStateValue(syncState.recipes.editedRecipes);
+    mirrorSharedDashboardState(syncState);
+    return state;
+  }
+
+  dashboardSharedOptimisticState = syncState;
+  const effectiveState = cloneDashboardStateValue(syncState);
+  effectiveState.pricing.ingredientPriceOverrides = {
+    ...getAmbiguousLegacyPriceOverrides(
+      readDashboardLocalStorageValue(STORAGE_KEY, {}),
+      DEFAULT_PRICE_OVERRIDES,
+    ),
+    ...effectiveState.pricing.ingredientPriceOverrides,
+  };
+  effectiveState.pricing.kegPriceOverrides = {
+    ...getAmbiguousLegacyPriceOverrides(
+      readDashboardLocalStorageValue(KEG_PRICE_STORAGE_KEY, {}),
+      DEFAULT_KEG_PRICE_OVERRIDES,
+    ),
+    ...effectiveState.pricing.kegPriceOverrides,
+  };
+
+  priceOverrides = {
+    ...DEFAULT_PRICE_OVERRIDES,
+    ...cloneDashboardStateValue(effectiveState.pricing.ingredientPriceOverrides),
+  };
+  kegPriceOverrides = {
+    ...DEFAULT_KEG_PRICE_OVERRIDES,
+    ...cloneDashboardStateValue(effectiveState.pricing.kegPriceOverrides),
+  };
+  chargeOverrides = cloneDashboardStateValue(effectiveState.pricing.chargeOverrides);
+  customRecipes = cloneDashboardStateValue(effectiveState.recipes.customRecipes);
+  inactiveRecipeIds = cloneDashboardStateValue(effectiveState.recipes.inactiveRecipeIds);
+  editedRecipes = cloneDashboardStateValue(effectiveState.recipes.editedRecipes);
+  customBeerKegs = cloneDashboardStateValue(effectiveState.products.customBeerKegs);
+  customLiquorTaps = cloneDashboardStateValue(effectiveState.products.customLiquorTaps);
+  comingSoonItems = cloneDashboardStateValue(effectiveState.products.comingSoonItems);
+  tapReplacementOverrides = cloneDashboardStateValue(effectiveState.products.tapReplacementOverrides);
+  mirrorSharedDashboardState(effectiveState);
+  return state;
+}
+
+function ensureDashboardSharedStatePanel() {
+  let panel = document.querySelector("#dashboard-shared-state");
+  if (panel) return panel;
+
+  const main = dashboardShell?.querySelector("main");
+  if (!main) return null;
+  panel = document.createElement("aside");
+  panel.id = "dashboard-shared-state";
+  panel.className = "operations-bar";
+  panel.setAttribute("aria-live", "polite");
+  main.prepend(panel);
+  return panel;
+}
+
+function renderDashboardSharedStateStatus() {
+  const panel = ensureDashboardSharedStatePanel();
+  if (!panel) return;
+
+  const importSummary = isEmployeeDashboard
+    ? { total: 0, text: "" }
+    : getSharedDashboardImportSummary();
+  const outboxPaths = isEmployeeDashboard ? [] : getDashboardSharedOutboxPaths();
+  const labels = {
+    loading: "Checking",
+    setup: "Setup needed",
+    importing: "Importing",
+    saving: "Saving",
+    saved: isEmployeeDashboard ? "Loaded" : "Saved",
+    conflict: "Conflict",
+    offline: "Offline",
+  };
+  const showImport = !isEmployeeDashboard
+    && !dashboardSharedState.initialized
+    && ["setup", "offline"].includes(dashboardSharedSyncStatus)
+    && importSummary.total > 0;
+  const showConflictRecovery = !isEmployeeDashboard
+    && dashboardSharedState.initialized
+    && dashboardSharedSyncStatus === "conflict"
+    && outboxPaths.length > 0;
+  const showOutboxRetry = !isEmployeeDashboard
+    && dashboardSharedState.initialized
+    && dashboardSharedSyncStatus === "offline"
+    && outboxPaths.length > 0;
+  panel.dataset.state = dashboardSharedSyncStatus;
+  panel.innerHTML = `
+    <div>
+      <h2>Shared data · ${escapeHtml(labels[dashboardSharedSyncStatus] || "Status")}</h2>
+      <p class="sync-status">${escapeHtml(dashboardSharedSyncMessage)}</p>
+      ${!isEmployeeDashboard && !dashboardSharedState.initialized ? `
+        <p class="sync-status"><strong>Import source:</strong> saved data in this browser (not a live read from the offline service computer).</p>
+        ${importSummary.text.split("\n").map((line) => `<p class="sync-status">${escapeHtml(line)}</p>`).join("")}
+      ` : ""}
+      ${outboxPaths.length ? `
+        <p class="sync-status"><strong>${outboxPaths.length} local area${outboxPaths.length === 1 ? "" : "s"} awaiting shared sync.</strong></p>
+      ` : ""}
+      ${!dashboardSharedOutboxDurable ? `
+        <p class="sync-status"><strong>Browser storage could not preserve the pending shared-data backup. Keep this page open and record the edit before reloading.</strong></p>
+      ` : ""}
+      ${!dashboardSharedLocalCacheDurable ? `
+        <p class="sync-status"><strong>This browser could not refresh its normal offline cache.</strong> Shared data and the recovery queue remain separate; reconnect and reload before relying on this device offline.</p>
+      ` : ""}
+    </div>
+    ${showImport || showConflictRecovery || showOutboxRetry ? `
+      <div class="sync-actions">
+        ${showImport ? `
+          <button class="primary-button" id="initialize-dashboard-shared-state" type="button">
+            Import this browser's saved setup
+          </button>
+        ` : ""}
+        ${showOutboxRetry ? `
+          <button class="primary-button" id="retry-dashboard-shared-state" type="button">
+            Retry shared sync
+          </button>
+        ` : ""}
+        ${showConflictRecovery ? `
+          <button class="primary-button" id="publish-dashboard-local-state" type="button">
+            Publish local version
+          </button>
+          <button class="ghost-button" id="discard-dashboard-local-state" type="button">
+            Use shared version
+          </button>
+        ` : ""}
+      </div>
+    ` : ""}
+  `;
+  panel.querySelector("#initialize-dashboard-shared-state")
+    ?.addEventListener("click", initializeSharedDashboardState);
+  panel.querySelector("#retry-dashboard-shared-state")
+    ?.addEventListener("click", retryDashboardSharedOutbox);
+  panel.querySelector("#publish-dashboard-local-state")
+    ?.addEventListener("click", forcePublishDashboardSharedOutbox);
+  panel.querySelector("#discard-dashboard-local-state")
+    ?.addEventListener("click", discardDashboardSharedOutbox);
+}
+
+function setDashboardSharedSyncStatus(status, message) {
+  dashboardSharedSyncStatus = status;
+  dashboardSharedSyncMessage = message;
+  renderDashboardSharedStateStatus();
+}
+
+function getDashboardSharedUnavailableMessage(error, localChangeMessage) {
+  const detail = clean(error?.message);
+  if (/supabase.*not configured|not configured.*supabase|shared dashboard storage is not configured/i.test(detail)) {
+    return `Shared database (Supabase) is not configured. ${localChangeMessage}`;
+  }
+  return `Shared sync is unavailable. ${localChangeMessage}`;
+}
+
+async function requestDashboardSharedState(method = "GET", body = null) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), DASHBOARD_STATE_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch("/api/dashboard-state", {
+      method,
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: body
+        ? { Accept: "application/json", "Content-Type": "application/json" }
+        : { Accept: "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+    const result = await parseJsonResponse(response);
+    if (response.status === 409) {
+      const conflictState = result.state || result.currentState;
+      if (conflictState) {
+        return {
+          conflict: true,
+          state: normalizeDashboardSharedState(conflictState),
+        };
+      }
+      const canonical = await requestDashboardSharedState("GET");
+      return {
+        conflict: true,
+        state: canonical.state,
+      };
+    }
+    const responseState = result.state
+      || (isPlainDashboardRecord(result.data) && Number.isSafeInteger(Number(result.revision)) ? result : null);
+    if (!response.ok || result.ok === false || !responseState) {
+      throw new Error(result.error || `Shared dashboard request failed (${response.status}).`);
+    }
+    return {
+      conflict: false,
+      state: normalizeDashboardSharedState(responseState),
+    };
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+function getDashboardSharedFieldLabel(path) {
+  return {
+    "pricing.ingredientPriceOverrides": "ingredient prices",
+    "pricing.kegPriceOverrides": "keg prices",
+    "pricing.chargeOverrides": "tap charges",
+    "recipes.customRecipes": "custom recipes",
+    "recipes.inactiveRecipeIds": "inactive recipes",
+    "recipes.editedRecipes": "recipe edits",
+    "products.customBeerKegs": "beer products",
+    "products.customLiquorTaps": "liquor products",
+    "products.comingSoonItems": "coming-soon products",
+    "products.tapReplacementOverrides": "tap replacements",
+  }[path] || path;
+}
+
+function getDashboardSharedConflictMessage(paths = getDashboardSharedOutboxPaths()) {
+  const labels = paths.map(getDashboardSharedFieldLabel);
+  const storageWarning = dashboardSharedOutboxDurable
+    ? "Local edits were kept for review"
+    : "Local edits are available in this open page, but the browser could not preserve their recovery backup";
+  return `${storageWarning} because shared data also changed in: ${labels.join(", ")}. Choose Publish local version to intentionally replace those shared areas, or Use shared version to discard the local edits.`;
+}
+
+async function recoverDashboardSharedOutbox(canonicalState) {
+  let currentState = normalizeDashboardSharedState(canonicalState);
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const reconciliation = reconcileDashboardSharedOutboxWithCanonical(currentState);
+    currentState = reconciliation.canonicalState;
+    applySharedDashboardState(currentState);
+
+    if (!reconciliation.safePaths.length) {
+      return {
+        state: currentState,
+        conflictPaths: reconciliation.conflictPaths,
+      };
+    }
+
+    const patch = getDashboardSharedOutboxPatch(reconciliation.safePaths);
+    const result = await requestDashboardSharedState("POST", {
+      action: "patch",
+      expectedRevision: currentState.revision,
+      patch,
+    });
+    if (result.conflict) {
+      currentState = result.state;
+      continue;
+    }
+
+    currentState = result.state;
+    clearCommittedDashboardSharedOutboxFields(
+      reconciliation.safePaths,
+      patch,
+      currentState,
+    );
+  }
+
+  const finalReconciliation = reconcileDashboardSharedOutboxWithCanonical(currentState);
+  applySharedDashboardState(finalReconciliation.canonicalState);
+  return {
+    state: finalReconciliation.canonicalState,
+    conflictPaths: [
+      ...new Set([
+        ...finalReconciliation.conflictPaths,
+        ...finalReconciliation.safePaths,
+      ]),
+    ],
+  };
+}
+
+async function retryDashboardSharedOutbox() {
+  if (isEmployeeDashboard || !hasDashboardSharedOutbox()) return;
+  setDashboardSharedSyncStatus("saving", "Checking whether the saved local edits can be synced safely...");
+
+  try {
+    const latest = await requestDashboardSharedState("GET");
+    const recovered = await recoverDashboardSharedOutbox(latest.state);
+    dashboardSharedWritesPaused = false;
+    dashboardSharedWritePauseReason = "";
+    const remainingPaths = getDashboardSharedOutboxPaths();
+    if (remainingPaths.length) {
+      setDashboardSharedSyncStatus(
+        "conflict",
+        getDashboardSharedConflictMessage(recovered.conflictPaths.length ? recovered.conflictPaths : remainingPaths),
+      );
+      render();
+      return;
+    }
+    setDashboardSharedSyncStatus(
+      "saved",
+      `Saved pending local edits to the shared dashboard${recovered.state.updatedAt ? ` at ${formatUpdatedAt(recovered.state.updatedAt)}` : ""}.`,
+    );
+    render();
+  } catch (error) {
+    dashboardSharedWritesPaused = true;
+    dashboardSharedWritePauseReason = "offline";
+    setDashboardSharedSyncStatus(
+      "offline",
+      getDashboardSharedUnavailableMessage(
+        error,
+        "Pending edits remain safely stored in this browser and will be checked again before they are published.",
+      ),
+    );
+  }
+}
+
+async function forcePublishDashboardSharedOutbox() {
+  if (isEmployeeDashboard || !hasDashboardSharedOutbox()) return;
+  const paths = getDashboardSharedOutboxPaths();
+  if (!confirmDashboardAction(
+    "Publish this browser's local version over the conflicting shared areas?",
+    paths.map((path) => getDashboardSharedFieldLabel(path)),
+    "This intentionally replaces those shared areas for every device.",
+  )) return;
+
+  const phrase = window.prompt(
+    `Type PUBLISH LOCAL CHANGES to replace the listed shared areas with this browser's local version.`,
+  );
+  if (clean(phrase) !== "PUBLISH LOCAL CHANGES") {
+    setDashboardSharedSyncStatus(
+      "conflict",
+      "Publish canceled. The local edits remain safely stored for review.",
+    );
+    return;
+  }
+
+  setDashboardSharedSyncStatus("saving", "Publishing the reviewed local version...");
+  try {
+    const latest = await requestDashboardSharedState("GET");
+    const patch = getDashboardSharedOutboxPatch(paths);
+    const result = await requestDashboardSharedState("POST", {
+      action: "patch",
+      expectedRevision: latest.state.revision,
+      patch,
+    });
+    if (result.conflict) {
+      applySharedDashboardState(result.state);
+      setDashboardSharedSyncStatus(
+        "conflict",
+        "Shared data changed again while publishing. Local edits were kept; review the latest shared version and choose again.",
+      );
+      render();
+      return;
+    }
+
+    clearCommittedDashboardSharedOutboxFields(paths, patch, result.state);
+    applySharedDashboardState(result.state);
+    dashboardSharedWritesPaused = false;
+    dashboardSharedWritePauseReason = "";
+    setDashboardSharedSyncStatus(
+      hasDashboardSharedOutbox() ? "conflict" : "saved",
+      hasDashboardSharedOutbox()
+        ? "Some newer local edits are still waiting for review."
+        : `Published the reviewed local version${result.state.updatedAt ? ` at ${formatUpdatedAt(result.state.updatedAt)}` : ""}.`,
+    );
+    render();
+  } catch (error) {
+    dashboardSharedWritesPaused = true;
+    dashboardSharedWritePauseReason = "offline";
+    setDashboardSharedSyncStatus(
+      "offline",
+      getDashboardSharedUnavailableMessage(
+        error,
+        "The reviewed local edits remain safely stored in this browser.",
+      ),
+    );
+  }
+}
+
+async function discardDashboardSharedOutbox() {
+  if (isEmployeeDashboard || !hasDashboardSharedOutbox()) return;
+  const discardPaths = getDashboardSharedOutboxPaths();
+  const discardSnapshot = Object.fromEntries(
+    discardPaths.map((path) => [
+      path,
+      cloneDashboardStateValue(dashboardSharedOutbox.entries[path].desired),
+    ]),
+  );
+  if (!confirmDashboardAction(
+    "Discard this browser's unsynced local edits and use the shared version?",
+    discardPaths.map((path) => getDashboardSharedFieldLabel(path)),
+    "The listed local edits will be removed from this browser.",
+  )) return;
+
+  setDashboardSharedSyncStatus("saving", "Loading the shared version...");
+  try {
+    const latest = await requestDashboardSharedState("GET");
+    discardPaths.forEach((path) => {
+      if (areDashboardStateValuesEqual(
+        dashboardSharedOutbox.entries[path]?.desired,
+        discardSnapshot[path],
+      )) {
+        delete dashboardSharedOutbox.entries[path];
+      }
+    });
+    saveDashboardSharedOutbox();
+    applySharedDashboardState(latest.state);
+    dashboardSharedWritesPaused = false;
+    dashboardSharedWritePauseReason = "";
+    setDashboardSharedSyncStatus(
+      hasDashboardSharedOutbox() ? "conflict" : "saved",
+      hasDashboardSharedOutbox()
+        ? "The reviewed local edits were discarded, but newer local edits remain safely stored for review."
+        : `Loaded the shared version${latest.state.updatedAt ? ` from ${formatUpdatedAt(latest.state.updatedAt)}` : ""}.`,
+    );
+    render();
+  } catch (error) {
+    setDashboardSharedSyncStatus(
+      "offline",
+      getDashboardSharedUnavailableMessage(
+        error,
+        "Local edits were not discarded because the shared version could not be loaded.",
+      ),
+    );
+  }
+}
+
+async function loadSharedDashboardState() {
+  renderDashboardSharedStateStatus();
+  try {
+    const result = await requestDashboardSharedState();
+    dashboardSharedState = result.state;
+    if (!result.state.initialized) {
+      if (isEmployeeDashboard) applyEmployeeSharedRecipeCache();
+      const importSummary = isEmployeeDashboard
+        ? { total: 0 }
+        : getSharedDashboardImportSummary();
+      setDashboardSharedSyncStatus(
+        "setup",
+        isEmployeeDashboard
+          ? "Shared setup is waiting for a manager to import the complete service-computer configuration."
+          : hasDashboardSharedOutbox()
+            ? "Shared setup is not initialized. Local drafts are safely stored here for review; they will not auto-publish when another device initializes shared data."
+            : importSummary.total
+              ? "Shared setup is not initialized. Because the service computer is offline, wait and import from that computer unless this browser has the complete saved setup."
+              : "Shared setup is not initialized, and import is blocked because this browser has no saved non-default configuration.",
+      );
+      return;
+    }
+
+    if (!isEmployeeDashboard && hasDashboardSharedOutbox()) {
+      const recovered = await recoverDashboardSharedOutbox(result.state);
+      dashboardSharedWritesPaused = false;
+      dashboardSharedWritePauseReason = "";
+      const remainingPaths = getDashboardSharedOutboxPaths();
+      if (remainingPaths.length) {
+        setDashboardSharedSyncStatus(
+          "conflict",
+          getDashboardSharedConflictMessage(
+            recovered.conflictPaths.length ? recovered.conflictPaths : remainingPaths,
+          ),
+        );
+      } else {
+        setDashboardSharedSyncStatus(
+          "saved",
+          `Recovered and saved this browser's pending edits${recovered.state.updatedAt ? ` at ${formatUpdatedAt(recovered.state.updatedAt)}` : ""}.`,
+        );
+      }
+      return;
+    }
+
+    applySharedDashboardState(result.state);
+    dashboardSharedWritesPaused = false;
+    dashboardSharedWritePauseReason = "";
+    setDashboardSharedSyncStatus(
+      "saved",
+      isEmployeeDashboard
+        ? `Shared configuration loaded${result.state.updatedAt ? ` from ${formatUpdatedAt(result.state.updatedAt)}` : ""}.`
+        : `Shared configuration is current${result.state.updatedAt ? ` as of ${formatUpdatedAt(result.state.updatedAt)}` : ""}.`,
+    );
+  } catch (error) {
+    if (isEmployeeDashboard) {
+      applyEmployeeSharedRecipeCache();
+      setDashboardSharedSyncStatus(
+        "offline",
+        getDashboardSharedUnavailableMessage(
+          error,
+          "Showing the last cached staff recipes on this device. Staff access is read-only; ask a manager to reconnect shared data for updates.",
+        ),
+      );
+      return;
+    }
+    setDashboardSharedSyncStatus(
+      "offline",
+      getDashboardSharedUnavailableMessage(
+        error,
+        hasDashboardSharedOutbox()
+          ? "Pending edits remain safely stored in this browser and will be checked against shared data before any retry."
+          : "This browser can still be used. New shared edits will be stored locally and checked before they are published.",
+      ),
+    );
+  }
+}
+
+async function initializeSharedDashboardState() {
+  if (isEmployeeDashboard || dashboardSharedState.initialized) return;
+  const importData = getSharedDashboardImportSnapshot();
+  const importSummary = getSharedDashboardImportSummary(importData);
+  if (!importSummary.total) {
+    setDashboardSharedSyncStatus(
+      "setup",
+      `Import blocked: this browser has no saved non-default prices, recipes, products, or tap replacements. ${importSummary.excludedLegacyDefaults ? `${importSummary.excludedLegacyDefaults} bundled or ambiguous legacy price default${importSummary.excludedLegacyDefaults === 1 ? " was" : "s were"} excluded.` : ""}`,
+    );
+    return;
+  }
+
+  if (!confirmDashboardAction(
+    "Make this browser's saved dashboard setup the official shared version?",
+    [
+      "Source: saved local data in this browser (not a live read from the service computer).",
+      importSummary.text,
+      "The service computer is offline, so only continue if this browser already has the complete configuration.",
+    ],
+    "If you are unsure, cancel and import from the service computer when you are back at work.",
+  )) return;
+
+  const phrase = window.prompt(
+    `Type ${SHARED_DASHBOARD_IMPORT_PHRASE} to confirm that this browser contains the complete service-computer setup.`,
+  );
+  if (clean(phrase) !== SHARED_DASHBOARD_IMPORT_PHRASE) {
+    setDashboardSharedSyncStatus(
+      "setup",
+      "Import canceled. Shared setup remains uninitialized and this browser's saved data was not published.",
+    );
+    return;
+  }
+
+  const importSnapshotStored = stageDashboardSharedOutbox(
+    importData,
+    SHARED_DASHBOARD_FIELD_PATHS,
+    { requiresReview: true },
+  );
+  if (!importSnapshotStored) {
+    setDashboardSharedSyncStatus(
+      "offline",
+      "Import paused because the browser could not preserve a recovery copy of this setup. Free browser storage, reload, and review the import again.",
+    );
+    return;
+  }
+  setDashboardSharedSyncStatus("importing", "Importing this browser's saved configuration...");
+  try {
+    const result = await requestDashboardSharedState("POST", {
+      action: "initialize",
+      expectedRevision: 0,
+      data: importData,
+    });
+    if (result.conflict) {
+      applySharedDashboardState(result.state);
+      setDashboardSharedSyncStatus(
+        "conflict",
+        hasDashboardSharedOutbox()
+          ? "Another device completed shared setup first. Local drafts were retained for review and were not allowed to overwrite its shared version."
+          : "Another device completed shared setup first. Its shared configuration has been loaded here.",
+      );
+      render();
+      return;
+    }
+
+    clearCommittedDashboardSharedOutboxFields(
+      getDashboardSharedOutboxPaths(),
+      importData,
+      result.state,
+    );
+    applySharedDashboardState(result.state);
+    dashboardSharedWritesPaused = false;
+    dashboardSharedWritePauseReason = "";
+    const remainingPaths = getDashboardSharedOutboxPaths();
+    setDashboardSharedSyncStatus(
+      remainingPaths.length ? "conflict" : "saved",
+      remainingPaths.length
+        ? "Shared setup was initialized, but newer local edits remain safely stored for review."
+        : `Shared setup imported and saved${result.state.updatedAt ? ` at ${formatUpdatedAt(result.state.updatedAt)}` : ""}.`,
+    );
+    render();
+  } catch (error) {
+    setDashboardSharedSyncStatus(
+      "offline",
+      getDashboardSharedUnavailableMessage(
+        error,
+        "Nothing was imported; this browser's saved configuration is still local.",
+      ),
+    );
+  }
+}
+
+function scheduleSharedDashboardStateSync(...slices) {
+  if (isEmployeeDashboard) return;
+
+  slices
+    .filter((slice) => [
+      "pricing.ingredientPriceOverrides",
+      "pricing.kegPriceOverrides",
+      "pricing.chargeOverrides",
+      "recipes.customRecipes",
+      "recipes.inactiveRecipeIds",
+      "recipes.editedRecipes",
+      "products.customBeerKegs",
+      "products.customLiquorTaps",
+      "products.comingSoonItems",
+      "products.tapReplacementOverrides",
+    ].includes(slice))
+    .forEach((slice) => dashboardSharedPendingSlices.add(slice));
+  if (dashboardSharedPatchScheduled) return;
+
+  dashboardSharedPatchScheduled = true;
+  queueMicrotask(() => {
+    dashboardSharedPatchScheduled = false;
+    const pendingSlices = [...dashboardSharedPendingSlices];
+    dashboardSharedPendingSlices.clear();
+    if (!pendingSlices.length) return;
+
+    const patch = getSharedDashboardPatch(pendingSlices);
+    if (!dashboardSharedState.initialized) {
+      const draftStored = stageDashboardSharedOutbox(
+        patch,
+        pendingSlices,
+        { requiresReview: true },
+      );
+      if (!draftStored) {
+        setDashboardSharedSyncStatus(
+          "offline",
+          "This draft could not be backed up in browser storage. Keep this page open and record the change before reloading.",
+        );
+      } else if (dashboardSharedSyncStatus !== "offline") {
+        setDashboardSharedSyncStatus(
+          "setup",
+          "Shared setup is not initialized. This local draft is durably stored for review and will not auto-publish when shared setup is initialized elsewhere.",
+        );
+      } else {
+        renderDashboardSharedStateStatus();
+      }
+      return;
+    }
+
+    enqueueSharedDashboardPatch(patch, pendingSlices);
+  });
+}
+
+function enqueueSharedDashboardPatch(patch, touchedFields) {
+  const generation = ++dashboardSharedMutationGeneration;
+  const optimisticBase = dashboardSharedOptimisticState || dashboardSharedState;
+  const baseValues = getSharedDashboardBaseValues(optimisticBase, touchedFields);
+  const outboxStored = stageDashboardSharedOutbox(patch, touchedFields);
+  dashboardSharedOptimisticState = mergeSharedDashboardPatchIntoState(optimisticBase, patch);
+  const requiresReview = touchedFields.some(
+    (path) => dashboardSharedOutbox.entries[path]?.requiresReview,
+  );
+  if (requiresReview) {
+    setDashboardSharedSyncStatus(
+      outboxStored ? "conflict" : "offline",
+      outboxStored
+        ? "This area contains a local draft created before shared setup was initialized. Review it and choose whether to publish the local or shared version."
+        : "This draft needs review, but the browser could not preserve its recovery backup. Keep this page open and record the change before reloading.",
+    );
+    return;
+  }
+  setDashboardSharedSyncStatus("saving", "Saving this change to the shared dashboard...");
+  dashboardSharedPatchQueue = dashboardSharedPatchQueue
+    .then(() => persistSharedDashboardPatch(patch, touchedFields, baseValues, generation))
+    .catch(() => {});
+}
+
+async function persistSharedDashboardPatch(patch, touchedFields, baseValues, generation) {
+  let conflictFound = false;
+
+  try {
+    if (dashboardSharedWritesPaused) {
+      if (generation === dashboardSharedMutationGeneration) {
+        setDashboardSharedSyncStatus(
+          dashboardSharedWritePauseReason === "conflict" ? "conflict" : "offline",
+          dashboardSharedWritePauseReason === "conflict"
+            ? dashboardSharedOutboxDurable
+              ? "Another manager changed this same area while you were editing. Your local edits remain safely stored for explicit review."
+              : "Another manager changed this same area, and the browser could not preserve the local recovery backup. Keep this page open and record the edit before reloading."
+            : dashboardSharedOutboxDurable
+              ? "Shared sync is paused after a connection error. Pending edits are safely stored in this browser; use Retry shared sync when the connection returns."
+              : "Shared sync is paused and the browser could not preserve the pending backup. Keep this page open and record the edit before reloading.",
+        );
+      }
+      return;
+    }
+
+    if (hasSharedDashboardFieldConflict(dashboardSharedState, baseValues, touchedFields)) {
+      if (generation === dashboardSharedMutationGeneration) {
+        applySharedDashboardState(dashboardSharedState);
+        setDashboardSharedSyncStatus(
+          "conflict",
+          getDashboardSharedConflictMessage(touchedFields),
+        );
+        render();
+      } else {
+        dashboardSharedWritesPaused = true;
+        dashboardSharedWritePauseReason = "conflict";
+      }
+      return;
+    }
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const result = await requestDashboardSharedState("POST", {
+        action: "patch",
+        expectedRevision: dashboardSharedState.revision,
+        patch,
+      });
+
+      if (result.conflict) {
+        conflictFound = true;
+        dashboardSharedState = result.state;
+        if (!result.state.initialized) {
+          if (generation === dashboardSharedMutationGeneration) {
+            setDashboardSharedSyncStatus(
+              "conflict",
+              "Shared setup changed while saving. Your change remains only on this browser.",
+            );
+          } else {
+            dashboardSharedWritesPaused = true;
+            dashboardSharedWritePauseReason = "conflict";
+          }
+          return;
+        }
+        if (hasSharedDashboardFieldConflict(result.state, baseValues, touchedFields)) {
+          if (generation === dashboardSharedMutationGeneration) {
+            applySharedDashboardState(result.state);
+            setDashboardSharedSyncStatus(
+              "conflict",
+              getDashboardSharedConflictMessage(touchedFields),
+            );
+            render();
+          } else {
+            dashboardSharedWritesPaused = true;
+            dashboardSharedWritePauseReason = "conflict";
+          }
+          return;
+        }
+        continue;
+      }
+
+      dashboardSharedState = result.state;
+      clearCommittedDashboardSharedOutboxFields(
+        touchedFields,
+        patch,
+        result.state,
+      );
+      if (generation === dashboardSharedMutationGeneration) {
+        applySharedDashboardState(result.state);
+        const remainingPaths = getDashboardSharedOutboxPaths();
+        setDashboardSharedSyncStatus(
+          remainingPaths.length ? "conflict" : "saved",
+          remainingPaths.length
+            ? getDashboardSharedConflictMessage(remainingPaths)
+            : conflictFound
+              ? "A newer change was found elsewhere. Your change was safely reapplied to that version and saved."
+              : `Saved to the shared dashboard${result.state.updatedAt ? ` at ${formatUpdatedAt(result.state.updatedAt)}` : ""}.`,
+        );
+        render();
+      }
+      return;
+    }
+
+    if (generation === dashboardSharedMutationGeneration) {
+      applySharedDashboardState(dashboardSharedState);
+      setDashboardSharedSyncStatus(
+        "conflict",
+        `The shared dashboard changed repeatedly. ${getDashboardSharedConflictMessage(touchedFields)}`,
+      );
+      render();
+    } else {
+      dashboardSharedWritesPaused = true;
+      dashboardSharedWritePauseReason = "conflict";
+    }
+  } catch (error) {
+    dashboardSharedWritesPaused = true;
+    dashboardSharedWritePauseReason = "offline";
+    if (generation === dashboardSharedMutationGeneration) {
+      setDashboardSharedSyncStatus(
+        "offline",
+        getDashboardSharedUnavailableMessage(
+          error,
+          dashboardSharedOutboxDurable
+            ? "Your change was not published to other devices, but it remains safely stored in this browser for a later retry."
+            : "Your change was not published, and the browser could not preserve its pending backup. Keep this page open and record the edit before reloading.",
+        ),
+      );
+    }
+  }
 }
 
 function bindEvents() {
@@ -802,6 +2200,21 @@ function bindEvents() {
   });
   document.querySelectorAll(".operation-tab").forEach((button) => {
     button.addEventListener("click", () => switchTab(button.dataset.operationTab));
+  });
+  addProductTypeButtons.forEach((button) => {
+    button.addEventListener("click", () => switchAddProductType(button.dataset.addProductType));
+    button.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const currentIndex = addProductTypeButtons.indexOf(button);
+      const nextIndex = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? addProductTypeButtons.length - 1
+          : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + addProductTypeButtons.length)
+            % addProductTypeButtons.length;
+      switchAddProductType(addProductTypeButtons[nextIndex]?.dataset.addProductType, { focus: true });
+    });
   });
 
   recipeSearch.addEventListener("input", renderRecipes);
@@ -844,12 +2257,24 @@ function bindEvents() {
   pmbProductForm?.addEventListener("submit", addPmbProduct);
   pmbProductKind?.addEventListener("change", syncPmbProductDefaults);
   pmbProductNameInput?.addEventListener("input", () => {
+    if (selectedUntappdBeer && clean(pmbProductNameInput.value) !== clean(selectedUntappdBeer.name)) {
+      selectedUntappdBeer = null;
+    }
     syncPmbProductDefaults();
-    scheduleBeerProductLookup();
+    scheduleUntappdProductSearch("beer");
   });
   pmbProductKegCostInput?.addEventListener("input", () => syncPmbProductDefaults());
   pmbProductMarginInput?.addEventListener("input", () => syncPmbProductDefaults());
+  pmbProductKegOzInput?.addEventListener("change", () => syncPmbProductDefaults());
   liquorProductForm?.addEventListener("submit", addLiquorProduct);
+  liquorProductNameInput?.addEventListener("input", () => {
+    if (selectedUntappdLiquor && clean(liquorProductNameInput.value) !== clean(selectedUntappdLiquor.name)) {
+      selectedUntappdLiquor = null;
+    }
+    scheduleUntappdProductSearch("liquor");
+  });
+  beerUntappdResults?.addEventListener("click", (event) => selectUntappdSearchResult(event, "beer"));
+  liquorUntappdResults?.addEventListener("click", (event) => selectUntappdSearchResult(event, "liquor"));
   shufflePmbProductImageButton?.addEventListener("click", () => {
     shuffleBeerLookupImage();
   });
@@ -857,22 +2282,70 @@ function bindEvents() {
     shuffleBeerLookupDescription();
   });
   clearPricesButton.addEventListener("click", () => {
+    if (!confirmDashboardAction(
+      "Clear every bottle-cost override?",
+      [`${Object.keys(priceOverrides).length} saved price entries will be reset to dashboard defaults.`],
+      "This cannot be undone from the dashboard.",
+    )) return;
     priceOverrides = {};
     saveOverrides();
     render();
   });
   clearKegPricesButton?.addEventListener("click", () => {
+    if (!confirmDashboardAction(
+      "Clear every keg-cost override?",
+      [`${Object.keys(kegPriceOverrides).length} saved keg price entries will be reset.`],
+      "This cannot be undone from the dashboard.",
+    )) return;
     kegPriceOverrides = {};
     saveKegPriceOverrides();
     render();
   });
   clearChargesButton.addEventListener("click", () => {
+    if (!confirmDashboardAction(
+      "Clear every tap-charge override?",
+      [`${Object.keys(chargeOverrides).length} saved charge entries will be reset.`],
+      "This cannot be undone from the dashboard.",
+    )) return;
     chargeOverrides = {};
     saveChargeOverrides();
     render();
   });
 
   document.addEventListener("keydown", handleEnterKeyNavigation);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") hideUntappdSearchResults();
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".untappd-search-field")) hideUntappdSearchResults();
+  });
+}
+
+function switchAddProductType(productType, { focus = false } = {}) {
+  const nextType = ["cocktail", "beer", "liquor"].includes(productType) ? productType : "cocktail";
+  activeAddProductType = nextType;
+
+  addProductTypeButtons.forEach((button) => {
+    const isActive = button.dataset.addProductType === nextType;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+    button.tabIndex = isActive ? 0 : -1;
+    if (isActive && focus) button.focus();
+  });
+
+  addProductForms.forEach((form) => {
+    form.hidden = form.dataset.addProductForm !== nextType;
+  });
+}
+
+function confirmDashboardAction(title, details = [], warning = "") {
+  const message = [
+    title,
+    "",
+    ...details.filter(Boolean),
+    warning ? `\n${warning}` : "",
+  ].join("\n");
+  return window.confirm(message);
 }
 
 function switchTab(tabName) {
@@ -894,6 +2367,16 @@ function switchTab(tabName) {
   document.querySelectorAll(".operation-tab").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.operationTab === activeOperationsTab);
   });
+
+  if (!isEmployeeDashboard && requestedTab === "weekly-usage" && !weeklyUsageSyncAttempted) {
+    runPmbWeeklyUsageSync({ automatic: true });
+  }
+  if (!isEmployeeDashboard && ["keg-levels", "inventory"].includes(requestedTab) && !kegSyncAttempted) {
+    runKegLevelSync();
+  }
+  if (!isEmployeeDashboard && ["keg-levels", "pricing", "ingredients"].includes(requestedTab) && !tapPricingSyncAttempted) {
+    runTapPricingSync();
+  }
 }
 
 function render() {
@@ -1381,6 +2864,10 @@ function renderPricingSummary(visibleTapRows = getLiveTapPricingRows(pricingSear
 
   pricingSummary.innerHTML = `
     <h2>Charge pricing</h2>
+    <div class="sync-panel">
+      <button class="primary-button" id="refresh-tap-pricing" type="button"${tapPricingSyncLoading ? " disabled" : ""}>${tapPricingSyncLoading ? "Refreshing..." : "Refresh PMB prices"}</button>
+      <p class="sync-status">${escapeHtml(liveTapPricingMessage)}${liveTapPricingUpdatedAt ? ` Last updated ${escapeHtml(formatUpdatedAt(liveTapPricingUpdatedAt))}.` : ""}</p>
+    </div>
     <div class="summary-line"><span>Cocktail recipes</span><strong>${activeRecipes.length}</strong></div>
     <div class="summary-line"><span>Current PMB taps</span><strong>${liveTapPriceItems.length || visibleTapRows.length}</strong></div>
     <div class="summary-line"><span>Charge overrides</span><strong>${countChargeOverrides()}</strong></div>
@@ -1389,6 +2876,7 @@ function renderPricingSummary(visibleTapRows = getLiveTapPricingRows(pricingSear
     <div class="summary-line"><span>Projected batch profit</span><strong>${money(profit)}</strong></div>
     <div class="summary-line"><span>Projected margin</span><strong>${formatNumber(margin)}%</strong></div>
   `;
+  document.querySelector("#refresh-tap-pricing")?.addEventListener("click", runTapPricingSync);
 }
 
 function renderIngredients() {
@@ -2189,7 +3677,7 @@ function renderWeeklyUsage() {
     <div class="summary-line"><span>Replaced histories</span><strong>${formatNumber(archivedCount)}</strong></div>
     <div class="summary-line"><span>Last successful PMB sync</span><strong>${weeklyUsageLastSyncAt ? escapeHtml(formatUpdatedAt(weeklyUsageLastSyncAt)) : "Not yet"}</strong></div>
     <div class="sync-panel sync-panel--weekly-usage">
-      <p class="sync-copy">Automatically checks PMB for missing completed Monday-Sunday reports when a manager opens the dashboard. The current week is never included.</p>
+      <p class="sync-copy">Automatically checks PMB for missing completed Monday-Sunday reports when a manager opens Weekly Usage. The current week is never included.</p>
       <p class="sync-status">${escapeHtml(weeklyUsageSyncMessage)}</p>
     </div>
     ${renderWeeklyUsageArchiveSummary()}
@@ -2282,8 +3770,19 @@ function getWeeklyUsageCurrentDisplay(item) {
   return clean(weeklyUsageCurrentOverrides[item.id] ?? item.currentDisplayValue ?? "");
 }
 
+function getPmbConnectionErrorMessage(error, fallback, { writeAttempted = false } = {}) {
+  const message = clean(error?.message || error);
+  if (/fetch failed|failed to fetch|networkerror|econnrefused|econnreset|enotfound|etimedout|timed? ?out|socket hang up|aborted|pmb .+ failed \(0\)|pmb .+ unavailable/i.test(message)) {
+    return writeAttempted
+      ? "Pour My Beer is reachable only from the work network. The dashboard could not confirm whether that change completed, so check PMB at work before retrying."
+      : "Pour My Beer is reachable only from the work network. Showing saved dashboard data; no live values were changed.";
+  }
+  return message || fallback;
+}
+
 async function runPmbWeeklyUsageSync({ automatic = false } = {}) {
   if (weeklyUsageSyncLoading) return;
+  weeklyUsageSyncAttempted = true;
 
   const weekStarts = getPmbSyncWeekStarts();
   if (!weekStarts.length) {
@@ -2320,9 +3819,10 @@ async function runPmbWeeklyUsageSync({ automatic = false } = {}) {
       ? `${successPrefix}Saved ${applied.matched} PMB row${applied.matched === 1 ? "" : "s"} across ${applied.reports} week${applied.reports === 1 ? "" : "s"}. ${applied.archived ? `${applied.archived} old/replaced product row${applied.archived === 1 ? "" : "s"} went to hidden history.` : ""}`
       : `PMB returned ${applied.reportItems} product row${applied.reportItems === 1 ? "" : "s"} across ${applied.reports} week${applied.reports === 1 ? "" : "s"}, but none matched the active tracker.`;
   } catch (error) {
-    const message = error.message || "Could not pull PMB weekly usage.";
+    weeklyUsageSyncAttempted = false;
+    const message = getPmbConnectionErrorMessage(error, "Could not pull PMB weekly usage.");
     weeklyUsageSyncMessage = automatic
-      ? `Automatic PMB check failed: ${message} Existing saved usage remains visible.`
+      ? `${message} Existing saved usage remains visible.`
       : message;
   } finally {
     weeklyUsageSyncLoading = false;
@@ -3385,7 +4885,7 @@ function renderKegOnDeckControl(item) {
 
 function renderKegLevelAdjustRow(item, liveRow, displayBrand = item.brand) {
   const itemKey = getKegItemKey(item);
-  const disabled = !liveRow?.deviceId || !liveRow?.lineNum;
+  const disabled = !liveRow?.plu || !liveRow?.deviceId || !liveRow?.lineNum;
   const targetPercent = liveRow?.fillLevelPercent == null ? "" : formatNumber(liveRow.fillLevelPercent);
   const currentOz = getKegCurrentLevelOz(liveRow, item);
   const fullOunces = getKegFullOunces(liveRow, item);
@@ -3455,8 +4955,8 @@ function syncKegAdjustPercentInput(key) {
 async function pushKegLevelAdjustment(key) {
   const item = getKegWallItemByKey(key);
   const liveRow = item ? getKegLiveRow(item) : null;
-  if (!item || !liveRow?.deviceId || !liveRow?.lineNum) {
-    kegSyncMessage = "That tap does not have a live PMB device/line yet. Refresh keg levels first.";
+  if (!item || !liveRow?.plu || !liveRow?.deviceId || !liveRow?.lineNum) {
+    kegSyncMessage = "That tap does not have a verified PMB PLU, device, and line yet. Refresh keg levels first.";
     renderKegLevels();
     return;
   }
@@ -3470,6 +4970,19 @@ async function pushKegLevelAdjustment(key) {
     renderKegLevels();
     return;
   }
+
+  if (!confirmDashboardAction(
+    `Push a live keg-level change for ${item.brand}?`,
+    [
+      `PMB target: PLU ${liveRow.plu}, device ${liveRow.deviceId}, line ${liveRow.lineNum}`,
+      liveRow.fillLevelPercent == null
+        ? "Current level: Not reported"
+        : `Current level: ${formatNumber(liveRow.fillLevelPercent)}%`,
+      deltaOunces ? `Ounce adjustment: ${deltaOunces}` : "",
+      targetPercent ? `Target level: ${targetPercent}%` : "",
+    ],
+    "The server will re-check this exact PMB tap mapping before changing the physical wall.",
+  )) return;
 
   kegConfigUpdateRunning = true;
   kegSyncMessage = `Pushing ${item.brand} level change to PMB device ${liveRow.deviceId}, line ${liveRow.lineNum}...`;
@@ -3506,7 +5019,11 @@ async function pushKegLevelAdjustment(key) {
     kegSyncMessage = result.message || `${item.brand} level update sent.`;
     await runKegLevelSync();
   } catch (error) {
-    kegSyncMessage = error.message || "Could not push keg level adjustment.";
+    kegSyncMessage = getPmbConnectionErrorMessage(
+      error,
+      "Could not push keg level adjustment.",
+      { writeAttempted: true },
+    );
   } finally {
     kegConfigUpdateRunning = false;
     renderKegLevels();
@@ -3704,11 +5221,23 @@ async function updateComingSoonMargin(id, marginValue) {
 
   const targetMargin = getBeerTargetMargin(marginValue);
   const pricePerOz = getGeneratedBeerChargePerOz(item.kegCost, targetMargin);
-  if (!item.plu || !pricePerOz) {
-    kegSyncMessage = "That beer is missing a PMB product id or keg cost, so pricing was not updated.";
+  const abvPercent = toNumber(item.abvPercent);
+  if (!item.plu || !pricePerOz || abvPercent <= 0 || abvPercent > 100) {
+    kegSyncMessage = "That beer is missing a PMB product id, keg cost, or verified ABV, so pricing was not updated.";
     renderKegLevels();
     return;
   }
+
+  if (!confirmDashboardAction(
+    `Update ${item.name} pricing in Pour My Beer?`,
+    [
+      `PMB PLU: ${item.plu}`,
+      `New charge: ${money(pricePerOz)} / oz`,
+      `Target margin: ${formatNumber(targetMargin)}%`,
+      `ABV: ${formatNumber(abvPercent)}%`,
+    ],
+    "This updates the existing PMB product immediately.",
+  )) return;
 
   kegSyncMessage = `Updating ${item.name} to ${money(pricePerOz)}/oz in Pour My Beer...`;
   renderKegLevels();
@@ -3730,6 +5259,7 @@ async function updateComingSoonMargin(id, marginValue) {
         servingOz: "16",
         brewery: inferBeerBrewery(item.name),
         style: inferBeerStyle(item.name),
+        abvPercent,
         ibu: "0",
         kegOz: item.kegOz || STANDARD_BEER_KEG_OZ,
         kegCost: item.kegCost,
@@ -3746,7 +5276,11 @@ async function updateComingSoonMargin(id, marginValue) {
     saveCustomBeerMargin(id, targetMargin, pricePerOz);
     kegSyncMessage = `${item.name} pricing updated to ${money(pricePerOz)}/oz at ${formatNumber(targetMargin)}% margin.`;
   } catch (error) {
-    kegSyncMessage = error.message || "Could not update PMB pricing.";
+    kegSyncMessage = getPmbConnectionErrorMessage(
+      error,
+      "Could not update PMB pricing.",
+      { writeAttempted: true },
+    );
   }
 
   renderKegLevels();
@@ -3764,6 +5298,17 @@ async function sendComingSoonItemToPmb(id) {
     renderKegLevels();
     return null;
   }
+
+  if (!confirmDashboardAction(
+    `${item.plu ? "Update" : "Create"} ${item.name} in Pour My Beer?`,
+    [
+      item.plu ? `Existing PMB PLU: ${item.plu}` : "A new PMB product will be created.",
+      `Charge: ${money(payload.pricePerOz)} / oz`,
+      `Serving size: ${formatNumber(payload.servingOz)} oz`,
+      payload.abvPercent ? `ABV: ${formatNumber(payload.abvPercent)}%` : "",
+    ],
+    "Review the product and price before continuing.",
+  )) return null;
 
   kegSyncMessage = `${item.plu ? "Updating" : "Creating"} ${item.name} in Pour My Beer...`;
   renderKegLevels();
@@ -3795,7 +5340,11 @@ async function sendComingSoonItemToPmb(id) {
     runTapPricingSync();
     return updatedItem;
   } catch (error) {
-    kegSyncMessage = error.message || "Could not save the PMB product.";
+    kegSyncMessage = getPmbConnectionErrorMessage(
+      error,
+      "Could not save the PMB product.",
+      { writeAttempted: true },
+    );
     renderKegLevels();
     return null;
   }
@@ -3879,8 +5428,26 @@ async function replaceTapWithProduct(replacementValue, tapKey) {
   }
 
   let item = details.item;
+  const liveRow = getKegLiveRow(tap);
+  if (!liveRow?.plu || !liveRow?.deviceId || !liveRow?.lineNum) {
+    kegSyncMessage = "That physical tap has not been verified against live PMB yet. Refresh keg levels on the work network before replacing it.";
+    renderKegLevels();
+    return;
+  }
   const tapLabel = `${tap.wall} ${tap.tapNumber}`;
   const target = buildTapReplacementTarget(details, item, replacementValue);
+  if (!confirmDashboardAction(
+    `Change ${tapLabel} in Pour My Beer?`,
+    [
+      `Current product: ${tap.brand}`,
+      `New product: ${target.name}`,
+      `PMB target: PLU ${liveRow.plu}, device ${liveRow.deviceId}, line ${liveRow.lineNum}`,
+      target.plu ? `Existing PMB PLU: ${target.plu}` : "A new or matching PMB product may be used.",
+      target.chargePerOz ? `Charge: ${money(target.chargePerOz)} / oz` : "",
+    ],
+    "This changes the product assigned to a physical tap and sends a wall configuration update.",
+  )) return;
+
   kegConfigUpdateRunning = true;
   kegSyncMessage = `Changing ${tapLabel} from ${tap.brand} to ${target.name} in Pour My Beer...`;
   renderKegLevels();
@@ -3897,6 +5464,9 @@ async function replaceTapWithProduct(replacementValue, tapKey) {
       body: JSON.stringify({
         tapKey,
         tapNumber: tap.tapNumber,
+        currentPlu: toNumber(liveRow.plu),
+        deviceId: toNumber(liveRow.deviceId),
+        lineNum: toNumber(liveRow.lineNum),
         wall: tap.wall,
         currentBrand: tap.brand,
         target,
@@ -3951,7 +5521,11 @@ async function replaceTapWithProduct(replacementValue, tapKey) {
     await runKegLevelSync();
     kegSyncMessage = `${newBrand} was pushed to PMB on ${tapLabel}${result.configUpdateSent ? " and the affected tap wall was updated." : "."}`;
   } catch (error) {
-    kegSyncMessage = error.message || "Could not change the PMB tap product.";
+    kegSyncMessage = getPmbConnectionErrorMessage(
+      error,
+      "Could not change the PMB tap product.",
+      { writeAttempted: true },
+    );
   } finally {
     kegConfigUpdateRunning = false;
     render();
@@ -4217,6 +5791,7 @@ async function runKegParAgent() {
 }
 
 async function runKegLevelSync() {
+  kegSyncAttempted = true;
   kegSyncLoading = true;
   kegSyncMessage = "Checking Pour My Beer for live keg levels...";
   renderKegLevels();
@@ -4224,7 +5799,7 @@ async function runKegLevelSync() {
 
   try {
     const response = await fetch("/api/keg-levels");
-    const result = await response.json();
+    const result = await parseJsonResponse(response);
     if (!response.ok) {
       throw new Error(result?.error || "Could not load keg levels.");
     }
@@ -4236,7 +5811,8 @@ async function runKegLevelSync() {
     kegSyncMessage = `Found live levels for ${result.items?.length || 0} products.`;
     succeeded = true;
   } catch (error) {
-    kegSyncMessage = error.message || "Could not load live keg levels.";
+    kegSyncAttempted = false;
+    kegSyncMessage = getPmbConnectionErrorMessage(error, "Could not load live keg levels.");
   } finally {
     kegSyncLoading = false;
     renderKegLevels();
@@ -4245,12 +5821,15 @@ async function runKegLevelSync() {
 }
 
 async function runTapPricingSync() {
+  if (tapPricingSyncLoading) return;
+  tapPricingSyncAttempted = true;
+  tapPricingSyncLoading = true;
   liveTapPricingMessage = "Checking Pour My Beer for current tap prices...";
   renderPricingSummary();
 
   try {
     const response = await fetch("/api/tap-pricing");
-    const result = await response.json();
+    const result = await parseJsonResponse(response);
     if (!response.ok) {
       throw new Error(result?.error || "Could not load tap pricing.");
     }
@@ -4268,16 +5847,22 @@ async function runTapPricingSync() {
     renderOldRecipes();
     renderStats();
   } catch (error) {
-    liveTapPrices = new Map();
-    liveTapPriceItems = [];
-    liveTapPricingUpdatedAt = "";
-    liveTapPricingMessage = error.message || "Could not load current tap pricing.";
-    renderPricingSummary();
+    tapPricingSyncAttempted = false;
+    liveTapPricingMessage = getPmbConnectionErrorMessage(error, "Could not load current tap pricing.");
     renderKegLevels();
+  } finally {
+    tapPricingSyncLoading = false;
+    renderPricingSummary();
   }
 }
 
 async function runKegConfigUpdate() {
+  if (!confirmDashboardAction(
+    "Send a configuration update to the Pour My Beer walls?",
+    ["The command targets the configured PMB tap devices."],
+    "Only continue while connected to the work network and after verifying the displayed tap assignments.",
+  )) return;
+
   kegConfigUpdateRunning = true;
   kegSyncMessage = "Sending config update to Pour My Beer...";
   renderKegLevels();
@@ -4286,14 +5871,18 @@ async function runKegConfigUpdate() {
     const response = await fetch("/api/keg-config-update", {
       method: "POST",
     });
-    const result = await response.json();
+    const result = await parseJsonResponse(response);
     if (!response.ok) {
       throw new Error(result?.error || "Could not send config update.");
     }
 
     kegSyncMessage = result.message || "Configuration update sent.";
   } catch (error) {
-    kegSyncMessage = error.message || "Could not send config update.";
+    kegSyncMessage = getPmbConnectionErrorMessage(
+      error,
+      "Could not send config update.",
+      { writeAttempted: true },
+    );
   } finally {
     kegConfigUpdateRunning = false;
     renderKegLevels();
@@ -5046,6 +6635,13 @@ async function syncCustomInventoryPrice(id, { automatic = false } = {}) {
 }
 
 async function deleteCustomInventoryItem(id) {
+  const item = customInventoryItems.find((entry) => entry.id === id);
+  if (!confirmDashboardAction(
+    `Remove ${item?.name || "this custom item"} from shared inventory?`,
+    ["Its saved on-hand count, par, position, and linked pricing will also be removed."],
+    "This change affects every signed-in manager.",
+  )) return;
+
   customInventoryItems = customInventoryItems.filter((item) => item.id !== id);
   delete inventoryOnHandOverrides[id];
   delete inventoryParOverrides[id];
@@ -5588,6 +7184,14 @@ function groupInventorySnapshotItems(sourceItems) {
 }
 
 async function deleteInventorySnapshot(snapshotId) {
+  const snapshot = inventoryHistory.find((entry) => entry.id === snapshotId);
+  if (!snapshot) return;
+  if (!confirmDashboardAction(
+    `Delete the ${formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot))} snapshot?`,
+    ["The shared weekly inventory record will be removed for every manager."],
+    "This cannot be undone from the dashboard.",
+  )) return;
+
   const state = await runSharedInventoryAction(
     { action: "delete-snapshot", id: snapshotId },
     { successMessage: "The shared Monday snapshot was deleted." },
@@ -5598,6 +7202,12 @@ async function deleteInventorySnapshot(snapshotId) {
 async function restoreInventorySnapshot(snapshotId) {
   const snapshot = inventoryHistory.find((entry) => entry.id === snapshotId);
   if (!snapshot) return;
+  if (!confirmDashboardAction(
+    `Restore inventory from ${formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot))}?`,
+    [`${snapshot.items.length} saved item counts and pars will replace the current shared values.`],
+    "Current inventory values will change for every signed-in manager.",
+  )) return;
+
   const state = await runSharedInventoryAction(
     { action: "restore-snapshot", id: snapshotId },
     {
@@ -5733,10 +7343,12 @@ async function addPmbProduct(event) {
   const productKind = clean(document.querySelector("#pmb-product-kind")?.value) || "cocktail";
   const name = clean(document.querySelector("#pmb-product-name")?.value);
   const kegCost = toNumber(pmbProductKegCostInput?.value);
+  const kegOz = toNumber(pmbProductKegOzInput?.value);
+  const abvPercent = toNumber(pmbProductAbvInput?.value);
   const targetMargin = getBeerTargetMargin();
-  const pricePerOz = getGeneratedBeerChargePerOz(kegCost, targetMargin);
-  if (!name || !kegCost) {
-    setPmbProductStatus("Add a beer name and keg cost before sending to PMB.", "error");
+  const pricePerOz = getGeneratedBeerChargePerOz(kegCost, targetMargin, kegOz);
+  if (!name || kegCost <= 0 || kegOz <= 0 || pricePerOz <= 0 || abvPercent <= 0 || abvPercent > 100) {
+    setPmbProductStatus("Add a beer name, positive keg cost, correct keg size, and a verified ABV from Untappd before sending to PMB.", "error");
     return;
   }
 
@@ -5749,11 +7361,6 @@ async function addPmbProduct(event) {
     return;
   }
 
-  pmbProductSaving = true;
-  if (pmbProductSubmitButton) pmbProductSubmitButton.textContent = "Sending...";
-  if (pmbProductSubmitButton) pmbProductSubmitButton.disabled = true;
-  setPmbProductStatus("Sending product to Pour My Beer...", "loading");
-
   const localImageUrl = clean(document.querySelector("#pmb-product-image")?.value);
   const payload = {
     productKind,
@@ -5762,14 +7369,33 @@ async function addPmbProduct(event) {
     servingOz: document.querySelector("#pmb-product-serving")?.value,
     brewery: document.querySelector("#pmb-product-brewery")?.value,
     style: document.querySelector("#pmb-product-style")?.value,
-    abvPercent: document.querySelector("#pmb-product-abv")?.value,
+    abvPercent,
     ibu: document.querySelector("#pmb-product-ibu")?.value,
-    kegOz: document.querySelector("#pmb-product-keg-oz")?.value,
+    kegOz,
     kegCost,
     targetMargin,
     notes: document.querySelector("#pmb-product-notes")?.value,
     imageUrl: localImageUrl,
   };
+
+  if (!confirmDashboardAction(
+    `Create or update “${name}” in Pour My Beer?`,
+    [
+      `Type: Beer keg`,
+      `Charge: ${money(pricePerOz)} / oz`,
+      `Keg cost: ${money(kegCost)}`,
+      `Keg size: ${formatNumber(kegOz)} oz`,
+      `ABV: ${formatNumber(abvPercent)}%`,
+      `Target margin: ${formatNumber(targetMargin)}%`,
+    ],
+    "If an exact-name PMB product already exists, its values may be updated.",
+  )) return;
+
+  pmbProductSaving = true;
+  if (pmbProductSubmitButton) pmbProductSubmitButton.textContent = "Sending...";
+  if (pmbProductSubmitButton) pmbProductSubmitButton.disabled = true;
+  setPmbProductStatus("Sending product to Pour My Beer...", "loading");
+
   try {
     const response = await fetch("/api/pmb-products", {
       method: "POST",
@@ -5805,10 +7431,17 @@ async function addPmbProduct(event) {
     render();
     runTapPricingSync();
   } catch (error) {
-    setPmbProductStatus(error.message || "Could not send product to Pour My Beer.", "error");
+    setPmbProductStatus(
+      getPmbConnectionErrorMessage(
+        error,
+        "Could not send product to Pour My Beer.",
+        { writeAttempted: true },
+      ),
+      "error",
+    );
   } finally {
     pmbProductSaving = false;
-    if (pmbProductSubmitButton) pmbProductSubmitButton.textContent = "Send to PMB";
+    if (pmbProductSubmitButton) pmbProductSubmitButton.textContent = "Create PMB beer";
     if (pmbProductSubmitButton) pmbProductSubmitButton.disabled = false;
   }
 }
@@ -5819,21 +7452,25 @@ async function addLiquorProduct(event) {
 
   const name = normalizeIngredientAlias(clean(liquorProductNameInput?.value));
   const pricePerOz = toNumber(liquorProductPriceInput?.value);
-  const servingOz = toNumber(liquorProductServingInput?.value) || 1.5;
+  const servingOz = toNumber(liquorProductServingInput?.value);
   const bottleCost = toNumber(liquorProductBottleCostInput?.value);
-  const bottleOz = toNumber(liquorProductBottleOzInput?.value) || 59.1745;
-  const abvPercent = toNumber(liquorProductAbvInput?.value) || 40;
+  const bottleOz = toNumber(liquorProductBottleOzInput?.value);
+  const abvPercent = toNumber(liquorProductAbvInput?.value);
   const notes = clean(liquorProductNotesInput?.value) || `${name || "This liquor"} is available as a straight liquor tap on the tap wall.`;
 
-  if (!name || !pricePerOz) {
-    setLiquorProductStatus("Add a liquor name and charge per oz before sending to PMB.", "error");
+  if (
+    !name
+    || pricePerOz <= 0
+    || servingOz <= 0
+    || servingOz > 16
+    || bottleCost <= 0
+    || bottleOz <= 0
+    || abvPercent <= 0
+    || abvPercent > 100
+  ) {
+    setLiquorProductStatus("Enter a name plus positive charge, pour size, bottle cost, bottle size, and an ABV above 0 and no more than 100 before sending to PMB.", "error");
     return;
   }
-
-  liquorProductSaving = true;
-  if (liquorProductSubmitButton) liquorProductSubmitButton.textContent = "Sending...";
-  if (liquorProductSubmitButton) liquorProductSubmitButton.disabled = true;
-  setLiquorProductStatus("Sending liquor tap to Pour My Beer...", "loading");
 
   const payload = {
     productKind: "liquor",
@@ -5847,6 +7484,24 @@ async function addLiquorProduct(event) {
     kegOz: bottleOz,
     notes,
   };
+
+  if (!confirmDashboardAction(
+    `Create or update “${name}” in Pour My Beer?`,
+    [
+      "Type: Straight liquor tap",
+      `Charge: ${money(pricePerOz)} / oz`,
+      `Pour size: ${formatNumber(servingOz)} oz`,
+      `ABV: ${formatNumber(abvPercent)}%`,
+      bottleCost ? `Bottle cost: ${money(bottleCost)}` : "",
+      `Bottle size: ${formatNumber(bottleOz)} oz`,
+    ],
+    "If an exact-name PMB product already exists, its values may be updated.",
+  )) return;
+
+  liquorProductSaving = true;
+  if (liquorProductSubmitButton) liquorProductSubmitButton.textContent = "Sending...";
+  if (liquorProductSubmitButton) liquorProductSubmitButton.disabled = true;
+  setLiquorProductStatus("Sending liquor tap to Pour My Beer...", "loading");
 
   try {
     const response = await fetch("/api/pmb-products", {
@@ -5882,14 +7537,24 @@ async function addLiquorProduct(event) {
 
     setLiquorProductStatus(result.message || `${name} was sent to Pour My Beer.`, "success");
     liquorProductForm.reset();
+    selectedUntappdLiquor = null;
+    liquorUntappdItems = [];
+    hideUntappdSearchResults("liquor");
     ingredients = buildIngredientCatalog(getActiveRecipes());
     render();
     runTapPricingSync();
   } catch (error) {
-    setLiquorProductStatus(error.message || "Could not send liquor tap to Pour My Beer.", "error");
+    setLiquorProductStatus(
+      getPmbConnectionErrorMessage(
+        error,
+        "Could not send liquor tap to Pour My Beer.",
+        { writeAttempted: true },
+      ),
+      "error",
+    );
   } finally {
     liquorProductSaving = false;
-    if (liquorProductSubmitButton) liquorProductSubmitButton.textContent = "Send to PMB";
+    if (liquorProductSubmitButton) liquorProductSubmitButton.textContent = "Create PMB liquor";
     if (liquorProductSubmitButton) liquorProductSubmitButton.disabled = false;
   }
 }
@@ -6009,6 +7674,7 @@ function addComingSoonItemFromPmbProduct(payload, product = null) {
     kegCost: toNumber(payload.kegCost),
     kegOz: toNumber(payload.kegOz) || STANDARD_BEER_KEG_OZ,
     pricePerOz: toNumber(payload.pricePerOz),
+    abvPercent: toNumber(payload.abvPercent),
     targetMargin: toNumber(payload.targetMargin) || DEFAULT_BEER_TARGET_MARGIN,
     plu: toNumber(product?.plu || payload.plu),
     createdAt: new Date().toISOString(),
@@ -6116,6 +7782,187 @@ function shuffleRecipeLookupImage() {
   recipeImageShuffleIndex += 1;
   syncRecipeCreativeDefaults({ preserveDescription: true, forceImage: true });
   ensureRecipeImageLookup({ force: true });
+}
+
+function getUntappdSearchElements(kind) {
+  if (kind === "liquor") {
+    return {
+      input: liquorProductNameInput,
+      results: liquorUntappdResults,
+      items: liquorUntappdItems,
+    };
+  }
+  return {
+    input: pmbProductNameInput,
+    results: beerUntappdResults,
+    items: beerUntappdItems,
+  };
+}
+
+function scheduleUntappdProductSearch(kind) {
+  const { input } = getUntappdSearchElements(kind);
+  const query = clean(input?.value);
+  const isLiquor = kind === "liquor";
+  const currentTimer = isLiquor ? liquorUntappdSearchTimer : beerUntappdSearchTimer;
+  clearTimeout(currentTimer);
+
+  if (query.length < 2) {
+    if (isLiquor) {
+      liquorUntappdItems = [];
+      liquorUntappdSearchTimer = null;
+    } else {
+      beerUntappdItems = [];
+      beerUntappdSearchTimer = null;
+    }
+    hideUntappdSearchResults(kind);
+    return;
+  }
+
+  const timer = setTimeout(() => searchUntappdProducts(kind, query), 350);
+  if (isLiquor) liquorUntappdSearchTimer = timer;
+  else beerUntappdSearchTimer = timer;
+}
+
+async function searchUntappdProducts(kind, query) {
+  const isLiquor = kind === "liquor";
+  const requestId = isLiquor ? ++liquorUntappdRequestId : ++beerUntappdRequestId;
+  const setStatus = isLiquor ? setLiquorProductStatus : setPmbProductStatus;
+  setStatus(
+    isLiquor
+      ? "Searching spirits carried on On Par’s Untappd menus..."
+      : "Searching the Untappd beer database...",
+    "loading",
+  );
+
+  try {
+    const response = await fetch(
+      `/api/untappd-search?kind=${encodeURIComponent(kind)}&q=${encodeURIComponent(query)}`,
+      { cache: "no-store" },
+    );
+    const result = await parseJsonResponse(response);
+    const latestRequestId = isLiquor ? liquorUntappdRequestId : beerUntappdRequestId;
+    if (requestId !== latestRequestId) return;
+    if (!response.ok) throw new Error(result.error || "Untappd search failed.");
+
+    const items = Array.isArray(result.items) ? result.items : [];
+    if (isLiquor) liquorUntappdItems = items;
+    else beerUntappdItems = items;
+    renderUntappdSearchResults(kind, items);
+    setStatus(
+      items.length
+        ? `Choose from ${items.length} Untappd ${items.length === 1 ? "match" : "matches"}.`
+        : isLiquor
+          ? "No matching spirit was found in On Par’s Untappd menus."
+          : "No matching beer was found in Untappd.",
+      items.length ? "success" : "error",
+    );
+  } catch (error) {
+    if (requestId !== (isLiquor ? liquorUntappdRequestId : beerUntappdRequestId)) return;
+    if (isLiquor) liquorUntappdItems = [];
+    else beerUntappdItems = [];
+    renderUntappdSearchResults(kind, [], error.message || "Untappd search failed.");
+    setStatus(error.message || "Untappd search failed.", "error");
+  }
+}
+
+function renderUntappdSearchResults(kind, items, emptyMessage = "") {
+  const { input, results } = getUntappdSearchElements(kind);
+  if (!results || !input) return;
+
+  if (!items.length) {
+    results.innerHTML = `<p class="untappd-search-empty">${escapeHtml(emptyMessage || "No Untappd matches found.")}</p>`;
+  } else {
+    results.innerHTML = items.map((item, index) => {
+      const producer = clean(item.producer || item.brewery);
+      const category = clean(item.style || item.category || (kind === "liquor" ? "Spirit" : "Beer"));
+      const strength = toNumber(item.abv) ? `${formatNumber(item.abv)}% ABV` : "";
+      const source = item.carried ? "Carried at On Par" : "Untappd";
+      const details = [producer, category, strength, source].filter(Boolean).join(" · ");
+      const image = clean(item.imageUrl);
+      return `
+        <button class="untappd-search-result" type="button" role="option" data-untappd-index="${index}">
+          ${image
+            ? `<img src="${escapeHtml(image)}" alt="">`
+            : `<span class="untappd-search-result__placeholder">${kind === "liquor" ? "SPIRIT" : "BEER"}</span>`}
+          <span>
+            <strong>${escapeHtml(item.name)}</strong>
+            <span>${escapeHtml(details)}</span>
+          </span>
+        </button>
+      `;
+    }).join("");
+  }
+
+  results.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+}
+
+function hideUntappdSearchResults(kind = "") {
+  const kinds = kind ? [kind] : ["beer", "liquor"];
+  kinds.forEach((currentKind) => {
+    const { input, results } = getUntappdSearchElements(currentKind);
+    if (results) results.hidden = true;
+    input?.setAttribute("aria-expanded", "false");
+  });
+}
+
+function selectUntappdSearchResult(event, kind) {
+  const button = event.target.closest("[data-untappd-index]");
+  if (!button) return;
+  const { items } = getUntappdSearchElements(kind);
+  const item = items[Number(button.dataset.untappdIndex)];
+  if (!item) return;
+
+  if (kind === "liquor") {
+    applyUntappdLiquorSelection(item);
+  } else {
+    applyUntappdBeerSelection(item);
+  }
+}
+
+function applyUntappdBeerSelection(item) {
+  selectedUntappdBeer = item;
+  if (pmbProductNameInput) pmbProductNameInput.value = item.name;
+  syncPmbProductDefaults();
+  if (pmbProductBreweryInput) pmbProductBreweryInput.value = clean(item.producer || item.brewery);
+  if (pmbProductStyleInput) pmbProductStyleInput.value = clean(item.style) || "Beer";
+  if (pmbProductAbvInput) pmbProductAbvInput.value = item.abv == null ? "" : String(item.abv);
+  if (pmbProductIbuInput) pmbProductIbuInput.value = item.ibu == null ? "0" : String(item.ibu);
+  if (pmbProductNotesInput) pmbProductNotesInput.value = clean(item.description);
+  setPmbProductImage(clean(item.imageUrl));
+  lastGeneratedPmbProductDescription = clean(item.description);
+  lastGeneratedPmbProductImage = clean(item.imageUrl);
+  beerLookupItems = beerUntappdItems
+    .filter((result) => result.description && result.imageUrl)
+    .map((result) => ({ ...result, sourceName: "Untappd" }));
+  beerLookupImageIndex = Math.max(
+    0,
+    beerLookupItems.findIndex((result) => (
+      result.id === item.id
+      || (result.untappdId && result.untappdId === item.untappdId)
+    )),
+  );
+  beerLookupDescriptionIndex = beerLookupImageIndex;
+  hideUntappdSearchResults("beer");
+  setPmbProductStatus(
+    `Selected ${item.name} from Untappd${item.producer ? ` by ${item.producer}` : ""}.`,
+    "success",
+  );
+}
+
+function applyUntappdLiquorSelection(item) {
+  selectedUntappdLiquor = item;
+  if (liquorProductNameInput) liquorProductNameInput.value = item.name;
+  if (liquorProductAbvInput && item.abv != null) liquorProductAbvInput.value = String(item.abv);
+  if (liquorProductNotesInput) {
+    liquorProductNotesInput.value = clean(item.description)
+      || [item.producer, item.category || item.style].filter(Boolean).join(" · ");
+  }
+  hideUntappdSearchResults("liquor");
+  setLiquorProductStatus(
+    `Selected ${item.name} from On Par’s Untappd menu${item.menuName ? ` (${item.menuName})` : ""}.`,
+    "success",
+  );
 }
 
 function syncPmbProductCreativeDefaults() {
@@ -6238,12 +8085,19 @@ function shuffleBeerLookupDescription() {
 }
 
 function clearBeerLookupResult({ keepStatus = false } = {}) {
+  if (!keepStatus) {
+    selectedUntappdBeer = null;
+    beerUntappdItems = [];
+  }
   beerLookupItems = [];
   beerLookupImageIndex = 0;
   beerLookupDescriptionIndex = 0;
-  if (pmbProductNotesInput) pmbProductNotesInput.value = "";
-  setPmbProductImage("");
-  if (!keepStatus) setPmbProductStatus("Enter a beer name and keg cost to look up internet details.", "");
+  if (!keepStatus) {
+    if (pmbProductNotesInput) pmbProductNotesInput.value = "";
+    setPmbProductImage("");
+  }
+  hideUntappdSearchResults("beer");
+  if (!keepStatus) setPmbProductStatus("Enter a beer name to search Untappd, then add the keg cost.", "");
 }
 
 function buildRecipeDescription(title, category, recipeIngredients = getRecipeBuilderIngredientsFromRows()) {
@@ -6339,20 +8193,36 @@ function syncPmbProductDefaults() {
   const kind = clean(pmbProductKind?.value) || "cocktail";
 
   if (kind === "beer") {
+    const untappdItem = selectedUntappdBeer
+      && clean(selectedUntappdBeer.name) === clean(pmbProductNameInput?.value)
+      ? selectedUntappdBeer
+      : null;
     const kegCost = toNumber(pmbProductKegCostInput?.value);
+    const kegOz = toNumber(pmbProductKegOzInput?.value) || STANDARD_BEER_KEG_OZ;
     const targetMargin = getBeerTargetMargin();
-    const chargePerOz = getGeneratedBeerChargePerOz(kegCost, targetMargin);
+    const chargePerOz = getGeneratedBeerChargePerOz(kegCost, targetMargin, kegOz);
     if (pmbProductServingInput) pmbProductServingInput.value = "16";
     if (pmbProductMarginInput && !clean(pmbProductMarginInput.value)) pmbProductMarginInput.value = String(DEFAULT_BEER_TARGET_MARGIN);
-    if (pmbProductStyleInput) pmbProductStyleInput.value = inferBeerStyle(pmbProductNameInput?.value);
-    if (pmbProductBreweryInput) pmbProductBreweryInput.value = inferBeerBrewery(pmbProductNameInput?.value);
-    if (pmbProductAbvInput) pmbProductAbvInput.value = "";
-    if (pmbProductIbuInput) pmbProductIbuInput.value = "0";
-    if (pmbProductKegOzInput) pmbProductKegOzInput.value = String(STANDARD_BEER_KEG_OZ);
+    if (pmbProductStyleInput) {
+      pmbProductStyleInput.value = clean(untappdItem?.style) || inferBeerStyle(pmbProductNameInput?.value);
+    }
+    if (pmbProductBreweryInput) {
+      pmbProductBreweryInput.value = clean(untappdItem?.producer || untappdItem?.brewery)
+        || inferBeerBrewery(pmbProductNameInput?.value);
+    }
+    if (pmbProductAbvInput) {
+      pmbProductAbvInput.value = untappdItem?.abv == null ? "" : String(untappdItem.abv);
+    }
+    if (pmbProductIbuInput) {
+      pmbProductIbuInput.value = untappdItem?.ibu == null ? "0" : String(untappdItem.ibu);
+    }
+    if (pmbProductKegOzInput && !clean(pmbProductKegOzInput.value)) {
+      pmbProductKegOzInput.value = String(STANDARD_BEER_KEG_OZ);
+    }
     if (pmbProductPriceInput) pmbProductPriceInput.value = chargePerOz ? formatNumber(chargePerOz) : "";
     if (pmbGeneratedSummary) {
       pmbGeneratedSummary.textContent = chargePerOz
-        ? `Generated: ${money(chargePerOz)}/oz at ${formatNumber(targetMargin)}% margin, 16 oz serving, ${formatNumber(STANDARD_BEER_KEG_OZ)} oz keg.`
+        ? `Generated: ${money(chargePerOz)}/oz at ${formatNumber(targetMargin)}% margin, 16 oz serving, ${formatNumber(kegOz)} oz keg.`
         : "Enter a keg cost to generate the PMB price, serving size, keg size, description, and picture.";
     }
     return;
@@ -6371,8 +8241,12 @@ function getBeerTargetMargin(value = pmbProductMarginInput?.value) {
   return Math.min(95, Math.max(1, margin));
 }
 
-function getGeneratedBeerChargePerOz(kegCost, targetMargin = DEFAULT_BEER_TARGET_MARGIN) {
-  const costPerOz = toNumber(kegCost) / STANDARD_BEER_KEG_OZ;
+function getGeneratedBeerChargePerOz(
+  kegCost,
+  targetMargin = DEFAULT_BEER_TARGET_MARGIN,
+  kegOz = toNumber(pmbProductKegOzInput?.value) || STANDARD_BEER_KEG_OZ,
+) {
+  const costPerOz = toNumber(kegCost) / toNumber(kegOz);
   if (!costPerOz) return 0;
   const targetMarginFraction = getBeerTargetMargin(targetMargin) / 100;
   return Math.max(0.01, Math.round((costPerOz / (1 - targetMarginFraction)) * 100) / 100);
@@ -6742,6 +8616,13 @@ function estimateIngredientCost(name, ounces) {
 }
 
 function deactivateRecipe(id) {
+  const recipe = recipes.find((entry) => entry.id === id);
+  if (!confirmDashboardAction(
+    `Move ${recipe?.title || "this recipe"} to Old Recipes?`,
+    ["It will no longer appear in the active recipe list."],
+    "You can reactivate it later.",
+  )) return;
+
   if (!inactiveRecipeIds.includes(id)) {
     inactiveRecipeIds.push(id);
   }
@@ -6756,6 +8637,13 @@ function reactivateRecipe(id) {
 }
 
 function deleteCustomRecipe(id) {
+  const recipe = recipes.find((entry) => entry.id === id);
+  if (!confirmDashboardAction(
+    `Permanently delete ${recipe?.title || "this custom recipe"}?`,
+    ["Its saved recipe, inactive status, and charge override will be removed."],
+    "This cannot be undone from the dashboard.",
+  )) return;
+
   customRecipes = customRecipes.filter((recipe) => recipe.id !== id);
   recipes = recipes.filter((recipe) => recipe.id !== id);
   inactiveRecipeIds = inactiveRecipeIds.filter((recipeId) => recipeId !== id);
@@ -6770,6 +8658,7 @@ function startEditingRecipe(id) {
   const recipe = recipes.find((item) => item.id === id);
   if (!recipe) return;
 
+  switchAddProductType("cocktail");
   editingRecipeId = id;
   recipeFormTitle.textContent = `Edit ${recipe.title}`;
   recipeSubmitButton.textContent = "Save changes";
@@ -6799,7 +8688,7 @@ function startEditingRecipe(id) {
 function resetRecipeForm() {
   editingRecipeId = null;
   recipeFormTitle.textContent = "Add cocktail product";
-  recipeSubmitButton.textContent = "Add product";
+  recipeSubmitButton.textContent = "Save recipe draft";
   cancelEditButton.hidden = true;
   recipeForm.reset();
   newIngredientRows.innerHTML = "";
@@ -8578,7 +10467,8 @@ function loadOverrides() {
 }
 
 function saveOverrides() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(priceOverrides));
+  writeDashboardLocalStorageValue(STORAGE_KEY, getLocalIngredientPriceOverrides());
+  scheduleSharedDashboardStateSync("pricing.ingredientPriceOverrides");
 }
 
 function loadKegPriceOverrides() {
@@ -8606,7 +10496,8 @@ function loadKegPriceOverrides() {
 }
 
 function saveKegPriceOverrides() {
-  localStorage.setItem(KEG_PRICE_STORAGE_KEY, JSON.stringify(kegPriceOverrides));
+  writeDashboardLocalStorageValue(KEG_PRICE_STORAGE_KEY, getLocalKegPriceOverrides());
+  scheduleSharedDashboardStateSync("pricing.kegPriceOverrides");
 }
 
 function loadCustomBeerKegs() {
@@ -8618,7 +10509,8 @@ function loadCustomBeerKegs() {
 }
 
 function saveCustomBeerKegs() {
-  localStorage.setItem(CUSTOM_BEER_KEG_STORAGE_KEY, JSON.stringify(customBeerKegs));
+  writeDashboardLocalStorageValue(CUSTOM_BEER_KEG_STORAGE_KEY, customBeerKegs);
+  scheduleSharedDashboardStateSync("products.customBeerKegs");
 }
 
 function loadCustomLiquorTaps() {
@@ -8630,7 +10522,8 @@ function loadCustomLiquorTaps() {
 }
 
 function saveCustomLiquorTaps() {
-  localStorage.setItem(CUSTOM_LIQUOR_TAP_STORAGE_KEY, JSON.stringify(customLiquorTaps));
+  writeDashboardLocalStorageValue(CUSTOM_LIQUOR_TAP_STORAGE_KEY, customLiquorTaps);
+  scheduleSharedDashboardStateSync("products.customLiquorTaps");
 }
 
 function loadComingSoonItems() {
@@ -8642,7 +10535,8 @@ function loadComingSoonItems() {
 }
 
 function saveComingSoonItems() {
-  localStorage.setItem(COMING_SOON_STORAGE_KEY, JSON.stringify(comingSoonItems));
+  writeDashboardLocalStorageValue(COMING_SOON_STORAGE_KEY, comingSoonItems);
+  scheduleSharedDashboardStateSync("products.comingSoonItems");
 }
 
 function loadTapReplacementOverrides() {
@@ -8654,7 +10548,8 @@ function loadTapReplacementOverrides() {
 }
 
 function saveTapReplacementOverrides() {
-  localStorage.setItem(TAP_REPLACEMENT_STORAGE_KEY, JSON.stringify(tapReplacementOverrides));
+  writeDashboardLocalStorageValue(TAP_REPLACEMENT_STORAGE_KEY, tapReplacementOverrides);
+  scheduleSharedDashboardStateSync("products.tapReplacementOverrides");
 }
 
 function loadChargeOverrides() {
@@ -8666,7 +10561,8 @@ function loadChargeOverrides() {
 }
 
 function saveChargeOverrides() {
-  localStorage.setItem(CHARGE_STORAGE_KEY, JSON.stringify(chargeOverrides));
+  writeDashboardLocalStorageValue(CHARGE_STORAGE_KEY, chargeOverrides);
+  scheduleSharedDashboardStateSync("pricing.chargeOverrides");
 }
 
 function loadCustomRecipes() {
@@ -8678,7 +10574,12 @@ function loadCustomRecipes() {
 }
 
 function saveCustomRecipes() {
-  localStorage.setItem(CUSTOM_RECIPE_STORAGE_KEY, JSON.stringify(customRecipes));
+  if (isEmployeeDashboard) {
+    saveEmployeeSharedRecipeCache();
+    return;
+  }
+  writeDashboardLocalStorageValue(CUSTOM_RECIPE_STORAGE_KEY, customRecipes);
+  scheduleSharedDashboardStateSync("recipes.customRecipes");
 }
 
 function loadInactiveRecipeIds() {
@@ -8690,7 +10591,12 @@ function loadInactiveRecipeIds() {
 }
 
 function saveInactiveRecipeIds() {
-  localStorage.setItem(INACTIVE_RECIPE_STORAGE_KEY, JSON.stringify(inactiveRecipeIds));
+  if (isEmployeeDashboard) {
+    saveEmployeeSharedRecipeCache();
+    return;
+  }
+  writeDashboardLocalStorageValue(INACTIVE_RECIPE_STORAGE_KEY, inactiveRecipeIds);
+  scheduleSharedDashboardStateSync("recipes.inactiveRecipeIds");
 }
 
 function loadEditedRecipes() {
@@ -8702,7 +10608,12 @@ function loadEditedRecipes() {
 }
 
 function saveEditedRecipes() {
-  localStorage.setItem(EDITED_RECIPE_STORAGE_KEY, JSON.stringify(editedRecipes));
+  if (isEmployeeDashboard) {
+    saveEmployeeSharedRecipeCache();
+    return;
+  }
+  writeDashboardLocalStorageValue(EDITED_RECIPE_STORAGE_KEY, editedRecipes);
+  scheduleSharedDashboardStateSync("recipes.editedRecipes");
 }
 
 function loadCustomInventoryItems() {

@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import http from "node:http";
 import { POST as savePmbProduct } from "../pmb-products/route.js";
+import { getTapConfigRows as getVerifiedTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
+import {
+  requireKegTargetIdentity,
+  verifyUniqueKegProductAssignment,
+} from "../../../lib/pmb-keg-safety.mjs";
 
 export const runtime = "nodejs";
 
@@ -353,23 +358,6 @@ async function getTapConfigRows(config) {
   return rows;
 }
 
-function resolveTapSlot(rows, input) {
-  const tapNumber = toNumber(input.tapNumber || input.tap?.tapNumber);
-  const currentPlu = toNumber(input.currentPlu || input.tap?.plu);
-  const currentName = clean(input.currentBrand || input.tap?.brand);
-
-  let slot = tapNumber ? rows.find((row) => row.tapNumber === tapNumber) : null;
-  if (!slot && currentPlu) slot = rows.find((row) => row.plu === currentPlu);
-  if (!slot && currentName) {
-    const normalized = normalizeName(currentName);
-    slot = rows.find((row) => normalizeName(row.product) === normalized);
-  }
-
-  if (!slot) throw new Error("PMB could not find that tap in Client Configuration.");
-  if (!slot.plu || slot.unused) throw new Error(`Tap ${slot.tapNumber || input.tapNumber || ""} is unused in PMB and has no product PLU to update.`);
-  return slot;
-}
-
 function findTargetProduct(products, target) {
   const targetPlu = toNumber(target.plu || target.targetPlu);
   if (targetPlu) {
@@ -490,13 +478,25 @@ async function sendTargetedConfigUpdate(config, deviceId) {
 export async function POST(request) {
   try {
     const input = await request.json();
+    const requestedTarget = requireKegTargetIdentity({
+      plu: input.currentPlu || input.tap?.plu,
+      deviceId: input.deviceId || input.tap?.deviceId,
+      lineNum: input.lineNum || input.tap?.lineNum,
+    });
     const config = getConfig();
-    const [rows, token] = await Promise.all([
-      getTapConfigRows(config),
-      getAuthtoken(config),
-    ]);
+    const token = await getAuthtoken(config);
     const products = await getProductList(config, token);
-    const slot = resolveTapSlot(rows, input);
+    // Read Client Configuration immediately before the product rewrite so a
+    // stale browser row cannot select a different physical tap.
+    const rows = await getVerifiedTapConfigRows(config);
+    const slot = verifyUniqueKegProductAssignment(rows, requestedTarget);
+    const requestedTapNumber = toNumber(input.tapNumber || input.tap?.tapNumber);
+    if (requestedTapNumber && requestedTapNumber !== slot.tapNumber) {
+      const error = new Error("That PMB tap number changed. Refresh keg levels before trying again.");
+      error.status = 409;
+      error.code = "PMB_TAP_TARGET_MISMATCH";
+      throw error;
+    }
     const sourceProduct = findTargetProduct(products, input.target || {});
     const productPayload = buildTapProductPayload(input, slot, sourceProduct);
 
@@ -535,10 +535,14 @@ export async function POST(request) {
     return NextResponse.json(
       {
         error: error.message || "Could not change the PMB tap product.",
+        code: error.code || "PMB_TAP_PRODUCT_CHANGE_FAILED",
         details: error.details || null,
         response: error.response || "",
       },
-      { status: /required|choose|missing|unused|price/i.test(error.message || "") ? 400 : 502 },
+      {
+        status: Number(error.status)
+          || (/required|choose|missing|unused|price/i.test(error.message || "") ? 400 : 502),
+      },
     );
   }
 }

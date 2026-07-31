@@ -14,8 +14,10 @@ function isApiPath(pathname) {
   return pathname.startsWith("/api/");
 }
 
-function isEmployeeAllowedApiPath(pathname) {
-  return pathname === "/api/session";
+function isEmployeeAllowedApiRequest(request) {
+  const { pathname } = request.nextUrl;
+  if (pathname === "/api/session") return true;
+  return request.method === "GET" && pathname === "/api/dashboard-state";
 }
 
 function getPublicUrl(request, pathname) {
@@ -37,7 +39,7 @@ export async function middleware(request) {
   }
 
   if (isAuthed) {
-    if (sessionRole === "employee" && isApiPath(pathname) && !isEmployeeAllowedApiPath(pathname)) {
+    if (sessionRole === "employee" && isApiPath(pathname) && !isEmployeeAllowedApiRequest(request)) {
       return NextResponse.json({ error: "Owner login required." }, { status: 403 });
     }
     return NextResponse.next();

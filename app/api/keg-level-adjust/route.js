@@ -1,4 +1,11 @@
 import { NextResponse } from "next/server";
+import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
+import {
+  PmbKegSafetyError,
+  requireKegTargetIdentity,
+  requireSuccessfulKegLevelResponse,
+  verifyExactKegTarget,
+} from "../../../lib/pmb-keg-safety.mjs";
 
 export const runtime = "nodejs";
 
@@ -90,7 +97,6 @@ function getConfig() {
     password: (process.env.PMB_API_PASSWORD || "admin").trim(),
     clientId: Number(process.env.PMB_API_CLIENT_ID || "910423"),
     clientName: (process.env.PMB_API_CLIENT_NAME || "PourMyBeer API").trim(),
-    fallbackDeviceId: Number(process.env.PMB_KEG_DEVICE_ID || "66952915841408") || 0,
     staticAuthtoken: (process.env.PMB_AUTHTOKEN || "").trim(),
   };
 }
@@ -106,7 +112,10 @@ async function getAuthtoken(config) {
   });
 
   if (auth.status !== 200 || !auth.json?.authtoken) {
-    throw new Error(`PMB authtoken failed (${auth.status})`);
+    throw new PmbKegSafetyError(`PMB authtoken failed (${auth.status})`, {
+      code: "PMB_AUTH_UNAVAILABLE",
+      status: 503,
+    });
   }
 
   return String(auth.json.authtoken);
@@ -121,88 +130,26 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function getDateRange() {
-  const end = new Date();
-  const start = new Date(end);
-  start.setDate(start.getDate() - 60);
+function parseAdjustmentInput(value, label, { minimum, maximum } = {}) {
+  const text = String(value ?? "").trim();
+  if (!text) return { present: false, value: 0 };
 
-  const format = (date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
-
-  return {
-    start_time: `${format(start)}T00:00:00-05:00`,
-    end_time: `${format(new Date(end.getTime() + 24 * 60 * 60 * 1000))}T00:00:00-05:00`,
-  };
-}
-
-async function resolveSlot(config, token, requestedPlu, requestedDeviceId, requestedLineNum) {
-  if (requestedDeviceId && requestedLineNum) {
-    return {
-      product: null,
-      slot: {
-        deviceId: requestedDeviceId,
-        lineNum: requestedLineNum,
+  const parsed = Number(text.replace(/[$,%]/g, "").replace(/,/g, ""));
+  if (
+    !Number.isFinite(parsed)
+    || (minimum != null && parsed < minimum)
+    || (maximum != null && parsed > maximum)
+  ) {
+    throw new PmbKegSafetyError(
+      `${label} must be a number${minimum != null && maximum != null ? ` from ${minimum} to ${maximum}` : ""}.`,
+      {
+        code: "PMB_KEG_ADJUSTMENT_INVALID",
+        status: 400,
       },
-    };
+    );
   }
 
-  const plu = Number(requestedPlu || 0);
-  if (!plu) throw new Error("A PMB PLU is required to adjust a keg level.");
-
-  const [products, transactions] = await Promise.all([
-    postJson(config.baseUrl, "/api/productlist", { id: String(config.clientId) }, token),
-    postJson(config.baseUrl, "/api/transactions", { id: config.clientId, ...getDateRange() }, token),
-  ]);
-
-  if (products.status !== 200 || !Array.isArray(products.json?.productlist)) {
-    throw new Error(`PMB productlist failed (${products.status})`);
-  }
-  if (transactions.status !== 200 || !Array.isArray(transactions.json?.taptransactions)) {
-    throw new Error(`PMB transactions failed (${transactions.status})`);
-  }
-
-  const latestDeviceByPlu = new Map();
-  transactions.json.taptransactions.forEach((transaction) => {
-    const transactionPlu = Number(transaction.plu || 0);
-    const deviceId = Number(transaction.device_id || 0);
-    const started = Number(transaction.tst_start || 0);
-    if (!transactionPlu || !deviceId) return;
-
-    const existing = latestDeviceByPlu.get(transactionPlu);
-    if (!existing || started >= existing.started) {
-      latestDeviceByPlu.set(transactionPlu, { deviceId, started });
-    }
-  });
-
-  const plusByDevice = new Map();
-  products.json.productlist.forEach((product) => {
-    const productPlu = Number(product.plu || 0);
-    if (!productPlu) return;
-    const mappedDevice = latestDeviceByPlu.get(productPlu)?.deviceId || config.fallbackDeviceId;
-    if (!mappedDevice) return;
-    if (!plusByDevice.has(mappedDevice)) plusByDevice.set(mappedDevice, []);
-    plusByDevice.get(mappedDevice).push(productPlu);
-  });
-
-  const slotByPlu = new Map();
-  plusByDevice.forEach((plus, deviceId) => {
-    plus
-      .sort((a, b) => b - a)
-      .forEach((productPlu, index) => {
-        slotByPlu.set(productPlu, { deviceId, lineNum: index + 1 });
-      });
-  });
-
-  const product = products.json.productlist.find((entry) => Number(entry.plu || 0) === plu) || null;
-  const slot = slotByPlu.get(plu);
-  if (!product) throw new Error(`PMB product ${plu} was not found in productlist.`);
-  if (!slot) throw new Error(`PMB slot was not found for ${product.name || plu}.`);
-
-  return { product, slot };
+  return { present: true, value: parsed };
 }
 
 function getFullOunces(level) {
@@ -220,22 +167,39 @@ function getCurrentOunces(level, fullOunces) {
 
 function buildAdjustment(input, level) {
   const fullOunces = getFullOunces(level);
-  if (!fullOunces) throw new Error("PMB did not return a keg size for that tap.");
+  if (!fullOunces) {
+    throw new PmbKegSafetyError("PMB did not return a valid keg size for that tap.", {
+      code: "PMB_KEG_LEVEL_READ_FAILED",
+      status: 503,
+    });
+  }
 
   const currentOunces = getCurrentOunces(level, fullOunces);
-  const targetPercentInput = toNumber(input.targetPercent);
-  const targetOuncesInput = toNumber(input.targetOunces);
-  const deltaOunces = toNumber(input.deltaOunces);
+  const targetPercentInput = parseAdjustmentInput(input.targetPercent, "Target percent", {
+    minimum: 0,
+    maximum: 100,
+  });
+  const targetOuncesInput = parseAdjustmentInput(input.targetOunces, "Target ounces", {
+    minimum: 0,
+    maximum: fullOunces,
+  });
+  const deltaOuncesInput = parseAdjustmentInput(input.deltaOunces, "Ounce adjustment", {
+    minimum: -fullOunces,
+    maximum: fullOunces,
+  });
 
   let targetOunces = currentOunces;
-  if (targetPercentInput > 0 || String(input.targetPercent ?? "").trim() === "0") {
-    targetOunces = (clamp(targetPercentInput, 0, 100) / 100) * fullOunces;
-  } else if (targetOuncesInput > 0 || String(input.targetOunces ?? "").trim() === "0") {
-    targetOunces = clamp(targetOuncesInput, 0, fullOunces);
-  } else if (deltaOunces) {
-    targetOunces = clamp(currentOunces + deltaOunces, 0, fullOunces);
+  if (targetPercentInput.present) {
+    targetOunces = (targetPercentInput.value / 100) * fullOunces;
+  } else if (targetOuncesInput.present) {
+    targetOunces = targetOuncesInput.value;
+  } else if (deltaOuncesInput.present && deltaOuncesInput.value !== 0) {
+    targetOunces = clamp(currentOunces + deltaOuncesInput.value, 0, fullOunces);
   } else {
-    throw new Error("Enter ounces to add/remove or a target percent.");
+    throw new PmbKegSafetyError("Enter ounces to add/remove or a target percent.", {
+      code: "PMB_KEG_ADJUSTMENT_REQUIRED",
+      status: 400,
+    });
   }
 
   const targetRawPercent = Math.round((targetOunces / fullOunces) * 10000);
@@ -329,33 +293,59 @@ async function sendTargetedConfigUpdate(config, token, slot) {
 export async function POST(request) {
   try {
     const input = await request.json();
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new PmbKegSafetyError("A JSON object is required to adjust a keg level.", {
+        code: "PMB_TAP_TARGET_REQUIRED",
+        status: 400,
+      });
+    }
+    const requestedTarget = requireKegTargetIdentity({
+      plu: input.plu,
+      deviceId: input.deviceId || input.device_id,
+      lineNum: input.lineNum || input.line_num,
+    });
     const config = getConfig();
     const token = await getAuthtoken(config);
-    const requestedDeviceId = Number(input.deviceId || input.device_id || 0);
-    const requestedLineNum = Number(input.lineNum || input.line_num || 0);
-    const requestedPlu = Number(input.plu || 0);
-    const { product, slot } = await resolveSlot(config, token, requestedPlu, requestedDeviceId, requestedLineNum);
 
     const levelResult = await postJson(
       config.baseUrl,
       "/api/getkeglevels",
-      { device_id: Number(slot.deviceId), line_num: Number(slot.lineNum) },
+      {
+        device_id: requestedTarget.deviceId,
+        line_num: requestedTarget.lineNum,
+      },
       token,
     );
-    if (levelResult.status !== 200 || !levelResult.json) {
-      throw new Error(`PMB getkeglevels failed (${levelResult.status})`);
-    }
+    const level = requireSuccessfulKegLevelResponse(levelResult, requestedTarget);
 
-    const adjustment = buildAdjustment(input, levelResult.json);
-    const setResult = await setKegLevel(config, token, slot, levelResult.json, adjustment);
+    // This management-page read is deliberately performed after the level read
+    // and directly before setkeglevels. A stale browser target must never be
+    // allowed to select a different product or physical line.
+    const tapConfigRows = await getTapConfigRows(config).catch((error) => {
+      throw new PmbKegSafetyError(
+        `Live PMB tap configuration could not be verified: ${error.message || "tap configuration unavailable"}`,
+        {
+          code: "PMB_TAP_CONFIG_UNAVAILABLE",
+          status: 503,
+        },
+      );
+    });
+    const slot = verifyExactKegTarget(tapConfigRows, requestedTarget);
+    const product = {
+      plu: requestedTarget.plu,
+      name: slot.product || "",
+    };
+
+    const adjustment = buildAdjustment(input, level);
+    const setResult = await setKegLevel(config, token, slot, level, adjustment);
     const configUpdateResult = input.sendConfigUpdate === false
       ? null
       : await sendTargetedConfigUpdate(config, setResult.token || token, slot);
 
     return NextResponse.json({
       ok: true,
-      message: `${product?.name || "Tap"} adjusted to ${adjustment.targetPercent}% (${Math.round(adjustment.targetOunces * 10) / 10} oz).`,
-      product: product ? { plu: Number(product.plu || requestedPlu), name: product.name || "" } : null,
+      message: `${product.name || "Tap"} adjusted to ${adjustment.targetPercent}% (${Math.round(adjustment.targetOunces * 10) / 10} oz).`,
+      product,
       slot,
       before: {
         percent: adjustment.currentPercent,
@@ -372,12 +362,15 @@ export async function POST(request) {
       configUpdateSent: Boolean(configUpdateResult),
     });
   } catch (error) {
+    const status = Number(error?.status)
+      || (error instanceof SyntaxError ? 400 : 500);
     return NextResponse.json(
       {
         error: error.message || "Could not adjust keg level.",
+        code: error?.code || "PMB_KEG_LEVEL_ADJUST_FAILED",
         attempts: error.attempts || [],
       },
-      { status: 500 },
+      { status },
     );
   }
 }

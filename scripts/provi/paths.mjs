@@ -8,6 +8,8 @@ export const storageDumpPath = path.join(agentRoot, "provi_storage_dump.json");
 export const captureDir = path.join(agentRoot, "captures");
 export const latestCapturePath = path.join(captureDir, "latest-provi-capture.json");
 export const latestExtractPath = path.join(captureDir, "latest-provi-values.json");
+export const captureRetentionDays = getBoundedInteger(process.env.PROVI_CAPTURE_RETENTION_DAYS, 30, 1, 365);
+export const captureRetentionMaxFiles = getBoundedInteger(process.env.PROVI_CAPTURE_MAX_FILES, 20, 2, 200);
 
 export const proviStartUrl = "https://app.provi.com/";
 export const proviHostPattern = /provi\.com/i;
@@ -20,3 +22,9 @@ export const chromeExecutableCandidates = [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
 ];
+
+function getBoundedInteger(value, fallback, minimum, maximum) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(minimum, Math.min(maximum, parsed));
+}
