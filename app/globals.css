@@ -228,6 +228,93 @@ h1 {
   background: rgba(232, 229, 221, 0.72);
 }
 
+.dashboard-activity {
+  margin-top: 14px;
+}
+
+.dashboard-activity summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.dashboard-activity__list {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dashboard-activity__list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border: 1px solid rgba(24, 33, 31, 0.1);
+  background: var(--paper-strong);
+  font-size: 0.78rem;
+}
+
+.dashboard-activity__list span {
+  color: var(--muted);
+}
+
+.pmb-reconciliation {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(31, 95, 84, 0.2);
+  background: rgba(241, 248, 244, 0.78);
+}
+
+.pmb-reconciliation p {
+  margin: 0;
+}
+
+.pmb-reconciliation__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pmb-reconciliation__stats span {
+  border: 1px solid rgba(31, 95, 84, 0.2);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--paper-strong);
+  color: var(--juniper-dark);
+  font-size: 0.76rem;
+  font-weight: 750;
+}
+
+.dashboard-restore-preview {
+  margin-top: 12px;
+}
+
+.backup-restore-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  padding: 0 16px;
+  background: var(--paper-strong);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.backup-restore-control input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .operation-tabs {
   display: inline-flex;
   flex-wrap: wrap;
@@ -2957,10 +3044,36 @@ td {
 
   .operation-tabs {
     width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    scrollbar-width: thin;
   }
 
   .operation-tab {
-    flex: 1 1 145px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .sync-actions {
+    align-items: stretch;
+  }
+
+  .sync-actions .primary-button,
+  .sync-actions .ghost-button,
+  .sync-actions .backup-restore-control {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .dashboard-activity__list li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .pmb-reconciliation__stats {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .form-header {

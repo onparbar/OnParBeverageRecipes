@@ -9,6 +9,7 @@ import {
   DASHBOARD_SESSION_COOKIE,
   getDashboardSessionRole,
 } from "../../../lib/dashboard-auth.mjs";
+import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 
 export const runtime = "nodejs";
 
@@ -108,6 +109,14 @@ export async function POST(request) {
           400,
         );
     }
+
+    recordDashboardActivity({
+      area: "Dashboard setup",
+      action: String(body.action || "patch"),
+      role,
+      revision: state.revision,
+      summary: String(body.action || "patch") === "initialize" ? "Imported the initial shared dashboard setup." : "Updated shared dashboard data.",
+    }).catch(() => {});
 
     return jsonResponse(state);
   } catch (error) {

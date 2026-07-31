@@ -5,6 +5,7 @@ import {
   replaceSharedWeeklyUsageState,
 } from "../../../lib/weekly-usage-shared-store.mjs";
 import { DASHBOARD_SESSION_COOKIE, getDashboardSessionRole } from "../../../lib/dashboard-auth.mjs";
+import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 
 export const runtime = "nodejs";
 
@@ -78,6 +79,14 @@ export async function POST(request) {
           400,
         );
     }
+
+    recordDashboardActivity({
+      area: "Weekly Usage",
+      action: String(body.action || "updated"),
+      role,
+      revision: state.revision,
+      summary: String(body.action || "") === "initialize" ? "Imported the initial shared Weekly Usage reports." : "Updated shared Weekly Usage reports.",
+    }).catch(() => {});
 
     return jsonResponse(state);
   } catch (error) {

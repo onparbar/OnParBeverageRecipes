@@ -756,6 +756,11 @@ let dashboardSharedState = {
 let dashboardSharedSyncStatus = "loading";
 let dashboardSharedSyncMessage = "Checking the shared dashboard configuration...";
 let dashboardSharedProvisioned = false;
+let dashboardBackupRunning = false;
+let dashboardRestorePreview = null;
+let dashboardRestoreMessage = "Restore files are checked locally first; nothing is overwritten automatically.";
+let dashboardActivity = [];
+let dashboardActivityMessage = "Loading shared change history...";
 let dashboardSharedMutationGeneration = 0;
 let dashboardSharedPatchScheduled = false;
 let dashboardSharedPatchQueue = Promise.resolve();
@@ -785,6 +790,9 @@ let kegSyncLoading = false;
 let kegSyncAttempted = false;
 let kegUpdatedAt = "";
 let kegConfigUpdateRunning = false;
+let pmbReconciliationRunning = false;
+let pmbReconciliationReport = null;
+let pmbReconciliationMessage = "Run a read-only check from the work network to compare saved taps with Pour My Beer.";
 let kegDeviceLevels = new Map();
 let kegTemplateAssignments = new Map();
 let parAgentState = null;
@@ -885,6 +893,7 @@ async function init() {
   applyWeeklyUsageProductChangeovers();
   await loadSharedWeeklyUsageState();
   await loadParAgentState();
+  await loadDashboardActivity();
   renderDashboardSharedStateStatus();
   hydrateCategoryFilter(recipes);
   bindEvents();
@@ -1554,6 +1563,22 @@ function renderServiceComputerReadiness() {
   `;
 }
 
+function renderDashboardActivity() {
+  if (isEmployeeDashboard) return "";
+  const entries = dashboardActivity.slice(0, 12);
+  return `
+    <details class="dashboard-activity">
+      <summary>Shared change history</summary>
+      <p class="sync-status">${escapeHtml(dashboardActivityMessage)}</p>
+      ${entries.length ? `
+        <ul class="dashboard-activity__list">
+          ${entries.map((entry) => `<li><strong>${escapeHtml(entry.area)}</strong> · ${escapeHtml(entry.summary || entry.action)}<span>${escapeHtml(formatUpdatedAt(entry.occurredAt))}</span></li>`).join("")}
+        </ul>
+      ` : ""}
+    </details>
+  `;
+}
+
 function renderDashboardSharedStateStatus() {
   const panel = ensureDashboardSharedStatePanel();
   if (!panel) return;
@@ -1583,12 +1608,15 @@ function renderDashboardSharedStateStatus() {
     && dashboardSharedState.initialized
     && dashboardSharedSyncStatus === "offline"
     && outboxPaths.length > 0;
+  const showBackup = !isEmployeeDashboard;
   panel.dataset.state = dashboardSharedSyncStatus;
   panel.innerHTML = `
     <div>
       <h2>Shared data · ${escapeHtml(labels[dashboardSharedSyncStatus] || "Status")}</h2>
       <p class="sync-status">${escapeHtml(dashboardSharedSyncMessage)}</p>
       ${renderServiceComputerReadiness()}
+      ${renderDashboardActivity()}
+      ${renderDashboardRestorePreview()}
       ${!isEmployeeDashboard && !dashboardSharedState.initialized ? `
         <p class="sync-status"><strong>Import source:</strong> saved data in this browser (not a live read from the offline service computer).</p>
         ${importSummary.text.split("\n").map((line) => `<p class="sync-status">${escapeHtml(line)}</p>`).join("")}
@@ -1603,8 +1631,17 @@ function renderDashboardSharedStateStatus() {
         <p class="sync-status"><strong>This browser could not refresh its normal offline cache.</strong> Shared data and the recovery queue remain separate; reconnect and reload before relying on this device offline.</p>
       ` : ""}
     </div>
-    ${showImport || showConflictRecovery || showOutboxRetry ? `
+    ${showImport || showConflictRecovery || showOutboxRetry || showBackup ? `
       <div class="sync-actions">
+        ${showBackup ? `
+          <button class="ghost-button" id="download-dashboard-backup" type="button"${dashboardBackupRunning ? " disabled" : ""}>
+            ${dashboardBackupRunning ? "Creating backup..." : "Download backup"}
+          </button>
+          <label class="backup-restore-control" for="validate-dashboard-backup">
+            <span>Validate backup</span>
+            <input id="validate-dashboard-backup" type="file" accept="application/json,.json">
+          </label>
+        ` : ""}
         ${showImport ? `
           <button class="primary-button" id="initialize-dashboard-shared-state" type="button">
             Import this browser's saved setup
@@ -1634,12 +1671,76 @@ function renderDashboardSharedStateStatus() {
     ?.addEventListener("click", forcePublishDashboardSharedOutbox);
   panel.querySelector("#discard-dashboard-local-state")
     ?.addEventListener("click", discardDashboardSharedOutbox);
+  panel.querySelector("#download-dashboard-backup")
+    ?.addEventListener("click", downloadDashboardBackup);
+  panel.querySelector("#validate-dashboard-backup")
+    ?.addEventListener("change", validateDashboardBackupFile);
+}
+
+function renderDashboardRestorePreview() {
+  if (isEmployeeDashboard) return "";
+  const preview = dashboardRestorePreview;
+  return `
+    <div class="dashboard-restore-preview">
+      <p class="sync-status"><strong>Backup restore guard:</strong> ${escapeHtml(dashboardRestoreMessage)}</p>
+      ${preview ? `<p class="sync-status">Valid file created ${escapeHtml(formatUpdatedAt(preview.createdAt))}. Includes: ${escapeHtml(preview.areas.join(", "))}. Current shared data has not been changed.</p>` : ""}
+    </div>
+  `;
+}
+
+async function validateDashboardBackupFile(event) {
+  const file = event.currentTarget?.files?.[0];
+  if (!file) return;
+  dashboardRestorePreview = null;
+  dashboardRestoreMessage = "Checking backup file locally...";
+  renderDashboardSharedStateStatus();
+  try {
+    if (file.size > 10 * 1024 * 1024) throw new Error("Backup files must be 10 MB or smaller.");
+    const backup = JSON.parse(await file.text());
+    if (backup?.format !== "on-par-dashboard-backup" || Number(backup?.version) !== 1) {
+      throw new Error("This is not a supported On Par dashboard backup.");
+    }
+    const areas = [
+      backup.dashboard?.data ? "Dashboard setup" : "",
+      backup.inventory?.data ? "Inventory" : "",
+      backup.weeklyUsage?.data ? "Weekly Usage" : "",
+      backup.kegLevels?.data ? "Keg Levels" : "",
+    ].filter(Boolean);
+    if (!areas.length) throw new Error("The backup does not contain any recognized shared dashboard areas.");
+    dashboardRestorePreview = { createdAt: backup.createdAt || "", areas };
+    dashboardRestoreMessage = "Backup is valid. Review the included areas above before asking to restore it; restore is intentionally not automatic.";
+  } catch (error) {
+    dashboardRestoreMessage = `Backup was not accepted: ${error.message || "invalid JSON file."}`;
+  } finally {
+    event.currentTarget.value = "";
+    renderDashboardSharedStateStatus();
+  }
 }
 
 function setDashboardSharedSyncStatus(status, message) {
   dashboardSharedSyncStatus = status;
   dashboardSharedSyncMessage = message;
   renderDashboardSharedStateStatus();
+}
+
+async function loadDashboardActivity() {
+  if (isEmployeeDashboard) return;
+  try {
+    const response = await fetch("/api/dashboard-activity", {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok || !Array.isArray(result)) throw new Error(result?.error || "Shared change history is unavailable.");
+    dashboardActivity = result;
+    dashboardActivityMessage = result.length
+      ? "Most recent shared changes. Activity begins after this update is installed."
+      : "No shared changes have been recorded yet. Activity begins after this update is installed.";
+  } catch (error) {
+    dashboardActivity = [];
+    dashboardActivityMessage = `Shared change history is unavailable: ${error.message || "could not load activity."}`;
+  }
 }
 
 function getDashboardSharedUnavailableMessage(error, localChangeMessage) {
@@ -1691,6 +1792,63 @@ async function requestDashboardSharedState(method = "GET", body = null) {
     };
   } finally {
     window.clearTimeout(timeout);
+  }
+}
+
+async function requestSharedBackupSlice(path, label) {
+  const response = await fetch(path, {
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+  });
+  const result = await parseJsonResponse(response);
+  if (!response.ok) throw new Error(result?.error || `Could not include ${label} in the backup.`);
+  return result;
+}
+
+function getBackupFilenameTimestamp() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+function downloadJsonFile(filename, payload) {
+  const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+async function downloadDashboardBackup() {
+  if (dashboardBackupRunning || isEmployeeDashboard) return;
+  dashboardBackupRunning = true;
+  renderDashboardSharedStateStatus();
+  try {
+    const [dashboard, inventory, weeklyUsage, kegLevels] = await Promise.all([
+      requestDashboardSharedState("GET").then((result) => result.state),
+      requestSharedBackupSlice("/api/inventory-state", "Inventory"),
+      requestSharedBackupSlice("/api/weekly-usage-state", "Weekly Usage"),
+      requestSharedBackupSlice("/api/keg-par-agent", "Keg Levels"),
+    ]);
+    downloadJsonFile(`on-par-dashboard-backup-${getBackupFilenameTimestamp()}.json`, {
+      format: "on-par-dashboard-backup",
+      version: 1,
+      createdAt: new Date().toISOString(),
+      dashboard,
+      inventory,
+      weeklyUsage,
+      kegLevels,
+    });
+    setDashboardSharedSyncStatus("saved", "Backup downloaded. Keep it somewhere private; it may contain pricing and operational data.");
+  } catch (error) {
+    setDashboardSharedSyncStatus("offline", `Backup was not created: ${error.message || "shared data could not be loaded."}`);
+  } finally {
+    dashboardBackupRunning = false;
+    renderDashboardSharedStateStatus();
   }
 }
 
@@ -3136,9 +3294,11 @@ function renderKegLevels() {
         <button class="primary-button" id="run-keg-vendor-sync" type="button"${vendorSyncRunning ? " disabled" : ""}>${vendorSyncRunning ? "Syncing..." : "Sync Prices"}</button>
         <button class="primary-button" id="refresh-keg-levels" type="button"${kegSyncLoading || kegConfigUpdateRunning ? " disabled" : ""}>${kegSyncLoading ? "Refreshing..." : "Refresh keg levels"}</button>
         <button class="ghost-button" id="send-keg-config-update" type="button"${kegSyncLoading || kegConfigUpdateRunning ? " disabled" : ""}>${kegConfigUpdateRunning ? "Sending..." : "Send config update"}</button>
+        <button class="ghost-button" id="run-pmb-reconciliation" type="button"${pmbReconciliationRunning ? " disabled" : ""}>${pmbReconciliationRunning ? "Checking..." : "PMB reconciliation"}</button>
       </div>
       <p class="sync-status">${escapeHtml(kegSyncMessage)}${kegUpdatedAt ? ` Last updated ${escapeHtml(formatUpdatedAt(kegUpdatedAt))}.` : ""}</p>
       <p class="sync-status">${escapeHtml(vendorSyncMessage)}</p>
+      ${renderPmbReconciliationReport()}
     </div>
     <div class="keg-summary-stats">
       <div class="summary-line"><span>Total taps</span><strong>${totalTaps}</strong></div>
@@ -3165,6 +3325,78 @@ function renderKegLevels() {
     .join("") + renderComingSoonBlock();
 
   bindKegLevelEvents();
+}
+
+function getPmbReconciliationKey(value) {
+  return normalizeTitle(value).replace(/[^a-z0-9]/g, "");
+}
+
+function renderPmbReconciliationReport() {
+  const report = pmbReconciliationReport;
+  if (!report) return `<p class="sync-status">${escapeHtml(pmbReconciliationMessage)}</p>`;
+  return `
+    <div class="pmb-reconciliation" role="status">
+      <p><strong>Read-only PMB report</strong> · ${escapeHtml(report.checkedAt ? formatUpdatedAt(report.checkedAt) : "just now")}</p>
+      <div class="pmb-reconciliation__stats">
+        <span>${report.remoteCount} live PMB taps</span>
+        <span>${report.matchedCount} matched saved taps</span>
+        <span>${report.unmatchedSaved.length} saved tap${report.unmatchedSaved.length === 1 ? "" : "s"} not found</span>
+        <span>${report.unmatchedRemote.length} PMB tap${report.unmatchedRemote.length === 1 ? "" : "s"} not in saved list</span>
+        <span>${report.queueCount} queued product change${report.queueCount === 1 ? "" : "s"}</span>
+      </div>
+      ${report.unmatchedSaved.length || report.unmatchedRemote.length ? `<p class="sync-status">${escapeHtml([
+        report.unmatchedSaved.length ? `Saved only: ${report.unmatchedSaved.slice(0, 4).join(", ")}${report.unmatchedSaved.length > 4 ? "…" : ""}` : "",
+        report.unmatchedRemote.length ? `PMB only: ${report.unmatchedRemote.slice(0, 4).join(", ")}${report.unmatchedRemote.length > 4 ? "…" : ""}` : "",
+      ].filter(Boolean).join(" · "))}</p>` : `<p class="sync-status">Saved tap names match the current PMB tap list. No changes were made.</p>`}
+    </div>
+  `;
+}
+
+async function runPmbReconciliation() {
+  if (pmbReconciliationRunning) return;
+  pmbReconciliationRunning = true;
+  pmbReconciliationReport = null;
+  pmbReconciliationMessage = "Checking the current PMB tap list (read-only)...";
+  renderKegLevels();
+
+  try {
+    const response = await fetch("/api/keg-levels", {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) throw new Error(result?.error || "Could not load the current PMB tap list.");
+    const remoteItems = Array.isArray(result.items) ? result.items : [];
+    const remoteKeys = new Set(remoteItems.map((item) => getPmbReconciliationKey(item.tapProduct || item.name)).filter(Boolean));
+    const savedItems = kegWallItems.filter((item) => clean(item.type).toLowerCase() !== "empty");
+    const savedKeys = new Set(savedItems.map((item) => getPmbReconciliationKey(item.brand || item.name)).filter(Boolean));
+    const unmatchedSaved = savedItems
+      .filter((item) => !remoteKeys.has(getPmbReconciliationKey(item.brand || item.name)))
+      .map((item) => clean(item.brand || item.name || item.tap))
+      .filter(Boolean);
+    const unmatchedRemote = remoteItems
+      .filter((item) => !savedKeys.has(getPmbReconciliationKey(item.tapProduct || item.name)))
+      .map((item) => clean(item.tapProduct || item.name || `PLU ${item.plu || "unknown"}`))
+      .filter(Boolean);
+    pmbReconciliationReport = {
+      checkedAt: result.updatedAt || new Date().toISOString(),
+      remoteCount: remoteItems.length,
+      matchedCount: Math.max(0, savedItems.length - unmatchedSaved.length),
+      unmatchedSaved,
+      unmatchedRemote,
+      queueCount: (() => {
+        const counts = getPmbPublishQueueCounts(pmbPublishQueue);
+        return counts.ready + counts.failed;
+      })(),
+    };
+    pmbReconciliationMessage = "";
+  } catch (error) {
+    pmbReconciliationMessage = getPmbConnectionErrorMessage(error, "Could not run the PMB reconciliation.");
+  } finally {
+    pmbReconciliationRunning = false;
+    renderKegLevels();
+  }
 }
 
 function renderComingSoonBlock() {
@@ -5326,6 +5558,9 @@ function bindKegLevelEvents() {
   });
   document.querySelector("#refresh-keg-levels")?.addEventListener("click", () => {
     runKegLevelSync();
+  });
+  document.querySelector("#run-pmb-reconciliation")?.addEventListener("click", () => {
+    runPmbReconciliation();
   });
   document.querySelector("#send-keg-config-update")?.addEventListener("click", () => {
     runKegConfigUpdate();

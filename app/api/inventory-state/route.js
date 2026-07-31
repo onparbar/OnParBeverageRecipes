@@ -5,6 +5,7 @@ import {
   readSharedInventoryState,
 } from "../../../lib/inventory-shared-store.mjs";
 import { DASHBOARD_SESSION_COOKIE, getDashboardSessionRole } from "../../../lib/dashboard-auth.mjs";
+import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 
 export const runtime = "nodejs";
 
@@ -84,6 +85,14 @@ export async function POST(request) {
           { status: 400, headers: { "Cache-Control": "no-store" } },
         );
     }
+
+    recordDashboardActivity({
+      area: "Inventory",
+      action: String(body.action || "updated"),
+      role,
+      revision: state.revision,
+      summary: String(body.action || "") === "initialize" ? "Imported the initial shared inventory." : "Updated shared inventory data.",
+    }).catch(() => {});
 
     return NextResponse.json(state, {
       headers: { "Cache-Control": "no-store" },

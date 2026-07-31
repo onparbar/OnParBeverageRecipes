@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { readParAgentState, runParAgentUpdate, syncParAgentState } from "../../../lib/par-agent.mjs";
 import { DASHBOARD_SESSION_COOKIE, getDashboardSessionRole } from "../../../lib/dashboard-auth.mjs";
+import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 
 export const runtime = "nodejs";
 
@@ -68,6 +69,7 @@ export async function POST(request) {
         expectedRevision: body.expectedRevision,
         role,
       });
+      recordDashboardActivity({ area: "Keg Levels", action: "ran par agent", role, revision: state.revision, summary: "Generated shared keg par recommendations." }).catch(() => {});
       return jsonResponse(state);
     }
 
@@ -76,6 +78,13 @@ export async function POST(request) {
       role,
       initialize: action === "initialize",
     });
+    recordDashboardActivity({
+      area: "Keg Levels",
+      action: action === "initialize" ? "initialize" : "updated",
+      role,
+      revision: state.revision,
+      summary: action === "initialize" ? "Imported the initial shared Keg Levels setup." : "Updated shared keg counts, pars, or on-deck choices.",
+    }).catch(() => {});
     return jsonResponse(state);
   } catch (error) {
     return errorResponse(error);
