@@ -534,3 +534,47 @@ curl -I 'https://onparbev.com/dashboard.js?v=check'
   - no `.weekly-usage-input` fields
   - `Jose Gold 2` found the Jose Gold row
   - `Bombay` found the archived Bombay Sapphire row marked as replaced by Hennessy
+
+## Keg Par Agent Formula Fix - 2026-08-10
+
+- Beer recommendations now trigger only when current live-plus-backup stock is below average weekly usage plus `0.5` keg; the order quantity fills the gap up to the existing per-tap cap.
+- Karaoke cocktail recommendations continue to use average weekly usage plus `0.25` keg, and cocktail makes are no longer suppressed by beer cooler-capacity allocation.
+- Patio taps `1-20` and Karaoke taps `83-92` now order when live keg ounces are below average weekly ounces plus `100` ounces. Backup counts and beer cooler capacity do not affect this liquor rule.
+- The Keg Levels par-agent panel and recommendation details now display the applicable formula and ounce-based liquor stock/usage.
+- Verification passed: `112` automated tests, browser-script syntax check, diff check, and the optimized Next.js production build.
+- Follow-up fixed browser/server tap-key drift for apostrophes and ampersands (`Tito's` was saved as `tito-s` but previously read as `titos`), which caused positive backup counts on Vodka Cran and Spiked Pink Lemonade to be ignored.
+- The par agent now uses the exact shared averages displayed on Weekly Usage for all `102` taps instead of independently recalculating a six-week PMB average. Blue Dot 1 now uses `0.214` internally and displays `0.21`.
+- Removed the obsolete par-agent PMB transaction calls; PMB supplies live levels while shared Weekly Usage supplies averages.
+- Restored the missing Node filesystem/path imports required to load the keg tap template at runtime.
+- Read-only live dry-run verification found `0` average mismatches and `0` positive on-hand mismatches across `102` taps. The full `116`-test suite and optimized production build pass.
+- Keg Levels now includes a confirmed `Clear all on hand` action. It writes explicit zero overrides for every tap so the par agent sees a complete inventory state, while zero values render as blank inputs for fast entry.
+- On-hand fields use numeric text entry instead of browser number spinners, select their contents on focus/click, strip accidental leading zeroes, and move vertically with Arrow Up/Arrow Down.
+- On-hand edits save locally while typing and sync after leaving the field through a serialized, version-aware queue. This removes per-keystroke network waits and prevents older responses from overwriting newer entries.
+- Added focused tests for blank-zero display, normalization, arrow navigation, and clear-all state generation. The full suite now contains `120` tests.
+- Tap-change reconciliation now compares every saved On Deck selection with the current PMB product after a Keg Levels refresh. Matching PLUs or normalized names (including `Voodoo Ranger IPA`, `Voodoo Ranger Regular IPA`, `NB VD RGR IPA`, and wall-number suffixes) clear the On Deck assignment and archive the installed Coming Soon item.
+- Successful in-dashboard tap changes clear the matching On Deck assignment immediately, and every visible On Deck label now has a direct `Remove` control for manual cleanup.
+- Live read-only verification reproduced tap 42 showing PMB current `Voodoo Ranger IPA 1` while also retaining `On deck: Voodoo Ranger IPA`; the new matcher covers that exact state. The suite now contains `121` tests.
+- Guinness is now a canonical `13.2`-gallon / `1,689.6`-ounce keg with a default keg price of `$185` (about `$0.1095/oz`). The known size overrides PMB's generic half-barrel size in Keg Levels, line-value calculations, Weekly Usage conversions, and the par agent.
+- The keg-pricing catalog now replaces stale template products with the current PMB beer product on each physical beer tap, so installed products such as Guinness appear even when they are absent from the CSV tap template.
+- Old saved/shared Guinness size values are normalized to `1,689.6` ounces while preserving any explicit updated keg price; bundled defaults migrate to the corrected `$185` record. Focused pricing and par-agent coverage brings the suite to `125` tests.
+
+## On Par Tee / PMB Pricing Refresh - 2026-08-10
+
+- On Par Tee now uses `2.5` gallons / `320` ounces of lemonade in both recipe CSV sources. At the existing lemonade rate, that ingredient costs `$7.23`.
+- Recalculated On Par Tee totals: `1,452` ounces and `$532.84` batch cost. The canonical keg-yield lookup and saved-recipe repair path now use the same values, including migration from the older 2- and 3-gallon lemonade formulas.
+- Recalculated all dependent On Par Tee pricing fields in both source files: `$0.37/oz`, `5.26 oz` pour, and the applicable profit, margin, and charge-per-pour figures for each file's charge rate.
+- Reproduced Tap Pricing on `https://onparbev.com`; the PMB refresh succeeded on the next live attempt, confirming the reported HTML `520` was intermittent rather than a persistent login failure.
+- Tap Pricing now retries transient Cloudflare/PMB gateway statuses once automatically, gives a correct gateway message if both attempts fail, and does not retry login errors.
+- The tap-pricing API is explicitly pinned to the Node runtime, direct PMB API calls have a 15-second bound, and the optional management-page tap lookup has a shorter 6-second-per-request bound so it cannot hold the whole pricing refresh indefinitely.
+- Verification passed: `128` automated tests, diff check, and optimized Next.js production build.
+
+## Current Keg Cost Catalog / Missing Ingredient Prices - 2026-08-10
+
+- Live dashboard verification confirmed Kahlua and Ketel One Cucumber Vodka were mapped to OHLQ and had saved 1L prices of `$27.26` and `$28.20`, but those values were not bundled defaults and the Ketel spelling alias could prevent the override from attaching to its recipe ingredient.
+- Added those two OHLQ bottle prices as reliable defaults and normalized recipe ingredient identities before building the pricing catalog, so `Kettle One` source spelling resolves to the canonical `Ketel One Cucumber Vodka` price row.
+- Reproduced the stale beer issue: Keg Costs showed `Breakfast Stout` on Main tap `39`, while the verified Keg Levels response showed `Guinness Draught` physically installed there.
+- Tap Pricing API rows now disclose whether the tap assignment came from verified PMB tap configuration or the old template fallback.
+- Keg Costs now uses verified live Keg Levels first, verified Tap Pricing assignments second, and the static template only before live data is available. Template-only products such as Breakfast Stout disappear once the current wall loads.
+- Assigned On Deck beers are included in Keg Costs with an `On Deck for <wall> <tap>` source label; unassigned historical custom beers no longer keep cluttering the vendor lists.
+- Opening Ingredient & Keg Costs now also loads verified Keg Levels so the catalog can replace stale template products without requiring a separate Keg Levels visit.
+- Verification passed: `132` automated tests, JavaScript syntax checks, diff check, and optimized Next.js production build.

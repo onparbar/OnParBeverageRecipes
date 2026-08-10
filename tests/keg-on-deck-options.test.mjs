@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildKegOnDeckOptions,
+  isKegOnDeckProductInstalled,
   resolveKegOnDeckOption,
 } from "../public/keg-on-deck-options.mjs";
 
@@ -92,4 +93,19 @@ test("deduplicates collisions while preserving richer Coming Soon data", () => {
 
   assert.equal(options.filter(({ id }) => id === richerOnParTee.id).length, 1);
   assert.deepEqual(resolveKegOnDeckOption(options, { id: richerOnParTee.id }), richerOnParTee);
+});
+
+test("recognizes an On Deck product after it becomes the live tap product", () => {
+  assert.equal(isKegOnDeckProductInstalled(
+    { name: "Voodoo Ranger IPA", plu: 4123 },
+    { name: "Voodoo Ranger IPA 1", plu: 4123 },
+  ), true);
+  assert.equal(isKegOnDeckProductInstalled(
+    { name: "Voodoo Ranger Regular IPA" },
+    { tapProduct: "NB VD RGR IPA 1" },
+  ), true);
+  assert.equal(isKegOnDeckProductInstalled(
+    { name: "Voodoo Ranger IPA", plu: 4123 },
+    { name: "Angry Orchard 1", plu: 9876 },
+  ), false);
 });

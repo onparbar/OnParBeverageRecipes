@@ -76,10 +76,12 @@ const KNOWN_RECIPE_FORMULA_REPAIRS = Object.freeze({
     }),
     lemonade: Object.freeze({
       legacy: Object.freeze([
+        Object.freeze({ raw: "Lemonade= 2 gallons", oz: 256 }),
+        Object.freeze({ raw: "Lemonade 2 gallons", oz: 256 }),
         Object.freeze({ raw: "Lemonade= 3 gallons", oz: 384 }),
         Object.freeze({ raw: "Lemonade 3 gallons", oz: 384 }),
       ]),
-      packageCount: "2",
+      packageCount: "2.5",
       packageUnit: "gallons",
       packageSizeOz: GALLON_OZ,
     }),

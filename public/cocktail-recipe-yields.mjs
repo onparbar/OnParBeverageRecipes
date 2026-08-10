@@ -11,7 +11,7 @@ const recipeYieldDefinitions = [
   },
   {
     sourceTitle: "On Par Tee",
-    yieldOz: 1388,
+    yieldOz: 1452,
     aliases: [],
   },
   {

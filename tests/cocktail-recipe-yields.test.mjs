@@ -92,7 +92,7 @@ function roundToHundredths(value) {
 const sourceRecipes = [
   ["Whiskey Smash", 1463],
   ["Apple Jack (Whiskey)", 1530],
-  ["On Par Tee", 1388],
+  ["On Par Tee", 1452],
   ["Crown Apple 'rita(Whiskey)", 1471],
   ["Vodka Cran(Vodka)", 1379],
   ["Lemon Drop Martini(Vodka)", 1448],
@@ -195,8 +195,8 @@ test("Whiskey Smash and On Par Tee source instructions agree with their ounce ma
       256,
     );
     assert.equal(
-      onParTee.find(({ label }) => label === "Lemonade= 2 gallons")?.oz,
-      256,
+      onParTee.find(({ label }) => label === "Lemonade= 2.5 gallons")?.oz,
+      320,
     );
     assert.equal(
       onParTee.find(({ label }) => label === "Water= 1.5 gallons")?.oz,
@@ -204,7 +204,7 @@ test("Whiskey Smash and On Par Tee source instructions agree with their ounce ma
     );
     assert.equal(
       onParTee.find(({ label }) => label.toLowerCase() === "total oz")?.cost,
-      1388,
+      1452,
     );
   }
 });
@@ -227,14 +227,14 @@ test("Whiskey Smash and On Par Tee costs and pricing metrics agree in both recip
         },
         {
           title: "On Par Tee",
-          totalCost: 531.39,
-          totalOz: 1388,
-          costPerOz: 0.38,
+          totalCost: 532.84,
+          totalOz: 1452,
+          costPerOz: 0.37,
           chargePerOz: 2.49,
-          profitPerOz: 2.11,
-          margin: 84.62,
-          pourOz: 5.03,
-          chargePerPour: 12.52,
+          profitPerOz: 2.12,
+          margin: 85.26,
+          pourOz: 5.26,
+          chargePerPour: 13.10,
         },
       ],
     },
@@ -254,14 +254,14 @@ test("Whiskey Smash and On Par Tee costs and pricing metrics agree in both recip
         },
         {
           title: "On Par Tee",
-          totalCost: 531.39,
-          totalOz: 1388,
-          costPerOz: 0.38,
+          totalCost: 532.84,
+          totalOz: 1452,
+          costPerOz: 0.37,
           chargePerOz: 1.99,
-          profitPerOz: 1.61,
-          margin: 80.76,
-          pourOz: 5.03,
-          chargePerPour: 10.01,
+          profitPerOz: 1.62,
+          margin: 81.56,
+          pourOz: 5.26,
+          chargePerPour: 10.47,
         },
       ],
     },
@@ -275,9 +275,13 @@ test("Whiskey Smash and On Par Tee costs and pricing metrics agree in both recip
       const ingredientCost = roundToHundredths(
         recipe.slice(0, totalPriceIndex).reduce((sum, row) => sum + row.cost, 0),
       );
+      const ingredientOz = roundToHundredths(
+        recipe.slice(0, totalPriceIndex).reduce((sum, row) => sum + row.oz, 0),
+      );
       const exactCostPerOz = expected.totalCost / expected.totalOz;
 
       assert.equal(ingredientCost, expected.totalCost, `${file}: ${expected.title} ingredient cost`);
+      assert.equal(ingredientOz, expected.totalOz, `${file}: ${expected.title} ingredient ounces`);
       assert.equal(getRecipeMetric(recipe, "Total price"), expected.totalCost, `${file}: ${expected.title} total cost`);
       assert.equal(getRecipeMetric(recipe, "Total oz"), expected.totalOz, `${file}: ${expected.title} yield`);
       assert.equal(getRecipeMetric(recipe, "Total price per oz"), expected.costPerOz, `${file}: ${expected.title} cost/oz`);
@@ -364,7 +368,7 @@ test("prefers a normalized current product name over prior template names", () =
       name: "Whiskey Smash",
       templateBrand: "SPIKED CRANBERRY LEMONADE (TITO'S) 1",
     }),
-    1388,
+    1452,
   );
 });
 
@@ -382,7 +386,7 @@ test("Keg Levels sizing prefers named cocktails before generic PMB sizes", () =>
       },
       1536,
     ),
-    1388,
+    1452,
   );
   assert.equal(
     getCocktailAwareKegFullOunces(

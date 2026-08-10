@@ -7,6 +7,26 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
+function positiveNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function normalizeProductIdentityName(value) {
+  return clean(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[’']/g, "")
+    .replace(/\bnb\s+vd\s+rgr\b/g, "voodoo ranger")
+    .replace(/\bregular\b/g, "")
+    .replace(/[()]/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+[123]$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function getSelectionId(selection) {
   if (typeof selection === "string") return clean(selection);
   return clean(selection?.id || selection?.comingSoonId);
@@ -22,6 +42,22 @@ export function resolveKegOnDeckOption(options = [], selection = null) {
   const selectedId = getSelectionId(selection);
   if (!selectedId) return null;
   return options.find((option) => clean(option?.id) === selectedId) || null;
+}
+
+export function isKegOnDeckProductInstalled(onDeckProduct, currentProduct) {
+  if (!onDeckProduct || !currentProduct) return false;
+
+  const onDeckPlu = positiveNumber(onDeckProduct.plu);
+  const currentPlu = positiveNumber(currentProduct.plu);
+  if (onDeckPlu && currentPlu && onDeckPlu === currentPlu) return true;
+
+  const onDeckName = normalizeProductIdentityName(
+    onDeckProduct.name || onDeckProduct.brand || onDeckProduct.tapProduct,
+  );
+  const currentName = normalizeProductIdentityName(
+    currentProduct.name || currentProduct.brand || currentProduct.tapProduct,
+  );
+  return Boolean(onDeckName && currentName && onDeckName === currentName);
 }
 
 export function buildKegOnDeckOptions({

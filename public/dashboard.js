@@ -20,9 +20,27 @@ import {
   getCocktailRecipeYieldOz,
 } from "./cocktail-recipe-yields.mjs";
 import {
+  getKnownBeerKegSizeOz,
+  GUINNESS_KEG_OZ,
+  GUINNESS_KEG_PRICE,
+  isBeerTapPosition,
+} from "./beer-keg-pricing.mjs";
+import {
   buildKegOnDeckOptions,
+  isKegOnDeckProductInstalled,
   resolveKegOnDeckOption,
 } from "./keg-on-deck-options.mjs";
+import {
+  createClearedKegOnHandOverrides,
+  getAdjacentKegOnHandIndex,
+  getKegOnHandEditorValue,
+  normalizeKegOnHandDraft,
+} from "./keg-on-hand-input.mjs";
+import {
+  buildAssignedOnDeckBeerItems,
+  buildVerifiedCurrentBeerTapItems,
+} from "./keg-pricing-scope.mjs";
+import { REQUIRED_INGREDIENT_PRICE_DEFAULTS } from "./ingredient-price-defaults.mjs";
 import {
   enqueuePmbPublishItem,
   getPmbPublishQueueCounts,
@@ -31,6 +49,7 @@ import {
   normalizePmbPublishQueue,
   removePmbPublishItem,
 } from "./pmb-publish-queue.mjs";
+import { fetchPmbJsonWithRetry } from "./pmb-refresh.mjs";
 
 const CSV_PATH = "./data/cocktail-recipes.csv";
 const NEW_COCKTAILS_CSV_PATH = "./data/new-cocktails.csv";
@@ -90,9 +109,6 @@ const KEG_LEVELS_SHARED_IMPORT_PHRASE = "IMPORT KEG LEVELS FROM SERVICE COMPUTER
 const STANDARD_BEER_KEG_OZ = 15.5 * 128;
 const STANDARD_COCKTAIL_KEG_OZ = 12 * 128;
 const DEFAULT_BEER_TARGET_MARGIN = 82;
-const KEG_SIZE_OVERRIDES = {
-  "stella-artois": 50 * 33.814,
-};
 const DEFAULT_PRICE_OVERRIDES = {
   "1800-reposado": {
     bottleOz: "59.1745",
@@ -154,6 +170,7 @@ const DEFAULT_PRICE_OVERRIDES = {
     bottlePrice: "51.7",
     updatedAt: "Default OHLQ pricing",
   },
+  ...REQUIRED_INGREDIENT_PRICE_DEFAULTS,
   "jose-cuervo-gold": {
     bottleOz: "59.1745",
     bottlePrice: "32.9",
@@ -307,9 +324,9 @@ const DEFAULT_KEG_PRICE_OVERRIDES = {
     updatedAt: "Bonbright manual pricing 2026-07-24",
   },
   guinness: {
-    kegOz: "1984",
-    kegPrice: "185",
-    updatedAt: "Bonbright manual pricing 2026-07-24",
+    kegOz: String(GUINNESS_KEG_OZ),
+    kegPrice: String(GUINNESS_KEG_PRICE),
+    updatedAt: "Bonbright manual pricing 2026-08-10",
   },
   "dortmunder-gold-lager": {
     kegOz: "1984",
@@ -799,6 +816,8 @@ let parAgentState = null;
 let parAgentRunning = false;
 let parAgentMessage = "Weekly par agent has not run yet.";
 let parAgentStateSyncTimer = null;
+let parAgentStateSyncQueue = Promise.resolve();
+let parAgentStateMutationVersion = 0;
 let activeKegAdjustKey = "";
 let pmbProductSaving = false;
 let liquorProductSaving = false;
@@ -884,7 +903,7 @@ async function init() {
   await loadSharedInventoryState();
   inventoryItems = mergeCustomInventoryItems(parseInventory(inventorySourceRows));
   kegWallItems = kegLevelsCsv ? parseKegLevels(parseCsv(kegLevelsCsv)) : [];
-  kegPricingItems = buildKegPricingCatalog(kegWallItems);
+  kegPricingItems = buildKegPricingCatalog(kegWallItems, getCurrentKegPricingTapItems());
   weeklyUsageItems = weeklyUsageCsv ? parseWeeklyUsage(parseCsv(weeklyUsageCsv)) : [];
   if (weeklyUsageExtraCsv) {
     weeklyUsageItems = mergeWeeklyUsageExtraHistory(weeklyUsageItems, parseWeeklyUsageExtraHistory(parseCsv(weeklyUsageExtraCsv)));
@@ -1490,17 +1509,21 @@ function applySharedDashboardState(rawState) {
       readDashboardLocalStorageValue(KEG_PRICE_STORAGE_KEY, {}),
       DEFAULT_KEG_PRICE_OVERRIDES,
     ),
-    ...effectiveState.pricing.kegPriceOverrides,
+    ...filterBundledPriceDefaults(
+      effectiveState.pricing.kegPriceOverrides,
+      DEFAULT_KEG_PRICE_OVERRIDES,
+      { excludeAmbiguous: false },
+    ),
   };
 
   priceOverrides = {
     ...DEFAULT_PRICE_OVERRIDES,
     ...cloneDashboardStateValue(effectiveState.pricing.ingredientPriceOverrides),
   };
-  kegPriceOverrides = {
+  kegPriceOverrides = normalizeKnownKegSizeOverrides({
     ...DEFAULT_KEG_PRICE_OVERRIDES,
     ...cloneDashboardStateValue(effectiveState.pricing.kegPriceOverrides),
-  };
+  });
   chargeOverrides = cloneDashboardStateValue(effectiveState.pricing.chargeOverrides);
   customRecipes = cloneDashboardStateValue(effectiveState.recipes.customRecipes);
   inactiveRecipeIds = cloneDashboardStateValue(effectiveState.recipes.inactiveRecipeIds);
@@ -2619,7 +2642,7 @@ function switchTab(tabName) {
   if (!isEmployeeDashboard && requestedTab === "weekly-usage" && !weeklyUsageSyncAttempted) {
     runPmbWeeklyUsageSync({ automatic: true });
   }
-  if (!isEmployeeDashboard && ["keg-levels", "inventory"].includes(requestedTab) && !kegSyncAttempted) {
+  if (!isEmployeeDashboard && ["keg-levels", "ingredients", "inventory"].includes(requestedTab) && !kegSyncAttempted) {
     runKegLevelSync();
   }
   if (!isEmployeeDashboard && ["keg-levels", "pricing", "ingredients"].includes(requestedTab) && !tapPricingSyncAttempted) {
@@ -2629,7 +2652,7 @@ function switchTab(tabName) {
 
 function render() {
   ingredients = buildIngredientCatalog(getActiveRecipes());
-  kegPricingItems = buildKegPricingCatalog(kegWallItems);
+  kegPricingItems = buildKegPricingCatalog(kegWallItems, getCurrentKegPricingTapItems());
   syncInventoryItemCatalogLinks();
   renderStats();
   renderRecipes();
@@ -3286,6 +3309,7 @@ function renderKegLevels() {
         <button class="primary-button" id="refresh-keg-levels" type="button"${kegSyncLoading || kegConfigUpdateRunning ? " disabled" : ""}>${kegSyncLoading ? "Refreshing..." : "Refresh keg levels"}</button>
         <button class="ghost-button" id="send-keg-config-update" type="button"${kegSyncLoading || kegConfigUpdateRunning ? " disabled" : ""}>${kegConfigUpdateRunning ? "Sending..." : "Send config update"}</button>
         <button class="ghost-button" id="run-pmb-reconciliation" type="button"${pmbReconciliationRunning ? " disabled" : ""}>${pmbReconciliationRunning ? "Checking..." : "PMB reconciliation"}</button>
+        <button class="ghost-button keg-clear-on-hand-button" id="clear-keg-on-hand" type="button">Clear all on hand</button>
       </div>
       <p class="sync-status">${escapeHtml(kegSyncMessage)}${kegUpdatedAt ? ` Last updated ${escapeHtml(formatUpdatedAt(kegUpdatedAt))}.` : ""}</p>
       <p class="sync-status">${escapeHtml(vendorSyncMessage)}</p>
@@ -4746,7 +4770,12 @@ function renderKegWallBlock(wallName, items) {
                     <td class="keg-product-cell">
                       ${replacement ? `<span class="table-note">Replacing ${escapeHtml(replacement.oldBrand)}</span>` : ""}
                       ${pmbChangedBrand ? `<span class="table-note table-note--accent">PMB current tap</span>` : ""}
-                      ${onDeck ? `<span class="table-note table-note--accent">On deck: ${escapeHtml(onDeck.name)}</span>` : ""}
+                      ${onDeck ? `
+                        <span class="table-note table-note--accent keg-on-deck-summary">
+                          <span>On deck: ${escapeHtml(onDeck.name)}</span>
+                          <button class="keg-on-deck-remove" data-keg-key="${escapeHtml(itemKey)}" type="button" aria-label="Remove ${escapeHtml(onDeck.name)} from On Deck for tap ${escapeHtml(item.tapNumber)}">Remove</button>
+                        </span>
+                      ` : ""}
                       ${renderTapChangeControls(item, liveRow, displayBrand)}
                     </td>
                     <td class="keg-level-cell ${getKegLevelClass(liveRow?.fillLevelPercent)}">
@@ -4755,7 +4784,7 @@ function renderKegWallBlock(wallName, items) {
                     <td class="keg-value-cell">${currentValue > 0 ? money(currentValue) : '<span class="inventory-order-zero">-</span>'}</td>
                     <td class="keg-pricing-cell">${pricing.chargeHtml}</td>
                     <td class="keg-usage-cell">${formatKegWeeklyUsageAverage(item, displayBrand)}</td>
-                    <td><input class="inventory-input keg-input" data-keg-field="onHand" data-keg-key="${escapeHtml(itemKey)}" type="number" min="0" step="1" inputmode="numeric" value="${escapeHtml(onHand)}" placeholder="0"></td>
+                    <td><input class="inventory-input keg-input keg-on-hand-input" data-keg-field="onHand" data-keg-key="${escapeHtml(itemKey)}" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${escapeHtml(getKegOnHandEditorValue(onHand))}" placeholder="0" aria-label="On hand kegs for ${escapeHtml(displayBrand)}"></td>
                     <td class="keg-need-cell">${renderKegNeedCell(item, need)}</td>
                   </tr>`;
                 return `${mainRow}${activeKegAdjustKey === itemKey ? renderKegLevelAdjustRow(item, liveRow, displayBrand) : ""}`;
@@ -5542,6 +5571,26 @@ async function pushKegLevelAdjustment(key) {
   }
 }
 
+function clearAllKegOnHand() {
+  const nonZeroCount = kegWallItems.filter((item) => (
+    toNumber(kegOnHandOverrides[getKegItemKey(item)]) > 0
+  )).length;
+  if (!confirmDashboardAction(
+    "Clear the entire Keg Levels on-hand column?",
+    [
+      `All ${kegWallItems.length} on-hand counts will be set to zero.`,
+      `${nonZeroCount} non-zero count${nonZeroCount === 1 ? "" : "s"} will be cleared.`,
+    ],
+    "This updates the shared counts used by the par agent.",
+  )) return;
+
+  kegOnHandOverrides = createClearedKegOnHandOverrides(kegWallItems, getKegItemKey);
+  saveKegOnHandOverrides();
+  kegSyncMessage = `Cleared all ${kegWallItems.length} on-hand counts to zero.`;
+  scheduleParAgentStateSync({ immediate: true });
+  renderKegLevels();
+}
+
 function bindKegLevelEvents() {
   document.querySelector("#view-missing-recipes")?.addEventListener("click", () => {
     switchTab("recipes");
@@ -5563,6 +5612,7 @@ function bindKegLevelEvents() {
   document.querySelector("#run-par-agent")?.addEventListener("click", () => {
     runKegParAgent();
   });
+  document.querySelector("#clear-keg-on-hand")?.addEventListener("click", clearAllKegOnHand);
   document.querySelector("#initialize-shared-keg-levels")?.addEventListener("click", () => {
     initializeSharedKegLevelsFromServiceComputer();
   });
@@ -5595,7 +5645,48 @@ function bindKegLevelEvents() {
     });
   });
 
-  document.querySelectorAll(".keg-input").forEach((input) => {
+  document.querySelectorAll('.keg-input[data-keg-field="onHand"]').forEach((input) => {
+    input.dataset.lastValidValue = normalizeKegOnHandDraft(input.value);
+
+    input.addEventListener("focus", () => input.select());
+    input.addEventListener("click", () => input.select());
+
+    input.addEventListener("keydown", (event) => {
+      if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      event.preventDefault();
+      const inputs = [...document.querySelectorAll('.keg-input[data-keg-field="onHand"]')];
+      const currentIndex = inputs.indexOf(input);
+      const nextIndex = getAdjacentKegOnHandIndex(
+        currentIndex,
+        inputs.length,
+        event.key === "ArrowUp" ? "up" : "down",
+      );
+      const nextInput = inputs[nextIndex];
+      if (!nextInput || nextInput === input) return;
+      nextInput.focus();
+      nextInput.select();
+      nextInput.scrollIntoView({ block: "nearest" });
+    });
+
+    input.addEventListener("input", (event) => {
+      const target = event.currentTarget;
+      const key = target.dataset.kegKey;
+      if (!key) return;
+
+      const nextValue = normalizeKegOnHandDraft(target.value, target.dataset.lastValidValue || "");
+      if (target.value !== nextValue) target.value = nextValue;
+      target.dataset.lastValidValue = nextValue;
+      kegOnHandOverrides[key] = nextValue || "0";
+      saveKegOnHandOverrides();
+      updateKegNeedCell(key, target);
+    });
+
+    input.addEventListener("change", () => {
+      scheduleParAgentStateSync();
+    });
+  });
+
+  document.querySelectorAll('.keg-input:not([data-keg-field="onHand"])').forEach((input) => {
     input.addEventListener("input", (event) => {
       const target = event.currentTarget;
       const key = target.dataset.kegKey;
@@ -5603,17 +5694,6 @@ function bindKegLevelEvents() {
       if (!key || !field) return;
 
       const nextValue = target.value;
-      if (field === "onHand") {
-        if (nextValue) {
-          kegOnHandOverrides[key] = nextValue;
-        } else {
-          delete kegOnHandOverrides[key];
-        }
-        saveKegOnHandOverrides();
-        scheduleParAgentStateSync();
-        updateKegNeedCell(key, target);
-        return;
-      }
 
       if (field === "par") {
         if (nextValue) {
@@ -5636,6 +5716,19 @@ function bindKegLevelEvents() {
       setKegOnDeckItem(key, select.value);
       saveKegOnDeckOverrides();
       scheduleParAgentStateSync();
+      renderKegLevels();
+    });
+  });
+
+  document.querySelectorAll(".keg-on-deck-remove").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.kegKey;
+      const onDeck = getKegOnDeckItem(key);
+      if (!key || !onDeck) return;
+      setKegOnDeckItem(key, "");
+      saveKegOnDeckOverrides();
+      scheduleParAgentStateSync({ immediate: true });
+      kegSyncMessage = `${onDeck.name} was removed from On Deck.`;
       renderKegLevels();
     });
   });
@@ -6032,6 +6125,16 @@ async function replaceTapWithProduct(replacementValue, tapKey) {
       ));
     }
 
+    const clearedOnDeck = clearKegOnDeckIfInstalled(tapKey, {
+      name: newBrand,
+      tapProduct: newBrand,
+      plu: newPlu,
+    });
+    if (clearedOnDeck) {
+      saveKegOnDeckOverrides();
+      scheduleParAgentStateSync({ immediate: true });
+    }
+
     saveTapReplacementOverrides();
     saveComingSoonItems();
     kegSyncMessage = `${newBrand} was pushed to PMB on ${tapLabel}${result.configUpdateSent ? " and the affected tap wall was updated." : "."}`;
@@ -6171,11 +6274,13 @@ function getParAgentStatusMessage() {
     return `Last run ${formatUpdatedAt(recommendations.generatedAt)} was held: backup/on-hand counts have not synced to the server yet. Open Keg Levels once with the current counts, then run the agent again.`;
   }
   const cocktailMakeText = summary.cocktailMakeCount ? ` ${formatNumber(summary.cocktailMakeCount)} cocktail${toNumber(summary.cocktailMakeCount) === 1 ? "" : "s"} to make.` : "";
-  const orderText = `${formatNumber(summary.orderTotal || 0)} keg${toNumber(summary.orderTotal) === 1 ? "" : "s"}`;
+  const liquorOrderText = summary.liquorOrderCount ? ` ${formatNumber(summary.liquorOrderCount)} liquor tap refill${toNumber(summary.liquorOrderCount) === 1 ? "" : "s"} to order.` : "";
+  const kegOrderTotal = summary.kegOrderTotal ?? Math.max(0, toNumber(summary.orderTotal) - toNumber(summary.cocktailMakeTotal));
+  const orderText = `${formatNumber(kegOrderTotal)} beer keg${kegOrderTotal === 1 ? "" : "s"}`;
   const capacityText = summary.capacityEnabled
     ? ` Cooler capacity ${formatNumber(summary.currentBackupKegs || 0)}/${formatNumber(summary.coolerCapacityKegs || 0)} backups; ${formatNumber(summary.suppressedByCapacity || 0)} held by capacity.`
     : " Cooler capacity is not set.";
-  return `Last run ${formatUpdatedAt(recommendations.generatedAt)}. Agent recommends ${orderText} across ${formatNumber(summary.orderItemCount || 0)} taps.${cocktailMakeText}${capacityText}`;
+  return `Last run ${formatUpdatedAt(recommendations.generatedAt)}. Agent recommends ${orderText}.${cocktailMakeText}${liquorOrderText}${capacityText}`;
 }
 
 function getParAgentSettings() {
@@ -6196,7 +6301,7 @@ function renderParAgentPanel() {
           <input id="par-agent-cooler-capacity" type="number" min="0" step="1" inputmode="numeric" value="${escapeHtml(capacity)}" placeholder="Optional">
         </label>
       </div>
-      <p class="sync-copy">Sets weekly par from PMB usage, current keg level, backup kegs on hand, and cooler capacity. Capacity limits trim lower-priority orders instead of blindly filling every formula gap.</p>
+      <p class="sync-copy">Uses the same saved averages shown in Weekly Usage. Beer orders use average weekly kegs + 0.5; cocktail makes use average weekly kegs + 0.25; patio and karaoke liquor orders use average weekly ounces + 100. Beer cooler capacity trims lower-priority keg orders.</p>
       ${parAgentState?.initialized === false ? '<button class="ghost-button" id="initialize-shared-keg-levels" type="button">Import from service computer</button>' : ""}
       <p class="sync-status">${escapeHtml(parAgentMessage)}</p>
     </div>
@@ -6239,14 +6344,18 @@ function getParAgentRecommendation(item) {
     || null;
 }
 
-function scheduleParAgentStateSync() {
+function scheduleParAgentStateSync({ immediate = false } = {}) {
+  parAgentStateMutationVersion += 1;
+  const mutationVersion = parAgentStateMutationVersion;
   clearTimeout(parAgentStateSyncTimer);
   parAgentStateSyncTimer = setTimeout(() => {
-    syncParAgentState({ silent: true });
-  }, 600);
+    parAgentStateSyncQueue = parAgentStateSyncQueue
+      .then(() => syncParAgentState({ silent: true, mutationVersion }))
+      .catch(() => {});
+  }, immediate ? 0 : 1500);
 }
 
-async function syncParAgentState({ silent = false } = {}) {
+async function syncParAgentState({ silent = false, mutationVersion = parAgentStateMutationVersion } = {}) {
   if (!parAgentState?.initialized) {
     if (!silent) {
       parAgentMessage = getParAgentStatusMessage();
@@ -6278,7 +6387,16 @@ async function syncParAgentState({ silent = false } = {}) {
       error.code = result?.code;
       throw error;
     }
-    applyParAgentState(result);
+    if (mutationVersion === parAgentStateMutationVersion) {
+      applyParAgentState(result);
+    } else {
+      parAgentState = {
+        ...(parAgentState || {}),
+        revision: result.revision,
+        initialized: result.initialized,
+        updatedAt: result.updatedAt,
+      };
+    }
   } catch (error) {
     if (error.code === "KEG_STATE_REVISION_CONFLICT") {
       parAgentMessage = "Another manager changed Keg Levels first. This device kept its local choices; reload before deciding what to publish.";
@@ -6300,7 +6418,7 @@ async function runKegParAgent() {
   }
   if (parAgentRunning) return;
   parAgentRunning = true;
-  parAgentMessage = "Pulling PMB levels and recent Monday-Sunday usage for par recommendations...";
+  parAgentMessage = "Pulling PMB levels and matching all 102 taps to the saved Weekly Usage averages...";
   renderKegLevels();
 
   try {
@@ -6402,8 +6520,14 @@ async function runKegLevelSync() {
     kegLiveLevels = buildKegLiveLevelMap(result.items || []);
     kegDeviceLevels = buildKegDeviceLevelsMap(result.deviceLevels || {});
     kegTemplateAssignments = buildKegTemplateAssignments();
+    kegPricingItems = buildKegPricingCatalog(kegWallItems, getCurrentKegPricingTapItems());
     kegUpdatedAt = result.updatedAt || new Date().toISOString();
-    kegSyncMessage = `Found live levels for ${result.items?.length || 0} products.`;
+    const installedOnDeckItems = reconcileInstalledKegOnDeckProducts();
+    kegSyncMessage = installedOnDeckItems.length
+      ? `Found live levels for ${result.items?.length || 0} products. Removed ${installedOnDeckItems.map((entry) => `${entry.name} from On Deck on tap ${entry.tapNumber}`).join(", ")} because ${installedOnDeckItems.length === 1 ? "it is" : "they are"} now connected.`
+      : `Found live levels for ${result.items?.length || 0} products.`;
+    renderIngredients();
+    renderPricing();
     succeeded = true;
   } catch (error) {
     kegSyncAttempted = false;
@@ -6423,13 +6547,16 @@ async function runTapPricingSync() {
   renderPricingSummary();
 
   try {
-    const response = await fetch("/api/tap-pricing");
-    const result = await parseJsonResponse(response);
+    const { response, result } = await fetchPmbJsonWithRetry({
+      fetcher: () => fetch("/api/tap-pricing", { cache: "no-store" }),
+      parseResponse: parseJsonResponse,
+    });
     if (!response.ok) {
       throw new Error(result?.error || "Could not load tap pricing.");
     }
 
     liveTapPriceItems = result.items || [];
+    kegPricingItems = buildKegPricingCatalog(kegWallItems, getCurrentKegPricingTapItems());
     liveTapPrices = buildLiveTapPriceMap(liveTapPriceItems);
     liveTapPricingUpdatedAt = result.updatedAt || new Date().toISOString();
     syncWeeklyUsageWithCurrentPmbTaps(liveTapPriceItems);
@@ -6527,6 +6654,45 @@ function getKegOnDeckOptions(itemOrKey) {
   });
 }
 
+function clearKegOnDeckIfInstalled(itemOrKey, currentProduct) {
+  const key = typeof itemOrKey === "string" ? itemOrKey : getKegItemKey(itemOrKey);
+  const onDeck = getKegOnDeckItem(key);
+  if (!key || !onDeck || !isKegOnDeckProductInstalled(onDeck, currentProduct)) return null;
+
+  delete kegOnDeckOverrides[key];
+  return onDeck;
+}
+
+function reconcileInstalledKegOnDeckProducts() {
+  const replacedAt = new Date().toISOString();
+  const cleared = kegWallItems.flatMap((item) => {
+    const liveProduct = getKegLiveRow(item);
+    const onDeck = clearKegOnDeckIfInstalled(item, liveProduct);
+    return onDeck ? [{ ...onDeck, tapKey: getKegItemKey(item), tapNumber: item.tapNumber, liveProduct }] : [];
+  });
+  if (!cleared.length) return cleared;
+
+  let comingSoonChanged = false;
+  comingSoonItems = comingSoonItems.map((item) => {
+    const installed = cleared.find((entry) => entry.comingSoonId === item.id);
+    if (!installed || item.replacedAt) return item;
+    comingSoonChanged = true;
+    return {
+      ...item,
+      plu: toNumber(installed.liveProduct?.plu) || toNumber(item.plu),
+      pmbProductName: clean(installed.liveProduct?.name || installed.liveProduct?.tapProduct) || item.pmbProductName,
+      pmbUpdatedAt: replacedAt,
+      replaceTapKey: installed.tapKey,
+      replacedAt,
+    };
+  });
+
+  saveKegOnDeckOverrides();
+  if (comingSoonChanged) saveComingSoonItems();
+  scheduleParAgentStateSync({ immediate: true });
+  return cleared;
+}
+
 function setKegOnDeckItem(key, comingSoonId) {
   const item = resolveKegOnDeckOption(getKegOnDeckOptions(key), comingSoonId);
   if (!key) return;
@@ -6575,9 +6741,11 @@ function renderKegNeedCell(item, need) {
   const reason = clean(recommendation.reason);
   const orderProductName = clean(recommendation.orderProductName);
   const actionLabel = recommendation.actionType === "make" ? "Make" : "Order";
-  const stockText = recommendation.isKegTap
-    ? `${formatNumber(recommendation.currentStockKegs)} in stock | ${formatNumber(recommendation.avgWeeklyKegs)} avg`
-    : "Bottle inventory";
+  const stockText = recommendation.isLiquorTap
+    ? `${formatNumber(recommendation.currentStockOunces)} oz in keg | ${formatNumber(recommendation.avgWeeklyOunces)} oz avg/week`
+    : recommendation.isKegTap
+      ? `${formatNumber(recommendation.currentStockKegs)} in stock | ${formatNumber(recommendation.avgWeeklyKegs)} avg`
+      : "Bottle inventory";
   return `
     <div class="keg-need-agent">
       ${valueHtml}
@@ -6696,6 +6864,8 @@ function isLiquorOunceTap(tapNumber) {
 
 function getKegFullOunces(liveRow, item = null) {
   if (!liveRow) return null;
+  const knownBeerKegOz = getKegSizeOverrideOz(liveRow) || getKegSizeOverrideOz(item);
+  if (knownBeerKegOz) return knownBeerKegOz;
   return getCocktailAwareKegFullOunces(
     liveRow,
     item,
@@ -9173,6 +9343,11 @@ async function parseJsonResponse(response) {
       };
     }
     const isHtml = contentType.includes("text/html") || /^\s*</.test(text);
+    if (isHtml && response.status >= 500) {
+      return {
+        error: `The dashboard hit a temporary server gateway error (${response.status}). The refresh was retried automatically; please try the button again if PMB is still unavailable.`,
+      };
+    }
     return {
       error: isHtml
         ? `The dashboard received an HTML page instead of JSON (${response.status}). Log in again and try once more.`
@@ -9713,18 +9888,20 @@ function buildIngredientCatalog(sourceRecipes) {
 
   sourceRecipes.forEach((recipe) => {
     recipe.ingredients.forEach((ingredient) => {
-      if (!byId.has(ingredient.id)) {
-        byId.set(ingredient.id, {
-          id: ingredient.id,
-          name: ingredient.name,
-          vendorProduct: getVendorMapping(ingredient.id),
+      const resolvedId = getResolvedIngredientId(ingredient);
+      const resolvedName = normalizeIngredientAlias(ingredient.name);
+      if (!byId.has(resolvedId)) {
+        byId.set(resolvedId, {
+          id: resolvedId,
+          name: resolvedName,
+          vendorProduct: getVendorMapping(resolvedId),
           totalCost: 0,
           totalOz: 0,
           recipes: [],
         });
       }
 
-      const record = byId.get(ingredient.id);
+      const record = byId.get(resolvedId);
       record.totalCost += ingredient.cost || 0;
       record.totalOz += ingredient.oz || 0;
       if (!record.recipes.includes(recipe.title)) {
@@ -10083,11 +10260,26 @@ function getCatalogCost(ingredient) {
   return getCatalogUnitCost(ingredient) * ingredient.totalOz;
 }
 
-function buildKegPricingCatalog(sourceKegWallItems) {
+function getCurrentKegPricingTapItems() {
+  return buildVerifiedCurrentBeerTapItems({
+    wallItems: kegWallItems,
+    liveLevelItems: [...kegLiveLevels.values()],
+    tapPriceItems: liveTapPriceItems,
+    isBeerTapPosition,
+  });
+}
+
+function buildKegPricingCatalog(sourceKegWallItems, currentTapItems = []) {
   const byId = new Map();
+  const currentBeerByTap = new Map(
+    currentTapItems
+      .filter((item) => isBeerTapPosition(item) && toNumber(item.tapPosition))
+      .map((item) => [toNumber(item.tapPosition), item]),
+  );
 
   sourceKegWallItems
     .filter((item) => isBeerPricingTap(item))
+    .filter(() => currentBeerByTap.size === 0)
     .forEach((item) => {
       const id = getKegPricingKey(item.brand);
       const existing = byId.get(id);
@@ -10120,16 +10312,69 @@ function buildKegPricingCatalog(sourceKegWallItems) {
       }
     });
 
-  customBeerKegs.forEach((item) => {
-    const id = item.id || getKegPricingKey(item.name);
-    if (!id || byId.has(id)) return;
+  currentBeerByTap.forEach((item, tapNumber) => {
+    const name = clean(item.name || item.matchedBrand);
+    if (!name) return;
+    const id = getKegPricingKey(name);
+    const tapLabel = `${clean(item.wall) || "Current wall"} ${tapNumber}`;
+    const existing = byId.get(id);
+    if (existing) {
+      if (!existing.sourceNames.includes(name)) existing.sourceNames.push(name);
+      if (!existing.sourceTaps.includes(tapLabel)) existing.sourceTaps.push(tapLabel);
+      return;
+    }
+
+    const catalogItem = {
+      id,
+      name: getKegDisplayName(name),
+      tapNumber,
+      wall: clean(item.wall),
+      type: clean(item.type) || "Beer",
+      brand: name,
+    };
+    const vendor = getKegVendorLabel(catalogItem);
+    const kegOz = getDefaultKegSizeOz(catalogItem);
     byId.set(id, {
+      ...catalogItem,
+      kegOz,
+      vendor,
+      vendorProduct: getKegVendorProduct(catalogItem.name, vendor, kegOz),
+      sourceNames: [name],
+      sourceTaps: [tapLabel],
+      sourceTypes: [catalogItem.type],
+      isCurrentWallProduct: true,
+    });
+  });
+
+  buildAssignedOnDeckBeerItems({
+    wallItems: sourceKegWallItems,
+    isBeerTapPosition,
+    resolveOnDeck: getKegOnDeckItem,
+  }).forEach((item) => {
+    const id = getKegPricingKey(item.name);
+    const existing = byId.get(id);
+    if (existing) {
+      if (!existing.sourceTaps.includes(item.sourceTapLabel)) existing.sourceTaps.push(item.sourceTapLabel);
+      return;
+    }
+
+    const customItem = customBeerKegs.find((entry) => getKegPricingKey(entry.name) === id) || {};
+    const catalogItem = {
+      ...customItem,
       ...item,
       id,
-      sourceNames: item.sourceNames?.length ? item.sourceNames : [item.name],
-      sourceTaps: item.sourceTaps?.length ? item.sourceTaps : ["New keg"],
-      sourceTypes: item.sourceTypes?.length ? item.sourceTypes : ["Beer"],
-      vendorProduct: null,
+      brand: item.name,
+    };
+    const vendor = getKegVendorLabel(catalogItem);
+    const kegOz = toNumber(item.kegOz) || toNumber(customItem.kegOz) || getDefaultKegSizeOz(catalogItem);
+    byId.set(id, {
+      ...catalogItem,
+      kegOz,
+      vendor,
+      vendorProduct: getKegVendorProduct(item.name, vendor, kegOz),
+      sourceNames: [item.name],
+      sourceTaps: [item.sourceTapLabel],
+      sourceTypes: ["Beer"],
     });
   });
 
@@ -10143,10 +10388,7 @@ function buildKegPricingCatalog(sourceKegWallItems) {
 }
 
 function isBeerPricingTap(item) {
-  return (
-    (item.tapNumber >= 21 && item.tapNumber <= 46) ||
-    (item.wall === "Karaoke" && item.tapNumber >= 73 && item.tapNumber <= 82)
-  );
+  return isBeerTapPosition(item);
 }
 
 function sortTapLabels(a, b) {
@@ -10154,10 +10396,13 @@ function sortTapLabels(a, b) {
 }
 
 function getDefaultKegSizeOz(item) {
-  const overrideKegOz = getKegSizeOverrideOz(item);
+  const liveRow = getKegLiveRow(item);
+  const replacement = tapReplacementOverrides[getKegItemKey(item)];
+  const overrideKegOz = getKegSizeOverrideOz(liveRow)
+    || getKegSizeOverrideOz(replacement?.newBrand)
+    || getKegSizeOverrideOz(item);
   if (overrideKegOz) return overrideKegOz;
 
-  const liveRow = getKegLiveRow(item);
   const rawKegSize = toNumber(liveRow?.rawKegSize);
   if (rawKegSize > 500) return rawKegSize;
   return STANDARD_BEER_KEG_OZ;
@@ -10234,7 +10479,15 @@ function getExpectedBeerKegOz(item) {
 }
 
 function getKegSizeOverrideOz(item) {
-  return KEG_SIZE_OVERRIDES[getKegPricingKey(item?.brand || item?.name || "")] || 0;
+  return getKnownBeerKegSizeOz(item);
+}
+
+function normalizeKnownKegSizeOverrides(source = {}) {
+  return Object.fromEntries(Object.entries(source).map(([id, override]) => {
+    const knownKegOz = getKnownBeerKegSizeOz(id);
+    if (!knownKegOz || !override || typeof override !== "object") return [id, override];
+    return [id, { ...override, kegOz: String(knownKegOz) }];
+  }));
 }
 
 function getIngredientBottleCost(ingredient) {
@@ -11342,18 +11595,22 @@ function loadKegPriceOverrides() {
     };
 
     Object.entries(DEFAULT_KEG_PRICE_OVERRIDES).forEach(([key, defaultOverride]) => {
-      if (defaultOverride.updatedAt !== "Bonbright manual pricing 2026-07-24") return;
       const savedOverride = savedOverrides[key];
-      if (!savedOverride || /^Bonbright invoice 2026-07-08$/.test(String(savedOverride.updatedAt || ""))) {
+      if (!savedOverride || isConservativeBundledPriceDefault(
+        key,
+        savedOverride,
+        DEFAULT_KEG_PRICE_OVERRIDES,
+        { excludeAmbiguous: false },
+      )) {
         merged[key] = defaultOverride;
       }
     });
 
-    return merged;
+    return normalizeKnownKegSizeOverrides(merged);
   } catch {
-    return {
+    return normalizeKnownKegSizeOverrides({
       ...DEFAULT_KEG_PRICE_OVERRIDES,
-    };
+    });
   }
 }
 

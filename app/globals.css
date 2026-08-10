@@ -1208,6 +1208,12 @@ td {
   min-height: 34px;
 }
 
+.keg-on-hand-input:focus {
+  border-color: var(--juniper);
+  box-shadow: 0 0 0 3px rgba(31, 95, 84, 0.14);
+  background: #fff;
+}
+
 .keg-input--par {
   background: rgba(214, 166, 61, 0.08);
   border-color: rgba(214, 166, 61, 0.45);
@@ -1801,6 +1807,11 @@ td {
   min-height: 38px;
   padding: 0 10px;
   font-size: 0.78rem;
+}
+
+.sync-actions--keg-primary .keg-clear-on-hand-button {
+  border-color: rgba(198, 74, 50, 0.35);
+  color: var(--tomato);
 }
 
 .cocktails-to-make-panel__header {
@@ -2944,6 +2955,28 @@ td {
 
 .table-note--accent {
   color: var(--juniper-dark);
+}
+
+.keg-on-deck-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.keg-on-deck-summary > span {
+  display: inline;
+}
+
+.keg-on-deck-remove {
+  border: 0;
+  padding: 0;
+  color: var(--tomato);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .portion-list {

@@ -115,7 +115,7 @@ test("repairs the known saved On Par Tee formula while preserving a manual cost"
     { name: "Crown Royal", raw: "Crown Royal= 7 bottles (1.75L)", cost: 414, oz: 414 },
     { name: "Peach Schnapps", raw: "Peach Schnapps= 8 bottles", cost: 96.25, oz: 270 },
     { name: "Sour Mix", raw: "Sour Mix= 2 gallons", cost: 15.36, oz: 256 },
-    { name: "Lemonade", raw: "Lemonade= 2 gallons", cost: 5.78, oz: 256 },
+    { name: "Lemonade", raw: "Lemonade= 2.5 gallons", cost: 7.23, oz: 320 },
     { name: "Water", raw: "Water= 1.5 gallons", cost: 0, oz: 192 },
   ];
   const edited = [
@@ -140,7 +140,7 @@ test("repairs the known saved On Par Tee formula while preserving a manual cost"
     [
       { raw: "Peach Schnapps= 8 bottles", cost: 96.25, oz: 270, packageCount: "8", packageUnit: "bottles" },
       { raw: "Sour Mix= 2 gallons", cost: 21, oz: 256, packageCount: "2", packageUnit: "gallons" },
-      { raw: "Lemonade= 2 gallons", cost: 5.78, oz: 256, packageCount: "2", packageUnit: "gallons" },
+      { raw: "Lemonade= 2.5 gallons", cost: 7.23, oz: 320, packageCount: "2.5", packageUnit: "gallons" },
       { raw: "Water= 1.5 gallons", cost: 0, oz: 192, packageCount: "1.5", packageUnit: "gallons" },
     ],
   );

@@ -3,6 +3,12 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const PMB_API_TIMEOUT_MS = 15000;
+const PMB_TAP_CONFIG_TIMEOUT_MS = 6000;
+
 function parseJsonLoose(text) {
   try {
     return JSON.parse(text);
@@ -60,6 +66,7 @@ async function postJson(baseUrl, path, body, token = "") {
     },
     body: JSON.stringify(body),
     cache: "no-store",
+    signal: AbortSignal.timeout(PMB_API_TIMEOUT_MS),
   });
 
   const raw = await response.text();
@@ -320,7 +327,7 @@ export async function GET() {
       postJson(config.baseUrl, "/api/productlist", { id: String(config.clientId) }, token),
       postJson(config.baseUrl, "/api/itemlist", { id: String(config.clientId) }, token),
       getTapLookup(),
-      getTapConfigRows(config).catch(() => []),
+      getTapConfigRows(config, { timeoutMs: PMB_TAP_CONFIG_TIMEOUT_MS }).catch(() => []),
     ]);
 
     if (products.status !== 200 || !Array.isArray(products.json?.productlist)) {
@@ -360,6 +367,8 @@ export async function GET() {
           volumeUnit: String(product.volume_unit || ""),
           isActive: Number(product.is_active || 0) === 1,
           isInUse: Number(product.is_in_use || 0) === 1,
+          isCurrentTap: Boolean(currentTap),
+          tapMatchSource: currentTap ? "pmb-tap-config" : matchedTap ? "template-fallback" : "",
         };
       })
       .filter(Boolean)

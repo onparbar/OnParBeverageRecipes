@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyCoolerCapacity,
   buildRawRecommendation,
   getCocktailRecipeYieldOz,
   getKegFullOunces,
+  getTapStateKey,
 } from "../lib/par-agent.mjs";
 import { COCKTAIL_RECIPE_YIELDS } from "../public/cocktail-recipe-yields.mjs";
 
@@ -17,6 +19,32 @@ function cocktailTap(name, tapNumber) {
     brand: name,
     templateBrand: name,
     type: "Cocktail",
+    plu: tapNumber,
+  };
+}
+
+function beerTap(name = "MICHELOB ULTRA 2", tapNumber = 73) {
+  return {
+    key: `karaoke-${tapNumber}`,
+    tapNumber,
+    wall: "Karaoke",
+    name,
+    brand: name,
+    templateBrand: name,
+    type: "Lager",
+    plu: tapNumber,
+  };
+}
+
+function liquorTap(wall, tapNumber, name) {
+  return {
+    key: `${wall.toLowerCase()}-${tapNumber}`,
+    tapNumber,
+    wall,
+    name,
+    brand: name,
+    templateBrand: name,
+    type: "Shots",
     plu: tapNumber,
   };
 }
@@ -78,6 +106,28 @@ test("keeps PMB and standard size fallbacks for other cocktails", () => {
   assert.equal(getKegFullOunces(null, tap), 1536);
 });
 
+test("uses the 13.2-gallon Guinness size instead of PMB's generic beer-keg size", () => {
+  const tap = beerTap("BUDWEISER 1", 42);
+  const liveLevel = {
+    name: "Guinness Draught 1",
+    tapProduct: "Guinness Draught 1",
+    fillLevelPercent: 50,
+    rawKegSize: 1984,
+    rawKegSizeDp: 0,
+  };
+  const result = buildRawRecommendation(
+    tap,
+    liveLevel,
+    [{ volumeOz: 1689.6 }],
+    { onHandOverrides: {}, onDeckOverrides: {} },
+    {},
+  );
+
+  assert.equal(getKegFullOunces(liveLevel, tap), 1689.6);
+  assert.deepEqual(result.weeklyKegs, [1]);
+  assert.equal(result.avgWeeklyKegs, 1);
+});
+
 test("corrected Strawberry threshold produces the required make recommendation", () => {
   const result = recommendation("SPIKED STRAWBERRY LEMONADE (TITO'S) 1", 65, 535, 60);
   assert.equal(result.currentStockKegs, 0.6);
@@ -116,4 +166,172 @@ test("uses On Par Tee and Whiskey Smash as saved On Deck make choices", () => {
     assert.equal(result.onDeckProduct?.name, onDeckName);
     assert.match(result.reason, new RegExp(`Make ${onDeckName} from On Deck`));
   });
+});
+
+test("orders a beer keg only when total stock is below average weekly usage plus 0.5 keg", () => {
+  const tap = beerTap();
+  const baseArgs = [
+    tap,
+    { fillLevelPercent: 40, rawKegSize: 1984, rawKegSizeDp: 0 },
+    [{ volumeOz: 992 }],
+  ];
+
+  const belowTarget = buildRawRecommendation(
+    ...baseArgs,
+    { onHandOverrides: { [tap.key]: 0.5 }, onDeckOverrides: {} },
+    {},
+  );
+  assert.equal(belowTarget.currentStockKegs, 0.9);
+  assert.equal(belowTarget.avgWeeklyKegs, 0.5);
+  assert.equal(belowTarget.targetStockKegs, 1);
+  assert.equal(belowTarget.orderQty, 1);
+  assert.match(belowTarget.reason, /below 1: 0\.5\/week plus 0\.5 keg/);
+
+  const atTarget = buildRawRecommendation(
+    ...baseArgs,
+    { onHandOverrides: { [tap.key]: 0.6 }, onDeckOverrides: {} },
+    {},
+  );
+  assert.equal(atTarget.currentStockKegs, 1);
+  assert.equal(atTarget.orderQty, 0);
+  assert.match(atTarget.reason, /covers 0\.5\/week plus 0\.5 keg/);
+});
+
+test("uses the same tap keys as the browser for apostrophes and ampersands", () => {
+  assert.equal(getTapStateKey({
+    wall: "Main",
+    tapNumber: 66,
+    brand: "VODKA CRAN (TITO'S) 1",
+  }), "main-66-vodka-cran-tito-s-1");
+  assert.equal(getTapStateKey({
+    wall: "Main",
+    tapNumber: 47,
+    brand: "GIN & JUICE (BOMBAY) 1",
+  }), "main-47-gin-juice-bombay-1");
+});
+
+test("counts saved on-hand kegs for Vodka Cran", () => {
+  const tap = cocktailTap("VODKA CRAN (TITO'S) 1", 66);
+  tap.key = getTapStateKey(tap);
+  const result = buildRawRecommendation(
+    tap,
+    { fillLevelPercent: 14.8, rawKegSize: 1379, rawKegSizeDp: 0 },
+    [{ volumeOz: 280 }],
+    { onHandOverrides: { "main-66-vodka-cran-tito-s-1": "1" }, onDeckOverrides: {} },
+    {},
+  );
+
+  assert.equal(result.backupKegs, 1);
+  assert.equal(result.currentStockKegs, 1.148);
+  assert.equal(result.orderQty, 0);
+});
+
+test("uses the saved Weekly Usage average instead of a separate recent PMB average", () => {
+  const tap = cocktailTap("BLUE DOT (SVEDKA) 1", 57);
+  const result = buildRawRecommendation(
+    tap,
+    { fillLevelPercent: 42.4, rawKegSize: 1507, rawKegSizeDp: 0 },
+    [{ volumeOz: 247.148 }],
+    { onHandOverrides: {}, onDeckOverrides: {} },
+    {},
+    {
+      tapNumber: 57,
+      displayUnit: "kegs",
+      average: 0.21435897435897439,
+      history: [{ value: 0.23 }, { value: 0.25 }, { value: 0.16 }],
+    },
+  );
+
+  assert.equal(result.avgWeeklyKegs, 0.214);
+  assert.equal(result.targetStockKegs, 0.46);
+  assert.deepEqual(result.weeklyKegs, [0.23, 0.25, 0.16]);
+});
+
+test("uses the 0.25-keg threshold for karaoke cocktail kegs", () => {
+  const tap = {
+    ...cocktailTap("RASPBERRY MARGARITA (JOSE CUERVO) 2", 93),
+    key: "karaoke-93",
+    wall: "Karaoke",
+  };
+  const result = buildRawRecommendation(
+    tap,
+    { fillLevelPercent: 30, rawKegSize: 1536, rawKegSizeDp: 0 },
+    [{ volumeOz: 153.6 }],
+    { onHandOverrides: {}, onDeckOverrides: {} },
+    {},
+  );
+
+  assert.equal(result.currentStockKegs, 0.3);
+  assert.equal(result.avgWeeklyKegs, 0.1);
+  assert.equal(result.targetStockKegs, 0.35);
+  assert.equal(result.orderQty, 1);
+});
+
+test("does not suppress karaoke cocktail makes when beer cooler capacity is enabled", () => {
+  const tap = {
+    ...cocktailTap("RASPBERRY MARGARITA (JOSE CUERVO) 2", 93),
+    key: "karaoke-93",
+    wall: "Karaoke",
+  };
+  const recommendation = buildRawRecommendation(
+    tap,
+    { fillLevelPercent: 30, rawKegSize: 1536, rawKegSizeDp: 0 },
+    [{ volumeOz: 153.6 }],
+    { onHandOverrides: {}, onDeckOverrides: {} },
+    {},
+  );
+  const result = applyCoolerCapacity(
+    [recommendation],
+    {},
+    { coolerCapacityKegs: 1 },
+  );
+
+  assert.equal(result.items[0].actionType, "make");
+  assert.equal(result.items[0].orderQty, 1);
+  assert.equal(result.items[0].capacityLimited, undefined);
+});
+
+test("orders patio and karaoke liquor taps below average weekly ounces plus 100 ounces", () => {
+  const fixtures = [
+    [liquorTap("Patio", 1, "Hennessy (Cognac) 3"), 50, 0],
+    [liquorTap("Karaoke", 83, "Grey Goose (Vodka) 2"), 49.8, 1],
+  ];
+
+  fixtures.forEach(([tap, fillLevelPercent, expectedOrderQty]) => {
+    const result = buildRawRecommendation(
+      tap,
+      { fillLevelPercent, rawKegSize: 500, rawKegSizeDp: 0 },
+      [{ volumeOz: 120 }, { volumeOz: 180 }],
+      { onHandOverrides: { [tap.key]: 8 }, onDeckOverrides: {} },
+      {},
+    );
+
+    assert.equal(result.isLiquorTap, true);
+    assert.equal(result.avgWeeklyOunces, 150);
+    assert.equal(result.targetStockOunces, 250);
+    assert.equal(result.orderQty, expectedOrderQty);
+    assert.equal(result.currentStockOunces, expectedOrderQty ? 249 : 250);
+  });
+});
+
+test("uses saved Weekly Usage ounces for liquor taps too", () => {
+  const tap = liquorTap("Patio", 1, "Hennessy (Cognac) 3");
+  const result = buildRawRecommendation(
+    tap,
+    { fillLevelPercent: 50, rawKegSize: 500, rawKegSizeDp: 0 },
+    [{ volumeOz: 10 }],
+    { onHandOverrides: {}, onDeckOverrides: {} },
+    {},
+    {
+      tapNumber: 1,
+      displayUnit: "oz",
+      average: 160,
+      history: [{ value: 120 }, { value: 200 }],
+    },
+  );
+
+  assert.equal(result.avgWeeklyOunces, 160);
+  assert.equal(result.targetStockOunces, 260);
+  assert.equal(result.orderQty, 1);
+  assert.deepEqual(result.weeklyOunces, [120, 200]);
 });
