@@ -1515,17 +1515,8 @@ function applySharedDashboardState(rawState) {
 }
 
 function ensureDashboardSharedStatePanel() {
-  let panel = document.querySelector("#dashboard-shared-state");
-  if (panel) return panel;
-
-  const main = dashboardShell?.querySelector("main");
-  if (!main) return null;
-  panel = document.createElement("aside");
-  panel.id = "dashboard-shared-state";
-  panel.className = "operations-bar";
-  panel.setAttribute("aria-live", "polite");
-  main.prepend(panel);
-  return panel;
+  document.querySelector("#dashboard-shared-state")?.remove();
+  return null;
 }
 
 function getServiceComputerReadiness() {
@@ -6355,7 +6346,7 @@ async function initializeSharedKegLevelsFromServiceComputer() {
     "Make this browser's Keg Levels choices the official shared version?",
     [
       "Source: the saved keg counts, pars, on-deck selections, and cooler setting in this browser.",
-      `${count} backup/on-hand count${count === 1 ? "" : "s"} will be published for all signed-in managers.",
+      `${count} backup/on-hand count${count === 1 ? "" : "s"} will be published for all signed-in managers.`,
       "Only continue while using the service computer with the complete current keg setup.",
     ],
     "If you are at home or unsure, cancel and wait until you are back at the service computer.",

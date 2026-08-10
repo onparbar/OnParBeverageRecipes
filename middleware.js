@@ -10,6 +10,14 @@ function isPublicPath(pathname) {
   return pathname === "/login" || pathname === "/api/login";
 }
 
+function isPublicStaticAssetPath(pathname) {
+  return (
+    pathname === "/dashboard.js" ||
+    pathname.endsWith(".mjs") ||
+    (pathname.startsWith("/data/") && pathname.endsWith(".csv"))
+  );
+}
+
 function isApiPath(pathname) {
   return pathname.startsWith("/api/");
 }
@@ -30,6 +38,10 @@ export async function middleware(request) {
   const { pathname } = request.nextUrl;
   const sessionRole = await getSessionRole(request);
   const isAuthed = Boolean(sessionRole);
+
+  if (isPublicStaticAssetPath(pathname)) {
+    return NextResponse.next();
+  }
 
   if (isPublicPath(pathname)) {
     if (isAuthed && pathname === "/login") {
