@@ -197,4 +197,28 @@ test("checks every PMB keg-level response status before using its body", () => {
     ),
     (error) => error.code === "PMB_KEG_LEVEL_READ_FAILED" && error.status === 503,
   );
+
+  const displayOnlyResponse = {
+    status: 200,
+    json: {
+      fill_level_perc: 7250,
+      fill_level_keg_size: 0,
+      fill_level_keg_size_dp: 0,
+    },
+  };
+  assert.equal(
+    requireSuccessfulKegLevelResponse(
+      displayOnlyResponse,
+      { deviceId: 9001, lineNum: 1 },
+      { requireKegSize: false },
+    ),
+    displayOnlyResponse.json,
+  );
+  assert.throws(
+    () => requireSuccessfulKegLevelResponse(
+      displayOnlyResponse,
+      { deviceId: 9001, lineNum: 1 },
+    ),
+    (error) => error.code === "PMB_KEG_LEVEL_READ_FAILED" && error.status === 503,
+  );
 });

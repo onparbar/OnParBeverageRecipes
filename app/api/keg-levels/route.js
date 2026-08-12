@@ -150,7 +150,13 @@ export async function GET() {
         { device_id: slot.deviceId, line_num: slot.lineNum },
         token,
       );
-      const levelJson = requireSuccessfulKegLevelResponse(response, slot);
+      // The dashboard can safely display a verified percentage even when a
+      // controller has not been configured with keg-size metadata. Keg writes
+      // keep the helper's stricter default and still require the complete
+      // response before calculating or sending an adjustment.
+      const levelJson = requireSuccessfulKegLevelResponse(response, slot, {
+        requireKegSize: false,
+      });
 
       const rawPercent = Number(levelJson.fill_level_perc);
       const rawKegSize = Number(levelJson.fill_level_keg_size);
@@ -158,8 +164,8 @@ export async function GET() {
       levelBySlot.set(`${slot.deviceId}:${slot.lineNum}`, {
         fillLevelPercent: Number.isFinite(rawPercent) ? Math.round((rawPercent / 100) * 10) / 10 : null,
         rawPercent,
-        rawKegSize,
-        rawKegSizeDp,
+        rawKegSize: Number.isFinite(rawKegSize) ? rawKegSize : null,
+        rawKegSizeDp: Number.isFinite(rawKegSizeDp) ? rawKegSizeDp : null,
       });
     }
 
