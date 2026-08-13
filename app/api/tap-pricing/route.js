@@ -6,6 +6,7 @@ import {
   buildCurrentTapAssignments,
   getTapPricingRepresentativeAssignment,
 } from "../../../lib/tap-pricing-assignments.mjs";
+import { filterCurrentTapPricingItems } from "../../../public/keg-pricing-scope.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -349,11 +350,14 @@ export async function GET() {
       postJson(config.baseUrl, "/api/productlist", { id: String(config.clientId) }, token),
       postJson(config.baseUrl, "/api/itemlist", { id: String(config.clientId) }, token),
       getTapLookup(),
-      getTapConfigRows(config, { timeoutMs: PMB_TAP_CONFIG_TIMEOUT_MS }).catch(() => []),
+      getTapConfigRows(config, { timeoutMs: PMB_TAP_CONFIG_TIMEOUT_MS }),
     ]);
 
     if (products.status !== 200 || !Array.isArray(products.json?.productlist)) {
       throw new Error(`PMB productlist failed (${products.status})`);
+    }
+    if (!tapConfigRows.length) {
+      throw new Error("PMB tap configuration returned no current physical taps.");
     }
 
     const itemPricesByPlu = buildItemPriceMap(itemPrices.json?.itemlist || []);
@@ -365,7 +369,7 @@ export async function GET() {
         .filter(Boolean),
     );
 
-    const items = products.json.productlist
+    const items = filterCurrentTapPricingItems(products.json.productlist
       .map((product) => {
         const chargePerOz = getChargePerOz(product);
         const name = normalizeProductName(product.name);
@@ -402,13 +406,7 @@ export async function GET() {
           tapMatchSource: currentTap ? "pmb-tap-config" : matchedTap ? "template-fallback" : "",
         };
       })
-      .filter(Boolean)
-      .sort((a, b) => {
-        if (a.tapPosition && b.tapPosition) return a.tapPosition - b.tapPosition;
-        if (a.tapPosition) return -1;
-        if (b.tapPosition) return 1;
-        return a.name.localeCompare(b.name);
-      });
+      .filter(Boolean));
 
     return NextResponse.json({
       updatedAt: new Date().toISOString(),

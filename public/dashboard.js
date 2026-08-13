@@ -59,6 +59,7 @@ import {
 import {
   buildAssignedOnDeckBeerItems,
   buildVerifiedCurrentBeerTapItems,
+  filterCurrentTapPricingItems,
 } from "./keg-pricing-scope.mjs";
 import { REQUIRED_INGREDIENT_PRICE_DEFAULTS } from "./ingredient-price-defaults.mjs";
 import {
@@ -81,7 +82,10 @@ import {
 import { buildWeeklyUsagePerformance } from "./weekly-usage-performance.mjs";
 import { buildWeeklyUsageTrend } from "./weekly-usage-trend.mjs";
 import { buildWeeklyPlanTrends } from "./weekly-plan-trends.mjs";
-import { buildDashboardOverview } from "./dashboard-overview.mjs";
+import {
+  buildDashboardOverview,
+  DASHBOARD_OVERVIEW_TARGETS,
+} from "./dashboard-overview.mjs";
 import { buildOhioComplianceWatchViewModel } from "./ohio-compliance-watch.mjs";
 import { buildWeeklyUsageSellerRankings } from "./weekly-usage-seller-rankings.mjs";
 import {
@@ -123,6 +127,8 @@ const COMING_SOON_STORAGE_KEY = "cocktail-dashboard-coming-soon";
 const TAP_REPLACEMENT_STORAGE_KEY = "cocktail-dashboard-tap-replacements";
 const DASHBOARD_STATE_OUTBOX_STORAGE_KEY = "cocktail-dashboard-shared-state-outbox";
 const EMPLOYEE_SHARED_RECIPE_CACHE_STORAGE_KEY = "cocktail-dashboard-employee-shared-recipes";
+const OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY = "cocktail-dashboard-owner-login-sync-lock";
+const OWNER_LOGIN_SYNC_LOCK_MAX_AGE_MS = 2 * 60 * 1000;
 const DASHBOARD_STATE_REQUEST_TIMEOUT_MS = 6000;
 const OPERATIONAL_SHARED_REQUEST_TIMEOUT_MS = 8000;
 const PAR_AGENT_RUN_REQUEST_TIMEOUT_MS = 30000;
@@ -973,6 +979,7 @@ let activeAddProductType = "cocktail";
 let globalSearchItems = [];
 let visibleGlobalSearchResults = [];
 let activeGlobalSearchResultIndex = -1;
+let ownerLoginSyncStarted = false;
 
 init();
 
@@ -1048,6 +1055,66 @@ async function init() {
   clearBeerLookupResult();
   render();
   loadBeverageNews();
+  void runOwnerLoginSync();
+}
+
+async function runOwnerLoginSync() {
+  if (isEmployeeDashboard || ownerLoginSyncStarted) return;
+  ownerLoginSyncStarted = true;
+  const lockToken = acquireOwnerLoginSyncLock();
+  try {
+    const [kegOutcome, , usageOutcome] = await Promise.allSettled([
+      runKegLevelSync(),
+      runTapPricingSync(),
+      lockToken
+        ? runPmbWeeklyUsageSync({ automatic: true })
+        : Promise.resolve({ ok: false, skipped: true }),
+    ]);
+    const kegResult = kegOutcome.status === "fulfilled" && kegOutcome.value;
+    const usageResult = usageOutcome.status === "fulfilled" ? usageOutcome.value : null;
+    if (!lockToken) {
+      renderDashboardOverview();
+      return;
+    }
+    if (
+      !kegResult
+      || !usageResult?.ok
+      || !parAgentState?.initialized
+      || !weeklyUsageSharedInitialized
+      || !inventorySharedInitialized
+    ) return;
+
+    const usageSaved = await flushPendingSharedWeeklyUsageSave();
+    const inventorySaved = await flushPendingInventoryFieldSyncs();
+    const parInputsSaved = await flushPendingParAgentStateSync();
+    if (!usageSaved || !inventorySaved || !parInputsSaved) return;
+    await runKegParAgent();
+    renderDashboardOverview();
+  } finally {
+    if (lockToken) releaseOwnerLoginSyncLock(lockToken);
+  }
+}
+
+function acquireOwnerLoginSyncLock() {
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  try {
+    const existing = JSON.parse(localStorage.getItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY) || "null");
+    if (existing?.token && Date.now() - Number(existing.startedAt) < OWNER_LOGIN_SYNC_LOCK_MAX_AGE_MS) return "";
+    localStorage.setItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY, JSON.stringify({ token, startedAt: Date.now() }));
+    const saved = JSON.parse(localStorage.getItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY) || "null");
+    return saved?.token === token ? token : "";
+  } catch {
+    return token;
+  }
+}
+
+function releaseOwnerLoginSyncLock(token) {
+  try {
+    const existing = JSON.parse(localStorage.getItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY) || "null");
+    if (existing?.token === token) localStorage.removeItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY);
+  } catch {
+    // The lock naturally expires even when browser storage is unavailable.
+  }
 }
 
 function cloneDashboardStateValue(value) {
@@ -2242,7 +2309,7 @@ async function loadSharedDashboardState() {
             ? "Shared setup is not initialized. Local drafts are safely stored here for review; they will not auto-publish when another device initializes shared data."
             : importSummary.total
               ? "Shared setup is not initialized. Because the service computer is offline, wait and import from that computer unless this browser has the complete saved setup."
-              : "Shared setup is not initialized, and import is blocked because this browser has no saved non-default configuration.",
+              : "Shared setup is not initialized. This authoritative browser has no saved non-default configuration; review setup to initialize the official bundled defaults.",
       );
       return;
     }
@@ -2306,22 +2373,24 @@ async function initializeSharedDashboardState() {
   if (isEmployeeDashboard || dashboardSharedState.initialized) return;
   const importData = getSharedDashboardImportSnapshot();
   const importSummary = getSharedDashboardImportSummary(importData);
-  if (!importSummary.total) {
-    setDashboardSharedSyncStatus(
-      "setup",
-      `Import blocked: this browser has no saved non-default prices, recipes, products, or tap replacements. ${importSummary.excludedLegacyDefaults ? `${importSummary.excludedLegacyDefaults} bundled or ambiguous legacy price default${importSummary.excludedLegacyDefaults === 1 ? " was" : "s were"} excluded.` : ""}`,
-    );
-    return;
-  }
+  const usesBundledDefaults = importSummary.total === 0;
 
   if (!confirmDashboardAction(
-    "Make this browser's saved dashboard setup the official shared version?",
-    [
-      "Source: saved local data in this browser (not a live read from the service computer).",
-      importSummary.text,
-      "The service computer is offline, so only continue if this browser already has the complete configuration.",
-    ],
-    "If you are unsure, cancel and import from the service computer when you are back at work.",
+    usesBundledDefaults
+      ? "Initialize the official shared dashboard setup with this release's bundled defaults?"
+      : "Make this browser's saved dashboard setup the official shared version?",
+    usesBundledDefaults
+      ? [
+          "Source: the bundled recipes, prices, products, and tap mappings in this release.",
+          "This browser has no saved non-default overrides, so shared storage will start with the official bundled configuration.",
+          "Future owner edits will then sync normally across devices.",
+        ]
+      : [
+          "Source: saved local data in this browser (not a live read from the service computer).",
+          importSummary.text,
+          "Only continue if this browser already has the complete configuration.",
+        ],
+    "Only continue on the authoritative service computer after confirming the displayed setup is correct.",
   )) return;
 
   const phrase = window.prompt(
@@ -2632,6 +2701,10 @@ function bindEvents() {
     }
     const target = event.target.closest("[data-dashboard-target]");
     if (!target) return;
+    if (target.dataset.dashboardTarget === DASHBOARD_OVERVIEW_TARGETS.sharedDashboardSetup) {
+      initializeSharedDashboardState();
+      return;
+    }
     if (target.dataset.dashboardTarget === "recipes") switchRecipeView("current");
     switchTab(target.dataset.dashboardTarget);
   });
@@ -3862,7 +3935,7 @@ function renderPmbPriceUpdateControl(item, source) {
           ${controlDisabled ? "disabled" : ""}
         >
       </label>
-      <button class="mini-button" type="button" data-pmb-price-update="${escapeHtml(key)}"${buttonDisabled ? " disabled" : ""}>${isRunning ? "Updating..." : "Update PMB"}</button>
+      <button class="mini-button" type="button" data-pmb-price-update="${escapeHtml(key)}"${buttonDisabled ? " disabled" : ""}>${isRunning ? "Updating..." : "Approve & update PMB"}</button>
       ${message ? `<span class="pricing-advisor-action__message pricing-advisor-action__message--${escapeHtml(message.tone)}" role="status">${escapeHtml(message.text)}</span>` : ""}
     </div>
   `;
@@ -4499,7 +4572,6 @@ function getWeeklyPlanFreshness(plan) {
     heldLineCount: plan.summary.heldLineCount,
     excludedLineCount: plan.summary.excludedLineCount,
     missingPriceCount: plan.summary.missingPriceCount,
-    coolerCapacitySet: toNumber(getParAgentSettings().coolerCapacityKegs) > 0,
   });
   return {
     latestCompletedWeek,
@@ -4523,6 +4595,8 @@ function getDashboardSharedOverviewSource() {
       : "",
     unsavedCount: getDashboardSharedOutboxPaths().length,
     durable: dashboardSharedOutboxDurable && dashboardSharedLocalCacheDurable,
+    setupMessage: dashboardSharedState.initialized ? "" : dashboardSharedSyncMessage,
+    setupActionAvailable: dashboardSharedSyncStatus === "setup",
   };
 }
 
@@ -6505,6 +6579,14 @@ async function loadSharedWeeklyUsageState() {
     weeklyUsageSharedRevision = Number(state.revision) || 0;
     if (state.initialized) {
       if (weeklyUsageSharedOutbox) {
+        if (areDashboardStateValuesEqual(weeklyUsageSharedOutbox.payload?.data, state.data)) {
+          weeklyUsageSharedOutbox = null;
+          saveWeeklyUsageSharedOutbox();
+          applySharedWeeklyUsageState(state);
+          weeklyUsageSharedSaveError = "";
+          weeklyUsageSharedMessage = "The pending Weekly Usage report was already saved by another dashboard tab.";
+          return;
+        }
         restoreWeeklyUsageFromOutbox();
         if (canSafelyRetryOperationalOutbox(weeklyUsageSharedOutbox, state.revision)) {
           weeklyUsageSharedOutbox = markOperationalOutboxFailure(weeklyUsageSharedOutbox);
@@ -6619,6 +6701,7 @@ function queueSharedWeeklyUsageSave() {
       weeklyUsageSharedSaving = weeklyUsageSharedPendingWrites > 0 || Boolean(weeklyUsageSharedSaveTimer);
       renderWeeklyUsage();
       renderWeeklyPlan();
+      renderDashboardOverview();
     }
   });
   return weeklyUsageSharedWriteQueue;
@@ -6738,6 +6821,16 @@ async function runPmbWeeklyUsageSync({ automatic = false } = {}) {
         return [range ? `Week: ${range}` : "Week requiring review", reason].filter(Boolean).join(" — ");
       });
       const overallReason = clean(result.reviewReason || result.reason || result.error);
+      if (automatic) {
+        weeklyUsageSyncAttempted = false;
+        weeklyUsageSyncMessage = [
+          "Automatic PMB check paused for owner review.",
+          overallReason,
+          ...reviewDetails,
+          "Open Weekly Usage and refresh manually to review this exception; nothing was accepted or saved automatically.",
+        ].filter(Boolean).join(" ");
+        return { ok: false, reviewRequired: true, error: weeklyUsageSyncMessage };
+      }
       const confirmed = confirmDashboardAction(
         "Pour My Beer returned a sparse or closed week that needs owner review.",
         [overallReason, ...reviewDetails],
@@ -8026,18 +8119,6 @@ function bindKegLevelEvents() {
   document.querySelector("#initialize-shared-keg-levels")?.addEventListener("click", () => {
     initializeSharedKegLevelsFromServiceComputer();
   });
-  document.querySelector("#par-agent-cooler-capacity")?.addEventListener("input", (event) => {
-    parAgentState = {
-      ...(parAgentState || {}),
-      settings: {
-        ...(parAgentState?.settings || {}),
-        coolerCapacityKegs: event.currentTarget.value,
-      },
-    };
-    parAgentMessage = getParAgentStatusMessage();
-    scheduleParAgentStateSync();
-  });
-
   document.querySelectorAll(".toggle-keg-adjust").forEach((button) => {
     button.addEventListener("click", () => {
       const key = button.dataset.kegKey;
@@ -8795,7 +8876,7 @@ function getParAgentStatusMessage() {
   }
   const recommendations = parAgentState?.recommendations;
   if (!recommendations?.generatedAt) {
-    return "Weekly par agent has not run yet. Set cooler capacity if you want capacity-aware trimming.";
+    return "Weekly par agent has not run yet.";
   }
   if (!hasCurrentParAgentRecommendations()) {
     return `The ${formatUpdatedAt(recommendations.generatedAt)} recommendations are stale because Keg Levels inputs changed afterward. Old order and prep quantities are hidden; run the par agent again.`;
@@ -8810,31 +8891,21 @@ function getParAgentStatusMessage() {
   const liquorOrderText = deferredLiquorRefillCount ? ` ${formatNumber(deferredLiquorRefillCount)} liquor tap refill recommendation${deferredLiquorRefillCount === 1 ? "" : "s"} deferred for manual review; none are included in active orders.` : "";
   const kegOrderTotal = summary.kegOrderTotal ?? Math.max(0, toNumber(summary.orderTotal) - toNumber(summary.cocktailMakeTotal));
   const orderText = `${formatNumber(kegOrderTotal)} beer keg${kegOrderTotal === 1 ? "" : "s"}`;
-  const capacityText = summary.capacityEnabled
-    ? ` Cooler capacity ${formatNumber(summary.currentBackupKegs || 0)}/${formatNumber(summary.coolerCapacityKegs || 0)} backups; ${formatNumber(summary.suppressedByCapacity || 0)} held by capacity.`
-    : " Cooler capacity is not set.";
-  return `Last run ${formatUpdatedAt(recommendations.generatedAt)}. Agent recommends ${orderText}.${cocktailMakeText}${liquorOrderText}${capacityText}`;
+  return `Last run ${formatUpdatedAt(recommendations.generatedAt)}. Agent recommends ${orderText}.${cocktailMakeText}${liquorOrderText}`;
 }
 
 function getParAgentSettings() {
-  return {
-    ...(parAgentState?.settings || {}),
-  };
+  const maxOrderPerTap = parAgentState?.settings?.maxOrderPerTap;
+  return maxOrderPerTap == null ? {} : { maxOrderPerTap };
 }
 
 function renderParAgentPanel() {
-  const settings = getParAgentSettings();
-  const capacity = clean(settings.coolerCapacityKegs);
   return `
     <div class="sync-panel sync-panel--par-agent">
       <div class="sync-actions par-agent-actions">
         <button class="primary-button" id="run-par-agent" type="button"${parAgentRunning ? " disabled" : ""}>${parAgentRunning ? "Running..." : "Run par agent"}</button>
-        <label class="par-agent-capacity">
-          <span>Cooler capacity</span>
-          <input id="par-agent-cooler-capacity" type="number" min="0" step="1" inputmode="numeric" value="${escapeHtml(capacity)}" placeholder="Optional">
-        </label>
       </div>
-      <p class="sync-copy">Uses the same saved averages shown in Weekly Usage. Beer orders use average weekly kegs + 0.5; cocktail makes use average weekly kegs + 0.25. Patio and karaoke liquor gaps use average weekly ounces + 100, but remain deferred manual-review items with no active order quantity until refill/cabinet netting is added. Beer cooler capacity trims lower-priority keg orders.</p>
+      <p class="sync-copy">Uses the same saved averages shown in Weekly Usage. Blank On hand fields count as zero. Beer orders use average weekly kegs + 0.5; cocktail makes use average weekly kegs + 0.25. Patio and karaoke liquor gaps use average weekly ounces + 100, but remain deferred manual-review items with no active order quantity until refill/cabinet netting is added.</p>
       ${parAgentState?.initialized === false ? '<button class="ghost-button" id="initialize-shared-keg-levels" type="button">Import from service computer</button>' : ""}
       <p class="sync-status">${escapeHtml(parAgentMessage)}</p>
     </div>
@@ -9038,6 +9109,7 @@ async function runKegParAgent() {
     parAgentRunning = false;
     renderKegLevels();
     renderWeeklyPlan();
+    renderDashboardOverview();
   }
 }
 
@@ -9183,7 +9255,7 @@ async function runTapPricingSync() {
       throw new Error(result?.error || "Could not load tap pricing.");
     }
 
-    liveTapPriceItems = result.items || [];
+    liveTapPriceItems = filterCurrentTapPricingItems(result.items);
     shotPricingCapability = result.portionPricing && typeof result.portionPricing === "object"
       ? result.portionPricing
       : {
@@ -13082,15 +13154,7 @@ function calculateRecipePricing(recipe, chargePerOz, existingTotals = null) {
 function getLiveTapPricingRows(searchTerm = "") {
   const normalizedSearch = String(searchTerm || "").trim().toLowerCase();
 
-  if (!liveTapPriceItems.length) {
-    return [
-      ...getActiveRecipes().map((recipe) => ({ livePrice: null, recipe, kegItem: null })),
-      ...kegPricingItems.map((kegItem) => ({ livePrice: null, recipe: null, kegItem })),
-    ].filter(({ recipe, kegItem }) => {
-      const haystack = `${recipe?.title || ""} ${kegItem?.name || ""} ${kegItem?.tapSummary || ""}`.toLowerCase();
-      return haystack.includes(normalizedSearch);
-    });
-  }
+  if (!liveTapPriceItems.length) return [];
 
   return liveTapPriceItems
     .map((livePrice) => ({

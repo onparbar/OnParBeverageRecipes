@@ -159,23 +159,40 @@ test("partial Weekly Usage keeps lowest-pour claims guarded while using comparab
   assert.equal(overview.planNumbersAvailable, false);
 });
 
-test("a complete current week reports excluded new taps without withholding comparable movement", () => {
+test("a complete current week does not alert for expected new-tap exclusions", () => {
   const signals = readySignals();
   signals.usage.performance.comparableCount = 100;
   signals.usage.performance.trendComplete = false;
   signals.usage.performance.excludedComparisonTaps = [
-    { tapNumber: 101, name: "New Cocktail", reason: "No prior-week or older PMB usage is saved; this may be a new tap." },
-    { tapNumber: 102, name: "New Cocktail 2", reason: "No prior-week or older PMB usage is saved; this may be a new tap." },
+    { tapNumber: 101, name: "New Cocktail", likelyNewTap: true, reason: "No prior-week or older PMB usage is saved; this may be a new tap." },
+    { tapNumber: 102, name: "New Cocktail 2", likelyNewTap: true, reason: "No prior-week or older PMB usage is saved; this may be a new tap." },
   ];
 
   const overview = buildDashboardOverview(signals, { now });
   const alert = overview.alerts.find((item) => item.id === "weekly-usage-trend-incomplete");
   const coverage = overview.kpis.find((item) => item.id === "usage-coverage");
 
-  assert.equal(alert.title, "Week-over-week comparison excludes 2 taps");
-  assert.match(alert.message, /uses the 100 taps captured in both weeks/i);
-  assert.equal(alert.details.length, 2);
+  assert.equal(alert, undefined);
   assert.match(coverage.detail, /100 taps comparable/);
+});
+
+test("a real reporting gap still produces a week-over-week alert when new taps are also present", () => {
+  const signals = readySignals();
+  signals.usage.performance.comparableCount = 99;
+  signals.usage.performance.trendComplete = false;
+  signals.usage.performance.excludedComparisonTaps = [
+    { tapNumber: 100, name: "Established Gap", reason: "Prior week PMB usage is missing even though older PMB history exists." },
+    { tapNumber: 101, name: "New Cocktail", likelyNewTap: true, reason: "No prior-week or older PMB usage is saved; this may be a new tap." },
+    { tapNumber: 102, name: "New Cocktail 2", likelyNewTap: true, reason: "No prior-week or older PMB usage is saved; this may be a new tap." },
+  ];
+
+  const overview = buildDashboardOverview(signals, { now });
+  const alert = overview.alerts.find((item) => item.id === "weekly-usage-trend-incomplete");
+
+  assert.equal(alert.title, "Week-over-week comparison excludes 1 tap");
+  assert.equal(alert.details.length, 1);
+  assert.match(alert.details[0], /Established Gap/);
+  assert.doesNotMatch(alert.details[0], /New Cocktail/);
 });
 
 test("shared setup, save, durability, and pending states fail closed and sort deterministically", () => {
@@ -210,6 +227,42 @@ test("shared setup, save, durability, and pending states fail closed and sort de
   assert.match(overview.alerts[0].message, /Inventory and Keg Levels/);
   assert.match(overview.alerts[0].details.join(" "), /Revision conflict/);
   assert.ok(!ids.includes("shared-changes-pending"), "failed saves should not also be presented as ordinary in-progress saves");
+});
+
+test("dashboard-only setup uses an exact warning and a working setup action", () => {
+  const signals = readySignals();
+  signals.shared.dashboard = {
+    available: true,
+    initialized: false,
+    setupActionAvailable: true,
+  };
+
+  const overview = buildDashboardOverview(signals, { now });
+  const alert = overview.alerts.find((item) => item.id === "shared-dashboard-setup-incomplete");
+
+  assert.ok(alert);
+  assert.equal(alert.severity, "warning");
+  assert.match(alert.message, /Recipe, pricing, product, and tap-replacement setup/);
+  assert.doesNotMatch(alert.message, /Weekly ordering is not reliable/);
+  assert.equal(alert.action.label, "Review dashboard setup");
+  assert.equal(alert.action.target, DASHBOARD_OVERVIEW_TARGETS.sharedDashboardSetup);
+  assert.ok(!overview.alerts.some((item) => item.id === "shared-setup-incomplete"));
+});
+
+test("dashboard setup explains when this browser has nothing safe to import", () => {
+  const signals = readySignals();
+  signals.shared.dashboard = {
+    available: true,
+    initialized: false,
+    setupMessage: "Shared setup is not initialized, and import is blocked because this browser has no saved non-default configuration.",
+    setupActionAvailable: false,
+  };
+
+  const overview = buildDashboardOverview(signals, { now });
+  const alert = overview.alerts.find((item) => item.id === "shared-dashboard-setup-incomplete");
+
+  assert.match(alert.message, /import is blocked because this browser has no saved non-default configuration/);
+  assert.equal(alert.action, null);
 });
 
 test("partial PMB keg reads are critical and never interpret missing rows as zero", () => {

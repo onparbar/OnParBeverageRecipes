@@ -89,9 +89,6 @@ try {
     statePath: result.statePath,
     orderItemCount: summary.orderItemCount || 0,
     orderTotal: summary.orderTotal || 0,
-    capacityEnabled: Boolean(summary.capacityEnabled),
-    coolerCapacityKegs: summary.coolerCapacityKegs || 0,
-    suppressedByCapacity: summary.suppressedByCapacity || 0,
   }, null, 2));
 } catch (error) {
   const failure = {

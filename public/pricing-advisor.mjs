@@ -120,8 +120,6 @@ export function getPmbPriceEditorDefault(recommendation = {}) {
   const unsafeSuggestionCodes = new Set([
     "mapping-unverified",
     "missing-cost",
-    "undated-cost",
-    "stale-cost",
   ]);
   const suggestionBlocked = Array.isArray(recommendation.issues)
     && recommendation.issues.some((entry) => unsafeSuggestionCodes.has(clean(entry?.code)));

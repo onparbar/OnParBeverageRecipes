@@ -209,7 +209,7 @@ test("a fresh verified live price remains manually editable when cost guidance i
   assert.equal(result.eligible, true);
 });
 
-test("price editor prefills only a current-cost 82% increase suggestion", () => {
+test("price editor prefills an 82% increase while preserving cost-date warnings for review", () => {
   const recommendation = {
     action: "increase",
     currentPricePerOz: 0.9,
@@ -220,6 +220,14 @@ test("price editor prefills only a current-cost 82% increase suggestion", () => 
   assert.equal(getPmbPriceEditorDefault({
     ...recommendation,
     issues: [{ code: "stale-cost" }],
+  }), 1);
+  assert.equal(getPmbPriceEditorDefault({
+    ...recommendation,
+    issues: [{ code: "undated-cost" }],
+  }), 1);
+  assert.equal(getPmbPriceEditorDefault({
+    ...recommendation,
+    issues: [{ code: "missing-cost" }],
   }), 0.9);
   assert.equal(getPmbPriceEditorDefault({
     ...recommendation,

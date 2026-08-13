@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildAssignedOnDeckBeerItems,
   buildVerifiedCurrentBeerTapItems,
+  filterCurrentTapPricingItems,
 } from "../public/keg-pricing-scope.mjs";
 
 const wallItems = [
@@ -14,6 +15,21 @@ const wallItems = [
 function isBeerTap(item) {
   return [39, 42].includes(Number(item.tapNumber ?? item.tapPosition));
 }
+
+test("Tap Pricing keeps only products verified on current physical wall taps", () => {
+  const result = filterCurrentTapPricingItems([
+    { tapPosition: null, name: "Archived Lager", isCurrentTap: false, tapMatchSource: "" },
+    { tapPosition: 39, name: "Old Template Stout", isCurrentTap: false, tapMatchSource: "template-fallback" },
+    { tapPosition: 42, name: "Voodoo Ranger IPA", isCurrentTap: true, tapMatchSource: "pmb-tap-config" },
+    { tapPosition: 21, name: "Michelob Ultra", isCurrentTap: true, tapMatchSource: "pmb-tap-config" },
+    { tapPosition: 0, name: "Coming Soon", isCurrentTap: true, tapMatchSource: "pmb-tap-config" },
+  ]);
+
+  assert.deepEqual(result.map(({ tapPosition, name }) => ({ tapPosition, name })), [
+    { tapPosition: 21, name: "Michelob Ultra" },
+    { tapPosition: 42, name: "Voodoo Ranger IPA" },
+  ]);
+});
 
 test("uses verified physical PMB products instead of old template products", () => {
   const result = buildVerifiedCurrentBeerTapItems({

@@ -235,10 +235,39 @@ export default function DashboardPage() {
             <button className="ghost-button" id="clear-charges" type="button">Clear charge overrides</button>
           </div>
 
+          <section className="pricing-advisor" aria-labelledby="pricing-advisor-title">
+            <div className="pricing-advisor__header">
+              <div>
+                <p className="eyebrow">Owner review required</p>
+                <h2 id="pricing-advisor-title">82% minimum gross-margin suggestions</h2>
+                <p>The suggested price is prefilled for beer and cocktails below 82%. Review any cost warning, then choose Approve &amp; update PMB. Nothing is sent until you confirm the live change.</p>
+              </div>
+              <span className="pricing-advisor__mode">Confirm before sending</span>
+            </div>
+            <div className="pricing-advisor__summary" id="pricing-advisor-summary" aria-live="polite"></div>
+            <div className="pricing-table-wrap">
+              <table className="pricing-table pricing-advisor__table">
+                <thead>
+                  <tr>
+                    <th>Tap</th>
+                    <th>Product</th>
+                    <th>Current</th>
+                    <th>Current gross margin</th>
+                    <th>82% suggested price</th>
+                    <th>Change</th>
+                    <th>Status</th>
+                    <th>Owner approval</th>
+                  </tr>
+                </thead>
+                <tbody id="pricing-advisor-table"></tbody>
+              </table>
+            </div>
+          </section>
+
           <div className="pricing-layout">
             <aside className="pricing-summary" id="pricing-summary"></aside>
             <div className="pricing-table-wrap">
-              <p className="pricing-calculation-note">Cocktail charge inputs below change dashboard calculations only. Use the Owner action in the 82% advisor for a confirmed live PMB increase.</p>
+              <p className="pricing-calculation-note">Current-wall reference list. Beer and cocktail PMB approvals are in the 82% suggestion table above; cocktail inputs here change dashboard calculations only.</p>
               <table className="pricing-table">
                 <thead>
                   <tr>
@@ -281,34 +310,6 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          <section className="pricing-advisor" aria-labelledby="pricing-advisor-title">
-            <div className="pricing-advisor__header">
-              <div>
-                <p className="eyebrow">Owner review required</p>
-                <h2 id="pricing-advisor-title">82% minimum gross-margin advisor</h2>
-                <p>Checks beer and cocktails only. It suggests increases below 82%, never lowers a price, and sends a live PMB change only after the Owner reviews and confirms it.</p>
-              </div>
-              <span className="pricing-advisor__mode">Manual approval</span>
-            </div>
-            <div className="pricing-advisor__summary" id="pricing-advisor-summary" aria-live="polite"></div>
-            <div className="pricing-table-wrap">
-              <table className="pricing-table pricing-advisor__table">
-                <thead>
-                  <tr>
-                    <th>Tap</th>
-                    <th>Product</th>
-                    <th>Current</th>
-                    <th>Current gross margin</th>
-                    <th>Recommended price</th>
-                    <th>Change</th>
-                    <th>Status</th>
-                    <th>Owner action</th>
-                  </tr>
-                </thead>
-                <tbody id="pricing-advisor-table"></tbody>
-              </table>
-            </div>
-          </section>
         </section>
 
         <section className="panel" id="keg-levels-panel" role="tabpanel" aria-label="Keg Levels">

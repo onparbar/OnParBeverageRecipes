@@ -81,7 +81,7 @@ test("removes only PMB wall-number suffixes from weekly plan product names", () 
   assert.equal(normalizeWeeklyPlanProductName("1800 Reposado"), "1800 Reposado");
 });
 
-test("keeps capacity and incomplete-inventory recommendations visible for review", () => {
+test("keeps capped and incomplete-inventory recommendations visible for review", () => {
   const plan = buildWeeklyActionPlan({
     recommendations: [
       {
@@ -89,11 +89,11 @@ test("keeps capacity and incomplete-inventory recommendations visible for review
         isKegTap: true,
         rawOrderQty: 2,
         orderQty: 1,
-        capacityLimited: true,
+        orderCapApplied: true,
         orderProductName: "Modelo 1",
         tapNumber: 8,
         wall: "Patio",
-        reason: "Cooler capacity trimmed this order.",
+        reason: "The per-tap order cap trimmed this order.",
       },
       {
         actionType: "order",
@@ -200,7 +200,6 @@ test("readiness blocks incomplete inputs, marks changed inputs stale, and expose
     latestCompletedUsageSaved: true,
     weeklyUsageLastSyncAt: "2026-08-12T11:00:00.000Z",
     inventoryInitialized: true,
-    coolerCapacitySet: true,
     now: "2026-08-12T13:00:00.000Z",
   };
 

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  applyCoolerCapacity,
   buildRawRecommendation,
   fetchPmbSnapshot,
   getCocktailRecipeYieldOz,
@@ -173,8 +172,8 @@ test("corrected Strawberry threshold produces the required make recommendation",
   assert.match(result.reason, /below 0\.64: 0\.388\/week/);
 });
 
-test("uses On Par Tee and Whiskey Smash as saved On Deck make choices", () => {
-  ["On Par Tee", "Whiskey Smash"].forEach((onDeckName, index) => {
+test("uses built-in cocktails as saved On Deck make choices", () => {
+  ["Bacardi Sunset", "On Par Tee", "Whiskey Smash"].forEach((onDeckName, index) => {
     const tap = cocktailTap("SPIKED STRAWBERRY LEMONADE (TITO'S) 1", 65 + index);
     const result = buildRawRecommendation(
       tap,
@@ -299,30 +298,6 @@ test("uses the 0.25-keg threshold for karaoke cocktail kegs", () => {
   assert.equal(result.avgWeeklyKegs, 0.1);
   assert.equal(result.targetStockKegs, 0.35);
   assert.equal(result.orderQty, 1);
-});
-
-test("does not suppress karaoke cocktail makes when beer cooler capacity is enabled", () => {
-  const tap = {
-    ...cocktailTap("RASPBERRY MARGARITA (JOSE CUERVO) 2", 93),
-    key: "karaoke-93",
-    wall: "Karaoke",
-  };
-  const recommendation = buildRawRecommendation(
-    tap,
-    { fillLevelPercent: 30, rawKegSize: 1536, rawKegSizeDp: 0 },
-    [{ volumeOz: 153.6 }],
-    { onHandOverrides: {}, onDeckOverrides: {} },
-    {},
-  );
-  const result = applyCoolerCapacity(
-    [recommendation],
-    {},
-    { coolerCapacityKegs: 1 },
-  );
-
-  assert.equal(result.items[0].actionType, "make");
-  assert.equal(result.items[0].orderQty, 1);
-  assert.equal(result.items[0].capacityLimited, undefined);
 });
 
 test("flags patio and karaoke liquor refill gaps for deferred manual review", () => {
@@ -486,7 +461,7 @@ test("keeps separate live levels when one PLU is assigned to multiple physical t
   assert.equal(snapshot.levelsByTap.get("tap:22").plu, 4101);
 });
 
-test("requires an explicit valid on-hand count for every current keg tap", () => {
+test("treats missing and blank on-hand counts as zero", () => {
   const firstKeg = beerTap("Test Lager 1", 21);
   const secondKeg = cocktailTap("BLUE DOT (SVEDKA) 1", 57);
   const coverage = getOnHandCoverage(
@@ -502,8 +477,21 @@ test("requires an explicit valid on-hand count for every current keg tap", () =>
   );
 
   assert.equal(coverage.requiredCount, 2);
-  assert.equal(coverage.coveredCount, 1);
-  assert.deepEqual(coverage.missingTaps.map((tap) => tap.tapNumber), [57]);
+  assert.equal(coverage.coveredCount, 2);
+  assert.deepEqual(coverage.missingTaps, []);
+});
+
+test("still rejects invalid nonblank on-hand counts", () => {
+  const firstKeg = beerTap("Test Lager 1", 21);
+  const secondKeg = cocktailTap("BLUE DOT (SVEDKA) 1", 57);
+  const coverage = getOnHandCoverage([firstKeg, secondKeg], {
+    [firstKeg.key]: "not a number",
+    [secondKeg.key]: "-1",
+  });
+
+  assert.equal(coverage.requiredCount, 2);
+  assert.equal(coverage.coveredCount, 0);
+  assert.deepEqual(coverage.missingTaps.map((tap) => tap.tapNumber), [21, 57]);
 });
 
 test("makes enough cocktail kegs to cover the complete calculated gap", () => {

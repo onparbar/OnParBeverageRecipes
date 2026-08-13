@@ -538,8 +538,8 @@ curl -I 'https://onparbev.com/dashboard.js?v=check'
 ## Keg Par Agent Formula Fix - 2026-08-10
 
 - Beer recommendations now trigger only when current live-plus-backup stock is below average weekly usage plus `0.5` keg; the order quantity fills the gap up to the existing per-tap cap.
-- Karaoke cocktail recommendations continue to use average weekly usage plus `0.25` keg, and cocktail makes are no longer suppressed by beer cooler-capacity allocation.
-- Patio taps `1-20` and Karaoke taps `83-92` now order when live keg ounces are below average weekly ounces plus `100` ounces. Backup counts and beer cooler capacity do not affect this liquor rule.
+- Karaoke cocktail recommendations continue to use average weekly usage plus `0.25` keg.
+- Patio taps `1-20` and Karaoke taps `83-92` now order when live keg ounces are below average weekly ounces plus `100` ounces. Backup counts do not affect this liquor rule.
 - The Keg Levels par-agent panel and recommendation details now display the applicable formula and ounce-based liquor stock/usage.
 - Verification passed: `112` automated tests, browser-script syntax check, diff check, and the optimized Next.js production build.
 - Follow-up fixed browser/server tap-key drift for apostrophes and ampersands (`Tito's` was saved as `tito-s` but previously read as `titos`), which caused positive backup counts on Vodka Cran and Spiked Pink Lemonade to be ignored.

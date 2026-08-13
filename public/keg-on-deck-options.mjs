@@ -1,7 +1,12 @@
 export const STATIC_KEG_ON_DECK_RECIPE_IDS = Object.freeze([
+  "bacardi-sunset",
   "whiskey-smash",
   "on-par-tee",
 ]);
+
+const STATIC_KEG_ON_DECK_RECIPE_TITLES = Object.freeze({
+  "bacardi-sunset": "Bacardi Sunset",
+});
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -76,11 +81,12 @@ export function buildKegOnDeckOptions({
 
   STATIC_KEG_ON_DECK_RECIPE_IDS.forEach((recipeId) => {
     const recipe = recipesById.get(recipeId);
-    if (!recipe || !clean(recipe.title)) return;
+    const name = clean(recipe?.title) || clean(STATIC_KEG_ON_DECK_RECIPE_TITLES[recipeId]);
+    if (!name) return;
     const option = {
       id: `recipe:${recipeId}`,
       recipeId,
-      name: clean(recipe.title),
+      name,
       kind: "recipe",
       plu: 0,
     };

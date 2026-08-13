@@ -132,8 +132,7 @@ function normalizeHeldRecommendations(recommendations) {
       heldQty: Math.max(0, wanted - approved),
     };
   }).filter((item) => item.heldQty > 0 && (
-    item.capacityLimited
-    || item.inventoryStateMissing
+    item.inventoryStateMissing
     || item.orderCapApplied
   ));
 
@@ -252,7 +251,6 @@ export function evaluateWeeklyPlanReadiness({
   heldLineCount = 0,
   excludedLineCount = 0,
   missingPriceCount = 0,
-  coolerCapacitySet = false,
   now = new Date(),
   staleAfterDays = 8,
 } = {}) {
@@ -286,7 +284,7 @@ export function evaluateWeeklyPlanReadiness({
     staleReasons.push("Weekly Usage changed after these keg and prep recommendations were generated.");
   }
   if (generatedTime && parseTime(parInputsChangedAt) > generatedTime) {
-    staleReasons.push("Keg counts, pars, capacity, or On Deck choices changed after this run.");
+    staleReasons.push("Keg counts, pars, or On Deck choices changed after this run.");
   }
   if (generatedTime && currentTime - generatedTime > staleAfterDays * 24 * 60 * 60 * 1000) {
     staleReasons.push(`Recommendations are more than ${staleAfterDays} days old.`);
@@ -295,8 +293,6 @@ export function evaluateWeeklyPlanReadiness({
   if (heldLineCount > 0) reviewReasons.push(`${heldLineCount} recommendation line${heldLineCount === 1 ? " is" : "s are"} held for review.`);
   if (excludedLineCount > 0) reviewReasons.push(`${excludedLineCount} inventory ordering rule${excludedLineCount === 1 ? " is" : "s are"} shown for review.`);
   if (missingPriceCount > 0) reviewReasons.push(`${missingPriceCount} active purchase line${missingPriceCount === 1 ? " is" : "s are"} missing a price.`);
-  if (!coolerCapacitySet) reviewReasons.push("Beer cooler capacity is not set.");
-
   if (blockers.length) {
     return { status: "blocked", label: "Not ready to order", blockers, staleReasons, reviewReasons };
   }

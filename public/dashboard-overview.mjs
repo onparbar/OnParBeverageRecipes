@@ -2,6 +2,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
 export const DASHBOARD_OVERVIEW_TARGETS = Object.freeze({
+  sharedDashboardSetup: "shared-dashboard-setup",
   weeklyPlan: "weekly-plan",
   kegLevels: "keg-levels",
   pricing: "pricing",
@@ -12,7 +13,7 @@ export const DASHBOARD_OVERVIEW_TARGETS = Object.freeze({
 });
 
 const SHARED_SOURCE_DEFINITIONS = Object.freeze([
-  { key: "dashboard", label: "Dashboard setup", target: DASHBOARD_OVERVIEW_TARGETS.recipes },
+  { key: "dashboard", label: "Dashboard setup", target: DASHBOARD_OVERVIEW_TARGETS.sharedDashboardSetup },
   { key: "inventory", label: "Inventory", target: DASHBOARD_OVERVIEW_TARGETS.inventory },
   { key: "weeklyUsage", label: "Weekly Usage", target: DASHBOARD_OVERVIEW_TARGETS.weeklyUsage },
   { key: "kegLevels", label: "Keg Levels", target: DASHBOARD_OVERVIEW_TARGETS.kegLevels },
@@ -138,6 +139,8 @@ function normalizeSharedSource(definition, rawSource) {
     savePending,
     unsavedCount,
     durable: source.durable !== false,
+    setupMessage: clean(source.setupMessage),
+    setupActionAvailable: source.setupActionAvailable === true,
   };
 }
 
@@ -233,6 +236,7 @@ function getUsageState(rawUsage = {}) {
       tapNumber: count(item?.tapNumber),
       name: clean(item?.name),
       reason: clean(item?.reason),
+      likelyNewTap: item?.likelyNewTap === true,
     }))
     .filter((item) => item.tapNumber || item.name || item.reason);
 
@@ -279,6 +283,8 @@ function buildSharedAlerts(sharedSources) {
   const alerts = [];
   const unavailable = sharedSources.filter((source) => !source.checked || !source.available);
   const uninitialized = sharedSources.filter((source) => source.available && !source.initialized);
+  const uninitializedDashboard = uninitialized.filter((source) => source.key === "dashboard");
+  const uninitializedOperations = uninitialized.filter((source) => source.key !== "dashboard");
   const failed = sharedSources.filter((source) => source.saveError || !source.durable);
   const pending = sharedSources.filter((source) => source.savePending && !source.saveError && source.durable);
 
@@ -307,15 +313,30 @@ function buildSharedAlerts(sharedSources) {
     }));
   }
 
-  if (uninitialized.length) {
-    const labels = uninitialized.map((source) => source.label);
+  if (uninitializedOperations.length) {
+    const labels = uninitializedOperations.map((source) => source.label);
     alerts.push(makeAlert({
       id: "shared-setup-incomplete",
       severity: "critical",
       priority: 30,
       title: "Shared setup is incomplete",
-      message: `${joinLabels(labels)} ${uninitialized.length === 1 ? "still needs" : "still need"} the one-time service-computer import. Weekly ordering is not reliable until setup is complete.`,
-      action: makeAction("Finish shared setup", uninitialized[0].target),
+      message: `${joinLabels(labels)} ${uninitializedOperations.length === 1 ? "still needs" : "still need"} the one-time service-computer import. Weekly ordering is not reliable until setup is complete.`,
+      action: makeAction("Finish shared setup", uninitializedOperations[0].target),
+    }));
+  }
+
+  if (uninitializedDashboard.length) {
+    const dashboardSetup = uninitializedDashboard[0];
+    alerts.push(makeAlert({
+      id: "shared-dashboard-setup-incomplete",
+      severity: "warning",
+      priority: 35,
+      title: "Dashboard setup is not shared yet",
+      message: dashboardSetup.setupMessage
+        || "Recipe, pricing, product, and tap-replacement setup is still being read from this browser. Review the one-time import before relying on those values from another device.",
+      action: dashboardSetup.setupActionAvailable
+        ? makeAction("Review dashboard setup", dashboardSetup.target)
+        : null,
     }));
   }
 
@@ -393,7 +414,7 @@ function buildPlanAlerts(planState, staleAfterDays) {
       severity: "warning",
       priority: 50,
       title: "Weekly Plan is ready with review items",
-      message: planState.details[0] || "At least one held, excluded, capacity, or missing-price item needs an owner review.",
+      message: planState.details[0] || "At least one held, excluded, or missing-price item needs an owner review.",
       details: planState.details,
       action: makeAction("Review Weekly Plan", DASHBOARD_OVERVIEW_TARGETS.weeklyPlan),
     })];
@@ -459,11 +480,13 @@ function buildKegLevelAlerts(feed, ageState) {
 
 function buildUsageAlerts(usage, ageState) {
   const alerts = [];
+  const newTapExclusions = usage.excludedComparisonTaps.filter((item) => item.likelyNewTap);
+  const actionableExclusions = usage.excludedComparisonTaps.filter((item) => !item.likelyNewTap);
   const excludedCount = Math.max(
-    usage.excludedComparisonTaps.length,
-    usage.eligibleCount - usage.comparableCount,
+    actionableExclusions.length,
+    usage.eligibleCount - usage.comparableCount - newTapExclusions.length,
   );
-  const exclusionDetails = usage.excludedComparisonTaps.map((item) => {
+  const exclusionDetails = actionableExclusions.map((item) => {
     const identity = [item.tapNumber ? `Tap ${formatCount(item.tapNumber)}` : "", item.name]
       .filter(Boolean)
       .join(" · ");
@@ -494,7 +517,7 @@ function buildUsageAlerts(usage, ageState) {
       details: exclusionDetails,
       action: makeAction("Complete Weekly Usage", DASHBOARD_OVERVIEW_TARGETS.weeklyUsage),
     }));
-  } else if (!usage.trendComplete) {
+  } else if (!usage.trendComplete && (!usage.previousLabel || excludedCount > 0)) {
     alerts.push(makeAlert({
       id: "weekly-usage-trend-incomplete",
       severity: "warning",

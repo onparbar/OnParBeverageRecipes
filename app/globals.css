@@ -3756,27 +3756,6 @@ td {
   margin-top: 0;
 }
 
-.par-agent-capacity {
-  display: grid;
-  gap: 5px;
-  min-width: 120px;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.par-agent-capacity input {
-  width: 100%;
-  min-height: 38px;
-  border: 1px solid var(--line);
-  padding: 0 10px;
-  background: var(--paper-strong);
-  color: var(--ink);
-  font: inherit;
-  font-weight: 800;
-}
-
 .ingredient-table-wrap,
 .pricing-table-wrap,
 .inventory-table-wrap {

@@ -155,7 +155,7 @@ For Pour My Beer / keg level work:
 - shared prices, recipes, and product setup use Supabase and remain available away from the work network when internet access is available
 - after its one-time service-computer import, shared inventory also uses Supabase; saving a Monday snapshot still requires complete live PMB tap coverage
 - after its one-time service-computer import, Weekly Usage reports use Supabase and can be viewed away from work; new PMB reports can still be pulled only while connected to the local PMB network
-- after its one-time service-computer import, Keg Levels counts, pars, on-deck choices, cooler capacity, and recommendations use Supabase; live keg refreshes and par-agent PMB reads still require the work network
+- after its one-time service-computer import, Keg Levels counts, pars, on-deck choices, and recommendations use Supabase; live keg refreshes and par-agent PMB reads still require the work network
 - the service computer being offline does not block Supabase-backed dashboard work, but it does block live Pour My Beer reads and writes
 
 ### 11. Provi security

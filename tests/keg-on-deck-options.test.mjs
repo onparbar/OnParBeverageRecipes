@@ -13,8 +13,15 @@ const recipes = [
   { id: "washington-apple", title: "Washington Apple" },
 ];
 
-test("includes both static On Deck recipes when Coming Soon is empty", () => {
+test("includes all static On Deck recipes when Coming Soon is empty", () => {
   assert.deepEqual(buildKegOnDeckOptions({ recipes }), [
+    {
+      id: "recipe:bacardi-sunset",
+      recipeId: "bacardi-sunset",
+      name: "Bacardi Sunset",
+      kind: "recipe",
+      plu: 0,
+    },
     {
       id: "recipe:on-par-tee",
       recipeId: "on-par-tee",
@@ -32,6 +39,18 @@ test("includes both static On Deck recipes when Coming Soon is empty", () => {
   ]);
 });
 
+test("keeps Bacardi Sunset available without a saved recipe card", () => {
+  assert.deepEqual(buildKegOnDeckOptions(), [
+    {
+      id: "recipe:bacardi-sunset",
+      recipeId: "bacardi-sunset",
+      name: "Bacardi Sunset",
+      kind: "recipe",
+      plu: 0,
+    },
+  ]);
+});
+
 test("retains active custom cocktail and beer options in alphabetic order", () => {
   const options = buildKegOnDeckOptions({
     recipes,
@@ -42,6 +61,7 @@ test("retains active custom cocktail and beer options in alphabetic order", () =
   });
 
   assert.deepEqual(options.map(({ id }) => id), [
+    "recipe:bacardi-sunset",
     "custom:blue-horizon",
     "recipe:on-par-tee",
     "recipe:whiskey-smash",

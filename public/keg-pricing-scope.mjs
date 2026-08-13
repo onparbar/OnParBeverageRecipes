@@ -2,6 +2,18 @@ function tapNumberOf(item) {
   return Number(item?.tapNumber ?? item?.tapPosition) || 0;
 }
 
+export function filterCurrentTapPricingItems(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => (
+      item?.isCurrentTap === true
+      && String(item?.tapMatchSource || "").trim() === "pmb-tap-config"
+      && tapNumberOf(item) > 0
+    ))
+    .slice()
+    .sort((a, b) => tapNumberOf(a) - tapNumberOf(b)
+      || String(a?.name || "").localeCompare(String(b?.name || "")));
+}
+
 export function buildVerifiedCurrentBeerTapItems({
   wallItems = [],
   liveLevelItems = [],

@@ -41,6 +41,46 @@ test("Dashboard and Weekly Plan render the new overview and PMB trend layers", (
   assert.match(dashboardSource, /Pour My Beer ounces—not drinks sold or revenue/);
 });
 
+test("Tap Pricing displays only PMB-verified current wall products", () => {
+  assert.match(dashboardSource, /liveTapPriceItems = filterCurrentTapPricingItems\(result\.items\)/);
+  assert.match(dashboardSource, /if \(!liveTapPriceItems\.length\) return \[\];/);
+  assert.match(pageSource, /82% minimum gross-margin suggestions/);
+  assert.match(pageSource, /Nothing is sent until you confirm the live change/);
+  assert.match(dashboardSource, /Approve & update PMB/);
+});
+
+test("owner login automatically attempts every read-only PMB refresh", () => {
+  assert.match(dashboardSource, /void runOwnerLoginSync\(\)/);
+  assert.match(dashboardSource, /acquireOwnerLoginSyncLock\(\)/);
+  assert.match(dashboardSource, /releaseOwnerLoginSyncLock\(lockToken\)/);
+  assert.match(dashboardSource, /runKegLevelSync\(\)/);
+  assert.match(dashboardSource, /runTapPricingSync\(\)/);
+  assert.match(dashboardSource, /runPmbWeeklyUsageSync\(\{ automatic: true \}\)/);
+  assert.match(dashboardSource, /flushPendingSharedWeeklyUsageSave\(\)/);
+  assert.match(dashboardSource, /flushPendingInventoryFieldSyncs\(\)/);
+  assert.match(dashboardSource, /flushPendingParAgentStateSync\(\)/);
+  assert.match(dashboardSource, /await runKegParAgent\(\)/);
+  assert.match(dashboardSource, /await runKegParAgent\(\);\s+renderDashboardOverview\(\)/);
+  assert.match(dashboardSource, /parAgentRunning = false;\s+renderKegLevels\(\);\s+renderWeeklyPlan\(\);\s+renderDashboardOverview\(\)/);
+  assert.match(dashboardSource, /Automatic PMB check paused for owner review/);
+  assert.match(dashboardSource, /nothing was accepted or saved automatically/);
+  assert.match(dashboardSource, /pending Weekly Usage report was already saved by another dashboard tab/);
+
+  const ownerSyncStart = dashboardSource.indexOf("async function runOwnerLoginSync()");
+  const ownerSyncEnd = dashboardSource.indexOf("function acquireOwnerLoginSyncLock", ownerSyncStart);
+  const ownerSyncSource = dashboardSource.slice(ownerSyncStart, ownerSyncEnd);
+  assert.match(ownerSyncSource, /runKegLevelSync\(\)/);
+  assert.match(ownerSyncSource, /runTapPricingSync\(\)/);
+  assert.match(ownerSyncSource, /lockToken\s*\? runPmbWeeklyUsageSync/);
+  assert.doesNotMatch(ownerSyncSource, /if \(!lockToken\) return;/);
+});
+
+test("the authoritative computer can initialize shared setup from bundled defaults", () => {
+  assert.match(dashboardSource, /Initialize the official shared dashboard setup with this release's bundled defaults/);
+  assert.match(dashboardSource, /Future owner edits will then sync normally across devices/);
+  assert.match(dashboardSource, /Type \$\{SHARED_DASHBOARD_IMPORT_PHRASE\}/);
+});
+
 test("every Weekly Usage tap row renders an accessible week-by-week trend graph", () => {
   assert.match(dashboardSource, /buildWeeklyUsageTrend\(item\.history, historyHeaders\)/);
   assert.match(dashboardSource, /Avg weekly \+ trend/);
