@@ -203,7 +203,7 @@
   - `PMB_API_PASSWORD`
   - `PMB_API_CLIENT_ID`
   - `PMB_API_CLIENT_NAME`
-  - optional `PMB_KEG_DEVICE_ID`
+  - keg device and line identities are auto-discovered from authenticated tap configuration
 - Keg pricing notes:
   - beer style/type labels were removed from display/search because they were inaccurate
   - `Summer Ale` default keg pricing is set to 1/2 bbl / 1984 oz and `$185`
@@ -578,3 +578,20 @@ curl -I 'https://onparbev.com/dashboard.js?v=check'
 - Assigned On Deck beers are included in Keg Costs with an `On Deck for <wall> <tap>` source label; unassigned historical custom beers no longer keep cluttering the vendor lists.
 - Opening Ingredient & Keg Costs now also loads verified Keg Levels so the catalog can replace stale template products without requiring a separate Keg Levels visit.
 - Verification passed: `132` automated tests, JavaScript syntax checks, diff check, and optimized Next.js production build.
+
+## Global Dashboard Search - 2026-08-12
+
+- Added an owner-dashboard global search dialog in the header, available by button or `Command/Ctrl + K`.
+- The search index covers dashboard sections, active and old recipes, recipe ingredients, ingredient and beer-keg costs, inventory, physical taps, and current/archived Weekly Usage products.
+- Search normalizes punctuation and apostrophes, requires all query words, ranks direct title matches first, and supports keyboard arrow/Enter navigation.
+- Choosing a result opens the correct main/operations tab, applies the existing section search when appropriate, scrolls to the exact row/card, and briefly highlights it.
+- Added focused search-ranking tests. Full verification passed: `238` automated tests, lint with zero warnings, diff check, and the optimized Next.js production build.
+
+## On Par Performance & Comparable Weekly Movement - 2026-08-12
+
+- Replaced the general beverage-news panel with an On Par performance view and a silent, change-only Ohio compliance watch sourced from official Ohio pages.
+- Top 5 and Bottom 3 rankings use saved PMB poured ounces (not GoTab), with filters for beverage type, physical wall, 1 week / 6 weeks / all saved weeks, and poured volume / estimated profit at today's verified economics.
+- The same beverage remains a separate row on each physical wall so wider distribution does not inflate its rank. Historical rows without a verifiable wall and beverage type are excluded and counted rather than guessed.
+- Estimated profit requires exact PMB tap + PLU identity, current verified price, and mapped cost. Liquor stays unavailable unless both PMB portion quantities resolve to the same price per ounce; historical realized profit is never implied.
+- Tap-pricing refresh no longer reconciles Weekly Usage, because pricing responses are product-centric and can represent one PLU on multiple physical walls. Weekly Usage reconciliation remains tied to the complete physical-tap PMB report.
+- Weekly Movement now compares only taps with valid PMB poured ounces in both consecutive weeks. Excluded taps are listed with tap number, product, and reason; taps with current data but no prior or older PMB history are identified as likely new/newly assigned. Missing readings are never treated as zero.

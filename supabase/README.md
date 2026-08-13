@@ -1,7 +1,8 @@
 # Shared dashboard state
 
-Apply `migrations/20260730000000_create_dashboard_shared_state.sql` once in the
-Supabase SQL editor, then configure these server-only environment variables:
+Apply every file in `migrations/` once, in filename order, in the Supabase SQL
+editor. The five migrations create four singleton application-state rows and
+the activity log table. Then configure these server-only environment variables:
 
 ```dotenv
 SUPABASE_URL=https://your-project.supabase.co
@@ -10,6 +11,12 @@ SUPABASE_SECRET_KEY=sb_secret_...
 
 `SUPABASE_SERVICE_ROLE_KEY` is also supported for projects that still use a
 legacy service-role JWT. Do not prefix either secret with `NEXT_PUBLIC_`.
+
+From the service checkout, verify the tables and required rows with:
+
+```bash
+npm run check:storage
+```
 
 The migration creates one uninitialized `dashboard-config` row. The application
 does not create or populate that row automatically.

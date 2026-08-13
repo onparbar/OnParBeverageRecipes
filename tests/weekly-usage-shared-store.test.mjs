@@ -71,6 +71,25 @@ test("reads an uninitialized Weekly Usage row without importing browser reports"
   assert.deepEqual(fetchImpl.calls.map((call) => call.method), ["GET"]);
 });
 
+test("Weekly Usage Supabase requests abort after the configured timeout", async () => {
+  let observedSignal = null;
+  const shared = createSharedWeeklyUsageStore({
+    env: makeEnvironment({ SUPABASE_REQUEST_TIMEOUT_MS: "25" }),
+    fetchImpl: async (_input, init) => {
+      observedSignal = init.signal;
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    },
+  });
+
+  await assert.rejects(
+    shared.read(),
+    (error) => assertStoreError(error, "WEEKLY_USAGE_STATE_UNAVAILABLE", 503),
+  );
+  assert.equal(observedSignal?.aborted, true);
+});
+
 test("requires explicit revision-zero Weekly Usage initialization", async () => {
   const fetchImpl = createSupabaseFetch(makeRow());
   const store = createSharedWeeklyUsageStore({

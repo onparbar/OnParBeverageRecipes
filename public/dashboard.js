@@ -31,6 +31,26 @@ import {
   resolveKegOnDeckOption,
 } from "./keg-on-deck-options.mjs";
 import {
+  buildWeeklyActionPlan,
+  canReuseWeeklyUsageHistory,
+  evaluateWeeklyPlanReadiness,
+  findWeeklyUsageIdentityMatch,
+  hasCompleteWeeklyUsageRows,
+  hasWeeklyUsagePhysicalIdentityConflict,
+  isWeeklyUsageNameFallbackEligible,
+  isRecommendationSourceRevisionCurrent,
+  isWeeklyPlanHandoffAllowed,
+} from "./weekly-action-plan.mjs";
+import {
+  canSafelyRetryOperationalOutbox,
+  createOperationalOutboxEntry,
+  markOperationalOutboxFailure,
+  normalizeOperationalOutboxEntry,
+  normalizeOperationalOutboxList,
+  normalizeOperationalOutboxMap,
+  rebaseOperationalOutboxAfterOwnCommit,
+} from "./operational-outbox.mjs";
+import {
   createClearedKegOnHandOverrides,
   getAdjacentKegOnHandIndex,
   getKegOnHandEditorValue,
@@ -50,10 +70,30 @@ import {
   removePmbPublishItem,
 } from "./pmb-publish-queue.mjs";
 import { fetchPmbJsonWithRetry } from "./pmb-refresh.mjs";
+import { searchDashboardItems } from "./global-dashboard-search.mjs";
+import {
+  buildPricingAdvisor,
+  getPmbPriceEditorDefault,
+  getPmbPriceUpdateEligibility,
+  isPricingAdvisorEligibleKind,
+  validatePmbPriceIncrease,
+} from "./pricing-advisor.mjs";
+import { buildWeeklyUsagePerformance } from "./weekly-usage-performance.mjs";
+import { buildWeeklyUsageTrend } from "./weekly-usage-trend.mjs";
+import { buildWeeklyPlanTrends } from "./weekly-plan-trends.mjs";
+import { buildDashboardOverview } from "./dashboard-overview.mjs";
+import { buildOhioComplianceWatchViewModel } from "./ohio-compliance-watch.mjs";
+import { buildWeeklyUsageSellerRankings } from "./weekly-usage-seller-rankings.mjs";
+import {
+  buildShotPricingRows,
+  summarizeShotPricingRows,
+  validateShotPricePair,
+} from "./shot-pricing-view.mjs";
 
 const CSV_PATH = "./data/cocktail-recipes.csv";
 const NEW_COCKTAILS_CSV_PATH = "./data/new-cocktails.csv";
 const INVENTORY_CSV_PATH = "./data/inventory-2026-06-01.csv";
+const INVENTORY_BASELINE_DATE = "2026-06-01T12:00:00";
 const KEG_LEVELS_CSV_PATH = "./data/keg-levels-template.csv";
 const WEEKLY_USAGE_CSV_PATH = "./data/weekly-usage-history.csv";
 const WEEKLY_USAGE_EXTRA_CSV_PATH = "./data/weekly-usage-history-extra.csv";
@@ -84,10 +124,17 @@ const TAP_REPLACEMENT_STORAGE_KEY = "cocktail-dashboard-tap-replacements";
 const DASHBOARD_STATE_OUTBOX_STORAGE_KEY = "cocktail-dashboard-shared-state-outbox";
 const EMPLOYEE_SHARED_RECIPE_CACHE_STORAGE_KEY = "cocktail-dashboard-employee-shared-recipes";
 const DASHBOARD_STATE_REQUEST_TIMEOUT_MS = 6000;
+const OPERATIONAL_SHARED_REQUEST_TIMEOUT_MS = 8000;
+const PAR_AGENT_RUN_REQUEST_TIMEOUT_MS = 30000;
 const WEEKLY_USAGE_CURRENT_STORAGE_KEY = "cocktail-dashboard-weekly-usage-current";
 const WEEKLY_USAGE_HISTORY_STORAGE_KEY = "cocktail-dashboard-weekly-usage-history";
 const WEEKLY_USAGE_ARCHIVE_STORAGE_KEY = "cocktail-dashboard-weekly-usage-archive";
 const WEEKLY_USAGE_LAST_SYNC_STORAGE_KEY = "cocktail-dashboard-weekly-usage-last-sync";
+const WEEKLY_USAGE_OUTBOX_STORAGE_KEY = "cocktail-dashboard-weekly-usage-outbox";
+const INVENTORY_FIELD_OUTBOX_STORAGE_KEY = "cocktail-dashboard-inventory-field-outbox";
+const INVENTORY_ACTION_OUTBOX_STORAGE_KEY = "cocktail-dashboard-inventory-action-outbox";
+const KEG_LEVELS_OUTBOX_STORAGE_KEY = "cocktail-dashboard-keg-levels-outbox";
+const OWNER_PROFILE_MARKER_STORAGE_KEY = "cocktail-dashboard-owner-profile-marker";
 const WEEKLY_USAGE_SYNC_LOOKBACK_WEEKS = 12;
 const SHARED_DASHBOARD_FIELD_PATHS = Object.freeze([
   "pricing.ingredientPriceOverrides",
@@ -101,6 +148,7 @@ const SHARED_DASHBOARD_FIELD_PATHS = Object.freeze([
   "products.pmbPublishQueue",
   "products.comingSoonItems",
   "products.tapReplacementOverrides",
+  "monitoring.ohioComplianceAcknowledgement",
 ]);
 const SHARED_DASHBOARD_IMPORT_PHRASE = "IMPORT FROM SERVICE COMPUTER";
 const INVENTORY_SHARED_IMPORT_PHRASE = "IMPORT INVENTORY FROM SERVICE COMPUTER";
@@ -584,7 +632,7 @@ const MENU_ORDER = [
   ["WASHINGTON APPLE (CROWN ROYAL APPLE)", "Washington Apple (Whiskey)"],
   ["WHISKEY SOUR (JACK DANIELS)", "Whiskey Sour (Whiskey)"],
 ];
-const OPERATION_TAB_NAMES = ["keg-levels", "pricing", "ingredients", "inventory"];
+const OPERATION_TAB_NAMES = ["weekly-plan", "keg-levels", "pricing", "ingredients", "inventory"];
 const NEW_RECIPE_ORDER = [
   ["WHISKEY SMASH", "Whiskey Smash"],
   ["APPLE JACK (WHISKEY)", "Apple Jack (Whiskey)"],
@@ -608,16 +656,34 @@ const STRAIGHT_LIQUOR_TAP_INGREDIENTS = [
 const dashboardShell = document.querySelector(".shell");
 const dashboardRole = dashboardShell?.dataset.dashboardRole || "owner";
 const isEmployeeDashboard = dashboardRole === "employee";
+const dashboardOverview = document.querySelector("#dashboard-overview");
 const recipeGrid = document.querySelector("#recipe-grid");
 const oldRecipeGrid = document.querySelector("#old-recipe-grid");
+const currentRecipesView = document.querySelector("#current-recipes-view");
+const oldRecipesView = document.querySelector("#old-recipes-view");
+const recipeViewButtons = [...document.querySelectorAll("[data-recipe-view]")].filter((button) => (
+  button.closest(".recipe-view-switcher")
+));
+const currentRecipeCount = document.querySelector("#current-recipe-count");
+const oldRecipeCount = document.querySelector("#old-recipe-count");
 const statsGrid = document.querySelector("#stats-grid");
 const recipeCoverageAlert = document.querySelector("#recipe-coverage-alert");
+const globalSearchTrigger = document.querySelector("#global-search-trigger");
+const globalSearchDialog = document.querySelector("#global-search-dialog");
+const globalSearchInput = document.querySelector("#global-search-input");
+const globalSearchClose = document.querySelector("#global-search-close");
+const globalSearchHint = document.querySelector("#global-search-hint");
+const globalSearchResults = document.querySelector("#global-search-results");
 const categoryFilter = document.querySelector("#category-filter");
 const recipeSearch = document.querySelector("#recipe-search");
 const oldSearch = document.querySelector("#old-search");
 const pricingSearch = document.querySelector("#pricing-search");
 const pricingTable = document.querySelector("#pricing-table");
 const pricingSummary = document.querySelector("#pricing-summary");
+const pricingAdvisorSummary = document.querySelector("#pricing-advisor-summary");
+const pricingAdvisorTable = document.querySelector("#pricing-advisor-table");
+const shotPricingSummary = document.querySelector("#shot-pricing-summary");
+const shotPricingTable = document.querySelector("#shot-pricing-table");
 const ingredientSearch = document.querySelector("#ingredient-search");
 const ingredientTable = document.querySelector("#ingredient-table");
 const kegPricingTable = document.querySelector("#keg-pricing-table");
@@ -636,6 +702,7 @@ const inventoryTable = document.querySelector("#inventory-table");
 const inventoryOrderTable = document.querySelector("#inventory-order-table");
 const inventorySummary = document.querySelector("#inventory-summary");
 const inventoryHistoryList = document.querySelector("#inventory-history-list");
+const weeklyPlan = document.querySelector("#weekly-plan");
 const kegSummary = document.querySelector("#keg-summary");
 const kegWalls = document.querySelector("#keg-walls");
 const weeklyUsageSearch = document.querySelector("#weekly-usage-search");
@@ -719,10 +786,14 @@ let weeklyUsageSharedRevision = 0;
 let weeklyUsageSharedInitialized = false;
 let weeklyUsageSharedProvisioned = false;
 let weeklyUsageSharedSaving = false;
+let weeklyUsageSharedSaveError = "";
 let weeklyUsageSharedMessage = "Loading shared Weekly Usage...";
 let weeklyUsageApplyingSharedState = false;
 let weeklyUsageSharedSaveTimer = null;
+let weeklyUsageSharedPendingWrites = 0;
 let weeklyUsageSharedWriteQueue = Promise.resolve();
+let weeklyUsageSharedOutbox = loadWeeklyUsageSharedOutbox();
+let weeklyUsageSharedOutboxDurable = true;
 let kegPricingItems = [];
 let priceOverrides = loadOverrides();
 let kegPriceOverrides = loadKegPriceOverrides();
@@ -744,6 +815,7 @@ let inventorySourceRows = [];
 let inventorySharedUpdatedAt = "";
 let inventorySharedMessage = "Loading shared inventory...";
 let inventorySharedSaving = false;
+let inventorySharedSaveError = "";
 let inventorySharedInitialized = false;
 let inventorySharedProvisioned = false;
 let inventorySharedRevision = 0;
@@ -769,6 +841,9 @@ let dashboardSharedState = {
     comingSoonItems: [],
     tapReplacementOverrides: {},
   },
+  monitoring: {
+    ohioComplianceAcknowledgement: {},
+  },
 };
 let dashboardSharedSyncStatus = "loading";
 let dashboardSharedSyncMessage = "Checking the shared dashboard configuration...";
@@ -789,7 +864,20 @@ let dashboardSharedOutboxDurable = true;
 let dashboardSharedLocalCacheDurable = true;
 const dashboardSharedPendingSlices = new Set();
 const inventoryFieldSyncTimers = new Map();
+const inventoryFieldSyncFailures = new Map();
+const inventoryQueuedFieldKeys = new Set();
+const inventoryQueuedActionIds = new Set();
+let inventoryFieldSyncPendingCount = 0;
 let inventoryFieldSyncQueue = Promise.resolve();
+let inventoryFieldOutbox = loadInventoryFieldOutbox();
+let inventoryFieldOutboxDurable = true;
+let inventoryActionOutbox = loadInventoryActionOutbox();
+let inventoryActionOutboxDurable = true;
+let inventoryOutboxClientOrder = Math.max(
+  Date.now(),
+  ...Object.values(inventoryFieldOutbox).map((entry) => Number(entry.clientOrder) || 0),
+  ...inventoryActionOutbox.map((entry) => Number(entry.clientOrder) || 0),
+);
 let kegOnHandOverrides = loadKegOnHandOverrides();
 let kegParOverrides = loadKegParOverrides();
 let kegOnDeckOverrides = loadKegOnDeckOverrides();
@@ -815,9 +903,16 @@ let kegTemplateAssignments = new Map();
 let parAgentState = null;
 let parAgentRunning = false;
 let parAgentMessage = "Weekly par agent has not run yet.";
+let parAgentError = "";
+let parAgentInputsChangedAt = "";
 let parAgentStateSyncTimer = null;
 let parAgentStateSyncQueue = Promise.resolve();
 let parAgentStateMutationVersion = 0;
+let parAgentStateOutbox = loadKegLevelsOutbox();
+let parAgentStateOutboxDurable = true;
+let weeklyPlanUpdating = false;
+let weeklyPlanRefreshMessage = "";
+let weeklyPlanGroupMode = "category";
 let activeKegAdjustKey = "";
 let pmbProductSaving = false;
 let liquorProductSaving = false;
@@ -853,19 +948,47 @@ let liveTapPricingMessage = "Open Tap Pricing on the work network to load curren
 let liveTapPricingUpdatedAt = "";
 let tapPricingSyncAttempted = false;
 let tapPricingSyncLoading = false;
-let activeOperationsTab = "keg-levels";
+let shotPricingCapability = {
+  writeAvailable: false,
+  code: "PMB_PORTION_SCHEMA_UNVERIFIED",
+  message: "Refresh PMB prices on the work network to check shot-pricing setup.",
+};
+let activePmbPortionPriceUpdateKey = "";
+const pmbPortionPriceUpdateMessages = new Map();
+let shotPricingRowsByKey = new Map();
+let activePmbPriceUpdateKey = "";
+const pmbPriceUpdateMessages = new Map();
+let pricingAdvisorInputsByKey = new Map();
+let beverageNewsPayload = null;
+let beverageNewsLoading = false;
+let ohioComplianceAcknowledgement = {};
+let sellerRankingCategory = "all";
+let sellerRankingWall = "main";
+let sellerRankingMetric = "volume";
+let sellerRankingPeriod = "six-weeks";
+let sellerRankingListSize = 5;
+let activeOperationsTab = "weekly-plan";
+let activeRecipeView = "current";
 let activeAddProductType = "cocktail";
+let globalSearchItems = [];
+let visibleGlobalSearchResults = [];
+let activeGlobalSearchResultIndex = -1;
 
 init();
 
 async function init() {
+  try {
+    localStorage.setItem(OWNER_PROFILE_MARKER_STORAGE_KEY, "1");
+  } catch {
+    // The owner dashboard can still load when local storage is unavailable; its
+    // existing save paths will surface their own fail-closed recovery notices.
+  }
   await loadSharedDashboardState();
 
   if (isEmployeeDashboard) {
-    const [csv, newCocktailsCsv, kegLevelsCsv] = await Promise.all([
-      fetchCsv(CSV_PATH),
-      fetchCsv(NEW_COCKTAILS_CSV_PATH),
-      fetchOptionalCsv(KEG_LEVELS_CSV_PATH),
+    const [csv, newCocktailsCsv] = await Promise.all([
+      fetchCsv("/api/recipe-data?set=active"),
+      fetchCsv("/api/recipe-data?set=new"),
     ]);
 
     recipes = [
@@ -874,7 +997,6 @@ async function init() {
       ...customRecipes,
     ].map(applyRecipeEdits);
     ingredients = buildIngredientCatalog(getActiveRecipes());
-    kegWallItems = kegLevelsCsv ? parseKegLevels(parseCsv(kegLevelsCsv)) : [];
     hydrateCategoryFilter(recipes);
     bindEvents();
     renderEmployeeDashboard();
@@ -925,6 +1047,7 @@ async function init() {
   syncRecipeBuilderSummary();
   clearBeerLookupResult();
   render();
+  loadBeverageNews();
 }
 
 function cloneDashboardStateValue(value) {
@@ -940,6 +1063,7 @@ function normalizeDashboardSharedState(state = {}) {
   const pricing = isPlainDashboardRecord(data.pricing) ? data.pricing : {};
   const recipeState = isPlainDashboardRecord(data.recipes) ? data.recipes : {};
   const products = isPlainDashboardRecord(data.products) ? data.products : {};
+  const monitoring = isPlainDashboardRecord(data.monitoring) ? data.monitoring : {};
 
   return {
     version: Math.max(1, toNumber(state.version) || 1),
@@ -985,6 +1109,11 @@ function normalizeDashboardSharedState(state = {}) {
         : isPlainDashboardRecord(products.tapReplacements)
           ? cloneDashboardStateValue(products.tapReplacements)
           : {},
+    },
+    monitoring: {
+      ohioComplianceAcknowledgement: isPlainDashboardRecord(monitoring.ohioComplianceAcknowledgement)
+        ? cloneDashboardStateValue(monitoring.ohioComplianceAcknowledgement)
+        : {},
     },
   };
 }
@@ -1115,6 +1244,9 @@ function getSharedDashboardImportSnapshot() {
       comingSoonItems: readDashboardLocalStorageValue(COMING_SOON_STORAGE_KEY, []),
       tapReplacementOverrides: readDashboardLocalStorageValue(TAP_REPLACEMENT_STORAGE_KEY, {}),
     },
+    monitoring: {
+      ohioComplianceAcknowledgement: {},
+    },
   };
 }
 
@@ -1186,6 +1318,9 @@ function getSharedDashboardConfigSnapshot() {
     pricing: getSharedDashboardPricingSnapshot(),
     recipes: getSharedDashboardRecipeSnapshot(),
     products: getSharedDashboardProductSnapshot(),
+    monitoring: {
+      ohioComplianceAcknowledgement: cloneDashboardStateValue(ohioComplianceAcknowledgement),
+    },
   };
 }
 
@@ -1533,6 +1668,9 @@ function applySharedDashboardState(rawState) {
   pmbPublishQueue = normalizePmbPublishQueue(effectiveState.products.pmbPublishQueue);
   comingSoonItems = cloneDashboardStateValue(effectiveState.products.comingSoonItems);
   tapReplacementOverrides = cloneDashboardStateValue(effectiveState.products.tapReplacementOverrides);
+  ohioComplianceAcknowledgement = cloneDashboardStateValue(
+    effectiveState.monitoring?.ohioComplianceAcknowledgement || {},
+  );
   mirrorSharedDashboardState(effectiveState);
   return state;
 }
@@ -1879,6 +2017,7 @@ function getDashboardSharedFieldLabel(path) {
     "products.pmbPublishQueue": "PMB publishing queue",
     "products.comingSoonItems": "coming-soon products",
     "products.tapReplacementOverrides": "tap replacements",
+    "monitoring.ohioComplianceAcknowledgement": "Ohio compliance review status",
   }[path] || path;
 }
 
@@ -2270,6 +2409,7 @@ function scheduleSharedDashboardStateSync(...slices) {
       "products.pmbPublishQueue",
       "products.comingSoonItems",
       "products.tapReplacementOverrides",
+      "monitoring.ohioComplianceAcknowledgement",
     ].includes(slice))
     .forEach((slice) => dashboardSharedPendingSlices.add(slice));
   if (dashboardSharedPatchScheduled) return;
@@ -2462,11 +2602,89 @@ async function persistSharedDashboardPatch(patch, touchedFields, baseValues, gen
 }
 
 function bindEvents() {
+  bindGlobalSearchEvents();
   document.querySelectorAll(".tab-button").forEach((button) => {
-    button.addEventListener("click", () => switchTab(button.dataset.tab));
+    button.addEventListener("click", () => {
+      if (button.dataset.recipeView) switchRecipeView(button.dataset.recipeView);
+      switchTab(button.dataset.tab);
+    });
+  });
+  recipeViewButtons.forEach((button) => {
+    button.addEventListener("click", () => switchRecipeView(button.dataset.recipeView));
+    button.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const currentIndex = recipeViewButtons.indexOf(button);
+      const nextIndex = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? recipeViewButtons.length - 1
+          : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + recipeViewButtons.length)
+            % recipeViewButtons.length;
+      switchRecipeView(recipeViewButtons[nextIndex]?.dataset.recipeView, { focus: true });
+    });
+  });
+  dashboardOverview?.addEventListener("click", (event) => {
+    const complianceReview = event.target.closest("[data-ohio-compliance-reviewed]");
+    if (complianceReview) {
+      acknowledgeOhioComplianceWatch();
+      return;
+    }
+    const target = event.target.closest("[data-dashboard-target]");
+    if (!target) return;
+    if (target.dataset.dashboardTarget === "recipes") switchRecipeView("current");
+    switchTab(target.dataset.dashboardTarget);
+  });
+  dashboardOverview?.addEventListener("change", async (event) => {
+    const categoryFilterControl = event.target.closest("[data-seller-ranking-category]");
+    if (categoryFilterControl) {
+      sellerRankingCategory = clean(categoryFilterControl.value).toLowerCase() || "all";
+      renderDashboardOverview();
+      return;
+    }
+    const wallFilterControl = event.target.closest("[data-seller-ranking-wall]");
+    if (wallFilterControl) {
+      sellerRankingWall = clean(wallFilterControl.value).toLowerCase() || "main";
+      renderDashboardOverview();
+      return;
+    }
+    const listSizeControl = event.target.closest("[data-seller-ranking-list-size]");
+    if (listSizeControl) {
+      sellerRankingListSize = Math.max(1, Math.min(25, Math.floor(toNumber(listSizeControl.value) || 5)));
+      renderDashboardOverview();
+      return;
+    }
+    const periodFilterControl = event.target.closest("[data-seller-ranking-period]");
+    if (periodFilterControl) {
+      sellerRankingPeriod = clean(periodFilterControl.value).toLowerCase() || "six-weeks";
+      renderDashboardOverview();
+      return;
+    }
+    const metricFilterControl = event.target.closest("[data-seller-ranking-metric]");
+    if (!metricFilterControl) return;
+    sellerRankingMetric = clean(metricFilterControl.value).toLowerCase() || "volume";
+    renderDashboardOverview();
+    if (sellerRankingMetric === "profit" && !tapPricingSyncAttempted && !tapPricingSyncLoading) {
+      await runTapPricingSync();
+    }
   });
   document.querySelectorAll(".operation-tab").forEach((button) => {
     button.addEventListener("click", () => switchTab(button.dataset.operationTab));
+    button.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      const tabs = [...button.closest('[role="tablist"]')?.querySelectorAll('[role="tab"]') || []];
+      if (!tabs.length) return;
+      event.preventDefault();
+      const currentIndex = tabs.indexOf(button);
+      const nextIndex = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? tabs.length - 1
+          : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+      const nextTab = tabs[nextIndex];
+      switchTab(nextTab.dataset.operationTab);
+      nextTab.focus();
+    });
   });
   addProductTypeButtons.forEach((button) => {
     button.addEventListener("click", () => switchAddProductType(button.dataset.addProductType));
@@ -2609,6 +2827,22 @@ function switchAddProductType(productType, { focus = false } = {}) {
   });
 }
 
+function switchRecipeView(viewName, { focus = false } = {}) {
+  const nextView = viewName === "old" ? "old" : "current";
+  activeRecipeView = nextView;
+
+  recipeViewButtons.forEach((button) => {
+    const isActive = button.dataset.recipeView === nextView;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+    button.tabIndex = isActive ? 0 : -1;
+    if (isActive && focus) button.focus();
+  });
+
+  if (currentRecipesView) currentRecipesView.hidden = nextView !== "current";
+  if (oldRecipesView) oldRecipesView.hidden = nextView !== "old";
+}
+
 function confirmDashboardAction(title, details = [], warning = "") {
   const message = [
     title,
@@ -2636,13 +2870,16 @@ function switchTab(tabName) {
   });
 
   document.querySelectorAll(".operation-tab").forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.operationTab === activeOperationsTab);
+    const isActive = button.dataset.operationTab === activeOperationsTab;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+    button.tabIndex = isActive ? 0 : -1;
   });
 
   if (!isEmployeeDashboard && requestedTab === "weekly-usage" && !weeklyUsageSyncAttempted) {
     runPmbWeeklyUsageSync({ automatic: true });
   }
-  if (!isEmployeeDashboard && ["keg-levels", "ingredients", "inventory"].includes(requestedTab) && !kegSyncAttempted) {
+  if (!isEmployeeDashboard && ["weekly-plan", "keg-levels", "ingredients", "inventory"].includes(requestedTab) && !kegSyncAttempted) {
     runKegLevelSync();
   }
   if (!isEmployeeDashboard && ["keg-levels", "pricing", "ingredients"].includes(requestedTab) && !tapPricingSyncAttempted) {
@@ -2663,12 +2900,298 @@ function render() {
   renderWeeklyUsage();
   renderOldRecipes();
   renderPmbPublishQueue();
+  renderDashboardOverview();
+  refreshGlobalSearchIndex();
 }
 
 function renderEmployeeDashboard() {
   ingredients = buildIngredientCatalog(getActiveRecipes());
   renderStats();
   renderRecipes();
+}
+
+function bindGlobalSearchEvents() {
+  if (!globalSearchTrigger || !globalSearchDialog || !globalSearchInput || !globalSearchResults) return;
+
+  globalSearchTrigger.addEventListener("click", openGlobalSearch);
+  globalSearchClose?.addEventListener("click", () => {
+    closeGlobalSearch();
+    globalSearchTrigger?.focus();
+  });
+  globalSearchInput.addEventListener("input", renderGlobalSearchResults);
+  globalSearchInput.addEventListener("keydown", handleGlobalSearchKeydown);
+  globalSearchResults.addEventListener("click", (event) => {
+    const resultButton = event.target.closest("[data-global-search-result]");
+    if (!resultButton) return;
+    activateGlobalSearchResult(visibleGlobalSearchResults[toNumber(resultButton.dataset.globalSearchResult)]);
+  });
+  globalSearchDialog.addEventListener("click", (event) => {
+    if (event.target === globalSearchDialog) {
+      closeGlobalSearch();
+      globalSearchTrigger?.focus();
+    }
+  });
+  globalSearchDialog.addEventListener("close", () => {
+    globalSearchInput.value = "";
+    activeGlobalSearchResultIndex = -1;
+    if (document.activeElement === document.body) globalSearchTrigger?.focus();
+  });
+  document.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      if (globalSearchDialog.open) {
+        closeGlobalSearch();
+        globalSearchTrigger?.focus();
+      } else {
+        openGlobalSearch();
+      }
+    }
+  });
+}
+
+function openGlobalSearch() {
+  if (!globalSearchDialog || !globalSearchInput) return;
+  refreshGlobalSearchIndex();
+  renderGlobalSearchResults();
+  if (!globalSearchDialog.open) globalSearchDialog.showModal();
+  globalSearchInput.focus();
+}
+
+function closeGlobalSearch() {
+  if (globalSearchDialog?.open) globalSearchDialog.close();
+}
+
+function getGlobalSearchSectionItems() {
+  return [
+    ["dashboard", "Dashboard", "Alerts, readiness, weekly priorities, and quick actions"],
+    ["recipes", "Recipes", "Cocktails, batches, spirits, and ingredients", "current"],
+    ["weekly-plan", "Weekly Plan", "Orders, beer kegs, and cocktails to make"],
+    ["keg-levels", "Keg Levels", "Tap walls, current levels, pars, and on-deck products"],
+    ["pricing", "Tap Pricing", "Pour prices, costs, and gross margins"],
+    ["ingredients", "Ingredient & Keg Costs", "Bottle prices, keg prices, and vendor mappings"],
+    ["inventory", "Inventory", "Liquor, mixers, counts, pars, and reorder items"],
+    ["weekly-usage", "Weekly Usage", "PMB history, average ounces, and tap performance"],
+    ["add", "Add Product", "Create a cocktail, beer keg, or liquor tap"],
+    ["recipes", "Old Recipes", "Deactivated cocktail recipes", "old"],
+  ].map(([tab, title, subtitle, recipeView]) => ({
+    id: `section:${tab}:${recipeView || "default"}`,
+    kind: "section",
+    title,
+    subtitle,
+    section: "Dashboard section",
+    searchText: [title, subtitle],
+    tab,
+    recipeView,
+  }));
+}
+
+function getRecipeGlobalSearchItems(sourceRecipes, { inactive = false } = {}) {
+  return sourceRecipes.map((recipe) => ({
+    id: `${inactive ? "old-recipe" : "recipe"}:${recipe.id}`,
+    kind: inactive ? "old-recipe" : "recipe",
+    title: recipe.title,
+    subtitle: `${recipe.category} · ${formatBatchLabel(recipe.batch)}`,
+    section: inactive ? "Old Recipes" : "Recipes",
+    searchText: [
+      recipe.category,
+      recipe.batch,
+      recipe.description,
+      ...(recipe.ingredients || []).map((ingredient) => ingredient.name),
+    ],
+    tab: "recipes",
+    recipeView: inactive ? "old" : "current",
+    filterId: inactive ? "old-search" : "recipe-search",
+    query: recipe.title,
+    highlightId: `recipe:${recipe.id}`,
+  }));
+}
+
+function refreshGlobalSearchIndex() {
+  if (isEmployeeDashboard) return;
+
+  const ingredientItems = ingredients
+    .filter((ingredient) => ingredient.id !== "water" && !isHiddenPricingIngredient(ingredient))
+    .map((ingredient) => ({
+      id: `ingredient:${ingredient.id}`,
+      kind: "ingredient",
+      title: ingredient.name,
+      subtitle: ingredient.vendorProduct?.vendor
+        ? `${ingredient.vendorProduct.vendor} · ${ingredient.vendorProduct.productName}`
+        : "Ingredient cost",
+      section: "Ingredient & Keg Costs",
+      searchText: [ingredient.group, ingredient.vendorProduct?.vendor, ingredient.vendorProduct?.productName, ...(ingredient.recipes || [])],
+      tab: "ingredients",
+      filterId: "ingredient-search",
+      query: ingredient.name,
+      highlightId: `ingredient:${ingredient.id}`,
+    }));
+
+  const kegPriceItems = kegPricingItems.map((item) => ({
+    id: `keg-price:${item.id}`,
+    kind: "keg-price",
+    title: item.name,
+    subtitle: [item.vendor, item.tapSummary].filter(Boolean).join(" · ") || "Beer keg cost",
+    section: "Ingredient & Keg Costs",
+    searchText: [item.wall, item.tapNumber ? `tap ${item.tapNumber}` : "", item.vendor, item.vendorProduct?.productName],
+    tab: "ingredients",
+    filterId: "ingredient-search",
+    query: item.name,
+    highlightId: `keg-price:${item.id}`,
+  }));
+
+  const inventorySearchItems = inventoryItems.map((item) => ({
+    id: `inventory:${item.id}`,
+    kind: "inventory",
+    title: item.name,
+    subtitle: [item.group, item.vendorProduct?.vendor].filter(Boolean).join(" · ") || "Inventory",
+    section: "Inventory",
+    searchText: [item.group, item.vendorProduct?.vendor, item.vendorProduct?.productName, item.orderQuantity > 0 ? "needs order reorder" : ""],
+    tab: "inventory",
+    filterId: "inventory-search",
+    query: item.name,
+    highlightId: `inventory:${item.id}`,
+  }));
+
+  const tapItems = kegWallItems.map((item) => {
+    const liveRow = getKegLiveRow(item);
+    const name = getKegDisplayBrand(item, liveRow);
+    const itemKey = getKegItemKey(item);
+    return {
+      id: `tap:${itemKey}`,
+      kind: "tap",
+      title: name || item.brand,
+      subtitle: `${item.wall} · Tap ${formatNumber(item.tapNumber)}`,
+      section: "Keg Levels",
+      searchText: [item.type, item.wall, `tap ${item.tapNumber}`, liveRow?.plu, liveRow?.productId],
+      tab: "keg-levels",
+      highlightId: `tap:${itemKey}`,
+    };
+  });
+
+  const usageItems = [...weeklyUsageItems, ...weeklyUsageArchivedItems]
+    .filter((item) => (item.history || []).length || weeklyUsageItems.includes(item))
+    .map((item, index) => ({
+      id: `usage:${item.tapNumber || "history"}:${slugify(item.name)}:${index}`,
+      kind: "usage",
+      title: item.name,
+      subtitle: `${item.tapNumber ? `Tap ${item.tapNumber} · ` : ""}${item.wall || "Historical"}`,
+      section: "Weekly Usage",
+      searchText: [item.type, item.wall, item.replacedBy, item.tapNumber ? `tap ${item.tapNumber}` : ""],
+      tab: "weekly-usage",
+      filterId: "weekly-usage-search",
+      query: item.name,
+    }));
+
+  globalSearchItems = [
+    ...getGlobalSearchSectionItems(),
+    ...getRecipeGlobalSearchItems(getActiveRecipes()),
+    ...getRecipeGlobalSearchItems(getInactiveRecipes(), { inactive: true }),
+    ...ingredientItems,
+    ...kegPriceItems,
+    ...inventorySearchItems,
+    ...tapItems,
+    ...usageItems,
+  ];
+}
+
+function getGlobalSearchKindLabel(kind) {
+  return ({
+    section: "Open",
+    recipe: "Recipe",
+    "old-recipe": "Old recipe",
+    ingredient: "Ingredient",
+    "keg-price": "Keg",
+    inventory: "Inventory",
+    tap: "Tap",
+    usage: "Usage",
+  })[kind] || "Result";
+}
+
+function renderGlobalSearchResults() {
+  if (!globalSearchResults || !globalSearchInput) return;
+  visibleGlobalSearchResults = searchDashboardItems(globalSearchItems, globalSearchInput.value, { limit: 14 });
+  activeGlobalSearchResultIndex = visibleGlobalSearchResults.length ? 0 : -1;
+  if (globalSearchHint) {
+    globalSearchHint.textContent = clean(globalSearchInput.value)
+      ? `${visibleGlobalSearchResults.length} result${visibleGlobalSearchResults.length === 1 ? "" : "s"}. Use the arrow keys and Enter to open.`
+      : "Start typing, or choose a dashboard section.";
+  }
+  globalSearchResults.innerHTML = visibleGlobalSearchResults.length
+    ? visibleGlobalSearchResults.map((item, index) => `
+        <button
+          class="global-search-result${index === activeGlobalSearchResultIndex ? " is-active" : ""}"
+          type="button"
+          role="option"
+          aria-selected="${index === activeGlobalSearchResultIndex}"
+          data-global-search-result="${index}"
+        >
+          <span class="global-search-result__copy">
+            <strong>${escapeHtml(item.title)}</strong>
+            <small>${escapeHtml(item.subtitle || getGlobalSearchKindLabel(item.kind))}</small>
+          </span>
+          <span class="global-search-result__section">${escapeHtml(item.section || getGlobalSearchKindLabel(item.kind))}</span>
+        </button>
+      `).join("")
+    : '<div class="global-search-empty">No dashboard items match that search.</div>';
+}
+
+function setActiveGlobalSearchResult(nextIndex) {
+  if (!visibleGlobalSearchResults.length) return;
+  activeGlobalSearchResultIndex = (nextIndex + visibleGlobalSearchResults.length) % visibleGlobalSearchResults.length;
+  globalSearchResults.querySelectorAll("[data-global-search-result]").forEach((button, index) => {
+    const active = index === activeGlobalSearchResultIndex;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+    if (active) button.scrollIntoView({ block: "nearest" });
+  });
+}
+
+function handleGlobalSearchKeydown(event) {
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    setActiveGlobalSearchResult(activeGlobalSearchResultIndex + 1);
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    setActiveGlobalSearchResult(activeGlobalSearchResultIndex - 1);
+  } else if (event.key === "Enter" && activeGlobalSearchResultIndex >= 0) {
+    event.preventDefault();
+    activateGlobalSearchResult(visibleGlobalSearchResults[activeGlobalSearchResultIndex]);
+  }
+}
+
+function highlightGlobalSearchTarget(item) {
+  if (!item?.highlightId) return;
+  window.requestAnimationFrame(() => {
+    const target = item.kind === "recipe" || item.kind === "old-recipe"
+      ? [...document.querySelectorAll(".recipe-card")].find((card) => card.dataset.recipeId === item.highlightId.slice(item.highlightId.indexOf(":") + 1))
+      : item.kind === "tap"
+        ? [...document.querySelectorAll("[data-keg-row-key]")].find((row) => `tap:${row.dataset.kegRowKey}` === item.highlightId)
+        : [...document.querySelectorAll("[data-global-search-key]")].find((element) => element.dataset.globalSearchKey === item.highlightId);
+    if (!target) return;
+    target.classList.remove("global-search-target");
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.requestAnimationFrame(() => target.classList.add("global-search-target"));
+    window.setTimeout(() => target.classList.remove("global-search-target"), 2100);
+  });
+}
+
+function activateGlobalSearchResult(item) {
+  if (!item) return;
+  if (item.recipeView) switchRecipeView(item.recipeView);
+  if (item.filterId) {
+    const input = document.getElementById(item.filterId);
+    if (input) {
+      input.value = item.query || item.title;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  }
+  switchTab(item.tab || "recipes");
+  closeGlobalSearch();
+  if (item.highlightId) {
+    highlightGlobalSearchTarget(item);
+  } else {
+    window.requestAnimationFrame(() => document.querySelector(`#${item.tab}-panel`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
 }
 
 function renderStats() {
@@ -2711,7 +3234,9 @@ function renderStats() {
 function renderRecipes() {
   const searchTerm = recipeSearch.value.trim().toLowerCase();
   const category = categoryFilter.value;
-  const visibleRecipes = getActiveRecipes().filter((recipe) => {
+  const activeRecipes = getActiveRecipes();
+  if (currentRecipeCount) currentRecipeCount.textContent = `(${activeRecipes.length.toLocaleString()})`;
+  const visibleRecipes = activeRecipes.filter((recipe) => {
     const matchesCategory = category === "all" || recipe.category === category;
     const haystack = `${recipe.title} ${recipe.batch} ${recipe.ingredients.map((item) => item.name).join(" ")}`.toLowerCase();
     return matchesCategory && haystack.includes(searchTerm);
@@ -2846,7 +3371,9 @@ function handleRecipeCoverageAction(event) {
 
 function renderOldRecipes() {
   const searchTerm = oldSearch.value.trim().toLowerCase();
-  const oldRecipes = getInactiveRecipes().filter((recipe) => {
+  const inactiveRecipes = getInactiveRecipes();
+  if (oldRecipeCount) oldRecipeCount.textContent = `(${inactiveRecipes.length.toLocaleString()})`;
+  const oldRecipes = inactiveRecipes.filter((recipe) => {
     const haystack = `${recipe.title} ${recipe.batch} ${recipe.ingredients.map((item) => item.name).join(" ")}`.toLowerCase();
     return haystack.includes(searchTerm);
   });
@@ -2866,6 +3393,7 @@ function createRecipeCard(recipe, state) {
   const totals = getRecipeTotals(recipe);
   const pricing = getRecipePricing(recipe);
   const card = cardTemplate.content.firstElementChild.cloneNode(true);
+  card.dataset.recipeId = recipe.id;
   card.querySelector("h2").textContent = recipe.title;
   card.querySelector(".recipe-card__batch").textContent = formatBatchLabel(recipe.batch);
   card.querySelector(".spirit-pill").textContent = recipe.category;
@@ -2973,11 +3501,544 @@ function renderPricing() {
   const visibleTapRows = getLiveTapPricingRows(searchTerm);
 
   renderPricingSummary(visibleTapRows);
+  renderShotPricing(visibleTapRows);
+  renderPricingAdvisor(visibleTapRows);
   pricingTable.innerHTML = "";
 
   visibleTapRows.forEach((tapRow) => {
     pricingTable.append(renderTapPricingRow(tapRow));
   });
+}
+
+function renderShotPricing(visibleTapRows = []) {
+  if (!shotPricingSummary || !shotPricingTable) return;
+  const rows = buildShotPricingRows(visibleTapRows, shotPricingCapability);
+  const summary = summarizeShotPricingRows(rows);
+  shotPricingRowsByKey = new Map(rows.map((row) => [row.key, row]));
+
+  shotPricingSummary.innerHTML = rows.length
+    ? `
+      <div class="shot-pricing__summary-counts">
+        <span><strong>${formatNumber(summary.total)}</strong> liquor products</span>
+        <span><strong>${formatNumber(summary.editable)}</strong> ready to edit</span>
+        <span><strong>${formatNumber(summary.setupRequired)}</strong> need one-time setup</span>
+      </div>
+      <p class="shot-pricing__setup-note shot-pricing__setup-note--${summary.editable ? "ready" : "setup"}">
+        <strong>${summary.editable ? "Live two-price review is ready." : "Live saves remain safely locked."}</strong>
+        ${escapeHtml(summary.editable
+          ? "Every change still requires owner confirmation and exact readback of both PMB portions."
+          : shotPricingCapability.message || "Connect on-site once so PMB's portion IDs and edit form can be verified. Existing prices remain untouched.")}
+      </p>
+    `
+    : `
+      <p class="shot-pricing__setup-note">
+        <strong>No live shot portions are loaded yet.</strong>
+        Refresh PMB prices while connected to the work network to load both portion prices for each liquor tap.
+      </p>
+    `;
+
+  shotPricingTable.innerHTML = rows.map((row) => {
+    const running = activePmbPortionPriceUpdateKey === row.key;
+    const message = pmbPortionPriceUpdateMessages.get(row.key);
+    const affected = row.assignments.length > 1
+      ? `${formatNumber(row.assignments.length)} taps share this PMB product`
+      : row.wall ? `${row.wall} tap ${formatNumber(row.tapNumber)}` : `Tap ${formatNumber(row.tapNumber)}`;
+    const currentPortions = row.portions.map((portion) => `
+      <span><b>${escapeHtml(portion.name)}</b> ${money(portion.price)}${portion.quantityOz ? ` · ${formatNumber(portion.quantityOz)} oz` : ""}</span>
+    `).join("");
+    const editors = row.portions.slice(0, 2).map((portion, index) => `
+      <label class="shot-pricing-field">
+        <span>${escapeHtml(portion.name)}</span>
+        <span class="shot-pricing-field__input"><i aria-hidden="true">$</i><input
+          type="number"
+          inputmode="decimal"
+          min="0.01"
+          max="1000"
+          step="0.01"
+          value="${escapeHtml(formatPriceInput(portion.price))}"
+          data-shot-price-input="${index}"
+          aria-label="New ${escapeHtml(portion.name)} price for ${escapeHtml(row.name)}"
+          ${!row.canEdit || activePmbPortionPriceUpdateKey ? "disabled" : ""}
+        ></span>
+      </label>
+    `).join("");
+    const issue = row.blockers[0] || "Both portions and the physical PMB identity passed the safety checks.";
+
+    return `
+      <tr class="shot-pricing-row${row.canEdit ? "" : " shot-pricing-row--blocked"}" data-shot-pricing-key="${escapeHtml(row.key)}">
+        <td><strong>${formatNumber(row.tapNumber)}</strong>${row.wall ? `<span class="table-note">${escapeHtml(row.wall)}</span>` : ""}</td>
+        <td><strong>${escapeHtml(row.name)}</strong><span class="table-note">PMB PLU ${formatNumber(row.plu)} · ${escapeHtml(affected)}</span></td>
+        <td><div class="portion-list">${currentPortions}</div></td>
+        <td><div class="shot-pricing-fields">${editors}</div></td>
+        <td>
+          <span class="pricing-advisor-status pricing-advisor-status--${row.canEdit ? "ready" : "review"}">${row.canEdit ? "Ready" : "Setup required"}</span>
+          <span class="table-note">${escapeHtml(issue)}</span>
+        </td>
+        <td>
+          <div class="pricing-advisor-action">
+            <button class="mini-button" type="button" data-shot-price-update="${escapeHtml(row.key)}"${!row.canEdit || activePmbPortionPriceUpdateKey ? " disabled" : ""}>${running ? "Updating both..." : "Update both in PMB"}</button>
+            ${message ? `<span class="pricing-advisor-action__message pricing-advisor-action__message--${escapeHtml(message.tone)}" role="status">${escapeHtml(message.text)}</span>` : ""}
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("") || '<tr><td colspan="6" class="empty-state">No PMB liquor portion rows match this search.</td></tr>';
+
+  bindShotPricingControls();
+}
+
+function bindShotPricingControls() {
+  shotPricingTable.querySelectorAll("[data-shot-pricing-key]").forEach((tableRow) => {
+    const key = clean(tableRow.dataset.shotPricingKey);
+    const row = shotPricingRowsByKey.get(key);
+    const inputs = [...tableRow.querySelectorAll("[data-shot-price-input]")];
+    const button = tableRow.querySelector("[data-shot-price-update]");
+    if (!row || !button) return;
+    const updateButtonState = () => {
+      if (activePmbPortionPriceUpdateKey || !row.canEdit) return;
+      button.disabled = !validateShotPricePair(row, inputs.map((input) => input.value)).valid;
+    };
+    inputs.forEach((input) => input.addEventListener("input", updateButtonState));
+    updateButtonState();
+    button.addEventListener("click", () => submitPmbPortionPriceUpdate(key));
+  });
+}
+
+async function submitPmbPortionPriceUpdate(updateKey) {
+  const key = clean(updateKey);
+  if (!key || activePmbPortionPriceUpdateKey) return;
+  const row = shotPricingRowsByKey.get(key);
+  const tableRow = [...shotPricingTable.querySelectorAll("[data-shot-pricing-key]")]
+    .find((candidate) => candidate.dataset.shotPricingKey === key);
+  const inputs = [...tableRow?.querySelectorAll("[data-shot-price-input]") || []];
+  const values = inputs.map((input) => input.value);
+  const validation = validateShotPricePair(row, values);
+  if (!validation.valid) {
+    pmbPortionPriceUpdateMessages.set(key, { tone: "error", text: validation.message });
+    renderPricing();
+    return;
+  }
+
+  const changes = row.portions.map((portion, index) => (
+    `${portion.name}: ${money(portion.price)} → ${money(validation.cents[index] / 100)}`
+  ));
+  const assignmentDetails = row.assignments.map((assignment) => (
+    `${assignment.wall || "PMB"} tap ${formatNumber(assignment.tapNumber)} · device ${assignment.deviceId} · line ${assignment.lineNum}`
+  ));
+  if (!confirmDashboardAction(
+    `Update both shot prices for ${row.name}?`,
+    [...changes, `PMB PLU: ${row.plu}`, ...assignmentDetails],
+    "This manual liquor price change is separate from the 82% advisor. Both PMB portions will be re-verified before and after saving.",
+  )) return;
+
+  activePmbPortionPriceUpdateKey = key;
+  pmbPortionPriceUpdateMessages.set(key, { tone: "pending", text: "Re-verifying both PMB portions..." });
+  renderPricing();
+
+  try {
+    const representative = row.assignments[0] || {};
+    const response = await fetch("/api/pmb-portion-price-update", {
+      method: "POST",
+      credentials: "same-origin",
+      redirect: "manual",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        kind: "liquor",
+        plu: row.plu,
+        exactIdentity: {
+          plu: row.plu,
+          tapNumber: row.tapNumber,
+          deviceId: representative.deviceId,
+          lineNum: representative.lineNum,
+          name: row.name,
+        },
+        expectedAssignments: row.assignments.map(({ tapNumber, deviceId, lineNum }) => ({ tapNumber, deviceId, lineNum })),
+        portions: row.portions.map((portion, index) => ({
+          itemId: portion.itemId,
+          name: portion.name,
+          quantityOz: portion.quantityOz,
+          expectedPriceRaw: portion.priceRaw,
+          priceDp: portion.priceDp,
+          expectedCurrentPrice: formatPriceInput(portion.price),
+          newPrice: (validation.cents[index] / 100).toFixed(2),
+        })),
+      }),
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok || result?.ok !== true) {
+      throw new Error(result?.error || "PMB did not confirm both shot prices.");
+    }
+    pmbPortionPriceUpdateMessages.set(key, { tone: "success", text: "PMB accepted both prices. Refreshing the exact portions..." });
+    await runTapPricingSync();
+  } catch (error) {
+    pmbPortionPriceUpdateMessages.set(key, {
+      tone: "error",
+      text: getPmbConnectionErrorMessage(error, "Could not update both PMB shot prices.", { writeAttempted: true }),
+    });
+  } finally {
+    activePmbPortionPriceUpdateKey = "";
+    renderPricing();
+  }
+}
+
+function renderPricingAdvisor(visibleTapRows = []) {
+  if (!pricingAdvisorSummary || !pricingAdvisorTable) return;
+
+  const advisorInputs = visibleTapRows
+    .map(buildPricingAdvisorInput)
+    .filter((item) => isPricingAdvisorEligibleKind(item.kind));
+  const advisor = buildPricingAdvisor(advisorInputs);
+  const advisorByKey = new Map(advisorInputs.map((input) => [input.updateKey, input]));
+  pricingAdvisorInputsByKey = advisorByKey;
+  pricingAdvisorSummary.innerHTML = `
+    <div><strong>${formatNumber(advisor.summary.priceChangeCount)}</strong><span>Price suggestions</span></div>
+    <div><strong>${formatNumber(advisor.summary.onTargetCount)}</strong><span>At or above 82%</span></div>
+    <div><strong>${formatNumber(advisor.summary.reviewCount)}</strong><span>Need input review</span></div>
+    <div><strong>${formatNumber(advisor.summary.blockedCount)}</strong><span>Missing required data</span></div>
+  `;
+
+  pricingAdvisorTable.innerHTML = advisor.rows.map((item) => {
+    const source = advisorByKey.get(item.updateKey || item.id) || {};
+    const status = getPricingAdvisorStatus(item);
+    const issueCopy = item.issues.map((entry) => entry.message).join(" ");
+    const tapLabel = item.tapPosition
+      ? `${item.tapPosition}${item.wall ? `<span>${escapeHtml(item.wall)}</span>` : ""}`
+      : "—";
+    const currentMargin = item.currentPricePerOz && item.costPerOz
+      ? `${formatNumber(item.currentMarginPercent)}%`
+      : "—";
+    const delta = item.currentPricePerOz && item.recommendedPricePerOz
+      ? `${item.priceChange > 0 ? "+" : ""}${money(item.priceChange)} / oz`
+      : "—";
+    const costNote = [
+      item.kind,
+      item.costPerOz ? `${money(item.costPerOz)} cost / oz` : "Cost needed",
+      item.costSource,
+    ].filter(Boolean).join(" · ");
+    const updateControl = renderPmbPriceUpdateControl(item, source);
+
+    return `
+      <tr class="pricing-advisor-row pricing-advisor-row--${escapeHtml(status.tone)}" data-pricing-advisor-key="${escapeHtml(source.updateKey || item.id)}">
+        <td class="pricing-advisor__tap"><strong>${tapLabel}</strong></td>
+        <td>
+          <strong>${escapeHtml(item.name)}</strong>
+          <span class="table-note">${escapeHtml(costNote)}</span>
+        </td>
+        <td>${item.currentPricePerOz ? `${money(item.currentPricePerOz)} / oz` : "—"}</td>
+        <td>${escapeHtml(currentMargin)}</td>
+        <td><strong>${item.recommendedPricePerOz ? `${money(item.recommendedPricePerOz)} / oz` : "—"}</strong></td>
+        <td>${escapeHtml(delta)}</td>
+        <td>
+          <span class="pricing-advisor-status pricing-advisor-status--${escapeHtml(status.tone)}">${escapeHtml(status.label)}</span>
+          ${issueCopy ? `<span class="table-note">${escapeHtml(issueCopy)}</span>` : '<span class="table-note">Inputs passed the dry-run checks.</span>'}
+        </td>
+        <td>${updateControl}</td>
+      </tr>
+    `;
+  }).join("") || '<tr><td colspan="8" class="empty-state">No tap-pricing rows match this search.</td></tr>';
+
+  bindPmbPriceUpdateControls();
+}
+
+function buildPricingAdvisorInput({ livePrice, recipe, kegItem }) {
+  const ingredient = livePrice?.ingredient || null;
+  const pricingContext = recipe
+    ? {
+        kind: "Cocktail",
+        costPerOz: getRecipeTotals(recipe).costPerOz,
+        costSource: "Recipe ingredient costs",
+        costUpdatedAt: getRecipePricingAdvisorTimestamp(recipe),
+      }
+    : kegItem
+      ? {
+          kind: "Beer",
+          costPerOz: getKegCatalogUnitCost(kegItem),
+          costSource: "Keg cost",
+          costUpdatedAt: kegPriceOverrides[kegItem.id]?.updatedAt,
+          currentPricePerOz: toNumber(livePrice?.chargePerOz),
+        }
+      : ingredient
+        ? {
+            kind: "Liquor",
+            costPerOz: getCatalogUnitCost(ingredient),
+            costSource: "Bottle cost",
+            costUpdatedAt: priceOverrides[ingredient.id]?.updatedAt,
+            currentPricePerOz: getPricingAdvisorCurrentPrice(livePrice),
+          }
+        : {
+            kind: clean(livePrice?.type) || "Tap",
+            costPerOz: 0,
+            costSource: "No mapped cost",
+            costUpdatedAt: "",
+          };
+
+  const assignments = getPmbPriceAssignments(livePrice);
+  const firstAssignment = assignments[0] || {};
+  const tapNumber = toNumber(livePrice?.tapPosition || firstAssignment.tapNumber || kegItem?.tapNumber);
+  const plu = toNumber(livePrice?.plu);
+  const updateKey = `${plu || "no-plu"}:${tapNumber || "no-tap"}`;
+  return {
+    id: updateKey,
+    updateKey,
+    name: clean(livePrice?.name || recipe?.title || kegItem?.name) || "Unmapped PMB tap",
+    wall: clean(livePrice?.wall || kegItem?.wall),
+    tapPosition: tapNumber,
+    tapNumber,
+    mappingVerified: Boolean(recipe || kegItem || ingredient),
+    currentPricePerOz: getPricingAdvisorCurrentPrice(livePrice),
+    livePriceUpdatedAt: livePrice ? liveTapPricingUpdatedAt : "",
+    plu,
+    deviceId: toNumber(livePrice?.deviceId || firstAssignment.deviceId),
+    lineNum: toNumber(livePrice?.lineNum || firstAssignment.lineNum),
+    isCurrentTap: livePrice?.isCurrentTap === true,
+    identityVerified: livePrice?.identityVerified === true,
+    tapMatchSource: clean(livePrice?.tapMatchSource),
+    assignments,
+    ...pricingContext,
+  };
+}
+
+function getPmbPriceAssignments(livePrice) {
+  const provided = Array.isArray(livePrice?.assignments) ? livePrice.assignments : [];
+  const fallback = livePrice?.tapPosition ? [livePrice] : [];
+  return (provided.length ? provided : fallback)
+    .map((assignment) => ({
+      tapNumber: toNumber(assignment?.tapNumber || assignment?.tapPosition),
+      deviceId: toNumber(assignment?.deviceId),
+      lineNum: toNumber(assignment?.lineNum),
+      wall: clean(assignment?.wall),
+      name: clean(assignment?.name || livePrice?.name),
+    }));
+}
+
+function getPmbPriceUpdateKey(input) {
+  return clean(input?.updateKey || input?.id);
+}
+
+function renderPmbPriceUpdateControl(item, source) {
+  const key = getPmbPriceUpdateKey(source);
+  const eligibility = getPmbPriceUpdateEligibility(source);
+  const isRunning = activePmbPriceUpdateKey === key;
+  const defaultPrice = getPmbPriceEditorDefault(item);
+  const message = pmbPriceUpdateMessages.get(key);
+  if (!eligibility.eligible) {
+    const needsLiveRefresh = eligibility.blockers.some((blocker) => (
+      /current PMB|freshness|identity|assignment/i.test(blocker)
+    ));
+    const reason = needsLiveRefresh
+      ? "Refresh PMB prices to verify this tap before editing."
+      : eligibility.blockers[0] || "This PMB price cannot be edited safely.";
+    return `
+      <div class="pricing-advisor-action pricing-advisor-action--unavailable">
+        <span class="pricing-advisor-action__unavailable">Unavailable</span>
+        <span class="table-note">${escapeHtml(reason)}</span>
+        ${message ? `<span class="pricing-advisor-action__message pricing-advisor-action__message--${escapeHtml(message.tone)}" role="status">${escapeHtml(message.text)}</span>` : ""}
+      </div>
+    `;
+  }
+  const noOpDefault = !validatePmbPriceIncrease({
+    currentPricePerOz: item.currentPricePerOz,
+    newPricePerOz: defaultPrice,
+  }).valid;
+  const controlDisabled = Boolean(activePmbPriceUpdateKey);
+  const buttonDisabled = controlDisabled || noOpDefault;
+
+  return `
+    <div class="pricing-advisor-action">
+      <label>
+        <span class="sr-only">New PMB price per ounce for ${escapeHtml(item.name)}</span>
+        <span class="pricing-advisor-action__currency" aria-hidden="true">$</span>
+        <input
+          type="number"
+          inputmode="decimal"
+          min="${escapeHtml(formatPriceInput(item.currentPricePerOz + 0.01))}"
+          step="0.01"
+          value="${escapeHtml(formatPriceInput(defaultPrice))}"
+          data-pmb-price-input
+          data-current-price="${escapeHtml(formatPriceInput(item.currentPricePerOz))}"
+          data-update-eligible="${eligibility.eligible ? "true" : "false"}"
+          aria-label="New PMB price per ounce for ${escapeHtml(item.name)}"
+          ${controlDisabled ? "disabled" : ""}
+        >
+      </label>
+      <button class="mini-button" type="button" data-pmb-price-update="${escapeHtml(key)}"${buttonDisabled ? " disabled" : ""}>${isRunning ? "Updating..." : "Update PMB"}</button>
+      ${message ? `<span class="pricing-advisor-action__message pricing-advisor-action__message--${escapeHtml(message.tone)}" role="status">${escapeHtml(message.text)}</span>` : ""}
+    </div>
+  `;
+}
+
+function bindPmbPriceUpdateControls() {
+  pricingAdvisorTable.querySelectorAll("[data-pmb-price-update]").forEach((button) => {
+    const row = button.closest("[data-pricing-advisor-key]");
+    const input = row?.querySelector("[data-pmb-price-input]");
+    button.addEventListener("click", () => submitPmbPriceIncrease(button.dataset.pmbPriceUpdate));
+    input?.addEventListener("input", () => {
+      if (activePmbPriceUpdateKey || input.dataset.updateEligible !== "true") return;
+      button.disabled = !validatePmbPriceIncrease({
+        currentPricePerOz: input.dataset.currentPrice,
+        newPricePerOz: input.value,
+      }).valid;
+    });
+  });
+}
+
+function formatPriceInput(value) {
+  const price = toNumber(value);
+  return price ? price.toFixed(2) : "";
+}
+
+async function submitPmbPriceIncrease(updateKey) {
+  const key = clean(updateKey);
+  if (!key || activePmbPriceUpdateKey) return;
+  const source = pricingAdvisorInputsByKey.get(key);
+  const eligibility = getPmbPriceUpdateEligibility(source);
+  const row = [...pricingAdvisorTable.querySelectorAll("[data-pricing-advisor-key]")]
+    .find((candidate) => candidate.dataset.pricingAdvisorKey === key);
+  const input = row?.querySelector("[data-pmb-price-input]");
+  const newPricePerOz = Math.round(toNumber(input?.value) * 100) / 100;
+  const validation = validatePmbPriceIncrease({
+    currentPricePerOz: eligibility.currentPricePerOz,
+    newPricePerOz,
+  });
+
+  if (!eligibility.eligible) {
+    pmbPriceUpdateMessages.set(key, {
+      tone: "error",
+      text: eligibility.blockers.join(" ") || "This PMB price cannot be updated safely.",
+    });
+    renderPricing();
+    return;
+  }
+  if (!validation.valid) {
+    pmbPriceUpdateMessages.set(key, { tone: "error", text: validation.message });
+    renderPricing();
+    return;
+  }
+
+  const assignments = source.assignments?.length
+    ? source.assignments
+    : [{ ...eligibility.identity, wall: source.wall }];
+  const assignmentDetails = assignments.map((assignment) => {
+    const location = [
+      assignment.wall,
+      assignment.tapNumber ? `tap ${formatNumber(assignment.tapNumber)}` : "",
+    ].filter(Boolean).join(" ") || `Tap ${formatNumber(assignment.tapNumber)}`;
+    return `Affected assignment: ${location} · device ${assignment.deviceId} · line ${assignment.lineNum}`;
+  });
+
+  if (!confirmDashboardAction(
+    `Update ${source.name} in Pour My Beer?`,
+    [
+      `Current PMB price: ${money(eligibility.currentPricePerOz)} / oz`,
+      `New PMB price: ${money(newPricePerOz)} / oz`,
+      `PMB PLU: ${eligibility.plu}`,
+      ...assignmentDetails,
+    ],
+    "This is a live price increase. No change is sent unless you confirm.",
+  )) return;
+
+  activePmbPriceUpdateKey = key;
+  pmbPriceUpdateMessages.set(key, { tone: "pending", text: "Sending the confirmed increase to PMB..." });
+  renderPricing();
+
+  try {
+    const response = await fetch("/api/pmb-price-update", {
+      method: "POST",
+      credentials: "same-origin",
+      redirect: "manual",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        plu: eligibility.plu,
+        kind: eligibility.kind,
+        exactIdentity: eligibility.identity,
+        expectedAssignments: assignments.map(({ tapNumber, deviceId, lineNum }) => ({
+          tapNumber,
+          deviceId,
+          lineNum,
+        })),
+        expectedCurrentPricePerOz: eligibility.currentPricePerOz,
+        newPricePerOz,
+      }),
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok || result?.ok !== true) {
+      throw new Error(result?.error || "PMB did not confirm the price update.");
+    }
+    const backendWarning = clean(result?.warning);
+    const configUpdateIncomplete = result?.configUpdateComplete === false;
+
+    pmbPriceUpdateMessages.set(key, {
+      tone: backendWarning || configUpdateIncomplete ? "warning" : "success",
+      text: `PMB accepted ${money(newPricePerOz)} / oz. Refreshing live prices...${backendWarning ? ` ${backendWarning}` : ""}`,
+    });
+    const refreshed = await runTapPricingSync();
+    const refreshedPrice = toNumber(pricingAdvisorInputsByKey.get(key)?.currentPricePerOz);
+    const priceConfirmed = refreshed && Math.abs(refreshedPrice - newPricePerOz) < 0.005;
+    const warningCopy = [
+      configUpdateIncomplete ? "The PMB configuration refresh did not complete." : "",
+      backendWarning,
+    ].filter(Boolean).join(" ");
+    pmbPriceUpdateMessages.set(key, {
+      tone: priceConfirmed ? (warningCopy ? "warning" : "success") : "error",
+      text: priceConfirmed
+        ? `Live PMB price confirmed at ${money(newPricePerOz)} / oz.${warningCopy ? ` ${warningCopy}` : ""}`
+        : refreshed && refreshedPrice
+          ? `PMB accepted the update, but the refresh returned ${money(refreshedPrice)} / oz. Verify PMB before retrying.${warningCopy ? ` ${warningCopy}` : ""}`
+          : `PMB accepted the update, but the live price could not be refreshed. Refresh PMB prices before another change.${warningCopy ? ` ${warningCopy}` : ""}`,
+    });
+  } catch (error) {
+    pmbPriceUpdateMessages.set(key, {
+      tone: "error",
+      text: getPmbConnectionErrorMessage(error, "Could not update the PMB price.", { writeAttempted: true }),
+    });
+  } finally {
+    activePmbPriceUpdateKey = "";
+    renderPricing();
+  }
+}
+
+function getPricingAdvisorCurrentPrice(livePrice) {
+  const directPrice = toNumber(livePrice?.chargePerOz);
+  if (directPrice) return directPrice;
+  const portions = getLiveTapPortions(livePrice);
+  const single = portions.find((portion) => !/double/i.test(portion?.name || "")) || portions[0];
+  const servingOz = getPortionServingOz(single);
+  return servingOz ? toNumber(single?.price) / servingOz : 0;
+}
+
+function getRecipePricingAdvisorTimestamp(recipe) {
+  const pricedIngredients = (recipe?.ingredients || []).filter((ingredient) => (
+    toNumber(ingredient.oz) > 0 && getIngredientCost(ingredient).cost > 0
+  ));
+  if (!pricedIngredients.length) return "";
+
+  const timestamps = pricedIngredients.map((ingredient) => {
+    if (ingredient.manualCost) return "";
+    return clean(priceOverrides[getResolvedIngredientId(ingredient)]?.updatedAt);
+  });
+  if (timestamps.some((value) => !value)) return "";
+
+  return timestamps.reduce((oldest, value) => {
+    const valueTime = new Date(value.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] || value).getTime();
+    const oldestTime = new Date(oldest.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] || oldest).getTime();
+    if (!Number.isFinite(valueTime)) return value;
+    if (!Number.isFinite(oldestTime)) return oldest;
+    return valueTime < oldestTime ? value : oldest;
+  });
+}
+
+function getPricingAdvisorStatus(item) {
+  if (item.hasBlocker) return { label: "Needs data", tone: "blocked" };
+  if (item.action === "increase") return { label: "Review increase", tone: "change" };
+  if (item.action === "set") return { label: "Review new price", tone: "change" };
+  if (item.action === "hold") return { label: "No change", tone: "ready" };
+  if (item.needsReview) return { label: "Review inputs", tone: "review" };
+  return { label: "No change", tone: "ready" };
 }
 
 function renderTapPricingRow({ livePrice, recipe, kegItem }) {
@@ -2991,7 +4052,7 @@ function renderRecipeTapPricingRow(livePrice, recipe) {
   const override = chargeOverrides[recipe.id];
   const chargePerOz = toNumber(override) || livePrice?.chargePerOz || recipe.defaultChargePerOz || 0;
   const pricing = calculateRecipePricing(recipe, chargePerOz);
-  const sourceLabel = override ? "Manual override" : livePrice ? `PMB live: ${livePrice.name}` : "CSV fallback";
+  const sourceLabel = override ? "Dashboard calculation override (not PMB)" : livePrice ? `PMB live: ${livePrice.name}` : "CSV fallback";
   const row = document.createElement("tr");
   row.innerHTML = `
     <td>${formatTapCell(livePrice)}</td>
@@ -3142,7 +4203,7 @@ function renderPricingSummary(visibleTapRows = getLiveTapPricingRows(pricingSear
     </div>
     <div class="summary-line"><span>Cocktail recipes</span><strong>${activeRecipes.length}</strong></div>
     <div class="summary-line"><span>Current PMB taps</span><strong>${liveTapPriceItems.length || visibleTapRows.length}</strong></div>
-    <div class="summary-line"><span>Charge overrides</span><strong>${countChargeOverrides()}</strong></div>
+    <div class="summary-line"><span>Dashboard calculation overrides</span><strong>${countChargeOverrides()}</strong></div>
     <div class="summary-line"><span>PMB live prices</span><strong>${escapeHtml(liveStatus)}</strong></div>
     <div class="summary-line"><span>Projected batch revenue</span><strong>${money(revenue)}</strong></div>
     <div class="summary-line"><span>Projected batch profit</span><strong>${money(profit)}</strong></div>
@@ -3182,6 +4243,7 @@ function renderIngredients() {
       const mappedBottleOz = ingredient.vendorProduct?.bottleOz ? formatNumber(ingredient.vendorProduct.bottleOz) : "";
       const previousPriceNote = getPreviousPriceNote(override);
       const row = document.createElement("tr");
+      row.dataset.globalSearchKey = `ingredient:${ingredient.id}`;
       row.innerHTML = `
         <td>
           <strong>${escapeHtml(ingredient.name)}</strong>
@@ -3213,6 +4275,7 @@ function renderIngredients() {
       const previousPriceNote = getPreviousPriceNote(override);
       const staleSmallKegOverride = isStaleSmallBeerKegOverride(item, override);
       const row = document.createElement("tr");
+      row.dataset.globalSearchKey = `keg-price:${item.id}`;
       row.innerHTML = `
         <td>
           <strong>${escapeHtml(item.name)}</strong>
@@ -3283,10 +4346,1064 @@ function renderInventory() {
   const groupedItems = groupInventoryForDisplay(visibleItems);
   const reorderItems = getInventoryReorderItems(visibleItems);
 
+  renderWeeklyPlan();
   renderInventorySummary(visibleItems, reorderItems);
   renderInventoryStockTable(groupedItems);
   renderInventoryOrderTable(reorderItems);
   renderInventoryHistory();
+}
+
+function getWeeklyPlanInventoryItems() {
+  return inventoryItems
+    .filter((item) => item.orderQuantity > 0 || item.orderHoldReason)
+    .map((item) => {
+      const orderUnits = getInventoryRoundedOrderQuantity(item);
+      const hasCurrentCount = Object.prototype.hasOwnProperty.call(inventoryOnHandOverrides, item.id);
+      const countHoldReason = !hasCurrentCount && toNumber(item.parDisplay) > 0
+        ? `No current saved count; the displayed on-hand value is from the ${formatUpdatedAt(INVENTORY_BASELINE_DATE)} baseline.`
+        : "";
+      return {
+        id: item.id,
+        name: item.name,
+        group: item.group,
+        orderUnits,
+        casePackaged: item.casePackaged,
+        packSize: item.packSize,
+        vendor: item.vendorProduct?.vendor || item.vendorProduct?.syncVendor || "",
+        estimatedCost: item.excludeFromInventoryValue ? 0 : orderUnits * toNumber(item.unitCost),
+        unitCost: item.excludeFromInventoryValue ? 0 : toNumber(item.unitCost),
+        hasKnownPrice: item.excludeFromInventoryValue || toNumber(item.unitCost) > 0,
+        onHand: toNumber(item.onHandDisplay),
+        par: toNumber(item.parDisplay),
+        hasCurrentCount,
+        orderHoldReason: item.orderHoldReason || countHoldReason,
+      };
+    });
+}
+
+function getWeeklyPlanRecommendations() {
+  if (!hasCurrentParAgentRecommendations()) return [];
+  return (parAgentState?.recommendations?.items || []).map((item) => {
+    if (!item.isKegTap || item.actionType !== "order") return item;
+    const pricingItem = getKegPricingItem(item.orderProductName || item.name);
+    const unitCost = pricingItem ? getKegPrice(pricingItem) : 0;
+    return {
+      ...item,
+      vendor: pricingItem?.vendor || "",
+      unitCost,
+    };
+  });
+}
+
+function getWeeklyPlanTapContext(item, unit) {
+  const taps = item.tapNumbers.length
+    ? `Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.map(formatNumber).join(", ")}`
+    : "Tap assignment unavailable";
+  const walls = item.walls.length ? ` · ${item.walls.join(", ")}` : "";
+  if (unit === "oz") {
+    return `${taps}${walls} · ${formatNumber(item.currentStockOunces)} oz current · ${formatNumber(item.avgWeeklyOunces)} oz avg/week`;
+  }
+  return `${taps}${walls} · ${formatNumber(item.currentStockKegs)} kegs in stock · ${formatNumber(item.avgWeeklyKegs)} avg/week`;
+}
+
+function renderWeeklyPlanInventoryRows(items) {
+  if (!items.length) return '<p class="weekly-plan-empty">No active order lines in this section.</p>';
+  return `<div class="weekly-plan-list">${items.map((item) => {
+    const quantity = item.casePackaged
+      ? `${formatNumber(item.caseCount)} case${item.caseCount === 1 ? "" : "s"} · ${formatNumber(item.quantity)} units`
+      : `${formatNumber(item.quantity)} unit${item.quantity === 1 ? "" : "s"}`;
+    const details = [
+      item.vendor,
+      `${formatNumber(item.onHand)} on hand / ${formatNumber(item.par)} par`,
+      item.estimatedCost > 0 ? `${money(item.estimatedCost)} estimated` : "Price needed",
+    ].filter(Boolean).join(" · ");
+    return `
+      <div class="weekly-plan-item">
+        <div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(details)}</span></div>
+        <b>${escapeHtml(quantity)}</b>
+      </div>
+    `;
+  }).join("")}</div>`;
+}
+
+function renderWeeklyPlanTapRows(items, { action, unit = "kegs" } = {}) {
+  if (!items.length) return `<p class="weekly-plan-empty">No active lines to ${escapeHtml(action.toLowerCase())} in this section.</p>`;
+  return `<div class="weekly-plan-list">${items.map((item) => `
+    <div class="weekly-plan-item">
+      <div>
+        <strong>${escapeHtml(item.name)}</strong>
+        <span>${escapeHtml(getWeeklyPlanTapContext(item, unit === "refills" ? "oz" : "kegs"))}</span>
+      </div>
+      <b>${escapeHtml(action)} ${formatNumber(item.quantity)} ${escapeHtml(unit === "refills" ? `refill${item.quantity === 1 ? "" : "s"}` : `keg${item.quantity === 1 ? "" : "s"}`)}</b>
+    </div>
+  `).join("")}</div>`;
+}
+
+function renderWeeklyPlanGroup(title, count, content, accent = "") {
+  return `
+    <section class="weekly-plan-group ${accent ? `weekly-plan-group--${accent}` : ""}">
+      <div class="weekly-plan-group__header"><h3>${escapeHtml(title)}</h3><strong>${formatNumber(count)}</strong></div>
+      ${content}
+    </section>
+  `;
+}
+
+function getLatestPriceTimestamp() {
+  return [...Object.values(priceOverrides), ...Object.values(kegPriceOverrides)]
+    .map((entry) => clean(entry?.updatedAt))
+    .map((value) => {
+      const embeddedDate = value.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0];
+      const time = new Date(embeddedDate || value).getTime();
+      return Number.isFinite(time) ? time : 0;
+    })
+    .reduce((latest, time) => Math.max(latest, time), 0);
+}
+
+function getWeeklyPlanMissingInventoryCount() {
+  return inventoryItems.filter((item) => (
+    toNumber(item.parDisplay) > 0
+    && !Object.prototype.hasOwnProperty.call(inventoryOnHandOverrides, item.id)
+  )).length;
+}
+
+function getWeeklyPlanFreshness(plan) {
+  const latestCompletedWeek = getCompletedMondayWeekStarts(1)[0] || null;
+  const latestCompletedTime = latestCompletedWeek?.getTime() || 0;
+  const latestCompletedUsageRowCount = latestCompletedTime
+    ? weeklyUsageItems.filter((item) => (
+      (item.history || []).some((entry) => getWeeklyUsageLabelTime(entry.label) === latestCompletedTime)
+    )).length
+    : 0;
+  const requiredUsageRows = Math.max(1, weeklyUsageItems.length);
+  const latestCompletedUsageSaved = latestCompletedTime > 0 && hasCompleteWeeklyUsageRows(
+    weeklyUsageItems,
+    (item) => (item.history || []).some((entry) => getWeeklyUsageLabelTime(entry.label) === latestCompletedTime),
+  );
+  const recommendationSummary = parAgentState?.recommendations?.summary || {};
+  const readiness = evaluateWeeklyPlanReadiness({
+    parInitialized: Boolean(parAgentState?.initialized),
+    recommendationGeneratedAt: parAgentState?.recommendations?.generatedAt,
+    recommendationError: parAgentError || (parAgentStateOutbox ? "Keg Levels has an unsynced recovery operation." : ""),
+    recommendationInventoryMissing: Boolean(recommendationSummary.inventoryStateMissing),
+    recommendationSourceCurrent: hasCurrentParAgentRecommendations(),
+    parInputsChangedAt: parAgentInputsChangedAt,
+    weeklyUsageInitialized: weeklyUsageSharedInitialized,
+    weeklyUsageSavePending: weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites > 0 || Boolean(weeklyUsageSharedSaveTimer) || Boolean(weeklyUsageSharedOutbox),
+    weeklyUsageSaveError: weeklyUsageSharedSaveError || (!weeklyUsageSharedOutboxDurable ? "Pending Weekly Usage could not be stored durably in this browser." : ""),
+    latestCompletedUsageSaved,
+    weeklyUsageLastSyncAt,
+    inventoryInitialized: inventorySharedInitialized,
+    inventorySavePending: inventorySharedSaving || inventoryFieldSyncPendingCount > 0 || inventoryFieldSyncTimers.size > 0 || Object.keys(inventoryFieldOutbox).length > 0 || inventoryActionOutbox.length > 0,
+    inventorySaveError: inventorySharedSaveError || (!inventoryFieldOutboxDurable || !inventoryActionOutboxDurable ? "Pending Inventory changes could not be stored durably in this browser." : ""),
+    missingInventoryCount: getWeeklyPlanMissingInventoryCount(),
+    heldLineCount: plan.summary.heldLineCount,
+    excludedLineCount: plan.summary.excludedLineCount,
+    missingPriceCount: plan.summary.missingPriceCount,
+    coolerCapacitySet: toNumber(getParAgentSettings().coolerCapacityKegs) > 0,
+  });
+  return {
+    latestCompletedWeek,
+    latestCompletedUsageSaved,
+    latestCompletedUsageRowCount,
+    requiredUsageRows,
+    readiness,
+  };
+}
+
+function getDashboardSharedOverviewSource() {
+  return {
+    available: dashboardSharedProvisioned,
+    provisioned: dashboardSharedProvisioned,
+    initialized: Boolean(dashboardSharedState.initialized),
+    savePending: ["loading", "importing", "saving"].includes(dashboardSharedSyncStatus)
+      || dashboardSharedPendingSlices.size > 0
+      || getDashboardSharedOutboxPaths().length > 0,
+    saveError: ["conflict", "offline"].includes(dashboardSharedSyncStatus)
+      ? dashboardSharedSyncMessage
+      : "",
+    unsavedCount: getDashboardSharedOutboxPaths().length,
+    durable: dashboardSharedOutboxDurable && dashboardSharedLocalCacheDurable,
+  };
+}
+
+function getInventorySharedOverviewSource() {
+  const unsavedCount = inventoryFieldSyncPendingCount
+    + inventoryFieldSyncTimers.size
+    + Object.keys(inventoryFieldOutbox).length
+    + inventoryActionOutbox.length;
+  return {
+    available: inventorySharedProvisioned,
+    provisioned: inventorySharedProvisioned,
+    initialized: inventorySharedInitialized,
+    savePending: inventorySharedSaving || unsavedCount > 0,
+    saveError: inventorySharedSaveError,
+    unsavedCount,
+    durable: inventoryFieldOutboxDurable && inventoryActionOutboxDurable,
+  };
+}
+
+function getWeeklyUsageSharedOverviewSource() {
+  const unsavedCount = weeklyUsageSharedPendingWrites
+    + Number(Boolean(weeklyUsageSharedSaveTimer))
+    + Number(Boolean(weeklyUsageSharedOutbox));
+  return {
+    available: weeklyUsageSharedProvisioned,
+    provisioned: weeklyUsageSharedProvisioned,
+    initialized: weeklyUsageSharedInitialized,
+    savePending: weeklyUsageSharedSaving || unsavedCount > 0,
+    saveError: weeklyUsageSharedSaveError,
+    unsavedCount,
+    durable: weeklyUsageSharedOutboxDurable,
+  };
+}
+
+function getKegLevelsSharedOverviewSource() {
+  return {
+    available: Boolean(parAgentState),
+    provisioned: Boolean(parAgentState),
+    initialized: Boolean(parAgentState?.initialized),
+    savePending: Boolean(parAgentStateSyncTimer || parAgentStateOutbox),
+    saveError: parAgentError,
+    hasOutbox: Boolean(parAgentStateOutbox),
+    durable: parAgentStateOutboxDurable,
+  };
+}
+
+function getPmbKegLevelOverviewFeed() {
+  const expectedCount = kegWallItems.length;
+  const capturedCount = kegWallItems.filter((item) => getKegLiveRow(item)).length;
+  const status = kegSyncLoading
+    ? "loading"
+    : kegUpdatedAt
+      ? capturedCount < expectedCount
+        ? "partial"
+        : "online"
+      : kegSyncAttempted
+        ? "loading"
+        : /could not|unavailable|failed|timed out|connect/i.test(kegSyncMessage)
+          ? "offline"
+          : "not-checked";
+  return {
+    status,
+    capturedCount,
+    expectedCount: status === "not-checked" ? 0 : expectedCount,
+    updatedAt: kegUpdatedAt,
+    error: !kegUpdatedAt && kegSyncAttempted ? kegSyncMessage : "",
+  };
+}
+
+function getPmbPricingOverviewFeed() {
+  const expectedCount = kegWallItems.length || liveTapPriceItems.length;
+  const capturedCount = liveTapPriceItems.length;
+  const status = tapPricingSyncLoading
+    ? "loading"
+    : liveTapPricingUpdatedAt
+      ? expectedCount > 0 && capturedCount < expectedCount
+        ? "partial"
+        : "online"
+      : tapPricingSyncAttempted
+        ? "loading"
+        : /could not|unavailable|failed|timed out|connect/i.test(liveTapPricingMessage)
+          ? "offline"
+          : "not-checked";
+  return {
+    status,
+    capturedCount,
+    expectedCount: status === "not-checked" ? 0 : expectedCount,
+    updatedAt: liveTapPricingUpdatedAt,
+    error: !liveTapPricingUpdatedAt && tapPricingSyncAttempted ? liveTapPricingMessage : "",
+  };
+}
+
+function renderDashboardAlert(alert) {
+  const details = alert.details || [];
+  return `
+    <article class="dashboard-alert dashboard-alert--${escapeHtml(alert.severity)}">
+      <div class="dashboard-alert__marker" aria-hidden="true"></div>
+      <div class="dashboard-alert__copy">
+        <span>${escapeHtml(alert.severity === "critical" ? "Action required" : alert.severity === "warning" ? "Review" : "Good to know")}</span>
+        <h3>${escapeHtml(alert.title)}</h3>
+        <p>${escapeHtml(alert.message)}</p>
+        ${details.length ? `<details><summary>See ${formatNumber(details.length)} detail${details.length === 1 ? "" : "s"}</summary><ul>${details.map((detail) => `<li>${escapeHtml(detail)}</li>`).join("")}</ul></details>` : ""}
+      </div>
+      ${alert.action ? `<button class="dashboard-overview-link" type="button" data-dashboard-target="${escapeHtml(alert.action.target)}">${escapeHtml(alert.action.label)} <span aria-hidden="true">→</span></button>` : ""}
+    </article>
+  `;
+}
+
+function renderDashboardOverview() {
+  if (!dashboardOverview || isEmployeeDashboard) return;
+  const plan = buildWeeklyActionPlan({
+    inventoryItems: getWeeklyPlanInventoryItems(),
+    recommendations: getWeeklyPlanRecommendations(),
+  });
+  const freshness = getWeeklyPlanFreshness(plan);
+  const usagePerformance = buildWeeklyUsagePerformance(weeklyUsageItems, {
+    category: "all",
+    getFullOunces: getWeeklyUsageFullOunces,
+    limit: 10,
+  });
+  const pricingAdvisor = buildPricingAdvisor(
+    getLiveTapPricingRows("").map(buildPricingAdvisorInput).filter((item) => isPricingAdvisorEligibleKind(item.kind)),
+  );
+  const recipeCoverage = getWallCocktailRecipeCoverage();
+  const queueCounts = getPmbPublishQueueCounts(pmbPublishQueue);
+  const overview = buildDashboardOverview({
+    weeklyPlan: {
+      readiness: freshness.readiness,
+      generatedAt: parAgentState?.recommendations?.generatedAt,
+      summary: plan.summary,
+    },
+    shared: {
+      dashboard: getDashboardSharedOverviewSource(),
+      inventory: getInventorySharedOverviewSource(),
+      weeklyUsage: getWeeklyUsageSharedOverviewSource(),
+      kegLevels: getKegLevelsSharedOverviewSource(),
+    },
+    pmb: {
+      kegLevels: getPmbKegLevelOverviewFeed(),
+      pricing: getPmbPricingOverviewFeed(),
+    },
+    usage: {
+      initialized: weeklyUsageSharedInitialized,
+      lastSyncAt: weeklyUsageLastSyncAt,
+      performance: usagePerformance,
+    },
+    pricing: {
+      targetMarginPercent: DEFAULT_BEER_TARGET_MARGIN,
+      advisorSummary: pricingAdvisor.summary,
+    },
+    inventory: { missingCurrentCount: getWeeklyPlanMissingInventoryCount() },
+    recipes: { missingRecipeCount: recipeCoverage.missing.length },
+    products: { pendingPublishCount: queueCounts.ready + queueCounts.failed },
+    deferred: { cocktailIngredientNetting: true, liquorRefillNetting: true },
+  }, { now: new Date() });
+  const leadingAlerts = overview.alerts.slice(0, 6);
+
+  dashboardOverview.innerHTML = `
+    <header class="dashboard-overview-hero dashboard-overview-hero--${escapeHtml(overview.status)}">
+      <div class="dashboard-overview-hero__copy">
+        <p class="eyebrow">Owner command center</p>
+        <h2>This week, at a glance</h2>
+        <p>Orders, production, live-system checks, and owner alerts in one organized starting point.</p>
+        <div class="dashboard-overview-status">
+          <span>${escapeHtml(overview.statusLabel)}</span>
+          <strong>${formatNumber(overview.alertCounts.critical)} urgent · ${formatNumber(overview.alertCounts.warning)} to review</strong>
+        </div>
+      </div>
+      <div class="dashboard-overview-hero__actions">
+        <button class="primary-button" type="button" data-dashboard-target="weekly-plan">Open Weekly Plan</button>
+        <button class="ghost-button" type="button" data-dashboard-target="keg-levels">Check Keg Levels</button>
+      </div>
+    </header>
+
+    <section class="dashboard-kpi-grid" aria-label="Weekly operations summary">
+      ${overview.kpis.map((kpi) => `
+        <button class="dashboard-kpi dashboard-kpi--${escapeHtml(kpi.tone)}" type="button" data-dashboard-target="${escapeHtml(kpi.target)}">
+          <span>${escapeHtml(kpi.label)}</span>
+          <strong>${escapeHtml(kpi.value)}</strong>
+          <small>${escapeHtml(kpi.detail)}</small>
+          <em>${kpi.confidence === "verified" ? "Verified" : kpi.confidence === "partial" ? "Partial" : "Needs current data"}</em>
+        </button>
+      `).join("")}
+    </section>
+
+    <div class="dashboard-overview-layout">
+      <section class="dashboard-overview-alerts" aria-labelledby="dashboard-alerts-title">
+        <div class="dashboard-section-heading">
+          <div><p class="eyebrow">Prioritized for you</p><h2 id="dashboard-alerts-title">Alerts &amp; follow-ups</h2></div>
+          <span>${formatNumber(overview.alerts.length)} total</span>
+        </div>
+        <div class="dashboard-alert-list">
+          ${leadingAlerts.length ? leadingAlerts.map(renderDashboardAlert).join("") : '<div class="dashboard-overview-empty"><strong>No current alerts</strong><span>Your checked operating inputs are ready.</span></div>'}
+        </div>
+        ${overview.alerts.length > leadingAlerts.length ? `<p class="dashboard-alert-more">${formatNumber(overview.alerts.length - leadingAlerts.length)} additional informational notice${overview.alerts.length - leadingAlerts.length === 1 ? "" : "s"} are available in the linked workspaces.</p>` : ""}
+      </section>
+
+      <aside class="dashboard-quick-actions" aria-labelledby="dashboard-quick-actions-title">
+        <div class="dashboard-section-heading">
+          <div><p class="eyebrow">Keep moving</p><h2 id="dashboard-quick-actions-title">Quick actions</h2></div>
+        </div>
+        <div class="dashboard-quick-action-list">
+          ${overview.quickActions.map((action, index) => `
+            <button class="dashboard-quick-action dashboard-quick-action--${escapeHtml(action.tone)}" type="button" data-dashboard-target="${escapeHtml(action.target)}">
+              <span><b>${String(index + 1).padStart(2, "0")}</b>${escapeHtml(action.label)}</span>
+              <i aria-hidden="true">↗</i>
+            </button>
+          `).join("")}
+        </div>
+        <div class="dashboard-trust-note">
+          <strong>Numbers stay honest</strong>
+          <p>When PMB coverage, shared saves, or weekly inputs are incomplete, operational quantities are hidden instead of guessed.</p>
+        </div>
+      </aside>
+    </div>
+
+    <section class="onpar-insights" id="onpar-insights" aria-labelledby="onpar-insights-title"></section>
+  `;
+  renderOnParInsights();
+}
+
+function getWeeklyUsageItemProfitRate(item) {
+  const tapNumber = toNumber(item?.tapNumber);
+  const plu = toNumber(item?.plu);
+  if (!tapNumber || !plu) {
+    return { grossProfitPerOz: null, reason: "Exact PMB tap and PLU identity are required." };
+  }
+
+  const matches = liveTapPriceItems.filter((livePrice) => {
+    if (livePrice?.isCurrentTap !== true || clean(livePrice?.tapMatchSource) !== "pmb-tap-config") return false;
+    if (toNumber(livePrice?.plu) !== plu) return false;
+    const assignments = Array.isArray(livePrice.assignments) ? livePrice.assignments : [];
+    return assignments.some((assignment) => toNumber(assignment?.tapNumber) === tapNumber);
+  });
+  if (matches.length !== 1) {
+    return { grossProfitPerOz: null, reason: "Refresh PMB prices to verify this exact physical tap." };
+  }
+  const livePrice = matches[0];
+  const category = getWeeklyUsagePerformanceCategory(item);
+
+  if (category === "beer") {
+    const kegMatches = kegPricingItems.filter((kegItem) => (
+      getKegPricingKey(kegItem?.name) === getKegPricingKey(livePrice.name)
+    ));
+    const sellingPrice = toNumber(livePrice.chargePerOz);
+    const costPerOz = kegMatches.length === 1 ? getKegCatalogUnitCost(kegMatches[0]) : 0;
+    if (!sellingPrice || !costPerOz) {
+      return { grossProfitPerOz: null, reason: "Verified live beer price and keg cost are required." };
+    }
+    return sellingPrice - costPerOz;
+  }
+
+  if (category === "cocktail") {
+    const liveAliases = getTapPriceAliases(livePrice.name);
+    const recipeMatches = getActiveRecipes().filter((recipe) => (
+      liveAliases.some((alias) => getTapPriceAliases(recipe.title).includes(alias))
+    ));
+    const recipe = recipeMatches.length === 1 ? recipeMatches[0] : null;
+    const sellingPrice = toNumber(livePrice.chargePerOz);
+    const missingCost = recipe?.ingredients?.some((ingredient) => (
+      toNumber(ingredient.oz) > 0
+      && normalizeIngredientAlias(ingredient.name).toLowerCase() !== "water"
+      && !(getIngredientCost(ingredient).cost > 0)
+    ));
+    const costPerOz = recipe && !missingCost ? getRecipeTotals(recipe).costPerOz : 0;
+    if (!sellingPrice || !costPerOz) {
+      return { grossProfitPerOz: null, reason: "Verified live cocktail price and complete recipe cost are required." };
+    }
+    return sellingPrice - costPerOz;
+  }
+
+  const ingredient = getIngredientForLiveTapPrice(livePrice);
+  const costPerOz = ingredient ? getCatalogUnitCost(ingredient) : 0;
+  const portions = getLiveTapPortions(livePrice);
+  if (!costPerOz || portions.length !== 2 || portions.some((portion) => (
+    !(toNumber(portion.price) > 0) || !(toNumber(portion.quantityOz) > 0)
+  ))) {
+    return {
+      grossProfitPerOz: null,
+      reason: "Liquor profit needs two verified PMB portion quantities and a mapped bottle cost.",
+    };
+  }
+  const sellingRates = portions.map((portion) => toNumber(portion.price) / toNumber(portion.quantityOz));
+  if (Math.abs(sellingRates[0] - sellingRates[1]) > 0.0001) {
+    return {
+      grossProfitPerOz: null,
+      reason: "Single and Double portions have different per-ounce prices, and PMB usage does not include the portion mix.",
+    };
+  }
+  return sellingRates[0] - costPerOz;
+}
+
+function renderSellerRankingList(rows, metric, emptyMessage) {
+  if (!rows.length) return `<p class="onpar-ranking-empty">${escapeHtml(emptyMessage)}</p>`;
+  return `<ol class="onpar-ranking-list">${rows.map((row, index) => {
+    const value = metric === "profit"
+      ? money(row.averageWeeklyGrossProfit)
+      : `${formatNumber(row.averageWeeklyOz)} oz`;
+    const categoryLabel = getWeeklyUsagePerformanceCategoryLabel(row.category);
+    const wallLabel = row.walls?.join(", ") || "Unassigned";
+    const wallDetail = /wall$/i.test(wallLabel) ? wallLabel : `${wallLabel} wall`;
+    const tapLabel = row.tapNumbers?.length ? `${row.tapNumbers.length === 1 ? "Tap" : "Taps"} ${row.tapNumbers.join(", ")}` : "Saved PMB history";
+    return `
+      <li>
+        <span class="onpar-ranking-list__rank">${index + 1}</span>
+        <div class="onpar-ranking-list__product">
+          <strong>${escapeHtml(row.name)}</strong>
+          <small>${escapeHtml(categoryLabel)} · ${escapeHtml(wallDetail)} · ${escapeHtml(tapLabel)} · ${formatNumber(row.sampleWeekCount)} recorded week${row.sampleWeekCount === 1 ? "" : "s"}</small>
+        </div>
+        <span class="onpar-ranking-list__value">${escapeHtml(value)}<small>/ week</small></span>
+      </li>`;
+  }).join("")}</ol>`;
+}
+
+function renderSellerRankingPeriod(period, { title, allTime, metric, emptyMessage, listSize }) {
+  const periodDescription = period.weekCount
+    ? `${formatNumber(period.weekCount)} saved PMB week${period.weekCount === 1 ? "" : "s"}`
+    : "No saved PMB weeks";
+  return `
+    <article class="onpar-insights-period${allTime ? " onpar-insights-period--all-time" : ""}">
+      <header class="onpar-insights-period__header">
+        <div><p class="eyebrow">${allTime ? "Long view" : "Recent demand"}</p><h3>${escapeHtml(title)}</h3></div>
+        <small>${escapeHtml(periodDescription)}</small>
+      </header>
+      <div class="onpar-insights-period__body">
+        <section class="onpar-ranking" aria-label="Top ${formatNumber(listSize)} sellers">
+          <div class="onpar-ranking__title"><h4>Top ${formatNumber(listSize)}</h4><span>${metric === "profit" ? "Avg est. profit" : "Avg poured volume"}</span></div>
+          ${renderSellerRankingList(period.top, metric, emptyMessage)}
+        </section>
+        <section class="onpar-ranking" aria-label="Bottom ${formatNumber(listSize)} sellers">
+          <div class="onpar-ranking__title"><h4>Bottom ${formatNumber(listSize)}</h4><span>${metric === "profit" ? "Avg est. profit" : "Avg poured volume"}</span></div>
+          ${renderSellerRankingList(period.bottom, metric, emptyMessage)}
+        </section>
+      </div>
+    </article>`;
+}
+
+function renderOhioComplianceAlert() {
+  const watch = buildOhioComplianceWatchViewModel(beverageNewsPayload?.complianceWatch, {
+    acknowledgedFingerprint: ohioComplianceAcknowledgement.fingerprint,
+  });
+  if (!watch.isVisible) return "";
+  const links = watch.sources.map((source) => `
+    <a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.source || "Official Ohio source")} ↗</a>
+  `).join("");
+  return `
+    <aside class="ohio-compliance-alert" role="region" aria-labelledby="ohio-compliance-alert-title">
+      <span class="ohio-compliance-alert__marker" aria-hidden="true"></span>
+      <div class="ohio-compliance-alert__copy">
+        <span>Official Ohio change</span>
+        <h3 id="ohio-compliance-alert-title">${escapeHtml(watch.alert.title)}</h3>
+        <p>${escapeHtml(watch.alert.message)} Review the official pages before making a compliance decision.</p>
+      </div>
+      <div class="ohio-compliance-alert__actions">${links}<button class="ghost-button" type="button" data-ohio-compliance-reviewed>Mark reviewed</button></div>
+    </aside>`;
+}
+
+function renderOnParInsights() {
+  const container = document.querySelector("#onpar-insights");
+  if (!container || isEmployeeDashboard) return;
+  const recentWeekLimit = sellerRankingPeriod === "one-week" ? 1 : 6;
+  const rankings = buildWeeklyUsageSellerRankings(
+    [...weeklyUsageItems, ...weeklyUsageArchivedItems],
+    {
+      category: sellerRankingCategory,
+      wall: sellerRankingWall,
+      metric: sellerRankingMetric,
+      getFullOunces: getWeeklyUsageFullOunces,
+      getGrossProfitPerOz: getWeeklyUsageItemProfitRate,
+      recentWeekLimit,
+      topLimit: sellerRankingListSize,
+      bottomLimit: sellerRankingListSize,
+    },
+  );
+  const unavailableExactVolumeSamples = rankings.metricMetadata.unavailableExactVolumeSampleCount;
+  const profitCoverage = sellerRankingMetric === "profit"
+    ? [
+        rankings.metricMetadata.unavailableItemCount
+          ? `${formatNumber(rankings.metricMetadata.unavailableItemCount)} product${rankings.metricMetadata.unavailableItemCount === 1 ? "" : "s"} excluded because price, cost, or liquor portion economics could not be verified.`
+          : "",
+        unavailableExactVolumeSamples
+          ? `${formatNumber(unavailableExactVolumeSamples)} saved sample${unavailableExactVolumeSamples === 1 ? "" : "s"} excluded because exact PMB ounces were unavailable.`
+          : "",
+        !rankings.metricMetadata.unavailableItemCount && !unavailableExactVolumeSamples
+          ? "All ranked products have verified current price, cost, and exact PMB ounces."
+          : "",
+      ].filter(Boolean).join(" ")
+    : "Exact PMB poured ounces; corporate-party pours remain included.";
+  const identityCoverage = rankings.quality.unverifiedIdentityItemCount
+    ? `${formatNumber(rankings.quality.unverifiedIdentityItemCount)} saved historical ${rankings.quality.unverifiedIdentityItemCount === 1 ? "product was" : "products were"} excluded because ${rankings.quality.unverifiedIdentityItemCount === 1 ? "its" : "their"} wall or drink type could not be verified.`
+    : "";
+  const emptyMessage = sellerRankingMetric === "profit"
+    ? "No products in this filter have enough exact PMB usage plus verified current price and cost data."
+    : "No positive PMB poured usage is saved for this filter.";
+  const periodRankings = sellerRankingPeriod === "all-time"
+      ? rankings.allTime
+      : rankings.recent;
+  const periodTitle = sellerRankingPeriod === "one-week"
+    ? "Latest saved week"
+    : sellerRankingPeriod === "all-time"
+      ? "All saved PMB weeks"
+      : "Last 6 saved weeks";
+
+  container.innerHTML = `
+    <header class="onpar-insights__header">
+      <div>
+        <p class="eyebrow">On Par insights</p>
+        <h2 id="onpar-insights-title">On Par performance</h2>
+        <p>Rankings use average weekly PMB usage, not GoTab sales. One wall is shown at a time, and missing weeks are never assumed to be zero.</p>
+      </div>
+      <div class="onpar-insights__controls">
+        <label class="select-field"><span>Drinks</span><select data-seller-ranking-category>
+          <option value="all"${sellerRankingCategory === "all" ? " selected" : ""}>All beverages</option>
+          <option value="beer"${sellerRankingCategory === "beer" ? " selected" : ""}>Beer</option>
+          <option value="cocktail"${sellerRankingCategory === "cocktail" ? " selected" : ""}>Cocktails</option>
+          <option value="liquor"${sellerRankingCategory === "liquor" ? " selected" : ""}>Liquor</option>
+        </select></label>
+        <label class="select-field"><span>Wall</span><select data-seller-ranking-wall>
+          <option value="main"${sellerRankingWall === "main" ? " selected" : ""}>Main wall</option>
+          <option value="karaoke"${sellerRankingWall === "karaoke" ? " selected" : ""}>Karaoke wall</option>
+          <option value="patio"${sellerRankingWall === "patio" ? " selected" : ""}>Patio liquor wall</option>
+        </select></label>
+        <label class="select-field"><span>Show per list</span><select data-seller-ranking-list-size>
+          ${[3, 5, 10, 15, 25].map((size) => `<option value="${size}"${sellerRankingListSize === size ? " selected" : ""}>${size} drinks</option>`).join("")}
+        </select></label>
+        <label class="select-field"><span>Period</span><select data-seller-ranking-period>
+          <option value="one-week"${sellerRankingPeriod === "one-week" ? " selected" : ""}>1 week</option>
+          <option value="six-weeks"${sellerRankingPeriod === "six-weeks" ? " selected" : ""}>6 weeks</option>
+          <option value="all-time"${sellerRankingPeriod === "all-time" ? " selected" : ""}>All time</option>
+        </select></label>
+        <label class="select-field"><span>Rank by</span><select data-seller-ranking-metric>
+          <option value="volume"${sellerRankingMetric === "volume" ? " selected" : ""}>Poured volume</option>
+          <option value="profit"${sellerRankingMetric === "profit" ? " selected" : ""}>Est. profit (today's rates)</option>
+        </select></label>
+      </div>
+    </header>
+    ${renderOhioComplianceAlert()}
+    <div class="onpar-insights__periods">
+      ${renderSellerRankingPeriod(periodRankings, { title: periodTitle, allTime: sellerRankingPeriod === "all-time", metric: sellerRankingMetric, emptyMessage, listSize: sellerRankingListSize })}
+    </div>
+    <footer class="onpar-insights__footer">
+      <span>${escapeHtml([profitCoverage, identityCoverage].filter(Boolean).join(" "))}</span>
+      <span>${sellerRankingMetric === "profit" ? "Estimate uses today’s verified PMB price and current dashboard cost—not historical realized profit." : "Averages use only the weeks recorded for each product."}</span>
+    </footer>`;
+}
+
+async function loadBeverageNews({ force = false } = {}) {
+  if (beverageNewsLoading || isEmployeeDashboard) return;
+  beverageNewsLoading = true;
+  renderDashboardOverview();
+
+  try {
+    const response = await fetch(`/api/beverage-news?scope=compliance${force ? "&refresh=1" : ""}`, {
+      cache: "no-store",
+      credentials: "same-origin",
+      redirect: "manual",
+      headers: { Accept: "application/json" },
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) throw new Error(result?.error || "Could not check official Ohio compliance sources.");
+    beverageNewsPayload = result;
+    establishOhioComplianceBaselineIfNeeded();
+  } catch (error) {
+    const message = clean(error?.message) || "Official Ohio compliance sources could not be checked.";
+    beverageNewsPayload = beverageNewsPayload
+      ? {
+          ...beverageNewsPayload,
+          status: "partial",
+          errors: [...(beverageNewsPayload.errors || []), { source: "Ohio compliance watch", message }].slice(-6),
+        }
+      : {
+          status: "offline",
+          updatedAt: "",
+          items: [],
+          regulatoryWatch: [],
+          officialResources: [],
+          complianceWatch: { status: "unavailable", isComplete: false, currentFingerprint: "", sources: [] },
+          errors: [{ source: "Ohio compliance watch", message }],
+        };
+  } finally {
+    beverageNewsLoading = false;
+    renderDashboardOverview();
+  }
+}
+
+function getOhioComplianceView() {
+  return buildOhioComplianceWatchViewModel(beverageNewsPayload?.complianceWatch, {
+    acknowledgedFingerprint: ohioComplianceAcknowledgement.fingerprint,
+  });
+}
+
+function saveOhioComplianceAcknowledgement(fingerprint) {
+  ohioComplianceAcknowledgement = {
+    fingerprint: clean(fingerprint),
+    acknowledgedAt: new Date().toISOString(),
+  };
+  scheduleSharedDashboardStateSync("monitoring.ohioComplianceAcknowledgement");
+}
+
+function establishOhioComplianceBaselineIfNeeded() {
+  const view = getOhioComplianceView();
+  if (view.shouldEstablishBaseline && dashboardSharedState.initialized) {
+    saveOhioComplianceAcknowledgement(view.currentFingerprint);
+  }
+}
+
+function acknowledgeOhioComplianceWatch() {
+  const view = getOhioComplianceView();
+  if (!view.shouldAlert) return;
+  saveOhioComplianceAcknowledgement(view.currentFingerprint);
+  renderDashboardOverview();
+}
+
+function renderWeeklyPlanReadiness(readiness) {
+  const reasons = [...readiness.blockers, ...readiness.staleReasons, ...readiness.reviewReasons];
+  return `
+    <section class="weekly-plan-readiness weekly-plan-readiness--${escapeHtml(readiness.status)}" aria-labelledby="weekly-plan-readiness-title">
+      <div>
+        <p class="eyebrow">Order readiness</p>
+        <h3 id="weekly-plan-readiness-title">${escapeHtml(readiness.label)}</h3>
+      </div>
+      ${reasons.length ? `<ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : '<p>All required shared inputs are current and no review warnings remain.</p>'}
+    </section>
+  `;
+}
+
+function renderWeeklyPlanProvenance({ latestCompletedWeek, latestCompletedUsageSaved, latestCompletedUsageRowCount }) {
+  const recommendations = parAgentState?.recommendations;
+  const recommendationSourceCurrent = hasCurrentParAgentRecommendations();
+  const priceTime = getLatestPriceTimestamp();
+  const missingCounts = getWeeklyPlanMissingInventoryCount();
+  return `
+    <section class="weekly-plan-provenance" aria-label="Weekly plan source freshness">
+      <div>
+        <span>Recommendations</span>
+        <strong>${recommendations?.generatedAt ? escapeHtml(formatUpdatedAt(recommendations.generatedAt)) : "Not generated"}</strong>
+        <small>${recommendations?.generatedAt && !recommendationSourceCurrent ? "Stale after a Keg Levels change · old quantities hidden" : recommendations?.summary?.tapCount ? `${formatNumber(recommendations.summary.tapCount)} PMB taps evaluated` : "Run the update from the service computer"}</small>
+      </div>
+      <div>
+        <span>Weekly Usage</span>
+        <strong>${weeklyUsageSharedSaveError ? "Recovery review needed" : weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites || weeklyUsageSharedSaveTimer || weeklyUsageSharedOutbox ? "Saving changes" : latestCompletedWeek ? `Week of ${escapeHtml(formatIsoDate(latestCompletedWeek))}` : "No completed week"}</strong>
+        <small>${weeklyUsageSharedSaveError ? escapeHtml(weeklyUsageSharedSaveError) : `${latestCompletedUsageSaved ? "Latest completed week saved" : "Latest completed week incomplete"} · ${formatNumber(latestCompletedUsageRowCount)}/${formatNumber(weeklyUsageItems.length)} active rows${weeklyUsageLastSyncAt ? ` · checked ${escapeHtml(formatUpdatedAt(weeklyUsageLastSyncAt))}` : ""}`}</small>
+      </div>
+      <div>
+        <span>Inventory counts</span>
+        <strong>${inventorySharedSaveError ? "Recovery review needed" : inventorySharedSaving || inventoryFieldSyncPendingCount || inventoryFieldSyncTimers.size || Object.keys(inventoryFieldOutbox).length || inventoryActionOutbox.length ? "Saving changes" : inventorySharedInitialized ? (inventorySharedUpdatedAt ? escapeHtml(formatUpdatedAt(inventorySharedUpdatedAt)) : "Shared inventory") : "Local / baseline only"}</strong>
+        <small>${inventorySharedSaveError ? escapeHtml(inventorySharedSaveError) : missingCounts ? `${formatNumber(missingCounts)} par item${missingCounts === 1 ? "" : "s"} still use the ${escapeHtml(formatUpdatedAt(INVENTORY_BASELINE_DATE))} baseline` : "All par items have a saved count"}</small>
+      </div>
+      <div>
+        <span>Prices</span>
+        <strong>${priceTime ? escapeHtml(formatUpdatedAt(priceTime)) : "Bundled defaults"}</strong>
+        <small>${escapeHtml(vendorSyncMessage)}</small>
+      </div>
+    </section>
+  `;
+}
+
+function getWeeklyPlanVendorLines(plan) {
+  const lines = [
+    ...plan.orders.beerKegs.map((item) => ({ ...item, lineType: "Beer keg", quantityLabel: `${formatNumber(item.quantity)} keg${item.quantity === 1 ? "" : "s"}` })),
+    ...[...plan.orders.liquor, ...plan.orders.mixers, ...plan.orders.supplies].map((item) => ({
+      ...item,
+      lineType: item.category === "liquor" ? "Liquor bottle" : item.category === "mixers" ? "Mixer" : "Supply",
+      quantityLabel: item.casePackaged
+        ? `${formatNumber(item.caseCount)} case${item.caseCount === 1 ? "" : "s"} · ${formatNumber(item.quantity)} units`
+        : `${formatNumber(item.quantity)} unit${item.quantity === 1 ? "" : "s"}`,
+    })),
+  ];
+  const grouped = new Map();
+  lines.forEach((item) => {
+    const vendor = clean(item.vendor) || "Needs vendor";
+    if (!grouped.has(vendor)) grouped.set(vendor, []);
+    grouped.get(vendor).push(item);
+  });
+  return [...grouped.entries()].sort(([left], [right]) => left.localeCompare(right));
+}
+
+function renderWeeklyPlanByVendor(plan) {
+  const groups = getWeeklyPlanVendorLines(plan);
+  if (!groups.length) return '<p class="weekly-plan-empty">No active purchasing lines. Review held and excluded items below before concluding no order is needed.</p>';
+  return groups.map(([vendor, items]) => renderWeeklyPlanGroup(
+    vendor,
+    items.length,
+    `<div class="weekly-plan-list">${items.map((item) => `
+      <div class="weekly-plan-item">
+        <div>
+          <strong>${escapeHtml(item.name)}</strong>
+          <span>${escapeHtml(item.lineType)}${item.tapNumbers?.length ? ` · Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.map(formatNumber).join(", ")}` : ""}${item.hasKnownPrice === false ? " · Price needed" : ""}</span>
+        </div>
+        <b>${escapeHtml(item.quantityLabel)}</b>
+      </div>
+    `).join("")}</div>`,
+  )).join("");
+}
+
+function renderWeeklyPlanReview(plan) {
+  if (!plan.review.heldRecommendations.length && !plan.review.deferredLiquorRefills.length && !plan.review.excludedInventory.length) return "";
+  return `
+    <section class="weekly-plan-review" aria-labelledby="weekly-plan-review-title">
+      <div class="weekly-plan-column__header">
+        <p class="eyebrow">Do not skip</p>
+        <h2 id="weekly-plan-review-title">Held &amp; Excluded — Review Before Ordering</h2>
+      </div>
+      ${plan.review.heldRecommendations.length ? renderWeeklyPlanGroup(
+        "Held recommendations",
+        plan.review.heldRecommendations.length,
+        `<div class="weekly-plan-list">${plan.review.heldRecommendations.map((item) => `
+          <div class="weekly-plan-item weekly-plan-item--held">
+            <div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(getWeeklyPlanTapContext(item, item.category === "held-liquor-refills" ? "oz" : "kegs"))} · ${escapeHtml(item.reasons.join(" ") || "Held for review")}</span></div>
+            <b>Held ${formatNumber(item.quantity)}</b>
+          </div>
+        `).join("")}</div>`,
+      ) : ""}
+      ${plan.review.deferredLiquorRefills.length ? renderWeeklyPlanGroup(
+        "Deferred liquor-tap refills",
+        plan.review.deferredLiquorRefills.length,
+        `<div class="weekly-plan-list">${plan.review.deferredLiquorRefills.map((item) => `
+          <div class="weekly-plan-item weekly-plan-item--held">
+            <div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(getWeeklyPlanTapContext(item, "oz"))} · Refill/cabinet netting is deferred, so this PMB recommendation is manual review only.</span></div>
+            <b>${formatNumber(item.quantity)} refill${item.quantity === 1 ? "" : "s"} — deferred</b>
+          </div>
+        `).join("")}</div>`,
+        "liquor",
+      ) : ""}
+      ${plan.review.excludedInventory.length ? renderWeeklyPlanGroup(
+        "Inventory ordering rules",
+        plan.review.excludedInventory.length,
+        `<div class="weekly-plan-list">${plan.review.excludedInventory.map((item) => `
+          <div class="weekly-plan-item weekly-plan-item--held">
+            <div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.group)} · ${formatNumber(item.onHand)} on hand / ${formatNumber(item.par)} par · ${escapeHtml(item.reason)}</span></div>
+            <b>${item.quantity > 0 ? `${formatNumber(item.quantity)} needed — held` : "Review"}</b>
+          </div>
+        `).join("")}</div>`,
+      ) : ""}
+    </section>
+  `;
+}
+
+function renderWeeklyPlanTrendRows(items, { kind }) {
+  if (!items.length) return '<p class="weekly-plan-trend-empty">No beverages meet this signal yet.</p>';
+  return `<ol class="weekly-plan-trend-list">${items.map((item) => {
+    const meta = kind === "sustained"
+      ? `${formatNumber(item.averageOz)} oz weekly average · ${formatNumber(item.currentOz)} oz latest`
+      : kind === "mix"
+        ? `${formatNumber(item.previousSharePercent)}% → ${formatNumber(item.currentSharePercent)}% of captured pours`
+        : `${formatNumber(item.previousOz ?? item.baselineOz)} oz → ${formatNumber(item.currentOz)} oz`;
+    const signal = kind === "sustained"
+      ? `${formatNumber(item.lowestWeekOz)}–${formatNumber(item.highestWeekOz)} oz range`
+      : kind === "mix"
+        ? `${item.sharePointChange > 0 ? "+" : ""}${formatNumber(item.sharePointChange)} pts`
+        : item.percentGuard
+          ? `${item.changeOz > 0 ? "+" : ""}${formatNumber(item.changeOz)} oz`
+          : `${item.changePercent > 0 ? "+" : ""}${formatNumber(item.changePercent)}%`;
+    return `
+      <li>
+        <div>
+          <strong>${escapeHtml(item.name || item.category)}</strong>
+          <small>${escapeHtml(meta)}</small>
+        </div>
+        <b class="weekly-plan-trend-signal${kind === "fallers" || kind === "low" || (kind === "mix" && item.sharePointChange < 0) ? " is-down" : ""}">${escapeHtml(signal)}</b>
+      </li>
+    `;
+  }).join("")}</ol>`;
+}
+
+function renderWeeklyPlanTrendCard({ eyebrow, title, section, content }) {
+  return `
+    <article class="weekly-plan-trend-card">
+      <div class="weekly-plan-trend-card__header">
+        <p class="eyebrow">${escapeHtml(eyebrow)}</p>
+        <h3>${escapeHtml(title)}</h3>
+      </div>
+      ${section.available ? content : `<p class="weekly-plan-trend-empty">${escapeHtml(section.reason)}</p>`}
+    </article>
+  `;
+}
+
+function renderWeeklyPlanTrends() {
+  const trends = buildWeeklyPlanTrends(weeklyUsageItems, { now: new Date(), limit: 5 });
+  const status = ["ready", "limited", "incomplete", "stale", "unavailable"].includes(trends.status)
+    ? trends.status
+    : "unavailable";
+  const coverage = trends.coverage;
+  const period = trends.period;
+  const latestCoverageCopy = coverage.eligibleTapCount
+    ? `${formatNumber(coverage.latestCapturedTapCount)} of ${formatNumber(coverage.eligibleTapCount)} current taps captured`
+    : "No eligible current taps";
+  const comparisonCoverageCopy = period.previousLabel
+    ? `${formatNumber(coverage.comparisonIncludedTapCount)} comparable${coverage.comparisonExcludedTapCount ? ` · ${formatNumber(coverage.comparisonExcludedTapCount)} excluded` : ""}`
+    : "";
+  const coverageCopy = [latestCoverageCopy, comparisonCoverageCopy].filter(Boolean).join(" · ");
+  const periodCopy = period.latestLabel && period.previousLabel
+    ? `${period.latestLabel} compared with ${period.previousLabel}`
+    : period.latestLabel || "Waiting for two completed PMB weeks";
+  const emergingItems = trends.sections.emergingLow.items || [];
+
+  return `
+    <section class="weekly-plan-trends" aria-labelledby="weekly-plan-trends-title">
+      <header class="weekly-plan-trends__header">
+        <div>
+          <p class="eyebrow">Beverage pulse</p>
+          <h2 id="weekly-plan-trends-title">What changed in the pours</h2>
+          <p>Signals use exact Pour My Beer ounces—not drinks sold or revenue—so corporate-party pours remain represented.</p>
+        </div>
+        <div class="weekly-plan-trends__status">
+          <span class="weekly-plan-trends__badge weekly-plan-trends__badge--${status}">${escapeHtml(trends.statusLabel)}</span>
+          <strong>${escapeHtml(periodCopy)}</strong>
+          <small>${escapeHtml(coverageCopy)}</small>
+        </div>
+      </header>
+      ${status === "ready" ? "" : `<p class="weekly-plan-trends__notice">${escapeHtml(trends.statusCopy)}</p>`}
+      <div class="weekly-plan-trends__grid">
+        ${renderWeeklyPlanTrendCard({
+          eyebrow: "Week over week",
+          title: "Biggest movers",
+          section: trends.sections.movers,
+          content: `
+            <div class="weekly-plan-trend-split">
+              <div><h4>Rising</h4>${renderWeeklyPlanTrendRows(trends.sections.movers.risers || [], { kind: "risers" })}</div>
+              <div><h4>Cooling</h4>${renderWeeklyPlanTrendRows(trends.sections.movers.fallers || [], { kind: "fallers" })}</div>
+            </div>
+          `,
+        })}
+        ${renderWeeklyPlanTrendCard({
+          eyebrow: "Repeat demand",
+          title: "Sustained high volume",
+          section: trends.sections.sustained,
+          content: renderWeeklyPlanTrendRows(trends.sections.sustained.items || [], { kind: "sustained" }),
+        })}
+        ${renderWeeklyPlanTrendCard({
+          eyebrow: "Needs a look",
+          title: "Emerging low or zero movement",
+          section: trends.sections.emergingLow,
+          content: renderWeeklyPlanTrendRows(emergingItems, { kind: "low" }),
+        })}
+        ${renderWeeklyPlanTrendCard({
+          eyebrow: "Category balance",
+          title: "Pour mix shifts",
+          section: trends.sections.categoryMix,
+          content: renderWeeklyPlanTrendRows(trends.sections.categoryMix.items || [], { kind: "mix" }),
+        })}
+      </div>
+    </section>
+  `;
+}
+
+function renderWeeklyPlan() {
+  if (!weeklyPlan) return;
+  const recommendations = parAgentState?.recommendations;
+  const plan = buildWeeklyActionPlan({
+    inventoryItems: getWeeklyPlanInventoryItems(),
+    recommendations: getWeeklyPlanRecommendations(),
+  });
+  const summary = plan.summary;
+  const freshness = getWeeklyPlanFreshness(plan);
+  const handoffAllowed = isWeeklyPlanHandoffAllowed(freshness.readiness.status);
+  const updatedText = recommendations?.generatedAt
+    ? `Keg and prep recommendations last calculated ${formatUpdatedAt(recommendations.generatedAt)}. Active cabinet orders recalculate immediately from saved counts.`
+    : "Cabinet orders use saved counts. Update the plan to check completed Weekly Usage, save pending inputs, and calculate keg and prep recommendations.";
+  const priceNote = summary.estimatedPurchaseCostComplete
+    ? "All active purchase lines are priced."
+    : `${summary.missingPriceCount ? `${formatNumber(summary.missingPriceCount)} active line${summary.missingPriceCount === 1 ? " is" : "s are"} missing a price. ` : ""}The total shown is the known-price subtotal, not a complete spend total.`;
+
+  weeklyPlan.innerHTML = `
+    <header class="weekly-plan-header">
+      <div>
+        <p class="eyebrow">One weekly checklist</p>
+        <h2>Order &amp; Prep Plan</h2>
+        <p>${escapeHtml(updatedText)}</p>
+      </div>
+      <div class="weekly-plan-actions">
+        <button class="primary-button" id="run-weekly-plan-agent" type="button"${parAgentRunning || weeklyPlanUpdating ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Updating..." : "Update weekly plan"}</button>
+        <label><span>Group purchases</span><select id="weekly-plan-group-mode"><option value="category"${weeklyPlanGroupMode === "category" ? " selected" : ""}>By category</option><option value="vendor"${weeklyPlanGroupMode === "vendor" ? " selected" : ""}>By vendor</option></select></label>
+        <button class="ghost-button" id="export-weekly-plan" type="button"${handoffAllowed ? "" : ' disabled aria-describedby="weekly-plan-handoff-note"'}>Export CSV</button>
+        <button class="ghost-button" id="print-weekly-plan" type="button"${handoffAllowed ? "" : ' disabled aria-describedby="weekly-plan-handoff-note"'}>Print</button>
+      </div>
+    </header>
+    ${handoffAllowed ? "" : '<p class="weekly-plan-handoff-note" id="weekly-plan-handoff-note">Export and print are locked until the plan is refreshed and no readiness blocker remains.</p>'}
+    <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(weeklyPlanRefreshMessage || parAgentMessage)}</p>
+    ${renderWeeklyPlanReadiness(freshness.readiness)}
+    ${renderWeeklyPlanProvenance(freshness)}
+    <div class="weekly-plan-stats">
+      <div><span>Order lines</span><strong>${formatNumber(summary.orderLineCount)}</strong></div>
+      <div><span>Beer kegs</span><strong>${formatNumber(summary.beerKegTotal)}</strong></div>
+      <div><span>Deferred tap refills</span><strong>${formatNumber(summary.liquorRefillTotal)}</strong></div>
+      <div><span>Cocktail kegs to make</span><strong>${formatNumber(summary.cocktailBatchTotal)}</strong></div>
+      <div><span>Held for review</span><strong>${formatNumber(summary.heldLineCount + summary.excludedLineCount)}</strong></div>
+      <div class="${summary.estimatedPurchaseCostComplete ? "" : "weekly-plan-stat--warning"}"><span>Known purchase estimate</span><strong>${money(summary.estimatedKnownPurchaseCost)}</strong><small>${summary.missingPriceCount ? `${formatNumber(summary.missingPriceCount)} missing price${summary.missingPriceCount === 1 ? "" : "s"}` : "Complete for active purchases"}</small></div>
+    </div>
+    <p class="weekly-plan-cost-note">${escapeHtml(priceNote)}</p>
+    <p class="weekly-plan-scope-note"><strong>Deferred calculation scope:</strong> cocktail ingredient consumption is not netted against ingredient inventory, and liquor-tap refills are not netted against cabinet bottle orders. Cocktail batches remain visible for production; PMB liquor-refill recommendations are held for manual review and are not active purchases.</p>
+    ${renderWeeklyPlanTrends()}
+    <div class="weekly-plan-columns">
+      <section class="weekly-plan-column">
+        <div class="weekly-plan-column__header"><p class="eyebrow">Purchasing</p><h2>Order This Week</h2></div>
+        ${weeklyPlanGroupMode === "vendor" ? renderWeeklyPlanByVendor(plan) : `
+          ${renderWeeklyPlanGroup("Beer Kegs", plan.orders.beerKegs.length, renderWeeklyPlanTapRows(plan.orders.beerKegs, { action: "Order", unit: "kegs" }), "beer")}
+          ${renderWeeklyPlanGroup("Liquor Bottles", plan.orders.liquor.length, renderWeeklyPlanInventoryRows(plan.orders.liquor), "liquor")}
+          ${renderWeeklyPlanGroup("Mixers", plan.orders.mixers.length, renderWeeklyPlanInventoryRows(plan.orders.mixers), "mixers")}
+          ${renderWeeklyPlanGroup("Other Supplies", plan.orders.supplies.length, renderWeeklyPlanInventoryRows(plan.orders.supplies))}
+        `}
+      </section>
+      <section class="weekly-plan-column weekly-plan-column--prep">
+        <div class="weekly-plan-column__header"><p class="eyebrow">Production</p><h2>Cocktails To Make</h2></div>
+        ${renderWeeklyPlanGroup("Cocktail Kegs", plan.prep.cocktails.length, renderWeeklyPlanTapRows(plan.prep.cocktails, { action: "Make", unit: "kegs" }), "cocktails")}
+      </section>
+    </div>
+    ${renderWeeklyPlanReview(plan)}
+  `;
+
+  document.querySelector("#run-weekly-plan-agent")?.addEventListener("click", runWeeklyPlanUpdate);
+  document.querySelector("#weekly-plan-group-mode")?.addEventListener("change", (event) => {
+    weeklyPlanGroupMode = event.currentTarget.value === "vendor" ? "vendor" : "category";
+    renderWeeklyPlan();
+  });
+  document.querySelector("#export-weekly-plan")?.addEventListener("click", () => exportWeeklyPlanCsv(plan, freshness));
+  document.querySelector("#print-weekly-plan")?.addEventListener("click", () => {
+    if (isWeeklyPlanHandoffAllowed(freshness.readiness.status)) window.print();
+  });
+}
+
+function getWeeklyPlanCsvRows(plan, freshness) {
+  const rows = [["Status", "Section", "Vendor", "Item", "Quantity", "Unit", "Known estimate", "Details"]];
+  rows.push(["Plan", "Readiness", "", freshness.readiness.label, "", "", "", [...freshness.readiness.blockers, ...freshness.readiness.staleReasons, ...freshness.readiness.reviewReasons].join(" ")]);
+
+  plan.orders.beerKegs.forEach((item) => rows.push([
+    "Active", "Beer Kegs", item.vendor, item.name, item.quantity, "kegs", item.hasKnownPrice ? item.estimatedCost : "", getWeeklyPlanTapContext(item, "kegs"),
+  ]));
+  [...plan.orders.liquor, ...plan.orders.mixers, ...plan.orders.supplies].forEach((item) => rows.push([
+    "Active",
+    item.category === "liquor" ? "Liquor Bottles" : item.category === "mixers" ? "Mixers" : "Other Supplies",
+    item.vendor,
+    item.name,
+    item.quantity,
+    item.casePackaged ? `units (${item.caseCount} cases)` : "units",
+    item.hasKnownPrice ? item.estimatedCost : "",
+    `${item.onHand} on hand / ${item.par} par`,
+  ]));
+  plan.prep.cocktails.forEach((item) => rows.push([
+    "Active", "Cocktails To Make", "Internal", item.name, item.quantity, "kegs", "", getWeeklyPlanTapContext(item, "kegs"),
+  ]));
+  plan.review.heldRecommendations.forEach((item) => rows.push([
+    "Held", "Recommendation Review", item.vendor, item.name, item.quantity, item.category === "held-liquor-refills" ? "refills" : "kegs", "", item.reasons.join(" "),
+  ]));
+  plan.review.deferredLiquorRefills.forEach((item) => rows.push([
+    "Held", "Deferred Liquor Tap Refills", item.vendor, item.name, item.quantity, "refills", "", `${getWeeklyPlanTapContext(item, "oz")} · Refill/cabinet netting deferred; manual review only.`,
+  ]));
+  plan.review.excludedInventory.forEach((item) => rows.push([
+    "Held", item.group, item.vendor, item.name, item.quantity, "units", "", item.reason,
+  ]));
+  return rows;
+}
+
+function escapeCsvValue(value) {
+  const text = String(value ?? "");
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function exportWeeklyPlanCsv(plan, freshness) {
+  if (!isWeeklyPlanHandoffAllowed(freshness.readiness.status)) {
+    weeklyPlanRefreshMessage = "Export is locked until the Weekly Plan is refreshed and ready for review.";
+    const status = document.querySelector("#weekly-plan-live-status");
+    if (status) status.textContent = weeklyPlanRefreshMessage;
+    return;
+  }
+  const csv = `${getWeeklyPlanCsvRows(plan, freshness)
+    .map((row) => row.map(escapeCsvValue).join(","))
+    .join("\n")}\n`;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `on-par-weekly-plan-${formatIsoDate(new Date())}.csv`;
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  weeklyPlanRefreshMessage = "Weekly Plan CSV exported with active, prep, held, and excluded lines.";
+  const status = document.querySelector("#weekly-plan-live-status");
+  if (status) status.textContent = weeklyPlanRefreshMessage;
 }
 
 function renderKegLevels() {
@@ -3523,17 +5640,16 @@ function getPmbSyncWeekStarts() {
 }
 
 function getSavedWeeklyUsageStartTimes() {
-  const counts = new Map();
+  const savedTimes = new Set();
   [...weeklyUsageItems, ...weeklyUsageArchivedItems].forEach((item) => {
     (item.history || []).forEach((entry) => {
       const time = getWeeklyUsageLabelTime(entry.label);
-      if (time) counts.set(time, (counts.get(time) || 0) + 1);
+      if (time) savedTimes.add(time);
     });
   });
-  const minimumCoverage = Math.max(8, Math.floor(Math.max(weeklyUsageItems.length, 1) * 0.1));
-  return new Set([...counts.entries()]
-    .filter(([, count]) => count >= minimumCoverage)
-    .map(([time]) => time));
+  // This only avoids re-fetching represented historical weeks. The latest completed week
+  // is always checked by getPmbSyncWeekStarts, and order readiness requires every active row.
+  return savedTimes;
 }
 
 function getCompletedMondayWeekStarts(lookbackWeeks = 12) {
@@ -3577,7 +5693,7 @@ function syncWeeklyUsageWithCurrentPmbTaps(rawTaps = []) {
   assignments.forEach((assignment) => {
     const matches = sourceItems
       .filter((item) => !usedSourceIds.has(getWeeklyUsageSourceId(item)))
-      .filter((item) => isWeeklyUsageAssignmentReusableMatch(item, assignment))
+      .filter((item) => isWeeklyUsageAssignmentReusableMatch(item, assignment, sourceItems))
       .sort((a, b) => scoreWeeklyUsageAssignmentMatch(b, assignment) - scoreWeeklyUsageAssignmentMatch(a, assignment));
 
     matches.forEach((item) => {
@@ -3651,10 +5767,15 @@ function pruneInactiveWeeklyUsageOverrides(activeItems = []) {
   return pruned;
 }
 
-function isWeeklyUsageAssignmentReusableMatch(item, assignment) {
-  const sameTap = toNumber(item.tapNumber) === toNumber(assignment.tapNumber);
-  if (hasExactWeeklyUsageProductNameMatch(item.name, assignment.name)) return true;
-  return sameTap && isSameWeeklyUsageProductName(item.name, assignment.name);
+function isWeeklyUsageAssignmentReusableMatch(item, assignment, sourceItems = []) {
+  const namesMatch = hasExactWeeklyUsageProductNameMatch(item.name, assignment.name)
+    || isSameWeeklyUsageProductName(item.name, assignment.name);
+  if (!namesMatch) return false;
+  const plu = toNumber(item.plu) || toNumber(assignment.plu);
+  const matchingPluSourceCount = plu
+    ? sourceItems.filter((sourceItem) => toNumber(sourceItem.plu) === plu).length
+    : 0;
+  return canReuseWeeklyUsageHistory(item, assignment, matchingPluSourceCount);
 }
 
 function buildWeeklyUsageItemFromAssignment(assignment, matches = []) {
@@ -3948,6 +6069,71 @@ function renderWeeklyUsageArchiveSummary() {
   `;
 }
 
+function getWeeklyUsagePerformanceCategoryLabel(category) {
+  return {
+    beer: "Beer",
+    cocktail: "Cocktail",
+    liquor: "Liquor",
+  }[category] || "Drink";
+}
+
+function getWeeklyUsageTrendDirectionCopy(direction) {
+  return {
+    up: "Rising",
+    down: "Falling",
+    flat: "Holding steady",
+    unavailable: "More history needed",
+  }[direction] || "More history needed";
+}
+
+function renderWeeklyUsageTrend(item, historyHeaders) {
+  const trend = buildWeeklyUsageTrend(item.history, historyHeaders);
+  if (!trend.recordedCount) {
+    return '<span class="weekly-usage-trend weekly-usage-trend--empty">No history</span>';
+  }
+
+  const unit = clean(item.displayUnit) || "units";
+  const directionCopy = getWeeklyUsageTrendDirectionCopy(trend.direction);
+  const valueCopy = trend.points.map((point) => (
+    `${point.label}: ${point.hasValue ? formatUsageDisplay(point.value, unit) : "No reading"}`
+  )).join("; ");
+  const accessibleCopy = `${directionCopy}. ${valueCopy}${trend.missingCount ? `. ${trend.missingCount} missing ${trend.missingCount === 1 ? "week is" : "weeks are"} shown as a gap, not zero.` : "."}`;
+  const segments = trend.segments.map((segment) => {
+    if (segment.length === 1) return "";
+    const points = segment.map((point) => `${point.x},${point.y}`).join(" ");
+    return `<polyline class="weekly-usage-trend__line" points="${points}"></polyline>`;
+  }).join("");
+  const points = trend.points.filter((point) => point.hasValue).map((point) => `
+    <circle class="weekly-usage-trend__point" cx="${point.x}" cy="${point.y}" r="2.7">
+      <title>${escapeHtml(`${point.label}: ${formatUsageDisplay(point.value, unit)}`)}</title>
+    </circle>
+  `).join("");
+  const directionSymbol = trend.direction === "up"
+    ? "↑"
+    : trend.direction === "down"
+      ? "↓"
+      : trend.direction === "flat"
+        ? "→"
+        : "·";
+
+  return `
+    <span
+      class="weekly-usage-trend weekly-usage-trend--${trend.direction}"
+      role="img"
+      tabindex="0"
+      aria-label="${escapeHtml(accessibleCopy)}"
+      title="${escapeHtml(accessibleCopy)}"
+    >
+      <svg viewBox="0 0 ${trend.width} ${trend.height}" aria-hidden="true" focusable="false">
+        <line class="weekly-usage-trend__baseline" x1="${trend.padding}" y1="${trend.height - trend.padding}" x2="${trend.width - trend.padding}" y2="${trend.height - trend.padding}"></line>
+        ${segments}
+        ${points}
+      </svg>
+      <span class="weekly-usage-trend__direction" aria-hidden="true">${directionSymbol}</span>
+    </span>
+  `;
+}
+
 function renderWeeklyUsage() {
   if (!weeklyUsageSummary || !weeklyUsageTable || !weeklyUsageHead) return;
 
@@ -3979,8 +6165,8 @@ function renderWeeklyUsage() {
     : allHistoryHeaders;
   const compactUsageTable = window.matchMedia("(max-width: 720px)").matches;
   const usageColumnWidths = compactUsageTable
-    ? { tap: 46, product: 150, average: 82, week: 90 }
-    : { tap: 70, product: 340, average: 120, week: 112 };
+    ? { tap: 46, product: 150, average: 154, week: 90 }
+    : { tap: 70, product: 340, average: 194, week: 112 };
   const weeklyUsageTableElement = weeklyUsageHead.closest("table");
   if (weeklyUsageTableElement) {
     const tableWidth = `${usageColumnWidths.tap + usageColumnWidths.product + usageColumnWidths.average + (historyHeaders.length * usageColumnWidths.week)}px`;
@@ -4037,7 +6223,7 @@ function renderWeeklyUsage() {
     <tr>
       <th>Tap #</th>
       <th>Product</th>
-      <th class="weekly-usage-average">Avg weekly</th>
+      <th class="weekly-usage-average">Avg weekly + trend</th>
       ${historyHeaders.map((label) => `<th class="weekly-usage-week">${formatWeeklyUsageHeader(label)}</th>`).join("")}
     </tr>
   `;
@@ -4065,7 +6251,10 @@ function renderWeeklyUsage() {
             <strong>${escapeHtml(item.name)}</strong>
             <span>${escapeHtml(wallLabel)}</span>
           </td>
-          <td class="weekly-usage-average"><strong>${escapeHtml(averageDisplay)}</strong></td>
+          <td class="weekly-usage-average">
+            <strong>${escapeHtml(averageDisplay)}</strong>
+            ${renderWeeklyUsageTrend(item, historyHeaders)}
+          </td>
           ${historyCells}
         </tr>
       `;
@@ -4158,14 +6347,35 @@ async function requirePmbWorkNetworkForServiceImport() {
   return result;
 }
 
+async function requestOperationalSharedJson(path, options = {}, timeoutMs = OPERATIONAL_SHARED_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(path, {
+      cache: "no-store",
+      credentials: "same-origin",
+      ...options,
+      signal: controller.signal,
+    });
+    return { response, result: await parseJsonResponse(response) };
+  } catch (error) {
+    if (controller.signal.aborted || error?.name === "AbortError") {
+      const timeoutError = new Error("The shared-state request timed out. The local change remains saved for recovery.");
+      timeoutError.code = "OPERATIONAL_SHARED_TIMEOUT";
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 async function requestSharedWeeklyUsage(body = null) {
-  const response = await fetch("/api/weekly-usage-state", {
+  const { response, result } = await requestOperationalSharedJson("/api/weekly-usage-state", {
     method: body ? "POST" : "GET",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers: body ? { "Content-Type": "application/json", Accept: "application/json" } : { Accept: "application/json" },
     body: body ? JSON.stringify(body) : undefined,
-    cache: "no-store",
   });
-  const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(result.error || `Shared Weekly Usage request failed (${response.status}).`);
     error.code = result.code || "WEEKLY_USAGE_STATE_ERROR";
@@ -4174,6 +6384,76 @@ async function requestSharedWeeklyUsage(body = null) {
     throw error;
   }
   return result;
+}
+
+function loadWeeklyUsageSharedOutbox() {
+  try {
+    return normalizeOperationalOutboxEntry(JSON.parse(localStorage.getItem(WEEKLY_USAGE_OUTBOX_STORAGE_KEY) || "null"));
+  } catch {
+    return null;
+  }
+}
+
+function saveWeeklyUsageSharedOutbox() {
+  try {
+    if (weeklyUsageSharedOutbox) {
+      localStorage.setItem(WEEKLY_USAGE_OUTBOX_STORAGE_KEY, JSON.stringify(weeklyUsageSharedOutbox));
+    } else {
+      localStorage.removeItem(WEEKLY_USAGE_OUTBOX_STORAGE_KEY);
+    }
+    weeklyUsageSharedOutboxDurable = true;
+    return true;
+  } catch {
+    weeklyUsageSharedOutboxDurable = false;
+    weeklyUsageSharedSaveError = "This browser could not preserve the pending Weekly Usage recovery copy. Keep this page open and do not order from the plan.";
+    return false;
+  }
+}
+
+function stageWeeklyUsageSharedOutbox() {
+  const prior = weeklyUsageSharedOutbox;
+  const entry = createOperationalOutboxEntry({
+    baseRevision: prior?.baseRevision ?? weeklyUsageSharedRevision,
+    payload: {
+      action: "replace",
+      data: getSharedWeeklyUsageData(),
+    },
+    updatedAt: new Date().toISOString(),
+  });
+  if (!entry) return false;
+  weeklyUsageSharedOutbox = {
+    ...entry,
+    ...(prior?.conflict ? {
+      conflict: true,
+      currentRevision: prior.currentRevision,
+      lastError: prior.lastError,
+    } : {}),
+  };
+  return saveWeeklyUsageSharedOutbox();
+}
+
+function restoreWeeklyUsageFromOutbox() {
+  const data = weeklyUsageSharedOutbox?.payload?.data;
+  if (!data || typeof data !== "object") return false;
+  weeklyUsageApplyingSharedState = true;
+  try {
+    weeklyUsageItems = Array.isArray(data.activeItems) ? cloneWeeklyUsageValue(data.activeItems) : weeklyUsageItems;
+    weeklyUsageArchivedItems = Array.isArray(data.archivedItems) ? cloneWeeklyUsageValue(data.archivedItems) : weeklyUsageArchivedItems;
+    weeklyUsageCurrentOverrides = data.currentOverrides && typeof data.currentOverrides === "object"
+      ? cloneWeeklyUsageValue(data.currentOverrides)
+      : weeklyUsageCurrentOverrides;
+    weeklyUsageHistoryOverrides = data.historyOverrides && typeof data.historyOverrides === "object"
+      ? cloneWeeklyUsageValue(data.historyOverrides)
+      : weeklyUsageHistoryOverrides;
+    weeklyUsageLastSyncAt = clean(data.lastSyncAt) || weeklyUsageLastSyncAt;
+    saveWeeklyUsageCurrentOverrides();
+    saveWeeklyUsageHistoryOverrides();
+    saveWeeklyUsageArchivedItems();
+    saveWeeklyUsageLastSyncAt();
+  } finally {
+    weeklyUsageApplyingSharedState = false;
+  }
+  return true;
 }
 
 function cloneWeeklyUsageValue(value) {
@@ -4224,15 +6504,45 @@ async function loadSharedWeeklyUsageState() {
     weeklyUsageSharedInitialized = Boolean(state.initialized);
     weeklyUsageSharedRevision = Number(state.revision) || 0;
     if (state.initialized) {
+      if (weeklyUsageSharedOutbox) {
+        restoreWeeklyUsageFromOutbox();
+        if (canSafelyRetryOperationalOutbox(weeklyUsageSharedOutbox, state.revision)) {
+          weeklyUsageSharedOutbox = markOperationalOutboxFailure(weeklyUsageSharedOutbox);
+          saveWeeklyUsageSharedOutbox();
+          weeklyUsageSharedMessage = "Recovering a Weekly Usage change that did not finish saving...";
+          const recovered = await queueSharedWeeklyUsageSave();
+          if (recovered) return;
+        } else {
+          weeklyUsageSharedOutbox = markOperationalOutboxFailure(weeklyUsageSharedOutbox, {
+            conflict: true,
+            currentRevision: state.revision,
+            message: `Shared Weekly Usage is now revision ${state.revision}, but this browser's recovery copy was based on revision ${weeklyUsageSharedOutbox.baseRevision}.`,
+          });
+          saveWeeklyUsageSharedOutbox();
+        }
+        weeklyUsageSharedSaveError = weeklyUsageSharedOutbox?.lastError || "Pending Weekly Usage recovery needs review.";
+        weeklyUsageSharedMessage = weeklyUsageSharedOutbox?.conflict
+          ? `Weekly Usage conflict: this browser kept its unsynced report from revision ${weeklyUsageSharedOutbox.baseRevision} instead of overwriting it with shared revision ${weeklyUsageSharedOutbox.currentRevision}. Review the local and shared versions before publishing either one.`
+          : `Weekly Usage recovery is still pending. This browser kept the unsynced report from revision ${weeklyUsageSharedOutbox?.baseRevision}; ordering remains blocked until it saves successfully.`;
+        return;
+      }
       applySharedWeeklyUsageState(state);
+      weeklyUsageSharedSaveError = "";
       weeklyUsageSharedMessage = "Shared Weekly Usage is available on all signed-in manager devices.";
     } else {
       weeklyUsageSharedMessage = "Setup needed: import Weekly Usage only from the service computer. Until then, reports stay on this device.";
     }
   } catch (error) {
     weeklyUsageSharedProvisioned = false;
-    weeklyUsageSharedInitialized = false;
-    weeklyUsageSharedMessage = `Shared Weekly Usage unavailable. Reports remain saved on this device only: ${error.message}`;
+    if (weeklyUsageSharedOutbox && restoreWeeklyUsageFromOutbox()) {
+      weeklyUsageSharedInitialized = true;
+      weeklyUsageSharedRevision = weeklyUsageSharedOutbox.baseRevision;
+      weeklyUsageSharedSaveError = error.message || "Shared Weekly Usage could not be loaded.";
+      weeklyUsageSharedMessage = `Shared Weekly Usage unavailable. This browser restored its pending local report and blocked ordering: ${error.message}`;
+    } else {
+      weeklyUsageSharedInitialized = false;
+      weeklyUsageSharedMessage = `Shared Weekly Usage unavailable. Reports remain saved on this device only: ${error.message}`;
+    }
   }
 }
 
@@ -4243,29 +6553,96 @@ function scheduleSharedWeeklyUsageSave() {
     return;
   }
 
+  stageWeeklyUsageSharedOutbox();
+  if (weeklyUsageSharedOutbox?.conflict) {
+    weeklyUsageSharedSaveError = weeklyUsageSharedOutbox.lastError || "Weekly Usage has an unresolved revision conflict.";
+    weeklyUsageSharedMessage = "Weekly Usage changes remain in this browser for explicit conflict review; they will not overwrite the newer shared version.";
+    renderWeeklyPlan();
+    return;
+  }
+
   clearTimeout(weeklyUsageSharedSaveTimer);
   weeklyUsageSharedSaving = true;
   weeklyUsageSharedMessage = "Saving shared Weekly Usage...";
   weeklyUsageSharedSaveTimer = setTimeout(() => {
-    weeklyUsageSharedWriteQueue = weeklyUsageSharedWriteQueue.then(async () => {
-      try {
-        const state = await requestSharedWeeklyUsage({
-          action: "replace",
-          expectedRevision: weeklyUsageSharedRevision,
-          data: getSharedWeeklyUsageData(),
-        });
-        applySharedWeeklyUsageState(state);
-        weeklyUsageSharedMessage = "Shared Weekly Usage saved.";
-      } catch (error) {
-        weeklyUsageSharedMessage = error.code === "WEEKLY_USAGE_STATE_REVISION_CONFLICT"
-          ? "Another manager changed Weekly Usage first. This device kept its saved report; reload before deciding what to publish."
-          : `Could not save shared Weekly Usage. This device kept its saved report: ${error.message}`;
-      } finally {
-        weeklyUsageSharedSaving = false;
-        renderWeeklyUsage();
-      }
-    });
+    weeklyUsageSharedSaveTimer = null;
+    queueSharedWeeklyUsageSave();
   }, 350);
+  renderWeeklyPlan();
+}
+
+function queueSharedWeeklyUsageSave() {
+  if (!weeklyUsageSharedOutbox) stageWeeklyUsageSharedOutbox();
+  const initialEntry = normalizeOperationalOutboxEntry(weeklyUsageSharedOutbox);
+  if (!initialEntry || initialEntry.conflict) return Promise.resolve(false);
+  let activeEntry = initialEntry;
+  weeklyUsageSharedPendingWrites += 1;
+  weeklyUsageSharedWriteQueue = weeklyUsageSharedWriteQueue.then(async () => {
+    activeEntry = normalizeOperationalOutboxEntry(weeklyUsageSharedOutbox) || initialEntry;
+    if (activeEntry.conflict) return false;
+    try {
+      const state = await requestSharedWeeklyUsage({
+        action: "replace",
+        expectedRevision: activeEntry.baseRevision,
+        data: activeEntry.payload.data,
+      });
+      if (weeklyUsageSharedOutbox?.id === activeEntry.id) {
+        weeklyUsageSharedOutbox = null;
+        saveWeeklyUsageSharedOutbox();
+        applySharedWeeklyUsageState(state);
+        weeklyUsageSharedSaveError = "";
+        weeklyUsageSharedMessage = "Shared Weekly Usage saved.";
+      } else {
+        weeklyUsageSharedOutbox = rebaseOperationalOutboxAfterOwnCommit(weeklyUsageSharedOutbox, {
+          committedBaseRevision: activeEntry.baseRevision,
+          nextRevision: state.revision,
+        });
+        saveWeeklyUsageSharedOutbox();
+        weeklyUsageSharedRevision = Number(state.revision) || weeklyUsageSharedRevision;
+        weeklyUsageSharedMessage = "An earlier Weekly Usage save completed; a newer local edit is still pending.";
+      }
+      return true;
+    } catch (error) {
+      weeklyUsageSharedSaveError = error.message || "Shared Weekly Usage could not be saved.";
+      weeklyUsageSharedOutbox = markOperationalOutboxFailure(weeklyUsageSharedOutbox || activeEntry, {
+        message: weeklyUsageSharedSaveError,
+        currentRevision: error.currentRevision,
+        conflict: error.code === "WEEKLY_USAGE_STATE_REVISION_CONFLICT",
+      });
+      saveWeeklyUsageSharedOutbox();
+      weeklyUsageSharedMessage = error.code === "WEEKLY_USAGE_STATE_REVISION_CONFLICT"
+        ? "Another manager changed Weekly Usage first. This browser kept the complete local report for explicit review and will not retry it against a different revision."
+        : `Could not save shared Weekly Usage. This browser preserved the pending report for a safe retry: ${error.message}`;
+      return false;
+    } finally {
+      weeklyUsageSharedPendingWrites = Math.max(0, weeklyUsageSharedPendingWrites - 1);
+      weeklyUsageSharedSaving = weeklyUsageSharedPendingWrites > 0 || Boolean(weeklyUsageSharedSaveTimer);
+      renderWeeklyUsage();
+      renderWeeklyPlan();
+    }
+  });
+  return weeklyUsageSharedWriteQueue;
+}
+
+async function flushPendingSharedWeeklyUsageSave() {
+  if (weeklyUsageSharedSaveTimer) {
+    clearTimeout(weeklyUsageSharedSaveTimer);
+    weeklyUsageSharedSaveTimer = null;
+    const result = await queueSharedWeeklyUsageSave();
+    return result !== false
+      && weeklyUsageSharedPendingWrites === 0
+      && !weeklyUsageSharedSaving
+      && !weeklyUsageSharedSaveError
+      && !weeklyUsageSharedOutbox
+      && weeklyUsageSharedOutboxDurable;
+  }
+  if (weeklyUsageSharedOutbox) {
+    if (!canSafelyRetryOperationalOutbox(weeklyUsageSharedOutbox, weeklyUsageSharedRevision)) return false;
+    const recovered = await queueSharedWeeklyUsageSave();
+    return recovered !== false && !weeklyUsageSharedOutbox && weeklyUsageSharedOutboxDurable;
+  }
+  const result = await weeklyUsageSharedWriteQueue;
+  return result !== false && weeklyUsageSharedPendingWrites === 0 && !weeklyUsageSharedSaving && !weeklyUsageSharedSaveError && weeklyUsageSharedOutboxDurable;
 }
 
 async function initializeSharedWeeklyUsageFromServiceComputer() {
@@ -4305,6 +6682,7 @@ async function initializeSharedWeeklyUsageFromServiceComputer() {
       data,
     });
     applySharedWeeklyUsageState(state);
+    weeklyUsageSharedSaveError = "";
     weeklyUsageSharedMessage = "Service-computer Weekly Usage imported. PMB reports and replaced-product history are now shared.";
   } catch (error) {
     weeklyUsageSharedMessage = error.code === "WEEKLY_USAGE_STATE_ALREADY_INITIALIZED"
@@ -4317,14 +6695,14 @@ async function initializeSharedWeeklyUsageFromServiceComputer() {
 }
 
 async function runPmbWeeklyUsageSync({ automatic = false } = {}) {
-  if (weeklyUsageSyncLoading) return;
+  if (weeklyUsageSyncLoading) return { ok: false, error: "Weekly Usage is already refreshing." };
   weeklyUsageSyncAttempted = true;
 
   const weekStarts = getPmbSyncWeekStarts();
   if (!weekStarts.length) {
     weeklyUsageSyncMessage = `${automatic ? "Automatic PMB check complete. " : ""}All recent completed Monday-Sunday weeks are already saved.`;
     renderWeeklyUsage();
-    return;
+    return { ok: true, checkedWeeks: 0, matched: 0, alreadyCurrent: true };
   }
 
   weeklyUsageSyncLoading = true;
@@ -4332,19 +6710,56 @@ async function runPmbWeeklyUsageSync({ automatic = false } = {}) {
   renderWeeklyUsage();
 
   try {
-    const params = new URLSearchParams({
+    const requestParams = new URLSearchParams({
       weeks: weekStarts.map(formatIsoDate).join(","),
     });
-    const response = await fetch(`/api/pmb-weekly-usage?${params.toString()}`, {
-      cache: "no-store",
-      credentials: "same-origin",
-      headers: {
-        Accept: "application/json",
-      },
-    });
-    const result = await parseJsonResponse(response);
+    const requestWeeklyUsage = async (confirmationToken = "") => {
+      const params = new URLSearchParams(requestParams);
+      if (confirmationToken) params.set("confirm", confirmationToken);
+      return requestOperationalSharedJson(`/api/pmb-weekly-usage?${params.toString()}`, {
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+        },
+      }, 45_000);
+    };
+
+    let { response, result } = await requestWeeklyUsage();
+    if (!response.ok && result?.code === "PMB_WEEKLY_USAGE_REVIEW_REQUIRED") {
+      const reviewWeeks = Array.isArray(result.reviewWeeks) ? result.reviewWeeks : [];
+      const reviewDetails = reviewWeeks.map((entry) => {
+        if (typeof entry === "string") return `Week: ${clean(entry)}`;
+        const range = [
+          clean(entry?.weekStart || entry?.start || entry?.week || entry?.label),
+          clean(entry?.weekEnd || entry?.end),
+        ].filter(Boolean).join(" to ");
+        const reason = clean(entry?.reason || entry?.message);
+        return [range ? `Week: ${range}` : "Week requiring review", reason].filter(Boolean).join(" — ");
+      });
+      const overallReason = clean(result.reviewReason || result.reason || result.error);
+      const confirmed = confirmDashboardAction(
+        "Pour My Beer returned a sparse or closed week that needs owner review.",
+        [overallReason, ...reviewDetails],
+        "Continue only if these weeks are legitimately closed or sparse. Confirming records the exception and retries the same report; it does not invent usage rows.",
+      );
+      if (!confirmed) {
+        weeklyUsageSyncAttempted = false;
+        weeklyUsageSyncMessage = "Weekly Usage review canceled. No sparse or closed week was accepted or saved.";
+        return { ok: false, canceled: true, error: weeklyUsageSyncMessage };
+      }
+      const confirmationToken = clean(result.confirmationToken);
+      if (!confirmationToken) {
+        throw new Error("PMB requested owner review but did not provide a valid confirmation token. Nothing was saved.");
+      }
+      weeklyUsageSyncMessage = "Owner confirmed the reviewed week; retrying the same PMB report...";
+      renderWeeklyUsage();
+      ({ response, result } = await requestWeeklyUsage(confirmationToken));
+    }
     if (!response.ok) {
-      throw new Error(result?.error || "Could not pull PMB weekly usage.");
+      const error = new Error(result?.error || "Could not pull PMB weekly usage.");
+      error.code = result?.code;
+      throw error;
     }
 
     const applied = applyPmbWeeklyUsageSync(result);
@@ -4354,12 +6769,14 @@ async function runPmbWeeklyUsageSync({ automatic = false } = {}) {
     weeklyUsageSyncMessage = applied.matched
       ? `${successPrefix}Saved ${applied.matched} PMB row${applied.matched === 1 ? "" : "s"} across ${applied.reports} week${applied.reports === 1 ? "" : "s"}. ${applied.archived ? `${applied.archived} old/replaced product row${applied.archived === 1 ? "" : "s"} went to hidden history.` : ""}`
       : `PMB returned ${applied.reportItems} product row${applied.reportItems === 1 ? "" : "s"} across ${applied.reports} week${applied.reports === 1 ? "" : "s"}, but none matched the active tracker.`;
+    return { ok: true, checkedWeeks: weekStarts.length, ...applied };
   } catch (error) {
     weeklyUsageSyncAttempted = false;
     const message = getPmbConnectionErrorMessage(error, "Could not pull PMB weekly usage.");
     weeklyUsageSyncMessage = automatic
       ? `${message} Existing saved usage remains visible.`
       : message;
+    return { ok: false, error: message };
   } finally {
     weeklyUsageSyncLoading = false;
     renderWeeklyUsage();
@@ -4454,29 +6871,19 @@ function applyPmbWeeklyUsageReport(report) {
 }
 
 function getPmbWeeklyUsageMatch(item, reportItems, usedReportIds = new Set(), label = "") {
-  const plu = toNumber(item.plu);
-  if (plu) {
-    const pluMatch = reportItems.find((reportItem) => (
+  const isIdentityCandidate = (reportItem) => (
       !usedReportIds.has(getPmbWeeklyUsageReportId(reportItem))
-      && toNumber(reportItem.plu) === plu
       && toNumber(reportItem.volumeOz) >= 0
       && shouldApplyWeeklyUsageReportItemToItem(item, reportItem, label)
-    ));
-    if (pluMatch) return pluMatch;
-  }
-
-  const tapMatch = reportItems.find((reportItem) => (
-    !usedReportIds.has(getPmbWeeklyUsageReportId(reportItem))
-    && toNumber(reportItem.tapNumber) === toNumber(item.tapNumber)
-    && toNumber(reportItem.volumeOz) >= 0
-    && shouldApplyWeeklyUsageReportItemToItem(item, reportItem, label)
-    && getWeeklyUsageNameKeys(reportItem.name || reportItem.brand, { stripWallNumber: false })
-      .some((key) => getWeeklyUsageNameKeys(item.name, { stripWallNumber: false }).includes(key))
-  ));
-  if (tapMatch) return tapMatch;
+  );
+  const identityMatch = findWeeklyUsageIdentityMatch(item, reportItems, isIdentityCandidate);
+  if (identityMatch) return identityMatch;
+  if (hasWeeklyUsagePhysicalIdentityConflict(item, reportItems, isIdentityCandidate)) return null;
 
   const exactKeys = getWeeklyUsageNameKeys(item.name, { stripWallNumber: false });
   const exactMatch = reportItems.find((reportItem) => (
+    isWeeklyUsageNameFallbackEligible(reportItem)
+    &&
     !usedReportIds.has(getPmbWeeklyUsageReportId(reportItem))
     && toNumber(reportItem.volumeOz) > 0
     && shouldApplyWeeklyUsageReportItemToItem(item, reportItem, label)
@@ -4486,6 +6893,8 @@ function getPmbWeeklyUsageMatch(item, reportItems, usedReportIds = new Set(), la
 
   const looseKeys = getWeeklyUsageNameKeys(item.name, { stripWallNumber: true });
   return reportItems.find((reportItem) => (
+    isWeeklyUsageNameFallbackEligible(reportItem)
+    &&
     !usedReportIds.has(getPmbWeeklyUsageReportId(reportItem))
     && toNumber(reportItem.volumeOz) > 0
     && shouldApplyWeeklyUsageReportItemToItem(item, reportItem, label)
@@ -5593,6 +8002,7 @@ function clearAllKegOnHand() {
 
 function bindKegLevelEvents() {
   document.querySelector("#view-missing-recipes")?.addEventListener("click", () => {
+    switchRecipeView("current");
     switchTab("recipes");
     recipeCoverageAlert?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
@@ -6106,9 +8516,11 @@ async function replaceTapWithProduct(replacementValue, tapKey) {
       source: details.source,
       sourceValue: replacementValue,
       tapLabel,
+      tapNumber: toNumber(tap.tapNumber),
       oldBrand: tap.brand,
+      oldPlu: toNumber(liveRow.plu),
       newBrand,
-      newKind: details.kind,
+      newKind: target.productKind || target.kind || details.kind,
       newPlu,
       newChargePerOz: toNumber(target.chargePerOz || target.pricePerOz || details.chargePerOz || item.chargePerOz || item.pricePerOz),
       deviceId: toNumber(result.slot?.deviceId),
@@ -6225,19 +8637,126 @@ function focusEditable(element) {
   }
 }
 
+async function requestParAgentState(body = null, timeoutMs = OPERATIONAL_SHARED_REQUEST_TIMEOUT_MS) {
+  const { response, result } = await requestOperationalSharedJson("/api/keg-par-agent", {
+    method: body ? "POST" : "GET",
+    headers: body ? { "Content-Type": "application/json", Accept: "application/json" } : { Accept: "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  }, timeoutMs);
+  if (!response.ok) {
+    const error = new Error(result?.error || `Keg Levels shared-state request failed (${response.status}).`);
+    error.code = result?.code || "KEG_STATE_ERROR";
+    error.status = response.status;
+    error.currentRevision = result?.currentRevision;
+    throw error;
+  }
+  return result;
+}
+
+function loadKegLevelsOutbox() {
+  try {
+    return normalizeOperationalOutboxEntry(JSON.parse(localStorage.getItem(KEG_LEVELS_OUTBOX_STORAGE_KEY) || "null"));
+  } catch {
+    return null;
+  }
+}
+
+function saveKegLevelsOutbox() {
+  try {
+    if (parAgentStateOutbox) localStorage.setItem(KEG_LEVELS_OUTBOX_STORAGE_KEY, JSON.stringify(parAgentStateOutbox));
+    else localStorage.removeItem(KEG_LEVELS_OUTBOX_STORAGE_KEY);
+    parAgentStateOutboxDurable = true;
+    return true;
+  } catch {
+    parAgentStateOutboxDurable = false;
+    parAgentError = "This browser could not preserve the pending Keg Levels recovery copy. Keep this page open and do not order from the plan.";
+    return false;
+  }
+}
+
+function stageKegLevelsOutbox() {
+  const prior = parAgentStateOutbox;
+  const entry = createOperationalOutboxEntry({
+    baseRevision: prior?.baseRevision ?? parAgentState?.revision,
+    payload: {
+      action: "sync-state",
+      onHandOverrides: { ...kegOnHandOverrides },
+      parOverrides: { ...kegParOverrides },
+      onDeckOverrides: { ...kegOnDeckOverrides },
+      settings: getParAgentSettings(),
+    },
+    updatedAt: new Date().toISOString(),
+  });
+  if (!entry) return null;
+  parAgentStateOutbox = {
+    ...entry,
+    ...(prior?.conflict ? {
+      conflict: true,
+      currentRevision: prior.currentRevision,
+      lastError: prior.lastError,
+    } : {}),
+  };
+  saveKegLevelsOutbox();
+  return parAgentStateOutbox;
+}
+
+function restoreKegLevelsOutbox(result = {}) {
+  const payload = parAgentStateOutbox?.payload;
+  if (!payload) return false;
+  parAgentState = {
+    ...(result || {}),
+    revision: Number(result?.revision ?? parAgentStateOutbox.baseRevision),
+    initialized: result?.initialized !== false,
+    onHandOverrides: { ...(payload.onHandOverrides || {}) },
+    parOverrides: { ...(payload.parOverrides || {}) },
+    onDeckOverrides: { ...(payload.onDeckOverrides || {}) },
+    settings: { ...(payload.settings || {}) },
+  };
+  kegOnHandOverrides = { ...(payload.onHandOverrides || {}) };
+  kegParOverrides = { ...(payload.parOverrides || {}) };
+  kegOnDeckOverrides = { ...(payload.onDeckOverrides || {}) };
+  saveKegOnHandOverrides();
+  saveKegParOverrides();
+  saveKegOnDeckOverrides();
+  parAgentInputsChangedAt = parAgentStateOutbox.updatedAt || new Date().toISOString();
+  return true;
+}
+
 async function loadParAgentState() {
   try {
-    const response = await fetch("/api/keg-par-agent", {
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-    });
-    const result = await response.json();
-    if (!response.ok) {
-      throw new Error(result?.error || "Could not load par agent state.");
+    const result = await requestParAgentState();
+    if (parAgentStateOutbox) {
+      restoreKegLevelsOutbox(result);
+      if (canSafelyRetryOperationalOutbox(parAgentStateOutbox, result.revision)) {
+        parAgentStateOutbox = markOperationalOutboxFailure(parAgentStateOutbox);
+        saveKegLevelsOutbox();
+        parAgentMessage = "Recovering Keg Levels inputs that did not finish saving...";
+        const recovered = await syncParAgentState({ silent: false });
+        if (recovered) return;
+      } else {
+        parAgentStateOutbox = markOperationalOutboxFailure(parAgentStateOutbox, {
+          conflict: true,
+          currentRevision: result.revision,
+          message: `Shared Keg Levels is now revision ${result.revision}, but this browser's recovery copy was based on revision ${parAgentStateOutbox.baseRevision}.`,
+        });
+        saveKegLevelsOutbox();
+      }
+      parAgentError = parAgentStateOutbox?.lastError || "Pending Keg Levels recovery needs review.";
+      parAgentMessage = parAgentStateOutbox?.conflict
+        ? `Keg Levels conflict: this browser restored its unsynced inputs from revision ${parAgentStateOutbox.baseRevision} instead of overwriting them with shared revision ${parAgentStateOutbox.currentRevision}. Review the local and shared versions before publishing.`
+        : `Keg Levels recovery is still pending. This browser restored the unsynced inputs from revision ${parAgentStateOutbox?.baseRevision}; ordering remains blocked until they save successfully.`;
+      return;
     }
+    parAgentError = "";
     applyParAgentState(result, { hydrate: true });
   } catch (error) {
-    parAgentMessage = error.message || "Could not load weekly par agent.";
+    if (parAgentStateOutbox && restoreKegLevelsOutbox()) {
+      parAgentError = error.message || "Could not load shared Keg Levels.";
+      parAgentMessage = `Shared Keg Levels is unavailable. This browser restored its pending inputs and blocked ordering: ${parAgentError}`;
+    } else {
+      parAgentError = error.message || "Could not load weekly par agent.";
+      parAgentMessage = parAgentError;
+    }
   }
 }
 
@@ -6260,6 +8779,16 @@ function applyParAgentState(state, { hydrate = false } = {}) {
   parAgentMessage = getParAgentStatusMessage();
 }
 
+function hasCurrentParAgentRecommendations() {
+  const recommendations = parAgentState?.recommendations;
+  if (!recommendations?.generatedAt) return false;
+  if (parAgentInputsChangedAt) return false;
+  return isRecommendationSourceRevisionCurrent(
+    parAgentState?.revision,
+    recommendations.sourceStateRevision,
+  );
+}
+
 function getParAgentStatusMessage() {
   if (!parAgentState?.initialized) {
     return "Setup needed: import Keg Levels only from the service computer. Counts and par choices stay on this device until then.";
@@ -6268,13 +8797,17 @@ function getParAgentStatusMessage() {
   if (!recommendations?.generatedAt) {
     return "Weekly par agent has not run yet. Set cooler capacity if you want capacity-aware trimming.";
   }
+  if (!hasCurrentParAgentRecommendations()) {
+    return `The ${formatUpdatedAt(recommendations.generatedAt)} recommendations are stale because Keg Levels inputs changed afterward. Old order and prep quantities are hidden; run the par agent again.`;
+  }
 
   const summary = recommendations.summary || {};
   if (summary.inventoryStateMissing) {
     return `Last run ${formatUpdatedAt(recommendations.generatedAt)} was held: backup/on-hand counts have not synced to the server yet. Open Keg Levels once with the current counts, then run the agent again.`;
   }
   const cocktailMakeText = summary.cocktailMakeCount ? ` ${formatNumber(summary.cocktailMakeCount)} cocktail${toNumber(summary.cocktailMakeCount) === 1 ? "" : "s"} to make.` : "";
-  const liquorOrderText = summary.liquorOrderCount ? ` ${formatNumber(summary.liquorOrderCount)} liquor tap refill${toNumber(summary.liquorOrderCount) === 1 ? "" : "s"} to order.` : "";
+  const deferredLiquorRefillCount = toNumber(summary.deferredLiquorRefillCount ?? summary.liquorOrderCount);
+  const liquorOrderText = deferredLiquorRefillCount ? ` ${formatNumber(deferredLiquorRefillCount)} liquor tap refill recommendation${deferredLiquorRefillCount === 1 ? "" : "s"} deferred for manual review; none are included in active orders.` : "";
   const kegOrderTotal = summary.kegOrderTotal ?? Math.max(0, toNumber(summary.orderTotal) - toNumber(summary.cocktailMakeTotal));
   const orderText = `${formatNumber(kegOrderTotal)} beer keg${kegOrderTotal === 1 ? "" : "s"}`;
   const capacityText = summary.capacityEnabled
@@ -6301,7 +8834,7 @@ function renderParAgentPanel() {
           <input id="par-agent-cooler-capacity" type="number" min="0" step="1" inputmode="numeric" value="${escapeHtml(capacity)}" placeholder="Optional">
         </label>
       </div>
-      <p class="sync-copy">Uses the same saved averages shown in Weekly Usage. Beer orders use average weekly kegs + 0.5; cocktail makes use average weekly kegs + 0.25; patio and karaoke liquor orders use average weekly ounces + 100. Beer cooler capacity trims lower-priority keg orders.</p>
+      <p class="sync-copy">Uses the same saved averages shown in Weekly Usage. Beer orders use average weekly kegs + 0.5; cocktail makes use average weekly kegs + 0.25. Patio and karaoke liquor gaps use average weekly ounces + 100, but remain deferred manual-review items with no active order quantity until refill/cabinet netting is added. Beer cooler capacity trims lower-priority keg orders.</p>
       ${parAgentState?.initialized === false ? '<button class="ghost-button" id="initialize-shared-keg-levels" type="button">Import from service computer</button>' : ""}
       <p class="sync-status">${escapeHtml(parAgentMessage)}</p>
     </div>
@@ -6309,6 +8842,7 @@ function renderParAgentPanel() {
 }
 
 function getCocktailsToMake() {
+  if (!hasCurrentParAgentRecommendations()) return [];
   return (parAgentState?.recommendations?.items || [])
     .filter((item) => item.actionType === "make" && toNumber(item.orderQty) > 0)
     .sort((a, b) => b.priority - a.priority || a.tapNumber - b.tapNumber);
@@ -6316,6 +8850,7 @@ function getCocktailsToMake() {
 
 function renderCocktailsToMakePanel() {
   const items = getCocktailsToMake();
+  const recommendationsStale = Boolean(parAgentState?.recommendations?.generatedAt) && !hasCurrentParAgentRecommendations();
   return `
     <div class="sync-panel cocktails-to-make-panel">
       <div class="cocktails-to-make-panel__header">
@@ -6331,12 +8866,13 @@ function renderCocktailsToMakePanel() {
             </div>
           `).join("")}
         </div>
-      ` : '<p class="sync-status">No cocktails need to be made from the current par-agent run.</p>'}
+      ` : `<p class="sync-status">${recommendationsStale ? "Cocktail recommendations are hidden because Keg Levels changed after the last run. Refresh the par agent." : "No cocktails need to be made from the current par-agent run."}</p>`}
     </div>
   `;
 }
 
 function getParAgentRecommendation(item) {
+  if (!hasCurrentParAgentRecommendations()) return null;
   const key = getKegItemKey(item);
   const recommendations = parAgentState?.recommendations?.items || [];
   return recommendations.find((entry) => entry.key === key)
@@ -6345,14 +8881,25 @@ function getParAgentRecommendation(item) {
 }
 
 function scheduleParAgentStateSync({ immediate = false } = {}) {
+  parAgentInputsChangedAt = new Date().toISOString();
   parAgentStateMutationVersion += 1;
   const mutationVersion = parAgentStateMutationVersion;
+  const staged = stageKegLevelsOutbox();
+  if (staged?.conflict) {
+    parAgentError = staged.lastError || "Keg Levels has an unresolved revision conflict.";
+    parAgentMessage = "This Keg Levels change remains saved locally for explicit conflict review; it will not overwrite the newer shared revision.";
+    renderKegLevels();
+    renderWeeklyPlan();
+    return;
+  }
   clearTimeout(parAgentStateSyncTimer);
   parAgentStateSyncTimer = setTimeout(() => {
+    parAgentStateSyncTimer = null;
     parAgentStateSyncQueue = parAgentStateSyncQueue
       .then(() => syncParAgentState({ silent: true, mutationVersion }))
       .catch(() => {});
   }, immediate ? 0 : 1500);
+  renderWeeklyPlan();
 }
 
 async function syncParAgentState({ silent = false, mutationVersion = parAgentStateMutationVersion } = {}) {
@@ -6361,35 +8908,32 @@ async function syncParAgentState({ silent = false, mutationVersion = parAgentSta
       parAgentMessage = getParAgentStatusMessage();
       renderKegLevels();
     }
-    return;
+    return false;
   }
-  const settings = getParAgentSettings();
+  if (!parAgentStateOutbox) stageKegLevelsOutbox();
+  const sentEntry = normalizeOperationalOutboxEntry(parAgentStateOutbox);
+  if (!sentEntry || sentEntry.conflict) {
+    parAgentError = sentEntry?.lastError || "Keg Levels has an unresolved recovery conflict.";
+    parAgentMessage = parAgentError;
+    if (!silent) renderKegLevels();
+    renderWeeklyPlan();
+    return false;
+  }
   try {
-    const response = await fetch("/api/keg-par-agent", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
-        action: "sync-state",
-        expectedRevision: parAgentState.revision,
-        onHandOverrides: kegOnHandOverrides,
-        parOverrides: kegParOverrides,
-        onDeckOverrides: kegOnDeckOverrides,
-        settings,
-      }),
+    const result = await requestParAgentState({
+      ...sentEntry.payload,
+      expectedRevision: sentEntry.baseRevision,
     });
-    const result = await parseJsonResponse(response);
-    if (!response.ok) {
-      const error = new Error(result?.error || "Could not save par agent state.");
-      error.code = result?.code;
-      throw error;
-    }
-    if (mutationVersion === parAgentStateMutationVersion) {
+    if (parAgentStateOutbox?.id === sentEntry.id && mutationVersion === parAgentStateMutationVersion) {
+      parAgentStateOutbox = null;
+      saveKegLevelsOutbox();
       applyParAgentState(result);
     } else {
+      parAgentStateOutbox = rebaseOperationalOutboxAfterOwnCommit(parAgentStateOutbox, {
+        committedBaseRevision: sentEntry.baseRevision,
+        nextRevision: result.revision,
+      });
+      saveKegLevelsOutbox();
       parAgentState = {
         ...(parAgentState || {}),
         revision: result.revision,
@@ -6397,63 +8941,155 @@ async function syncParAgentState({ silent = false, mutationVersion = parAgentSta
         updatedAt: result.updatedAt,
       };
     }
+    parAgentError = "";
+    parAgentMessage = parAgentStateOutbox
+      ? "An earlier Keg Levels save completed; newer local inputs are still pending."
+      : getParAgentStatusMessage();
+    return true;
   } catch (error) {
+    parAgentStateOutbox = markOperationalOutboxFailure(parAgentStateOutbox || sentEntry, {
+      message: error.message || "Could not save par agent state.",
+      currentRevision: error.currentRevision,
+      conflict: error.code === "KEG_STATE_REVISION_CONFLICT",
+    });
+    saveKegLevelsOutbox();
+    parAgentError = error.message || "Could not save par agent state.";
     if (error.code === "KEG_STATE_REVISION_CONFLICT") {
-      parAgentMessage = "Another manager changed Keg Levels first. This device kept its local choices; reload before deciding what to publish.";
+      parAgentMessage = "Another manager changed Keg Levels first. This browser preserved its local inputs for explicit review and will not retry them against a different revision.";
       renderKegLevels();
-      return;
+      renderWeeklyPlan();
+      return false;
     }
-    if (!silent) {
-      parAgentMessage = error.message || "Could not save par agent state.";
-      renderKegLevels();
-    }
+    parAgentMessage = `Could not save Keg Levels. The complete input payload remains in this browser for a safe retry: ${parAgentError}`;
+    if (!silent) renderKegLevels();
+    renderWeeklyPlan();
+    return false;
   }
+}
+
+async function flushPendingParAgentStateSync() {
+  let enqueued = false;
+  if (parAgentStateSyncTimer) {
+    clearTimeout(parAgentStateSyncTimer);
+    parAgentStateSyncTimer = null;
+    const mutationVersion = parAgentStateMutationVersion;
+    parAgentStateSyncQueue = parAgentStateSyncQueue
+      .then(() => syncParAgentState({ silent: false, mutationVersion }))
+      .catch(() => false);
+    enqueued = true;
+  }
+  if (parAgentStateOutbox && !enqueued) {
+    if (!canSafelyRetryOperationalOutbox(parAgentStateOutbox, parAgentState?.revision)) return false;
+    const mutationVersion = parAgentStateMutationVersion;
+    parAgentStateSyncQueue = parAgentStateSyncQueue
+      .then(() => syncParAgentState({ silent: false, mutationVersion }))
+      .catch(() => false);
+  }
+  const result = await parAgentStateSyncQueue;
+  return result !== false && !parAgentStateOutbox && parAgentStateOutboxDurable;
 }
 
 async function runKegParAgent() {
   if (!parAgentState?.initialized) {
     parAgentMessage = getParAgentStatusMessage();
     renderKegLevels();
-    return;
+    renderWeeklyPlan();
+    return false;
   }
-  if (parAgentRunning) return;
+  if (parAgentRunning) return false;
+  if (parAgentStateSyncTimer || parAgentStateOutbox) {
+    const inputsSaved = await flushPendingParAgentStateSync();
+    if (!inputsSaved) {
+      parAgentError = "Pending Keg Levels inputs could not be saved before the recommendation run.";
+      parAgentMessage = parAgentError;
+      renderKegLevels();
+      renderWeeklyPlan();
+      return false;
+    }
+  }
   parAgentRunning = true;
-  parAgentMessage = "Pulling PMB levels and matching all 102 taps to the saved Weekly Usage averages...";
+  parAgentError = "";
+  parAgentMessage = "Pulling PMB levels and matching configured taps to the saved Weekly Usage averages...";
   renderKegLevels();
+  renderWeeklyPlan();
 
   try {
-    const response = await fetch("/api/keg-par-agent", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
+    const result = await requestParAgentState({
         action: "run",
         expectedRevision: parAgentState.revision,
         onHandOverrides: kegOnHandOverrides,
         parOverrides: kegParOverrides,
         onDeckOverrides: kegOnDeckOverrides,
         settings: getParAgentSettings(),
-      }),
-    });
-    const result = await parseJsonResponse(response);
-    if (!response.ok) {
-      const error = new Error(result?.error || "Could not run par agent.");
-      error.code = result?.code;
-      throw error;
-    }
+      }, PAR_AGENT_RUN_REQUEST_TIMEOUT_MS);
 
     applyParAgentState(result);
+    parAgentInputsChangedAt = "";
+    parAgentError = "";
     parAgentMessage = getParAgentStatusMessage();
+    return true;
   } catch (error) {
-    parAgentMessage = error.code === "KEG_STATE_REVISION_CONFLICT"
+    parAgentError = error.code === "KEG_STATE_REVISION_CONFLICT"
       ? "Another manager changed Keg Levels first. Reload before running the agent again."
       : error.message || "Could not run par agent.";
+    parAgentMessage = parAgentError;
+    return false;
   } finally {
     parAgentRunning = false;
     renderKegLevels();
+    renderWeeklyPlan();
+  }
+}
+
+async function runWeeklyPlanUpdate() {
+  if (weeklyPlanUpdating || parAgentRunning) return;
+  if (!parAgentState?.initialized || !weeklyUsageSharedInitialized || !inventorySharedInitialized) {
+    parAgentError = "Complete the shared Keg Levels, Weekly Usage, and Inventory setup before updating the Weekly Plan.";
+    weeklyPlanRefreshMessage = parAgentError;
+    renderWeeklyPlan();
+    return;
+  }
+
+  weeklyPlanUpdating = true;
+  parAgentError = "";
+  weeklyPlanRefreshMessage = "Step 1 of 3: checking the latest completed Monday-Sunday PMB usage report...";
+  renderWeeklyPlan();
+
+  try {
+    const usageResult = await runPmbWeeklyUsageSync();
+    if (!usageResult?.ok) {
+      throw new Error(usageResult?.error || "The latest completed Weekly Usage report could not be checked.");
+    }
+
+    weeklyPlanRefreshMessage = usageResult.checkedWeeks
+      ? `Step 2 of 3: checked ${formatNumber(usageResult.checkedWeeks)} completed week${usageResult.checkedWeeks === 1 ? "" : "s"} and applied ${formatNumber(usageResult.matched || 0)} PMB row${usageResult.matched === 1 ? "" : "s"}; saving shared inputs...`
+      : "Step 2 of 3: completed Weekly Usage was already current; saving pending shared inputs...";
+    renderWeeklyPlan();
+
+    const usageSaved = await flushPendingSharedWeeklyUsageSave();
+    if (!usageSaved) throw new Error("Weekly Usage was checked but could not be saved to shared state.");
+    const inventorySaved = await flushPendingInventoryFieldSyncs();
+    if (!inventorySaved) throw new Error(inventorySharedSaveError || "Pending Inventory changes could not be saved before the recommendation run.");
+    const parInputsSaved = await flushPendingParAgentStateSync();
+    if (!parInputsSaved) throw new Error("Pending Keg Levels inputs could not be saved before the recommendation run.");
+
+    weeklyPlanRefreshMessage = "Step 3 of 3: shared usage, inventory, and keg inputs are saved; refreshing PMB levels and recommendations...";
+    renderWeeklyPlan();
+    const ran = await runKegParAgent();
+    if (!ran) throw new Error(parAgentMessage || "The keg and prep recommendation refresh failed.");
+
+    const summary = parAgentState?.recommendations?.summary || {};
+    const usageText = usageResult.checkedWeeks
+      ? `checked ${formatNumber(usageResult.checkedWeeks)} completed usage week${usageResult.checkedWeeks === 1 ? "" : "s"} and applied ${formatNumber(usageResult.matched || 0)} PMB row${usageResult.matched === 1 ? "" : "s"}`
+      : "confirmed completed Weekly Usage was already current";
+    weeklyPlanRefreshMessage = `Weekly Plan updated: ${usageText}, saved pending Weekly Usage, Inventory, and Keg Levels inputs, and recalculated ${formatNumber(summary.tapCount || 0)} tap recommendation${toNumber(summary.tapCount) === 1 ? "" : "s"}.`;
+    parAgentError = "";
+  } catch (error) {
+    parAgentError = error.message || "Weekly Plan update failed.";
+    weeklyPlanRefreshMessage = `${parAgentError} The last successful plan remains visible and is marked not ready.`;
+  } finally {
+    weeklyPlanUpdating = false;
+    renderWeeklyPlan();
   }
 }
 
@@ -6481,18 +9117,7 @@ async function initializeSharedKegLevelsFromServiceComputer() {
     await requirePmbWorkNetworkForServiceImport();
     parAgentMessage = "Importing the service computer's Keg Levels choices...";
     renderKegLevels();
-    const response = await fetch("/api/keg-par-agent", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ action: "initialize", expectedRevision: 0, onHandOverrides: kegOnHandOverrides, parOverrides: kegParOverrides, onDeckOverrides: kegOnDeckOverrides, settings: getParAgentSettings() }),
-    });
-    const result = await parseJsonResponse(response);
-    if (!response.ok) {
-      const error = new Error(result?.error || "Could not import Keg Levels.");
-      error.code = result?.code;
-      throw error;
-    }
+    const result = await requestParAgentState({ action: "initialize", expectedRevision: 0, onHandOverrides: kegOnHandOverrides, parOverrides: kegParOverrides, onDeckOverrides: kegOnDeckOverrides, settings: getParAgentSettings() });
     applyParAgentState(result);
     parAgentMessage = "Service-computer Keg Levels imported. Counts, pars, on-deck choices, and recommendations are now shared.";
   } catch (error) {
@@ -6535,16 +9160,19 @@ async function runKegLevelSync() {
   } finally {
     kegSyncLoading = false;
     renderKegLevels();
+    renderWeeklyPlan();
+    renderDashboardOverview();
   }
   return succeeded;
 }
 
 async function runTapPricingSync() {
-  if (tapPricingSyncLoading) return;
+  if (tapPricingSyncLoading) return false;
   tapPricingSyncAttempted = true;
   tapPricingSyncLoading = true;
   liveTapPricingMessage = "Checking Pour My Beer for current tap prices...";
   renderPricingSummary();
+  let succeeded = false;
 
   try {
     const { response, result } = await fetchPmbJsonWithRetry({
@@ -6556,10 +9184,16 @@ async function runTapPricingSync() {
     }
 
     liveTapPriceItems = result.items || [];
+    shotPricingCapability = result.portionPricing && typeof result.portionPricing === "object"
+      ? result.portionPricing
+      : {
+          writeAvailable: false,
+          code: "PMB_PORTION_SCHEMA_UNVERIFIED",
+          message: "PMB did not report a verified shot-pricing write capability. Existing prices remain untouched.",
+        };
     kegPricingItems = buildKegPricingCatalog(kegWallItems, getCurrentKegPricingTapItems());
     liveTapPrices = buildLiveTapPriceMap(liveTapPriceItems);
-    liveTapPricingUpdatedAt = result.updatedAt || new Date().toISOString();
-    syncWeeklyUsageWithCurrentPmbTaps(liveTapPriceItems);
+    liveTapPricingUpdatedAt = clean(result.updatedAt);
     const matchedCount = getActiveRecipes().filter((recipe) => getLiveTapPrice(recipe)).length;
     liveTapPricingMessage = `Matched ${matchedCount} recipes from Pour My Beer.`;
     renderPricing();
@@ -6568,14 +9202,19 @@ async function runTapPricingSync() {
     renderRecipes();
     renderOldRecipes();
     renderStats();
+    succeeded = true;
   } catch (error) {
     tapPricingSyncAttempted = false;
+    liveTapPricingUpdatedAt = "";
     liveTapPricingMessage = getPmbConnectionErrorMessage(error, "Could not load current tap pricing.");
+    renderPricing();
     renderKegLevels();
   } finally {
     tapPricingSyncLoading = false;
     renderPricingSummary();
+    renderDashboardOverview();
   }
+  return succeeded;
 }
 
 async function runKegConfigUpdate() {
@@ -6710,6 +9349,7 @@ function setKegOnDeckItem(key, comingSoonId) {
 }
 
 function getKegNeed(item) {
+  if (parAgentState?.recommendations?.generatedAt && !hasCurrentParAgentRecommendations()) return 0;
   const recommendation = getParAgentRecommendation(item);
   if (recommendation && Number.isFinite(toNumber(recommendation.orderQty))) {
     return Math.max(0, Math.round(toNumber(recommendation.orderQty)));
@@ -6724,9 +9364,14 @@ function getKegNeed(item) {
 
 function renderKegNeedCell(item, need) {
   const recommendation = getParAgentRecommendation(item);
-  const valueHtml = need > 0
-    ? `<span class="inventory-order-value">${formatNumber(need)}</span>`
-    : `<span class="inventory-order-zero">0</span>`;
+  const deferredQty = recommendation?.isLiquorTap
+    ? Math.max(toNumber(recommendation.deferredQty), toNumber(recommendation.suggestedRefillQty))
+    : 0;
+  const valueHtml = deferredQty > 0
+    ? `<span class="table-note table-note--accent">Review ${formatNumber(deferredQty)} refill${deferredQty === 1 ? "" : "s"}</span>`
+    : need > 0
+      ? `<span class="inventory-order-value">${formatNumber(need)}</span>`
+      : `<span class="inventory-order-zero">0</span>`;
   if (!recommendation) {
     const onDeck = getKegOnDeckItem(item);
     if (!onDeck || need <= 0) return valueHtml;
@@ -6740,7 +9385,11 @@ function renderKegNeedCell(item, need) {
 
   const reason = clean(recommendation.reason);
   const orderProductName = clean(recommendation.orderProductName);
-  const actionLabel = recommendation.actionType === "make" ? "Make" : "Order";
+  const actionLabel = recommendation.isLiquorTap
+    ? "Review refill"
+    : recommendation.actionType === "make"
+      ? "Make"
+      : "Order";
   const stockText = recommendation.isLiquorTap
     ? `${formatNumber(recommendation.currentStockOunces)} oz in keg | ${formatNumber(recommendation.avgWeeklyOunces)} oz avg/week`
     : recommendation.isKegTap
@@ -6749,7 +9398,7 @@ function renderKegNeedCell(item, need) {
   return `
     <div class="keg-need-agent">
       ${valueHtml}
-      ${orderProductName && need > 0 ? `<span class="table-note table-note--accent">${escapeHtml(actionLabel)} ${escapeHtml(orderProductName)}</span>` : ""}
+      ${orderProductName && (need > 0 || deferredQty > 0) ? `<span class="table-note table-note--accent">${escapeHtml(actionLabel)} ${escapeHtml(orderProductName)}</span>` : ""}
       <span class="table-note">${escapeHtml(stockText)}</span>
       ${reason ? `<span class="table-note">${escapeHtml(reason)}</span>` : ""}
     </div>
@@ -6964,13 +9613,11 @@ function getKegLevelClass(value) {
 }
 
 async function requestSharedInventory(body = null) {
-  const response = await fetch("/api/inventory-state", {
+  const { response, result } = await requestOperationalSharedJson("/api/inventory-state", {
     method: body ? "POST" : "GET",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers: body ? { "Content-Type": "application/json", Accept: "application/json" } : { Accept: "application/json" },
     body: body ? JSON.stringify(body) : undefined,
-    cache: "no-store",
   });
-  const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(result.error || `Shared inventory request failed (${response.status}).`);
     error.code = result.code || "INVENTORY_STATE_ERROR";
@@ -6981,6 +9628,219 @@ async function requestSharedInventory(body = null) {
   return result;
 }
 
+function loadInventoryFieldOutbox() {
+  try {
+    return normalizeOperationalOutboxMap(JSON.parse(localStorage.getItem(INVENTORY_FIELD_OUTBOX_STORAGE_KEY) || "{}"));
+  } catch {
+    return {};
+  }
+}
+
+function loadInventoryActionOutbox() {
+  try {
+    return normalizeOperationalOutboxList(JSON.parse(localStorage.getItem(INVENTORY_ACTION_OUTBOX_STORAGE_KEY) || "[]"));
+  } catch {
+    return [];
+  }
+}
+
+function saveInventoryActionOutbox() {
+  try {
+    if (inventoryActionOutbox.length) {
+      localStorage.setItem(INVENTORY_ACTION_OUTBOX_STORAGE_KEY, JSON.stringify(inventoryActionOutbox));
+    } else {
+      localStorage.removeItem(INVENTORY_ACTION_OUTBOX_STORAGE_KEY);
+    }
+    inventoryActionOutboxDurable = true;
+    return true;
+  } catch {
+    inventoryActionOutboxDurable = false;
+    inventorySharedSaveError = "This browser could not preserve pending Inventory recovery operations. Keep this page open and do not order from the plan.";
+    return false;
+  }
+}
+
+function nextInventoryOutboxClientOrder() {
+  inventoryOutboxClientOrder = Math.max(Date.now(), inventoryOutboxClientOrder + 1);
+  return inventoryOutboxClientOrder;
+}
+
+function stageInventoryActionOutbox(payload, options = {}) {
+  const entry = createOperationalOutboxEntry({
+    baseRevision: inventorySharedRevision,
+    payload: {
+      ...payload,
+      recoveryOptions: {
+        applyState: options.applyState !== false,
+        rebuild: options.rebuild === true,
+        successMessage: clean(options.successMessage) || "Shared inventory saved.",
+      },
+    },
+    updatedAt: new Date().toISOString(),
+    clientOrder: nextInventoryOutboxClientOrder(),
+  });
+  if (!entry) return null;
+  inventoryActionOutbox.push(entry);
+  saveInventoryActionOutbox();
+  return entry;
+}
+
+function saveInventoryFieldOutbox() {
+  try {
+    if (Object.keys(inventoryFieldOutbox).length) {
+      localStorage.setItem(INVENTORY_FIELD_OUTBOX_STORAGE_KEY, JSON.stringify(inventoryFieldOutbox));
+    } else {
+      localStorage.removeItem(INVENTORY_FIELD_OUTBOX_STORAGE_KEY);
+    }
+    inventoryFieldOutboxDurable = true;
+    return true;
+  } catch {
+    inventoryFieldOutboxDurable = false;
+    inventorySharedSaveError = "This browser could not preserve pending Inventory recovery operations. Keep this page open and do not order from the plan.";
+    return false;
+  }
+}
+
+function stageInventoryFieldOutbox(key, payload) {
+  const prior = inventoryFieldOutbox[key];
+  const entry = createOperationalOutboxEntry({
+    baseRevision: prior?.baseRevision ?? inventorySharedRevision,
+    payload,
+    updatedAt: new Date().toISOString(),
+    clientOrder: nextInventoryOutboxClientOrder(),
+  });
+  if (!entry) return null;
+  inventoryFieldOutbox[key] = {
+    ...entry,
+    ...(prior?.conflict ? {
+      conflict: true,
+      currentRevision: prior.currentRevision,
+      lastError: prior.lastError,
+    } : {}),
+  };
+  saveInventoryFieldOutbox();
+  return inventoryFieldOutbox[key];
+}
+
+function overlayInventoryFieldOutbox() {
+  Object.values(inventoryFieldOutbox).forEach((entry) => {
+    const payload = entry?.payload || {};
+    const id = clean(payload.id);
+    if (!id || !["onHand", "par"].includes(payload.field)) return;
+    const target = payload.field === "par" ? inventoryParOverrides : inventoryOnHandOverrides;
+    const value = clean(payload.value);
+    if (value === "") delete target[id];
+    else target[id] = value;
+  });
+  saveInventoryOnHandOverrides();
+  saveInventoryParOverrides();
+}
+
+function getPendingInventoryOperations() {
+  return [
+    ...Object.entries(inventoryFieldOutbox).map(([key, entry]) => ({ kind: "field", key, entry })),
+    ...inventoryActionOutbox.map((entry) => ({ kind: "action", key: entry.id, entry })),
+  ].sort((left, right) => (
+    left.entry.clientOrder - right.entry.clientOrder
+    || left.entry.updatedAt.localeCompare(right.entry.updatedAt)
+    || left.entry.id.localeCompare(right.entry.id)
+  ));
+}
+
+function hasEarlierFailedInventoryOperation(entry) {
+  return getPendingInventoryOperations().some(({ entry: candidate }) => (
+    candidate.clientOrder < entry.clientOrder
+    && (candidate.conflict || Boolean(candidate.lastError))
+  ));
+}
+
+function applyPendingInventoryActionLocally(payload) {
+  if (!payload || typeof payload !== "object") return;
+  switch (payload.action) {
+    case "upsert-custom": {
+      const item = payload.item;
+      if (!item?.id) return;
+      customInventoryItems = [...customInventoryItems.filter((entry) => entry.id !== item.id), { ...item }];
+      if (clean(item.onHandDisplay) === "") delete inventoryOnHandOverrides[item.id];
+      else inventoryOnHandOverrides[item.id] = clean(item.onHandDisplay);
+      if (clean(item.parDisplay) === "") delete inventoryParOverrides[item.id];
+      else inventoryParOverrides[item.id] = clean(item.parDisplay);
+      break;
+    }
+    case "delete-custom":
+      customInventoryItems = customInventoryItems.filter((item) => item.id !== payload.id);
+      inventoryItemOrder = inventoryItemOrder.filter((id) => id !== payload.id);
+      delete inventoryOnHandOverrides[payload.id];
+      delete inventoryParOverrides[payload.id];
+      break;
+    case "reorder-items":
+      inventoryItemOrder = Array.isArray(payload.itemOrder) ? [...new Set(payload.itemOrder)] : inventoryItemOrder;
+      break;
+    case "restore-snapshot": {
+      const snapshot = inventoryHistory.find((entry) => entry.id === payload.id);
+      if (!snapshot) return;
+      inventoryOnHandOverrides = {};
+      inventoryParOverrides = {};
+      snapshot.items.forEach((item) => {
+        const id = clean(item.id) || slugify(item.name);
+        if (id && clean(item.onHandDisplay) !== "") inventoryOnHandOverrides[id] = clean(item.onHandDisplay);
+        if (id && clean(item.parDisplay) !== "") inventoryParOverrides[id] = clean(item.parDisplay);
+      });
+      break;
+    }
+    case "delete-snapshot":
+      inventoryHistory = inventoryHistory.filter((snapshot) => snapshot.id !== payload.id);
+      break;
+    case "save-snapshot":
+      // The server owns the canonical snapshot id, week, and timestamp. The exact
+      // payload remains durable and visible as pending until its revision-bound save finishes.
+      break;
+    default:
+      break;
+  }
+}
+
+function overlayInventoryOutboxes() {
+  getPendingInventoryOperations().forEach(({ kind, entry }) => {
+    if (kind === "action") applyPendingInventoryActionLocally(entry.payload);
+    else {
+      const payload = entry.payload || {};
+      const target = payload.field === "par" ? inventoryParOverrides : inventoryOnHandOverrides;
+      const value = clean(payload.value);
+      if (!payload.id || !["onHand", "par"].includes(payload.field)) return;
+      if (value === "") delete target[payload.id];
+      else target[payload.id] = value;
+    }
+  });
+  saveInventoryOnHandOverrides();
+  saveInventoryParOverrides();
+  saveCustomInventoryItems();
+  saveInventoryItemOrder();
+  saveInventoryHistory();
+  if (inventorySourceRows.length) {
+    inventoryItems = mergeCustomInventoryItems(parseInventory(inventorySourceRows));
+    syncInventoryItemCatalogLinks();
+  }
+}
+
+function markInventoryOutboxConflicts(currentRevision, message = "") {
+  inventoryFieldOutbox = Object.fromEntries(Object.entries(inventoryFieldOutbox).map(([key, entry]) => [
+    key,
+    markOperationalOutboxFailure(entry, {
+      conflict: true,
+      currentRevision,
+      message: message || `Shared Inventory is now revision ${currentRevision}, but this pending change was based on revision ${entry.baseRevision}.`,
+    }),
+  ]));
+  saveInventoryFieldOutbox();
+  inventoryActionOutbox = inventoryActionOutbox.map((entry) => markOperationalOutboxFailure(entry, {
+    conflict: true,
+    currentRevision,
+    message: message || `Shared Inventory is now revision ${currentRevision}, but this pending ${entry.payload.action} operation was based on revision ${entry.baseRevision}.`,
+  }));
+  saveInventoryActionOutbox();
+}
+
 async function loadSharedInventoryState() {
   try {
     const state = await requestSharedInventory();
@@ -6989,14 +9849,54 @@ async function loadSharedInventoryState() {
     inventorySharedRevision = Number(state.revision) || 0;
     if (state.initialized) {
       applySharedInventoryState(state);
+      if (getPendingInventoryOperations().length) {
+        overlayInventoryOutboxes();
+        const safeToRetry = getPendingInventoryOperations().every(({ entry }) => (
+          canSafelyRetryOperationalOutbox(entry, state.revision)
+        ));
+        if (safeToRetry) {
+          inventoryFieldOutbox = Object.fromEntries(Object.entries(inventoryFieldOutbox).map(([key, entry]) => [
+            key,
+            markOperationalOutboxFailure(entry),
+          ]));
+          saveInventoryFieldOutbox();
+          inventoryActionOutbox = inventoryActionOutbox.map((entry) => markOperationalOutboxFailure(entry));
+          saveInventoryActionOutbox();
+          inventorySharedMessage = "Recovering Inventory changes that did not finish saving...";
+          const recovered = await flushPendingInventorySyncs();
+          if (recovered) {
+            inventorySharedSaveError = "";
+            inventorySharedMessage = "Recovered and saved pending Inventory changes.";
+            return;
+          }
+        } else {
+          markInventoryOutboxConflicts(state.revision);
+        }
+        const pendingEntry = getPendingInventoryOperations()[0]?.entry;
+        inventorySharedSaveError = pendingEntry?.lastError || "Pending Inventory recovery needs review.";
+        inventorySharedMessage = pendingEntry?.conflict
+          ? `Inventory conflict: this browser restored unsynced field values from revision ${pendingEntry.baseRevision} instead of overwriting them with shared revision ${pendingEntry.currentRevision}. Review them against the shared version before publishing.`
+          : `Inventory recovery is still pending. This browser restored unsynced field values from revision ${pendingEntry?.baseRevision}; ordering remains blocked until they save successfully.`;
+        return;
+      }
+      inventorySharedSaveError = "";
       inventorySharedMessage = "Shared inventory is available on all signed-in manager devices.";
     } else {
       inventorySharedMessage = "Setup needed: import inventory only from the service computer. Until then, changes stay on this device.";
     }
   } catch (error) {
     inventorySharedProvisioned = false;
-    inventorySharedInitialized = false;
-    inventorySharedMessage = `Shared inventory unavailable. Changes are saved on this device only: ${error.message}`;
+    if (getPendingInventoryOperations().length) {
+      overlayInventoryOutboxes();
+      inventorySharedInitialized = true;
+      inventorySharedRevision = Math.min(...getPendingInventoryOperations().map(({ entry }) => entry.baseRevision));
+    } else {
+      inventorySharedInitialized = false;
+    }
+    inventorySharedSaveError = error.message || "Shared inventory could not be loaded.";
+    inventorySharedMessage = getPendingInventoryOperations().length
+      ? `Shared inventory unavailable. This browser restored its pending changes and blocked ordering: ${error.message}`
+      : `Shared inventory unavailable. Changes are saved on this device only: ${error.message}`;
   }
 }
 
@@ -7099,8 +9999,10 @@ async function initializeSharedInventoryFromServiceComputer() {
     });
     applySharedInventoryState(state, { rebuild: true });
     inventorySharedMessage = "Service-computer inventory imported. Counts, pars, custom items, and Monday snapshots are now shared.";
+    inventorySharedSaveError = "";
     inventorySharedSaving = false;
   } catch (error) {
+    inventorySharedSaveError = error.message || "Inventory import failed.";
     inventorySharedMessage = error.code === "INVENTORY_STATE_ALREADY_INITIALIZED"
       ? "Shared inventory was already initialized in another session. Reload to use the official version."
       : `Inventory import failed. Nothing was published from this browser: ${error.message}`;
@@ -7128,25 +10030,98 @@ async function runSharedInventoryAction(body, {
     renderInventoryPanels();
     return null;
   }
-  if (flushFields) await flushPendingInventoryFieldSyncs();
+  const staged = stageInventoryActionOutbox(body, {
+    successMessage,
+    applyState,
+    rebuild,
+  });
+  if (!staged || !inventoryActionOutboxDurable) {
+    inventorySharedSaving = false;
+    renderInventoryPanels();
+    renderWeeklyPlan();
+    return null;
+  }
+  overlayInventoryOutboxes();
+  renderInventory();
   setInventorySharedStatus("Saving shared inventory...", true);
-  try {
-    const state = await requestSharedInventory(body);
-    if (applyState) applySharedInventoryState(state, { rebuild });
-    else {
+  if (flushFields) {
+    const saved = await flushPendingInventorySyncs();
+    return saved ? true : null;
+  }
+  return queueInventoryActionSync(staged.id);
+}
+
+function queueInventoryActionSync(operationId) {
+  if (inventoryQueuedActionIds.has(operationId)) return inventoryFieldSyncQueue;
+  inventoryQueuedActionIds.add(operationId);
+  inventoryFieldSyncPendingCount += 1;
+  inventoryFieldSyncQueue = inventoryFieldSyncQueue.then(async () => {
+    const entryIndex = inventoryActionOutbox.findIndex((entry) => entry.id === operationId);
+    const activeEntry = entryIndex >= 0 ? normalizeOperationalOutboxEntry(inventoryActionOutbox[entryIndex]) : null;
+    if (!activeEntry || activeEntry.conflict || hasEarlierFailedInventoryOperation(activeEntry)) {
+      inventoryQueuedActionIds.delete(operationId);
+      inventoryFieldSyncPendingCount = Math.max(0, inventoryFieldSyncPendingCount - 1);
+      return null;
+    }
+    const { recoveryOptions = {}, ...body } = activeEntry.payload;
+    inventorySharedSaving = true;
+    try {
+      const state = await requestSharedInventory({
+        ...body,
+        expectedRevision: activeEntry.baseRevision,
+      });
       inventorySharedRevision = Number(state.revision) || inventorySharedRevision;
       inventorySharedUpdatedAt = state.current?.updatedAt || inventorySharedUpdatedAt;
+      inventoryActionOutbox = inventoryActionOutbox.filter((entry) => entry.id !== activeEntry.id);
+      inventoryActionOutbox = inventoryActionOutbox.map((entry) => rebaseOperationalOutboxAfterOwnCommit(entry, {
+        committedBaseRevision: activeEntry.baseRevision,
+        nextRevision: state.revision,
+      }));
+      inventoryFieldOutbox = Object.fromEntries(Object.entries(inventoryFieldOutbox).map(([key, entry]) => [
+        key,
+        rebaseOperationalOutboxAfterOwnCommit(entry, {
+          committedBaseRevision: activeEntry.baseRevision,
+          nextRevision: state.revision,
+        }),
+      ]));
+      saveInventoryActionOutbox();
+      saveInventoryFieldOutbox();
+      if (recoveryOptions.applyState !== false) applySharedInventoryState(state, { rebuild: recoveryOptions.rebuild === true });
+      overlayInventoryOutboxes();
+      if (!getPendingInventoryOperations().length && inventoryFieldOutboxDurable && inventoryActionOutboxDurable) inventorySharedSaveError = "";
+      inventorySharedMessage = getPendingInventoryOperations().length
+        ? "An earlier Inventory operation saved; newer local changes are still pending."
+        : recoveryOptions.successMessage || "Shared inventory saved.";
+      return state;
+    } catch (error) {
+      const currentIndex = inventoryActionOutbox.findIndex((entry) => entry.id === activeEntry.id);
+      if (currentIndex >= 0) {
+        inventoryActionOutbox[currentIndex] = markOperationalOutboxFailure(inventoryActionOutbox[currentIndex], {
+          message: error.message || "A pending Inventory operation could not be saved.",
+          currentRevision: error.currentRevision,
+          conflict: error.code === "INVENTORY_STATE_REVISION_CONFLICT",
+        });
+      }
+      saveInventoryActionOutbox();
+      inventorySharedSaveError = error.message || "A pending Inventory operation could not be saved.";
+      inventorySharedMessage = error.code === "INVENTORY_STATE_REVISION_CONFLICT"
+        ? `Inventory conflict: the local ${body.action} operation is preserved for explicit review and will not be retried against the newer shared revision.`
+        : `Could not save shared inventory. The complete ${body.action} operation remains in this browser for a safe retry: ${error.message}`;
+      return null;
+    } finally {
+      inventoryQueuedActionIds.delete(operationId);
+      inventoryFieldSyncPendingCount = Math.max(0, inventoryFieldSyncPendingCount - 1);
+      inventorySharedSaving = inventoryFieldSyncPendingCount > 0 || inventoryFieldSyncTimers.size > 0;
+      renderInventoryPanels();
+      renderWeeklyPlan();
     }
-    inventorySharedMessage = successMessage;
-    inventorySharedSaving = false;
-    return state;
-  } catch (error) {
-    inventorySharedMessage = `Could not save shared inventory. This device still has your change: ${error.message}`;
+  }).catch((error) => {
+    inventoryQueuedActionIds.delete(operationId);
+    inventorySharedSaveError = error.message || "A pending Inventory operation could not be saved.";
     inventorySharedSaving = false;
     return null;
-  } finally {
-    renderInventoryPanels();
-  }
+  });
+  return inventoryFieldSyncQueue;
 }
 
 function scheduleInventoryFieldSync(id, field, value) {
@@ -7156,35 +10131,158 @@ function scheduleInventoryFieldSync(id, field, value) {
     return;
   }
   const key = `${id}:${field}`;
+  const payload = { action: "update-field", id, field, value };
+  const staged = stageInventoryFieldOutbox(key, payload);
+  if (staged?.conflict) {
+    inventorySharedSaveError = staged.lastError || "Inventory has an unresolved revision conflict.";
+    inventorySharedMessage = "This Inventory change remains saved locally for explicit conflict review; it will not overwrite the newer shared revision.";
+    inventorySharedSaving = false;
+    renderInventoryPanels();
+    renderWeeklyPlan();
+    return;
+  }
   clearTimeout(inventoryFieldSyncTimers.get(key)?.timer);
+  inventoryFieldSyncFailures.delete(key);
+  if (!inventoryFieldSyncFailures.size
+    && !getPendingInventoryOperations().some(({ entry }) => entry.conflict)
+    && inventoryFieldOutboxDurable
+    && inventoryActionOutboxDurable) inventorySharedSaveError = "";
   inventorySharedMessage = "Saving shared inventory...";
   inventorySharedSaving = true;
-  const payload = { action: "update-field", id, field, value };
   const timer = setTimeout(() => {
     inventoryFieldSyncTimers.delete(key);
-    inventoryFieldSyncQueue = inventoryFieldSyncQueue.then(() =>
-      runSharedInventoryAction(
-        payload,
-        { successMessage: "Shared inventory saved.", applyState: false, flushFields: false },
-      ),
-    );
+    queueInventoryFieldSync(key, payload);
   }, 500);
   inventoryFieldSyncTimers.set(key, { timer, payload });
+  renderWeeklyPlan();
+}
+
+function queueInventoryFieldSync(key, payload) {
+  if (inventoryQueuedFieldKeys.has(key)) return inventoryFieldSyncQueue;
+  const staged = inventoryFieldOutbox[key] || stageInventoryFieldOutbox(key, payload);
+  const initialEntry = normalizeOperationalOutboxEntry(staged);
+  if (!initialEntry || initialEntry.conflict) {
+    if (initialEntry) inventoryFieldSyncFailures.set(key, initialEntry.payload);
+    return Promise.resolve(null);
+  }
+  let activeEntry = initialEntry;
+  let committed = false;
+  inventoryQueuedFieldKeys.add(key);
+  inventoryFieldSyncPendingCount += 1;
+  inventoryFieldSyncQueue = inventoryFieldSyncQueue.then(async () => {
+    activeEntry = normalizeOperationalOutboxEntry(inventoryFieldOutbox[key]) || initialEntry;
+    if (activeEntry.conflict || hasEarlierFailedInventoryOperation(activeEntry)) {
+      inventoryFieldSyncFailures.set(key, activeEntry.payload);
+      return null;
+    }
+    inventorySharedSaving = true;
+    try {
+      const state = await requestSharedInventory({
+        ...activeEntry.payload,
+        expectedRevision: activeEntry.baseRevision,
+      });
+      inventorySharedRevision = Number(state.revision) || inventorySharedRevision;
+      inventorySharedUpdatedAt = state.current?.updatedAt || inventorySharedUpdatedAt;
+      if (inventoryFieldOutbox[key]?.id === activeEntry.id) delete inventoryFieldOutbox[key];
+      else {
+        inventoryFieldOutbox[key] = rebaseOperationalOutboxAfterOwnCommit(inventoryFieldOutbox[key], {
+          committedBaseRevision: activeEntry.baseRevision,
+          nextRevision: state.revision,
+        });
+      }
+      inventoryFieldOutbox = Object.fromEntries(Object.entries(inventoryFieldOutbox).map(([entryKey, entry]) => [
+        entryKey,
+        rebaseOperationalOutboxAfterOwnCommit(entry, {
+          committedBaseRevision: activeEntry.baseRevision,
+          nextRevision: state.revision,
+        }),
+      ]));
+      inventoryActionOutbox = inventoryActionOutbox.map((entry) => rebaseOperationalOutboxAfterOwnCommit(entry, {
+        committedBaseRevision: activeEntry.baseRevision,
+        nextRevision: state.revision,
+      }));
+      saveInventoryFieldOutbox();
+      saveInventoryActionOutbox();
+      inventoryFieldSyncFailures.delete(key);
+      if (!inventoryFieldSyncFailures.size && !getPendingInventoryOperations().length && inventoryFieldOutboxDurable && inventoryActionOutboxDurable) inventorySharedSaveError = "";
+      inventorySharedMessage = getPendingInventoryOperations().length
+        ? "An earlier Inventory field saved; newer local changes are still pending."
+        : "Shared inventory saved.";
+      committed = true;
+      return state;
+    } catch (error) {
+      inventorySharedSaveError = error.message || "A pending inventory field could not be saved.";
+      inventoryFieldOutbox[key] = markOperationalOutboxFailure(inventoryFieldOutbox[key] || activeEntry, {
+        message: inventorySharedSaveError,
+        currentRevision: error.currentRevision,
+        conflict: error.code === "INVENTORY_STATE_REVISION_CONFLICT",
+      });
+      saveInventoryFieldOutbox();
+      inventoryFieldSyncFailures.set(key, activeEntry.payload);
+      inventorySharedMessage = error.code === "INVENTORY_STATE_REVISION_CONFLICT"
+        ? "Inventory conflict: the local field value is preserved for explicit review and will not be retried against the newer shared revision."
+        : `Could not save shared inventory. The field change remains in this browser for a safe retry: ${error.message}`;
+      return null;
+    }
+  }).catch((error) => {
+    inventoryFieldSyncFailures.set(key, activeEntry.payload);
+    inventorySharedSaveError = error.message || "A pending inventory field could not be saved.";
+    inventorySharedSaving = false;
+    return null;
+  }).finally(() => {
+    inventoryQueuedFieldKeys.delete(key);
+    inventoryFieldSyncPendingCount = Math.max(0, inventoryFieldSyncPendingCount - 1);
+    inventorySharedSaving = inventoryFieldSyncPendingCount > 0 || inventoryFieldSyncTimers.size > 0;
+    if (committed && inventoryFieldOutbox[key] && inventoryFieldOutbox[key].id !== activeEntry.id && !inventoryFieldOutbox[key].conflict) {
+      window.setTimeout(() => queueInventoryFieldSync(key, inventoryFieldOutbox[key].payload), 0);
+      inventorySharedSaving = true;
+    }
+    renderInventoryPanels();
+    renderWeeklyPlan();
+  });
+  return inventoryFieldSyncQueue;
 }
 
 async function flushPendingInventoryFieldSyncs() {
-  const pending = [...inventoryFieldSyncTimers.values()];
+  return flushPendingInventorySyncs();
+}
+
+async function flushPendingInventorySyncs() {
+  const timers = [...inventoryFieldSyncTimers.values()].map((entry) => entry.timer);
   inventoryFieldSyncTimers.clear();
-  pending.forEach(({ timer }) => clearTimeout(timer));
-  pending.forEach(({ payload }) => {
-    inventoryFieldSyncQueue = inventoryFieldSyncQueue.then(() =>
-      runSharedInventoryAction(
-        payload,
-        { successMessage: "Shared inventory saved.", applyState: false, flushFields: false },
-      ),
-    );
+  timers.forEach((timer) => clearTimeout(timer));
+  inventoryFieldSyncFailures.clear();
+  const operations = getPendingInventoryOperations();
+  const conflictEntry = operations.find(({ entry }) => entry?.conflict)?.entry;
+  if (operations.length && !conflictEntry) {
+    inventorySharedSaveError = "";
+    inventorySharedSaving = true;
+  } else if (conflictEntry) {
+    inventorySharedSaveError = conflictEntry.lastError || "Pending Inventory changes need explicit conflict review.";
+    inventorySharedMessage = "Inventory has locally preserved changes that conflict with the current shared revision. Ordering remains blocked until they are reviewed.";
+    inventorySharedSaving = inventoryFieldSyncPendingCount > 0;
+    renderInventoryPanels();
+    renderWeeklyPlan();
+    return false;
+  }
+  operations.forEach(({ kind, key, entry }) => {
+    if (entry.conflict) {
+      if (kind === "field") inventoryFieldSyncFailures.set(key, entry.payload);
+      return;
+    }
+    if (kind === "field") queueInventoryFieldSync(key, entry.payload);
+    else queueInventoryActionSync(entry.id);
   });
   await inventoryFieldSyncQueue;
+  inventorySharedSaving = inventoryFieldSyncPendingCount > 0 || inventoryFieldSyncTimers.size > 0;
+  return inventoryFieldSyncPendingCount === 0
+    && !inventorySharedSaving
+    && !inventorySharedSaveError
+    && inventoryFieldSyncFailures.size === 0
+    && Object.keys(inventoryFieldOutbox).length === 0
+    && inventoryActionOutbox.length === 0
+    && inventoryFieldOutboxDurable
+    && inventoryActionOutboxDurable;
 }
 
 function renderInventorySummary(visibleItems, reorderItems) {
@@ -7553,6 +10651,7 @@ function getInventoryVendorTotals(items) {
 
 function createInventoryRow(item, mode) {
   const row = document.createElement("tr");
+  if (mode === "stock") row.dataset.globalSearchKey = `inventory:${item.id}`;
   const orderQuantityForMode = mode === "order" ? getInventoryRoundedOrderQuantity(item) : item.orderQuantity;
   const costCell = item.unitCost > 0
     ? (mode === "order" ? money(orderQuantityForMode * item.unitCost) : money(item.totalValue))
@@ -7584,7 +10683,7 @@ function createInventoryRow(item, mode) {
     ? money(item.unitCost)
     : '<span class="inventory-order-zero">Price needed</span>';
   row.innerHTML = `
-    <td><strong>${escapeHtml(item.name)}</strong>${item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${linkedNotes.join("")}</td>
+    <td><strong>${escapeHtml(item.name)}</strong>${item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${item.orderHoldReason ? `<span class="table-note table-note--warning">Ordering hold: ${escapeHtml(item.orderHoldReason)}</span>` : ""}${linkedNotes.join("")}</td>
     <td>${mode === "stock" ? `<input class="inventory-input" data-field="onHand" type="text" inputmode="${inputMode}" value="${escapeHtml(item.onHandDisplay)}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>
     <td>${mode === "stock" ? `<div class="inventory-par-cell"><input class="inventory-input inventory-input--par ${isParEditable ? "is-editing" : "is-locked"}" data-field="par" type="text" inputmode="${inputMode}" value="${escapeHtml(item.parDisplay)}" aria-label="Par for ${escapeHtml(item.name)}" ${isParEditable ? "" : "readonly"}><button class="mini-button inventory-par-toggle" data-par-toggle="${escapeHtml(item.id)}" type="button">${isParEditable ? "Done" : "Edit"}</button></div>` : formatInventoryQuantity(item.parDisplay)}</td>
     <td data-cell="order" class="${item.orderQuantity > 0 ? "inventory-order-flag" : "muted"}">${orderCell}</td>
@@ -7674,7 +10773,7 @@ function reorderInventoryItemBefore(sourceId, targetId) {
 }
 
 function getCompleteInventoryItemOrder() {
-  return ["Liquor Cabinet", "Mixer Cabinet", "Other"]
+  return ["Liquor Cabinet", "Mixer Cabinet", "Other", "Bottle Service", "Bubbly"]
     .flatMap((group) => getSortedInventoryGroupItems(group).map((item) => item.id));
 }
 
@@ -7736,6 +10835,7 @@ function syncInventoryRowCells(row, item) {
 function renderInventoryPanels() {
   const visibleItems = getVisibleInventoryItems();
   const reorderItems = getInventoryReorderItems(visibleItems);
+  renderWeeklyPlan();
   renderInventorySummary(visibleItems, reorderItems);
   renderInventoryOrderTable(reorderItems);
 }
@@ -8173,6 +11273,7 @@ async function addCustomRecipe(event) {
   }
 
   resetRecipeForm();
+  switchRecipeView("current");
   switchTab("recipes");
   render();
 }
@@ -10641,12 +13742,12 @@ function parseInventory(rows) {
     const packSize = casePackaged ? normalizePackSize(row[4]) : 1;
     const caseCost = toNumber(row[3]);
     const unitCost = getInventoryUnitCost(caseCost, packSize);
-    let note = clean(row[10]);
-    if (normalizedName === "Bombay Sapphire" && /do not order for now/i.test(note)) {
-      note = "";
-    }
+    const note = clean(row[10]);
     const group = getInventoryGroup(normalizedName, currentSection);
-    const id = getInventoryItemId(normalizedName);
+    const baseId = getInventoryItemId(normalizedName);
+    const id = ["Bottle Service", "Bubbly"].includes(group)
+      ? `${baseId}-${slugify(group)}`
+      : baseId;
     const sourceOnHandUnits = getInventoryOnHandUnits({
       caseEquivalent: row[1],
       individualUnits: row[2],
@@ -10655,9 +13756,6 @@ function parseInventory(rows) {
     });
     const onHandDisplay = inventoryOnHandOverrides[id] ?? String(sourceOnHandUnits);
     const parDisplay = inventoryParOverrides[id] ?? clean(row[7]);
-
-    if (group === "Bottle Service" || group === "Bubbly") return;
-    if (["Jameson", "Patron", "Pink Whitney", "Screwball"].includes(normalizedName)) return;
 
     const item = {
       id,
@@ -10674,9 +13772,11 @@ function parseInventory(rows) {
       unitCost,
       parDisplay,
       note,
-      excludeFromOrderList: normalizedName === "Sour Mix",
+      orderHoldReason: getInventoryOrderHoldReason(normalizedName, group, note),
       excludeFromInventoryValue: normalizedName === "Non Alcoholic Beer",
     };
+
+    item.excludeFromOrderList = Boolean(item.orderHoldReason);
 
     recalculateInventoryItem(item);
     items.push(item);
@@ -11082,7 +14182,7 @@ function groupInventoryForDisplay(sourceItems) {
     grouped.get(item.group).push(item);
   });
 
-  return ["Liquor Cabinet", "Mixer Cabinet", "Other"]
+  return ["Liquor Cabinet", "Mixer Cabinet", "Other", "Bottle Service", "Bubbly"]
     .map((groupName) => [
       groupName,
       (grouped.get(groupName) || []).sort((a, b) => getInventorySortKey(a).localeCompare(getInventorySortKey(b))),
@@ -11100,6 +14200,27 @@ function getInventoryGroup(name, sourceSection) {
   const ingredientGroup = getIngredientGroup(name);
   if (ingredientGroup === "Liquor") return "Liquor Cabinet";
   return "Mixer Cabinet";
+}
+
+function getInventoryOrderHoldReason(name, group, note = "") {
+  const normalizedName = clean(name);
+  const sourceNote = clean(note);
+  if (/do not order|hold|paused?/i.test(sourceNote)) {
+    return `Source note: ${sourceNote}`;
+  }
+  if (group === "Bottle Service") {
+    return "Bottle-service stock is counted here but held outside automatic cabinet ordering.";
+  }
+  if (group === "Bubbly") {
+    return "Bubbly stock is counted here but held outside automatic cabinet ordering.";
+  }
+  if (["Jameson", "Patron", "Patron Silver", "Pink Whitney", "Screwball"].includes(normalizedName)) {
+    return "Straight-liquor tap stock is visible, but automatic bottle ordering is held until refill netting is added.";
+  }
+  if (normalizedName === "Sour Mix") {
+    return "Automatic ordering is intentionally held; review this mixer manually.";
+  }
+  return "";
 }
 
 function inferCategory(title) {

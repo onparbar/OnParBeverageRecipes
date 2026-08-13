@@ -1,6 +1,7 @@
 node_modules/
 .pnpm-store/
 .next/
+.next-check/
 .DS_Store
 Thumbs.db
 *.log
@@ -11,3 +12,6 @@ data/*.json
 .env.local
 .env*.local
 .tools/
+.deploy/
+current
+releases/

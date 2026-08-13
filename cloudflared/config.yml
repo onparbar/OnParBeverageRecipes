@@ -4,7 +4,7 @@ protocol: http2
 
 ingress:
   - hostname: onparbev.com
-    service: http://localhost:3000
+    service: http://127.0.0.1:3000
   - hostname: www.onparbev.com
-    service: http://localhost:3000
+    service: http://127.0.0.1:3000
   - service: http_status:404

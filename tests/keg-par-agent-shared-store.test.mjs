@@ -50,6 +50,29 @@ test("Keg Levels reads an empty row without importing this browser", async () =>
   assert.deepEqual(fetchImpl.calls.map((call) => call.method), ["GET"]);
 });
 
+test("Keg Levels Supabase requests abort after the configured timeout", async () => {
+  let observedSignal = null;
+  const shared = createSharedKegParAgentStore({
+    env: {
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SECRET_KEY: "sb_secret_test-only",
+      SUPABASE_REQUEST_TIMEOUT_MS: "25",
+    },
+    fetchImpl: async (_input, init) => {
+      observedSignal = init.signal;
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    },
+  });
+
+  await assert.rejects(
+    shared.read(),
+    (error) => assertError(error, "KEG_STATE_UNAVAILABLE"),
+  );
+  assert.equal(observedSignal?.aborted, true);
+});
+
 test("Keg Levels requires an explicit service-computer initialization before saves", async () => {
   const fetchImpl = fetchFor({ id: "keg-par-agent", revision: 0, initialized: false, data: {}, initialized_at: null, updated_at: "2026-07-31T12:00:00.000Z", updated_by_role: "" });
   const shared = store(fetchImpl);

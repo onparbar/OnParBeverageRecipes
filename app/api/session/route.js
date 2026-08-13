@@ -6,8 +6,14 @@ export async function GET(request) {
   const role = await getDashboardSessionRole(session);
 
   if (!role) {
-    return NextResponse.json({ error: "Login required." }, { status: 401 });
+    return NextResponse.json(
+      { error: "Login required." },
+      { status: 401, headers: { "Cache-Control": "no-store" } },
+    );
   }
 
-  return NextResponse.json({ role });
+  return NextResponse.json(
+    { role },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }

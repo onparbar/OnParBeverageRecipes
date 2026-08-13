@@ -1,7 +1,21 @@
 import { NextResponse } from "next/server";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
+import { requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
 import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
+import {
+  buildVerifiedKegSlotMap,
+  PmbKegSafetyError,
+} from "../../../lib/pmb-keg-safety.mjs";
+import {
+  applyWeeklyUsageTapReplacementSafety,
+  buildPhysicalWeeklyUsageItems,
+  buildWeeklyUsageTapContext,
+  requirePlausibleWeeklyTransactions,
+} from "../../../lib/pmb-weekly-usage-identity.mjs";
+import { readSharedDashboardState } from "../../../lib/shared-dashboard-store.mjs";
 import { isCompletedMondayWeekStart } from "../../../lib/weekly-usage-periods.mjs";
 
 export const runtime = "nodejs";
@@ -64,6 +78,7 @@ async function postJson(baseUrl, requestPath, body, token = "") {
     },
     body: JSON.stringify(body),
     cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
   });
 
   const raw = await response.text();
@@ -77,11 +92,14 @@ async function postJson(baseUrl, requestPath, body, token = "") {
 function getConfig() {
   const baseUrl = (process.env.PMB_API_BASE_URL || "").trim().replace(/\/$/, "");
   if (!baseUrl) throw new Error("Missing PMB_API_BASE_URL in .env.local");
+  const username = (process.env.PMB_API_USERNAME || "").trim();
+  const password = (process.env.PMB_API_PASSWORD || "").trim();
+  if (!username || !password) throw new Error("Missing PMB_API_USERNAME or PMB_API_PASSWORD in .env.local");
 
   return {
     baseUrl,
-    username: (process.env.PMB_API_USERNAME || "admin").trim(),
-    password: (process.env.PMB_API_PASSWORD || "admin").trim(),
+    username,
+    password,
     clientId: Number(process.env.PMB_API_CLIENT_ID || "910423"),
     clientName: (process.env.PMB_API_CLIENT_NAME || "PourMyBeer API").trim(),
   };
@@ -221,9 +239,27 @@ async function getTapLookup() {
   return { byExactAlias, byLooseAlias, byTap };
 }
 
+async function getApprovedWeeklyUsageChangeovers() {
+  const csvPath = path.join(process.cwd(), "public", "data", "weekly-usage-changeovers.csv");
+  let rows;
+  try {
+    rows = parseCsv(await readFile(csvPath, "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+  return rows.slice(1).map((row) => ({
+    tapNumber: toNumber(row[0]),
+    previousName: clean(row[1]),
+    currentName: clean(row[2]),
+    effectiveDate: clean(row[3]),
+    splitWeek: clean(row[4]).toLowerCase(),
+  })).filter((row) => row.tapNumber && row.currentName && row.effectiveDate);
+}
+
 function getMatchedTap(name, plu, context) {
-  const currentTap = context.currentTapByPlu.get(toNumber(plu));
-  if (currentTap) return currentTap;
+  const currentTaps = context.currentTapsByPlu.get(toNumber(plu)) || [];
+  if (currentTaps.length === 1) return currentTaps[0];
   const wallNumber = getTrailingWallNumber(name);
   const exactMatch = getAliasMatch(context.tapLookup.byExactAlias, normalizeName(name), wallNumber);
   if (exactMatch) return exactMatch;
@@ -355,37 +391,12 @@ function getTransactionRangePayload(range) {
 }
 
 function buildWeeklyReport(range, transactions, productByPlu, context) {
-  const byPlu = new Map();
-  transactions.forEach((transaction) => {
-    const plu = toNumber(transaction?.plu);
-    const volumeOz = toNumber(transaction?.volume_amount);
-    if (!plu || !volumeOz) return;
-
-    const existing = byPlu.get(plu) || {
-      plu,
-      name: productByPlu.get(plu)?.name || `PLU ${plu}`,
-      volumeOz: 0,
-      transactionCount: 0,
-    };
-    existing.volumeOz += volumeOz;
-    existing.transactionCount += 1;
-    byPlu.set(plu, existing);
-  });
-
-  context.currentTapByPlu.forEach((tap, plu) => {
-    if (byPlu.has(plu)) return;
-    byPlu.set(plu, {
-      plu,
-      name: tap.name || productByPlu.get(plu)?.name || `PLU ${plu}`,
-      volumeOz: 0,
-      transactionCount: 0,
-    });
-  });
-
-  const items = [...byPlu.values()]
+  const items = buildPhysicalWeeklyUsageItems(transactions, productByPlu, context)
     .map((item) => {
+      if (item.tapNumber) {
+        return { ...item, volumeOz: Math.round(item.volumeOz * 100) / 100 };
+      }
       const tap = getMatchedTap(item.name, item.plu, context);
-      const currentTap = context.currentTapByPlu.get(toNumber(item.plu));
       return {
         ...item,
         volumeOz: Math.round(item.volumeOz * 100) / 100,
@@ -394,7 +405,7 @@ function buildWeeklyReport(range, transactions, productByPlu, context) {
         type: tap?.type || "",
         brand: tap?.brand || tap?.name || "",
         templateBrand: tap?.templateBrand || "",
-        isCurrentTap: Boolean(currentTap),
+        isCurrentTap: Boolean(tap),
       };
     })
     .sort((a, b) => (a.tapNumber || 9999) - (b.tapNumber || 9999) || a.name.localeCompare(b.name));
@@ -409,16 +420,42 @@ function buildWeeklyReport(range, transactions, productByPlu, context) {
   };
 }
 
+function getSparseWeekPositiveRowThreshold(currentTapCount) {
+  return Math.min(5, Math.max(1, Math.ceil((Number(currentTapCount) || 0) * 0.05)));
+}
+
+function createWeeklyReviewToken(reviewWeeks) {
+  return createHmac("sha256", String(process.env.DASHBOARD_SESSION_SECRET || ""))
+    .update(JSON.stringify(reviewWeeks))
+    .digest("base64url");
+}
+
+function reviewTokenMatches(suppliedToken, expectedToken) {
+  const supplied = Buffer.from(clean(suppliedToken));
+  const expected = Buffer.from(clean(expectedToken));
+  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+}
+
 export async function GET(request) {
   try {
+    const role = await requireDashboardRequestRole(request, { owner: true });
     const ranges = getRequestedDateRanges(request);
     const config = getConfig();
     const token = await getAuthtoken(config);
 
-    const [products, tapLookup] = await Promise.all([
+    const [products, tapLookup, sharedDashboard, approvedChangeovers] = await Promise.all([
       postJson(config.baseUrl, "/api/productlist", { id: String(config.clientId) }, token),
       getTapLookup(),
+      readSharedDashboardState(),
+      getApprovedWeeklyUsageChangeovers(),
     ]);
+
+    if (!sharedDashboard.initialized) {
+      throw new PmbKegSafetyError(
+        "Shared dashboard setup must be initialized before Weekly Usage can verify tap replacements. No usage was saved.",
+        { code: "SHARED_STATE_NOT_INITIALIZED", status: 409 },
+      );
+    }
 
     if (products.status !== 200 || !Array.isArray(products.json?.productlist)) {
       throw new Error(`PMB productlist failed (${products.status})`);
@@ -434,24 +471,110 @@ export async function GET(request) {
       });
     });
 
-    const currentTaps = buildCurrentTaps(
-      await getTapConfigRows(config).catch(() => []),
+    const tapConfigRows = await getTapConfigRows(config).catch((error) => {
+      throw new PmbKegSafetyError(
+        `Live PMB tap configuration could not be verified: ${error.message || "tap configuration unavailable"}`,
+        { code: "PMB_TAP_CONFIG_UNAVAILABLE", status: 503 },
+      );
+    });
+    const verifiedSlots = [...buildVerifiedKegSlotMap(tapConfigRows).values()];
+    let currentTaps = buildCurrentTaps(
+      verifiedSlots,
       productByPlu,
       tapLookup,
     );
-    const currentTapByPlu = new Map(currentTaps.map((tap) => [toNumber(tap.plu), tap]));
+    currentTaps = applyWeeklyUsageTapReplacementSafety(
+      currentTaps,
+      sharedDashboard.data?.products?.tapReplacementOverrides || {},
+      approvedChangeovers,
+    );
+    const expectedTapNumbers = [...tapLookup.byTap.keys()].sort((a, b) => a - b);
+    const currentTapNumbers = new Set(currentTaps.map((tap) => tap.tapNumber));
+    const missingTapNumbers = expectedTapNumbers.filter((tapNumber) => !currentTapNumbers.has(tapNumber));
+    if (currentTaps.length !== expectedTapNumbers.length || missingTapNumbers.length) {
+      throw new PmbKegSafetyError(
+        `Live PMB tap configuration covered ${currentTaps.length} of ${expectedTapNumbers.length} expected taps. No usage was saved.`,
+        {
+          code: "PMB_TAP_CONFIG_INCOMPLETE",
+          status: 503,
+          details: { expectedTapCount: expectedTapNumbers.length, currentTapCount: currentTaps.length, missingTapNumbers },
+        },
+      );
+    }
 
     const transactionResults = await Promise.all(ranges.map((range) => (
       postJson(config.baseUrl, "/api/transactions", { id: config.clientId, ...getTransactionRangePayload(range) }, token)
     )));
 
+    const minimumPositiveRows = getSparseWeekPositiveRowThreshold(currentTaps.length);
+    const reviewWeeks = [];
+    const reviewTokenMaterial = [];
     transactionResults.forEach((transactions, index) => {
       if (transactions.status !== 200 || !Array.isArray(transactions.json?.taptransactions)) {
         throw new Error(`PMB transactions failed for ${formatShortDate(ranges[index].start)} (${transactions.status})`);
       }
+      const label = `${formatShortDate(ranges[index].start)} - ${formatShortDate(ranges[index].endInclusive)}`;
+      try {
+        requirePlausibleWeeklyTransactions(transactions.json.taptransactions, {
+          label,
+          minimumPositiveRows,
+        });
+      } catch (error) {
+        if (error?.code !== "PMB_WEEKLY_USAGE_REVIEW_REQUIRED") throw error;
+        const reviewWeek = {
+          weekStart: formatDate(ranges[index].start),
+          weekEnd: formatDate(ranges[index].endInclusive),
+          label,
+          reason: error.details?.reason || "sparse",
+          transactionCount: Number(error.details?.transactionCount) || 0,
+          positiveRowCount: Number(error.details?.positiveRowCount) || 0,
+          minimumPositiveRows,
+        };
+        reviewWeeks.push(reviewWeek);
+        reviewTokenMaterial.push({
+          ...reviewWeek,
+          transactionDigest: createHash("sha256")
+            .update(JSON.stringify(transactions.json.taptransactions))
+            .digest("base64url"),
+        });
+      }
     });
 
-    const context = { tapLookup, currentTapByPlu };
+    if (reviewWeeks.length) {
+      const confirmationToken = createWeeklyReviewToken(reviewTokenMaterial);
+      const suppliedToken = new URL(request.url).searchParams.get("confirm") || "";
+      if (!reviewTokenMatches(suppliedToken, confirmationToken)) {
+        throw new PmbKegSafetyError(
+          "Pour My Beer returned one or more sparse or closed weeks. Owner review is required before those exact reports can be accepted.",
+          {
+            code: "PMB_WEEKLY_USAGE_REVIEW_REQUIRED",
+            status: 409,
+            details: {
+              reviewReason: "Confirm only if the listed weeks were legitimately closed or unusually sparse.",
+              reviewWeeks,
+              confirmationToken,
+            },
+          },
+        );
+      }
+
+      transactionResults.forEach((transactions, index) => {
+        requirePlausibleWeeklyTransactions(transactions.json.taptransactions, {
+          label: `${formatShortDate(ranges[index].start)} - ${formatShortDate(ranges[index].endInclusive)}`,
+          minimumPositiveRows,
+          allowReviewedSparseWeek: true,
+        });
+      });
+      recordDashboardActivity({
+        area: "Weekly Usage",
+        action: "confirmed sparse PMB week",
+        role,
+        revision: 0,
+        summary: `Confirmed PMB review exception for ${reviewWeeks.map((week) => week.weekStart).join(", ")}; shared save occurs separately.`,
+      }).catch(() => {});
+    }
+
+    const context = buildWeeklyUsageTapContext(currentTaps, tapLookup);
     const reports = ranges.map((range, index) => buildWeeklyReport(
       range,
       transactionResults[index].json.taptransactions,
@@ -470,8 +593,12 @@ export async function GET(request) {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error.message || "Could not pull PMB weekly usage." },
-      { status: error.status || 500 },
+      {
+        error: error.message || "Could not pull PMB weekly usage.",
+        code: error.code || "PMB_WEEKLY_USAGE_FAILED",
+        ...(error?.details && typeof error.details === "object" ? error.details : {}),
+      },
+      { status: error.status || 500, headers: { "Cache-Control": "no-store" } },
     );
   }
 }

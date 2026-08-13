@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import sharp from "sharp";
+import { fetchRemoteBuffer } from "../../../lib/safe-remote-fetch.mjs";
 
 const IMAGE_WIDTH = 676;
 const IMAGE_HEIGHT = 540;
 const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const IMAGE_SOURCE_MAX_BYTES = 15 * 1024 * 1024;
+const REMOTE_TEXT_MAX_BYTES = 2 * 1024 * 1024;
+const SAFE_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif", "image/gif", "image/apng"];
 
 function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -42,31 +46,31 @@ function stripTags(value) {
 }
 
 async function fetchText(url) {
-  const response = await fetch(url, {
+  const response = await fetchRemoteBuffer(url, {
+    acceptedContentTypes: ["text/html", "application/xhtml+xml"],
     headers: {
       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 OnParBeverageDashboard/1.0",
       Accept: "text/html,application/xhtml+xml",
     },
-    cache: "no-store",
-    redirect: "follow",
+    maxBytes: REMOTE_TEXT_MAX_BYTES,
+    timeoutMs: 10_000,
   });
   if (!response.ok) throw new Error(`Fetch failed ${response.status}`);
   return response.text();
 }
 
 async function fetchImageBuffer(url) {
-  const response = await fetch(url, {
+  const response = await fetchRemoteBuffer(url, {
+    acceptedContentTypes: SAFE_IMAGE_TYPES,
     headers: {
       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 OnParBeverageDashboard/1.0",
-      Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      Accept: "image/avif,image/webp,image/apng,image/png,image/jpeg,image/gif",
     },
-    cache: "no-store",
-    redirect: "follow",
+    maxBytes: IMAGE_SOURCE_MAX_BYTES,
+    timeoutMs: 10_000,
   });
   if (!response.ok) throw new Error(`Image fetch failed ${response.status}`);
-  const contentType = response.headers.get("content-type") || "";
-  if (!contentType.startsWith("image/")) throw new Error("Result was not an image.");
-  return Buffer.from(await response.arrayBuffer());
+  return response.buffer;
 }
 
 function extractDuckDuckGoResults(html) {
@@ -142,7 +146,7 @@ async function normalizeImage(rawImageUrl, baseUrl) {
   try {
     const input = await fetchImageBuffer(imageUrl);
     for (const quality of [86, 78, 70, 62, 54]) {
-      const output = await sharp(input, { animated: false })
+      const output = await sharp(input, { animated: false, limitInputPixels: 40_000_000 })
         .resize(IMAGE_WIDTH, IMAGE_HEIGHT, { fit: "cover", position: "center" })
         .withMetadata({ density: 72 })
         .jpeg({ quality, progressive: true })
@@ -256,6 +260,9 @@ export async function GET(request) {
     const query = clean(new URL(request.url).searchParams.get("q"));
     if (!query) {
       return NextResponse.json({ error: "Missing beer name." }, { status: 400 });
+    }
+    if (query.length > 120) {
+      return NextResponse.json({ error: "Beer name is too long." }, { status: 400 });
     }
 
     const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(`${query} beer description product official`)}`;

@@ -1,0 +1,75 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const [pageSource, dashboardSource] = await Promise.all([
+  readFile(new URL("../app/page.jsx", import.meta.url), "utf8"),
+  readFile(new URL("../public/dashboard.js", import.meta.url), "utf8"),
+]);
+
+test("the owner dashboard is the initial page and recipes appear later in navigation", () => {
+  const dashboardTab = pageSource.indexOf('data-tab="dashboard"');
+  const operationsTab = pageSource.indexOf('data-tab="operations"');
+  const usageTab = pageSource.indexOf('data-tab="weekly-usage"');
+  const recipesTab = pageSource.indexOf('data-tab="recipes"');
+  const addTab = pageSource.indexOf('data-tab="add"');
+
+  assert.ok(dashboardTab >= 0);
+  assert.ok(dashboardTab < operationsTab);
+  assert.ok(operationsTab < usageTab);
+  assert.ok(usageTab < recipesTab);
+  assert.ok(recipesTab < addTab);
+  assert.match(pageSource, /className="panel is-active" id="dashboard-panel"/);
+  assert.doesNotMatch(pageSource, /className="panel is-active" id="recipes-panel"/);
+});
+
+test("current and old recipes share one Recipes workspace", () => {
+  assert.match(pageSource, /id="current-recipes-view"/);
+  assert.match(pageSource, /id="old-recipes-view"/);
+  assert.match(pageSource, /data-recipe-view="current"/);
+  assert.match(pageSource, /data-recipe-view="old"/);
+  assert.doesNotMatch(pageSource, /id="old-panel"/);
+  assert.match(dashboardSource, /function switchRecipeView\(/);
+  assert.match(dashboardSource, /recipeView: inactive \? "old" : "current"/);
+});
+
+test("Dashboard and Weekly Plan render the new overview and PMB trend layers", () => {
+  assert.match(pageSource, /id="dashboard-overview"/);
+  assert.match(dashboardSource, /buildDashboardOverview\(/);
+  assert.match(dashboardSource, /buildWeeklyPlanTrends\(/);
+  assert.match(dashboardSource, /What changed in the pours/);
+  assert.match(dashboardSource, /Pour My Beer ounces—not drinks sold or revenue/);
+});
+
+test("every Weekly Usage tap row renders an accessible week-by-week trend graph", () => {
+  assert.match(dashboardSource, /buildWeeklyUsageTrend\(item\.history, historyHeaders\)/);
+  assert.match(dashboardSource, /Avg weekly \+ trend/);
+  assert.match(dashboardSource, /missing .* shown as a gap, not zero/);
+  assert.match(dashboardSource, /weekly-usage-trend__point/);
+});
+
+test("the initial Dashboard prioritizes On Par rankings and change-only Ohio compliance", () => {
+  assert.match(dashboardSource, /On Par performance/);
+  assert.match(dashboardSource, /Show per list/);
+  assert.match(dashboardSource, /data-seller-ranking-list-size/);
+  assert.match(dashboardSource, /Top \$\{formatNumber\(listSize\)\}/);
+  assert.match(dashboardSource, /Bottom \$\{formatNumber\(listSize\)\}/);
+  assert.match(dashboardSource, /Last 6 saved weeks/);
+  assert.match(dashboardSource, /All saved PMB weeks/);
+  assert.match(dashboardSource, /Cocktails/);
+  assert.match(dashboardSource, /Liquor/);
+  assert.match(dashboardSource, /Main wall/);
+  assert.match(dashboardSource, /Karaoke wall/);
+  assert.match(dashboardSource, /Patio liquor wall/);
+  assert.doesNotMatch(dashboardSource, />All walls</);
+  assert.match(dashboardSource, /let sellerRankingWall = "main"/);
+  assert.match(dashboardSource, />1 week</);
+  assert.match(dashboardSource, />6 weeks</);
+  assert.match(dashboardSource, />All time</);
+  assert.match(dashboardSource, /Est\. profit \(today's rates\)/);
+  assert.match(dashboardSource, /fetch\(`\/api\/beverage-news\?scope=compliance/);
+  assert.doesNotMatch(dashboardSource, /Beverage radar/);
+  assert.doesNotMatch(dashboardSource, /Industry &amp; trend stories/);
+  assert.match(dashboardSource, /target="_blank" rel="noopener noreferrer"/);
+  assert.match(dashboardSource, /official Ohio/);
+});

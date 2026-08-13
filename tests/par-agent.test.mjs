@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   applyCoolerCapacity,
   buildRawRecommendation,
+  fetchPmbSnapshot,
   getCocktailRecipeYieldOz,
   getKegFullOunces,
+  getOnHandCoverage,
   getTapStateKey,
 } from "../lib/par-agent.mjs";
 import { COCKTAIL_RECIPE_YIELDS } from "../public/cocktail-recipe-yields.mjs";
@@ -61,6 +63,38 @@ function recommendation(name, tapNumber, volumeOz, fillLevelPercent = 0) {
     { onHandOverrides: {}, onDeckOverrides: {} },
     {},
   );
+}
+
+function wallTap(tapNumber, { type = "Lager", brand = `Test Beer ${tapNumber}`, wall = "Main" } = {}) {
+  return {
+    key: getTapStateKey({ wall, tapNumber, brand }),
+    tapNumber,
+    type,
+    brand,
+    wall,
+  };
+}
+
+async function pmbSnapshotFixture({ wallItems, tapRows, levelsBySlot = {}, tapConfigError = null }) {
+  const productlist = [...new Map(
+    tapRows.map((row) => [row.plu, { plu: row.plu, name: row.product }]),
+  ).values()];
+
+  return fetchPmbSnapshot({
+    config: { baseUrl: "http://pmb.test", clientId: 1 },
+    getAuthtokenImpl: async () => "test-token",
+    getKegWallItemsImpl: async () => wallItems,
+    getTapConfigRowsImpl: async () => {
+      if (tapConfigError) throw tapConfigError;
+      return tapRows;
+    },
+    postJsonImpl: async (_baseUrl, requestPath, body) => {
+      if (requestPath === "/api/productlist") {
+        return { status: 200, json: { productlist } };
+      }
+      return levelsBySlot[`${body.device_id}:${body.line_num}`];
+    },
+  });
 }
 
 test("uses each named cocktail recipe yield instead of the generic 12-gallon PMB size", () => {
@@ -291,13 +325,13 @@ test("does not suppress karaoke cocktail makes when beer cooler capacity is enab
   assert.equal(result.items[0].capacityLimited, undefined);
 });
 
-test("orders patio and karaoke liquor taps below average weekly ounces plus 100 ounces", () => {
+test("flags patio and karaoke liquor refill gaps for deferred manual review", () => {
   const fixtures = [
     [liquorTap("Patio", 1, "Hennessy (Cognac) 3"), 50, 0],
     [liquorTap("Karaoke", 83, "Grey Goose (Vodka) 2"), 49.8, 1],
   ];
 
-  fixtures.forEach(([tap, fillLevelPercent, expectedOrderQty]) => {
+  fixtures.forEach(([tap, fillLevelPercent, expectedDeferredQty]) => {
     const result = buildRawRecommendation(
       tap,
       { fillLevelPercent, rawKegSize: 500, rawKegSizeDp: 0 },
@@ -309,8 +343,12 @@ test("orders patio and karaoke liquor taps below average weekly ounces plus 100 
     assert.equal(result.isLiquorTap, true);
     assert.equal(result.avgWeeklyOunces, 150);
     assert.equal(result.targetStockOunces, 250);
-    assert.equal(result.orderQty, expectedOrderQty);
-    assert.equal(result.currentStockOunces, expectedOrderQty ? 249 : 250);
+    assert.equal(result.orderQty, 0);
+    assert.equal(result.suggestedRefillQty, expectedDeferredQty);
+    assert.equal(result.deferredQty, expectedDeferredQty);
+    assert.equal(result.deferredReview, Boolean(expectedDeferredQty));
+    assert.equal(result.actionType, expectedDeferredQty ? "review" : "none");
+    assert.equal(result.currentStockOunces, expectedDeferredQty ? 249 : 250);
   });
 });
 
@@ -332,6 +370,183 @@ test("uses saved Weekly Usage ounces for liquor taps too", () => {
 
   assert.equal(result.avgWeeklyOunces, 160);
   assert.equal(result.targetStockOunces, 260);
-  assert.equal(result.orderQty, 1);
+  assert.equal(result.orderQty, 0);
+  assert.equal(result.deferredQty, 1);
   assert.deepEqual(result.weeklyOunces, [120, 200]);
+});
+
+test("uses a 500-ounce fallback when a liquor tap has no PMB keg-size metadata", () => {
+  const tap = liquorTap("Patio", 1, "Hennessy (Cognac) 3");
+  const liveLevel = {
+    fillLevelPercent: 50,
+    rawPercent: 5000,
+    rawKegSize: null,
+    rawKegSizeDp: null,
+  };
+  const result = buildRawRecommendation(
+    tap,
+    liveLevel,
+    [],
+    { onHandOverrides: {}, onDeckOverrides: {} },
+    {},
+    { tapNumber: 1, displayUnit: "oz", average: 160, history: [{ value: 160 }] },
+  );
+
+  assert.equal(getKegFullOunces(liveLevel, tap), 500);
+  assert.equal(result.currentStockOunces, 250);
+  assert.equal(result.targetStockOunces, 260);
+  assert.equal(result.orderQty, 0);
+  assert.equal(result.deferredQty, 1);
+  assert.match(result.reason, /manual/i);
+});
+
+test("fails closed when the live PMB tap configuration cannot be read", async () => {
+  await assert.rejects(
+    () => pmbSnapshotFixture({
+      wallItems: [wallTap(21)],
+      tapRows: [{ plu: 4101, deviceId: 9001, lineNum: 1, tapNumber: 21, product: "Test Beer", unused: false }],
+      tapConfigError: new Error("management page timed out"),
+    }),
+    (error) => (
+      error.code === "PMB_TAP_CONFIG_UNAVAILABLE"
+      && error.status === 503
+      && /Existing recommendations were kept/.test(error.message)
+    ),
+  );
+});
+
+test("fails closed when the live PMB tap configuration is only partial", async () => {
+  await assert.rejects(
+    () => pmbSnapshotFixture({
+      wallItems: [wallTap(21), wallTap(22)],
+      tapRows: [{ plu: 4101, deviceId: 9001, lineNum: 1, tapNumber: 21, product: "Test Beer 21", unused: false }],
+    }),
+    (error) => (
+      error.code === "PMB_TAP_CONFIG_PARTIAL"
+      && error.status === 503
+      && error.details.liveTapCount === 1
+      && error.details.expectedTapCount === 2
+      && error.details.missingTapNumbers[0] === 22
+    ),
+  );
+});
+
+test("fails closed on failed and malformed PMB keg-level responses", async () => {
+  const wallItems = [wallTap(21)];
+  const tapRows = [{
+    plu: 4101,
+    deviceId: 9001,
+    lineNum: 1,
+    tapNumber: 21,
+    product: "Test Beer 21",
+    unused: false,
+  }];
+
+  await assert.rejects(
+    () => pmbSnapshotFixture({
+      wallItems,
+      tapRows,
+      levelsBySlot: {
+        "9001:1": { status: 500, json: { fill_level_perc: 5000 } },
+      },
+    }),
+    (error) => error.code === "PMB_KEG_LEVEL_READ_FAILED" && error.details.upstreamStatus === 500,
+  );
+
+  await assert.rejects(
+    () => pmbSnapshotFixture({
+      wallItems,
+      tapRows,
+      levelsBySlot: {
+        "9001:1": { status: 200, json: { fill_level_perc: "not-a-level" } },
+      },
+    }),
+    (error) => error.code === "PMB_KEG_LEVEL_READ_FAILED" && error.details.upstreamStatus === 200,
+  );
+});
+
+test("keeps separate live levels when one PLU is assigned to multiple physical taps", async () => {
+  const snapshot = await pmbSnapshotFixture({
+    wallItems: [wallTap(21), wallTap(22)],
+    tapRows: [
+      { plu: 4101, deviceId: 9001, lineNum: 1, tapNumber: 21, product: "Test Beer", unused: false },
+      { plu: 4101, deviceId: 9002, lineNum: 4, tapNumber: 22, product: "Test Beer", unused: false },
+    ],
+    levelsBySlot: {
+      "9001:1": { status: 200, json: { fill_level_perc: 2500 } },
+      "9002:4": { status: 200, json: { fill_level_perc: 7500 } },
+    },
+  });
+
+  assert.equal(snapshot.currentTaps.length, 2);
+  assert.equal(snapshot.levelsByTap.size, 2);
+  assert.equal(snapshot.levelsByTap.get("tap:21").fillLevelPercent, 25);
+  assert.equal(snapshot.levelsByTap.get("tap:22").fillLevelPercent, 75);
+  assert.equal(snapshot.levelsByTap.get("tap:21").plu, 4101);
+  assert.equal(snapshot.levelsByTap.get("tap:22").plu, 4101);
+});
+
+test("requires an explicit valid on-hand count for every current keg tap", () => {
+  const firstKeg = beerTap("Test Lager 1", 21);
+  const secondKeg = cocktailTap("BLUE DOT (SVEDKA) 1", 57);
+  const coverage = getOnHandCoverage(
+    [firstKeg, secondKeg, liquorTap("Patio", 1, "Hennessy (Cognac) 3")],
+    {
+      [firstKeg.key]: "0",
+      unrelated1: "1",
+      unrelated2: "1",
+      unrelated3: "1",
+      unrelated4: "1",
+      unrelated5: "1",
+    },
+  );
+
+  assert.equal(coverage.requiredCount, 2);
+  assert.equal(coverage.coveredCount, 1);
+  assert.deepEqual(coverage.missingTaps.map((tap) => tap.tapNumber), [57]);
+});
+
+test("makes enough cocktail kegs to cover the complete calculated gap", () => {
+  const tap = cocktailTap("BLUE DOT (SVEDKA) 1", 57);
+  const result = buildRawRecommendation(
+    tap,
+    { fillLevelPercent: 10, rawKegSize: 1507, rawKegSizeDp: 0 },
+    [],
+    { onHandOverrides: { [tap.key]: 0 }, onDeckOverrides: {} },
+    {},
+    {
+      tapNumber: 57,
+      displayUnit: "kegs",
+      average: 2.4,
+      history: [{ value: 2.4 }],
+    },
+  );
+
+  assert.equal(result.currentStockKegs, 0.1);
+  assert.equal(result.targetStockKegs, 2.65);
+  assert.equal(result.gapKegs, 2.55);
+  assert.equal(result.orderQty, 3);
+});
+
+test("surfaces the configured beer order cap whenever it reduces calculated need", () => {
+  const tap = beerTap("Test Lager 1", 21);
+  const result = buildRawRecommendation(
+    tap,
+    { fillLevelPercent: 0, rawKegSize: 1984, rawKegSizeDp: 0 },
+    [],
+    { onHandOverrides: { [tap.key]: 0 }, onDeckOverrides: {} },
+    { maxOrderPerTap: 2 },
+    {
+      tapNumber: 21,
+      displayUnit: "kegs",
+      average: 4,
+      history: [{ value: 4 }],
+    },
+  );
+
+  assert.equal(result.calculatedOrderQty, 5);
+  assert.equal(result.orderQty, 2);
+  assert.equal(result.orderCap, 2);
+  assert.equal(result.orderCapApplied, true);
+  assert.match(result.reason, /configured per-tap order cap reduced this to 2/);
 });

@@ -106,6 +106,25 @@ test("fails closed when Supabase credentials are unavailable", async () => {
   assert.equal(fetched, false);
 });
 
+test("inventory Supabase requests abort after the configured timeout", async () => {
+  let observedSignal = null;
+  const store = createSharedInventoryStore({
+    env: makeEnvironment({ SUPABASE_REQUEST_TIMEOUT_MS: "25" }),
+    fetchImpl: async (_input, init) => {
+      observedSignal = init.signal;
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    },
+  });
+
+  await assert.rejects(
+    store.read(),
+    (error) => assertStoreError(error, "INVENTORY_STATE_UNAVAILABLE", 503),
+  );
+  assert.equal(observedSignal?.aborted, true);
+});
+
 test("reads an uninitialized inventory row without publishing browser data", async () => {
   const fetchImpl = createSupabaseFetch(makeRow());
   const store = createSharedInventoryStore({
@@ -209,6 +228,68 @@ test("retries revision conflicts so concurrent item edits are both preserved", a
     vodka: "2",
     gin: "4",
   });
+});
+
+test("a recovered inventory field write is accepted only at its recorded base revision", async () => {
+  const initialState = createEmptyInventoryState();
+  initialState.initialized = true;
+  const fetchImpl = createSupabaseFetch(makeRow({
+    revision: 4,
+    initialized: true,
+    initialized_at: "2026-07-31T14:00:00.000Z",
+    data: { current: initialState.current, snapshots: [] },
+  }));
+  const shared = createSharedInventoryStore({ env: makeEnvironment(), fetchImpl });
+
+  await assert.rejects(
+    shared.mutate(
+      "update-field",
+      { id: "vodka", field: "onHand", value: "2" },
+      "owner",
+      { expectedRevision: 3 },
+    ),
+    (error) => assertStoreError(error, "INVENTORY_STATE_REVISION_CONFLICT", 409),
+  );
+  assert.equal(fetchImpl.calls.filter((call) => call.method === "PATCH").length, 0);
+
+  const saved = await shared.mutate(
+    "update-field",
+    { id: "vodka", field: "onHand", value: "2" },
+    "owner",
+    { expectedRevision: 4 },
+  );
+  assert.equal(saved.revision, 5);
+  assert.equal(saved.current.onHandOverrides.vodka, "2");
+});
+
+test("every recovered inventory mutation fails closed at a stale base revision", async () => {
+  const mutations = [
+    ["upsert-custom", { item: { id: "tonic", name: "Tonic", group: "Mixer Cabinet" } }],
+    ["delete-custom", { id: "tonic" }],
+    ["reorder-items", { itemOrder: ["vodka", "gin"] }],
+    ["save-snapshot", { items: [{ id: "vodka", name: "Vodka" }], summary: { tapCount: 1, liveTapCount: 1 } }],
+    ["delete-snapshot", { id: "inventory-2026-08-10" }],
+    ["restore-snapshot", { id: "inventory-2026-08-10" }],
+  ];
+
+  for (const [action, payload] of mutations) {
+    const initialState = createEmptyInventoryState();
+    initialState.initialized = true;
+    const fetchImpl = createSupabaseFetch(makeRow({
+      revision: 8,
+      initialized: true,
+      initialized_at: "2026-07-31T14:00:00.000Z",
+      data: { current: initialState.current, snapshots: [] },
+    }));
+    const shared = createSharedInventoryStore({ env: makeEnvironment(), fetchImpl });
+
+    await assert.rejects(
+      shared.mutate(action, payload, "owner", { expectedRevision: 7 }),
+      (error) => assertStoreError(error, "INVENTORY_STATE_REVISION_CONFLICT", 409),
+      action,
+    );
+    assert.equal(fetchImpl.calls.filter((call) => call.method === "PATCH").length, 0, action);
+  }
 });
 
 test("maps a missing inventory table to a typed unavailable error", async () => {

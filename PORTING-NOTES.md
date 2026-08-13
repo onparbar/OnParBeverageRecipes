@@ -1,5 +1,9 @@
 # Porting Notes
 
+> Historical handoff note: the Mac service layout and current deployment
+> procedure now live in `OPERATIONS.md`. Do not use the old Vercel guidance in
+> this file as a production runbook.
+
 ## Why this file exists
 
 - This desktop copy appears behind the newer active working repo used for recent dashboard development.
@@ -25,11 +29,12 @@ These items were part of the newer dashboard work and may need to be ported into
 1. Open this repo on the new computer.
 2. Read `scratchpad.md`.
 3. Compare this copy against the newer active repo if that repo is still available.
-4. Decide which repo should be the real source of truth before pushing to GitHub or Vercel.
+4. Decide which repo should be the real source of truth before pushing to GitHub.
 
 ## If this copy becomes the source of truth
 
 - Port the newer dashboard features into this repo first.
 - Run `npm run build`.
 - Test locally.
-- Only then push or deploy.
+- Only then push. Production deployment is performed from the on-site service
+  checkout using `scripts/deploy-on-site.sh`.

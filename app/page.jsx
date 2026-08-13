@@ -2,18 +2,37 @@
 
 import { useEffect, useState } from "react";
 
-function OperationsBar() {
+const operationSections = [
+  ["weekly-plan", "Weekly Plan"],
+  ["keg-levels", "Keg Levels"],
+  ["pricing", "Tap Pricing"],
+  ["ingredients", "Ingredient & Keg Costs"],
+  ["inventory", "Inventory"],
+];
+
+function OperationsBar({ context }) {
   return (
     <div className="operations-bar">
       <div>
         <p className="eyebrow">Beverage ops</p>
-        <h2>Levels, Pricing & Inventory</h2>
+        <h2>Weekly Beverage Operations</h2>
       </div>
-      <div className="operation-tabs" aria-label="Beverage operations sections">
-        <button className="operation-tab is-active" data-operation-tab="keg-levels" type="button">Keg Levels</button>
-        <button className="operation-tab" data-operation-tab="pricing" type="button">Tap Pricing</button>
-        <button className="operation-tab" data-operation-tab="ingredients" type="button">Ingredient &amp; Keg Costs</button>
-        <button className="operation-tab" data-operation-tab="inventory" type="button">Inventory</button>
+      <div className="operation-tabs" role="tablist" aria-label="Beverage operations sections">
+        {operationSections.map(([id, label]) => (
+          <button
+            className={`operation-tab${id === "weekly-plan" ? " is-active" : ""}`}
+            id={`${context}-${id}-tab`}
+            data-operation-tab={id}
+            type="button"
+            role="tab"
+            aria-controls={`${id}-panel`}
+            aria-selected={id === "weekly-plan" ? "true" : "false"}
+            tabIndex={id === "weekly-plan" ? 0 : -1}
+            key={id}
+          >
+            {label}
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -33,7 +52,11 @@ export default function DashboardPage() {
         const response = await fetch("/api/session", { cache: "no-store" });
         const result = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(result?.error || "Login required.");
-        if (isMounted) setSessionRole(result?.role === "employee" ? "employee" : "owner");
+        if (result?.role === "employee") {
+          window.location.replace("/staff");
+          return;
+        }
+        if (isMounted) setSessionRole("owner");
       } catch {
         window.location.assign("/login");
       }
@@ -90,37 +113,120 @@ export default function DashboardPage() {
           <p className="eyebrow">{isEmployee ? "Staff recipe view" : "Batch cocktail costing"}</p>
           <h1>Beverage Dashboard</h1>
         </div>
-        <div className="top-actions dashboard-owner-only" aria-label="Dashboard controls">
-          <button className="tab-button is-active" data-tab="recipes" type="button">Recipes</button>
-          <button className="tab-button" data-tab="operations" type="button">Beverage Ops</button>
-          <button className="tab-button" data-tab="weekly-usage" type="button">Weekly Usage</button>
-          <button className="tab-button" data-tab="add" type="button">Add Product</button>
-          <button className="tab-button" data-tab="old" type="button">Old Recipes</button>
+        <div className="topbar-actions">
+          <button
+            className="global-search-trigger dashboard-owner-only"
+            id="global-search-trigger"
+            type="button"
+            aria-haspopup="dialog"
+            aria-controls="global-search-dialog"
+          >
+            <span aria-hidden="true">⌕</span>
+            <span>Search dashboard</span>
+            <kbd>⌘ K</kbd>
+          </button>
+          <div className="top-actions dashboard-owner-only" aria-label="Dashboard sections">
+            <button className="tab-button is-active" id="dashboard-tab" data-tab="dashboard" type="button">Dashboard</button>
+            <button className="tab-button" id="operations-tab" data-tab="operations" type="button">Beverage Ops</button>
+            <button className="tab-button" id="weekly-usage-tab" data-tab="weekly-usage" type="button">Weekly Usage</button>
+            <button className="tab-button" id="recipes-tab" data-tab="recipes" data-recipe-view="current" type="button">Recipes</button>
+            <button className="tab-button" id="add-tab" data-tab="add" type="button">Add Product</button>
+          </div>
+          <a className="logout-link" href="/api/logout" aria-label={`Log out of the ${sessionRole} dashboard`}>Log out</a>
         </div>
       </header>
 
-      <main>
-        <section className="panel is-active" id="recipes-panel" aria-labelledby="recipes-tab">
-          <div className="toolbar">
-            <label className="search-field">
-              <span>Search recipes or ingredients</span>
-              <input id="recipe-search" type="search" placeholder="Search cocktails, liquor, juice..." />
-            </label>
-            <label className="select-field">
-              <span>Spirit</span>
-              <select id="category-filter">
-                <option value="all">All spirits</option>
-              </select>
-            </label>
-          </div>
+      <dialog className="global-search-dialog dashboard-owner-only" id="global-search-dialog" aria-labelledby="global-search-title">
+        <div className="global-search-dialog__header">
+          <label htmlFor="global-search-input">
+            <span className="sr-only" id="global-search-title">Search the beverage dashboard</span>
+            <span className="global-search-dialog__icon" aria-hidden="true">⌕</span>
+            <input
+              id="global-search-input"
+              type="search"
+              placeholder="Search recipes, ingredients, taps, inventory..."
+              autoComplete="off"
+              aria-controls="global-search-results"
+              aria-autocomplete="list"
+            />
+          </label>
+          <button className="global-search-close" id="global-search-close" type="button" aria-label="Close dashboard search">Esc</button>
+        </div>
+        <p className="global-search-hint" id="global-search-hint">Start typing, or choose a dashboard section.</p>
+        <div className="global-search-results" id="global-search-results" role="listbox" aria-label="Dashboard search results"></div>
+      </dialog>
 
-          <div className="stats-grid" id="stats-grid"></div>
-          <section className="recipe-coverage-alert" id="recipe-coverage-alert" aria-live="polite" hidden></section>
-          <div className="recipe-grid" id="recipe-grid"></div>
+      <main>
+        <section className="panel is-active" id="dashboard-panel" role="tabpanel" aria-labelledby="dashboard-tab">
+          <div className="dashboard-overview" id="dashboard-overview"></div>
         </section>
 
-        <section className="panel" id="pricing-panel" aria-labelledby="pricing-tab">
-          <OperationsBar />
+        <section className="panel" id="recipes-panel" role="tabpanel" aria-labelledby="recipes-tab">
+          <header className="recipe-workspace-header">
+            <div>
+              <p className="eyebrow">Recipe library</p>
+              <h2>Cocktail Recipes</h2>
+              <p>Work with the active menu or reopen a recipe from the archive without leaving this page.</p>
+            </div>
+            <div className="recipe-view-switcher" role="tablist" aria-label="Recipe status">
+              <button
+                className="recipe-view-button is-active"
+                id="current-recipes-tab"
+                data-recipe-view="current"
+                type="button"
+                role="tab"
+                aria-controls="current-recipes-view"
+                aria-selected="true"
+              >
+                Current <span id="current-recipe-count"></span>
+              </button>
+              <button
+                className="recipe-view-button"
+                id="old-recipes-tab"
+                data-recipe-view="old"
+                type="button"
+                role="tab"
+                aria-controls="old-recipes-view"
+                aria-selected="false"
+                tabIndex={-1}
+              >
+                Old Recipes <span id="old-recipe-count"></span>
+              </button>
+            </div>
+          </header>
+
+          <div id="current-recipes-view" role="tabpanel" aria-labelledby="current-recipes-tab">
+            <div className="toolbar">
+              <label className="search-field">
+                <span>Search recipes or ingredients</span>
+                <input id="recipe-search" type="search" placeholder="Search cocktails, liquor, juice..." />
+              </label>
+              <label className="select-field">
+                <span>Spirit</span>
+                <select id="category-filter">
+                  <option value="all">All spirits</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="stats-grid" id="stats-grid"></div>
+            <section className="recipe-coverage-alert" id="recipe-coverage-alert" aria-live="polite" hidden></section>
+            <div className="recipe-grid" id="recipe-grid"></div>
+          </div>
+
+          <div id="old-recipes-view" role="tabpanel" aria-labelledby="old-recipes-tab" hidden>
+            <div className="toolbar">
+              <label className="search-field">
+                <span>Search old recipes</span>
+                <input id="old-search" type="search" placeholder="Search deactivated cocktails..." />
+              </label>
+            </div>
+            <div className="recipe-grid" id="old-recipe-grid"></div>
+          </div>
+        </section>
+
+        <section className="panel" id="pricing-panel" role="tabpanel" aria-label="Tap Pricing">
+          <OperationsBar context="pricing" />
           <div className="toolbar">
             <label className="search-field">
               <span>Find recipe</span>
@@ -132,6 +238,7 @@ export default function DashboardPage() {
           <div className="pricing-layout">
             <aside className="pricing-summary" id="pricing-summary"></aside>
             <div className="pricing-table-wrap">
+              <p className="pricing-calculation-note">Cocktail charge inputs below change dashboard calculations only. Use the Owner action in the 82% advisor for a confirmed live PMB increase.</p>
               <table className="pricing-table">
                 <thead>
                   <tr>
@@ -146,14 +253,75 @@ export default function DashboardPage() {
               </table>
             </div>
           </div>
+
+          <section className="shot-pricing" aria-labelledby="shot-pricing-title">
+            <div className="shot-pricing__header">
+              <div>
+                <p className="eyebrow">Portion Mode · liquor only</p>
+                <h2 id="shot-pricing-title">Shot pricing</h2>
+                <p>Edit the two PMB portion prices together. Shot prices are manual owner decisions and are never governed by the 82% beer-and-cocktail rule below.</p>
+              </div>
+              <span className="pricing-advisor__mode">Two-price review</span>
+            </div>
+            <div className="shot-pricing__summary" id="shot-pricing-summary" aria-live="polite"></div>
+            <div className="pricing-table-wrap">
+              <table className="pricing-table shot-pricing__table">
+                <thead>
+                  <tr>
+                    <th>Tap</th>
+                    <th>Liquor</th>
+                    <th>Current portions</th>
+                    <th>New portion prices</th>
+                    <th>Status</th>
+                    <th>Owner action</th>
+                  </tr>
+                </thead>
+                <tbody id="shot-pricing-table"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="pricing-advisor" aria-labelledby="pricing-advisor-title">
+            <div className="pricing-advisor__header">
+              <div>
+                <p className="eyebrow">Owner review required</p>
+                <h2 id="pricing-advisor-title">82% minimum gross-margin advisor</h2>
+                <p>Checks beer and cocktails only. It suggests increases below 82%, never lowers a price, and sends a live PMB change only after the Owner reviews and confirms it.</p>
+              </div>
+              <span className="pricing-advisor__mode">Manual approval</span>
+            </div>
+            <div className="pricing-advisor__summary" id="pricing-advisor-summary" aria-live="polite"></div>
+            <div className="pricing-table-wrap">
+              <table className="pricing-table pricing-advisor__table">
+                <thead>
+                  <tr>
+                    <th>Tap</th>
+                    <th>Product</th>
+                    <th>Current</th>
+                    <th>Current gross margin</th>
+                    <th>Recommended price</th>
+                    <th>Change</th>
+                    <th>Status</th>
+                    <th>Owner action</th>
+                  </tr>
+                </thead>
+                <tbody id="pricing-advisor-table"></tbody>
+              </table>
+            </div>
+          </section>
         </section>
 
-        <section className="panel" id="keg-levels-panel" aria-labelledby="keg-levels-tab">
-          <OperationsBar />
+        <section className="panel" id="keg-levels-panel" role="tabpanel" aria-label="Keg Levels">
+          <OperationsBar context="keg-levels" />
           <div className="keg-layout">
             <aside className="keg-summary" id="keg-summary"></aside>
             <div className="keg-walls" id="keg-walls"></div>
           </div>
+        </section>
+
+        <section className="panel" id="weekly-plan-panel" role="tabpanel" aria-label="Weekly Plan">
+          <OperationsBar context="weekly-plan" />
+          <div id="weekly-plan" className="weekly-plan"></div>
         </section>
 
         <section className="panel" id="add-panel" aria-labelledby="add-tab">
@@ -438,8 +606,8 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        <section className="panel" id="ingredients-panel" aria-labelledby="ingredients-tab">
-          <OperationsBar />
+        <section className="panel" id="ingredients-panel" role="tabpanel" aria-label="Ingredient and Keg Costs">
+          <OperationsBar context="ingredients" />
           <div className="toolbar">
             <label className="search-field">
               <span>Find pricing item</span>
@@ -504,8 +672,8 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        <section className="panel" id="inventory-panel" aria-labelledby="inventory-tab">
-          <OperationsBar />
+        <section className="panel" id="inventory-panel" role="tabpanel" aria-label="Inventory">
+          <OperationsBar context="inventory" />
           <div className="toolbar">
             <label className="search-field">
               <span>Find inventory item</span>
@@ -652,15 +820,6 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        <section className="panel" id="old-panel" aria-labelledby="old-tab">
-          <div className="toolbar">
-            <label className="search-field">
-              <span>Search old recipes</span>
-              <input id="old-search" type="search" placeholder="Search deactivated cocktails..." />
-            </label>
-          </div>
-          <div className="recipe-grid" id="old-recipe-grid"></div>
-        </section>
       </main>
 
       <template

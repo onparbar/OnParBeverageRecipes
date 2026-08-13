@@ -2,12 +2,18 @@
   "name": "on-par-beverage-recipes",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:check": "ONPAR_NEXT_DIST_DIR=.next-check next build",
     "start": "next start",
     "test": "node --test tests/*.test.mjs scripts/provi/utils.test.mjs",
-    "lint": "next lint",
+    "lint": "eslint . --max-warnings=0",
+    "check": "npm test && npm run lint && npm run build:check",
+    "check:storage": "node --env-file=.env.local scripts/check-shared-storage.mjs",
     "provi:session": "node scripts/provi/setup_provi_session.mjs",
     "provi:capture": "node scripts/provi/capture_provi_checkout.mjs",
     "provi:extract": "node scripts/provi/extract_provi_values.mjs"
@@ -16,13 +22,16 @@
     "next": "15.5.22",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "sharp": "0.35.3"
+    "sharp": "0.35.3",
+    "undici": "^6.28.0"
   },
   "devDependencies": {
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^15.5.22",
     "playwright": "^1.60.0"
   },
   "overrides": {
-    "postcss": "8.5.18",
+    "postcss": "8.5.26",
     "sharp": "0.35.3"
   }
 }

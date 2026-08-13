@@ -180,6 +180,7 @@ async function fetchProviProductLines(productName, sessionContext) {
   const response = await fetch(url, {
     headers: buildProviRequestHeaders(sessionContext),
     cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!response.ok) {

@@ -115,6 +115,9 @@ export async function GET(request) {
     if (query.length < 2) {
       return NextResponse.json({ error: "Enter at least two characters to search Untappd." }, { status: 400 });
     }
+    if (query.length > 120) {
+      return NextResponse.json({ error: "Search text is too long." }, { status: 400 });
+    }
     if (!["beer", "liquor"].includes(kind)) {
       return NextResponse.json({ error: "Search kind must be beer or liquor." }, { status: 400 });
     }

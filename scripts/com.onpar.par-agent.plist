@@ -6,11 +6,16 @@
   <string>com.onpar.par-agent</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/onparmarketing/OnParBeverageRecipes-service/.tools/node/bin/node</string>
-    <string>/Users/onparmarketing/OnParBeverageRecipes-service/scripts/update-par-agent.mjs</string>
+    <string>/bin/bash</string>
+    <string>/Users/onparmarketing/OnParBeverageRecipes-service/.deploy/run-par-agent.sh</string>
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/onparmarketing/OnParBeverageRecipes-service</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ONPAR_SERVICE_DIR</key>
+    <string>/Users/onparmarketing/OnParBeverageRecipes-service/current</string>
+  </dict>
   <key>StartCalendarInterval</key>
   <dict>
     <key>Weekday</key>

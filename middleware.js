@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { DASHBOARD_SESSION_COOKIE, getDashboardSessionRole } from "./lib/dashboard-auth.mjs";
+import {
+  DASHBOARD_SESSION_COOKIE,
+  getDashboardAuthStatus,
+  getDashboardSessionRole,
+} from "./lib/dashboard-auth.mjs";
+import { isEmployeeAllowedDashboardRequest } from "./lib/dashboard-access.mjs";
 
 async function getSessionRole(request) {
   const session = request.cookies.get(DASHBOARD_SESSION_COOKIE)?.value;
@@ -7,41 +12,38 @@ async function getSessionRole(request) {
 }
 
 function isPublicPath(pathname) {
-  return pathname === "/login" || pathname === "/api/login";
-}
-
-function isPublicStaticAssetPath(pathname) {
-  return (
-    pathname === "/dashboard.js" ||
-    pathname.endsWith(".mjs") ||
-    (pathname.startsWith("/data/") && pathname.endsWith(".csv"))
-  );
+  return [
+    "/login",
+    "/api/login",
+    "/api/logout",
+    "/api/health",
+    "/api/version",
+  ].includes(pathname);
 }
 
 function isApiPath(pathname) {
   return pathname.startsWith("/api/");
 }
 
-function isEmployeeAllowedApiRequest(request) {
-  const { pathname } = request.nextUrl;
-  if (pathname === "/api/session") return true;
-  return request.method === "GET" && pathname === "/api/dashboard-state";
+function getPublicUrl(request, pathname) {
+  const url = request.nextUrl.clone();
+  url.pathname = pathname;
+  url.search = "";
+  url.hash = "";
+  return url;
 }
 
-function getPublicUrl(request, pathname) {
-  const protocol = request.headers.get("x-forwarded-proto") || "https";
-  const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || request.nextUrl.host;
-  return new URL(pathname, `${protocol}://${host}`);
+function nextPrivateResponse() {
+  const response = NextResponse.next();
+  response.headers.set("Cache-Control", "private, no-store, max-age=0");
+  response.headers.set("Vary", "Cookie");
+  return response;
 }
 
 export async function middleware(request) {
   const { pathname } = request.nextUrl;
   const sessionRole = await getSessionRole(request);
   const isAuthed = Boolean(sessionRole);
-
-  if (isPublicStaticAssetPath(pathname)) {
-    return NextResponse.next();
-  }
 
   if (isPublicPath(pathname)) {
     if (isAuthed && pathname === "/login") {
@@ -51,20 +53,49 @@ export async function middleware(request) {
   }
 
   if (isAuthed) {
-    if (sessionRole === "employee" && isApiPath(pathname) && !isEmployeeAllowedApiRequest(request)) {
-      return NextResponse.json({ error: "Owner login required." }, { status: 403 });
+    if (sessionRole === "employee") {
+      if (pathname === "/") {
+        return NextResponse.redirect(getPublicUrl(request, "/staff"));
+      }
+      if (!isEmployeeAllowedDashboardRequest({ pathname, method: request.method })) {
+        if (isApiPath(pathname)) {
+          return NextResponse.json(
+            { error: "Owner login required." },
+            { status: 403, headers: { "Cache-Control": "no-store" } },
+          );
+        }
+        return new NextResponse("Owner login required.", {
+          status: 403,
+          headers: {
+            "Cache-Control": "no-store",
+            "Content-Type": "text/plain; charset=utf-8",
+          },
+        });
+      }
+      return nextPrivateResponse();
     }
-    return NextResponse.next();
+    if (pathname === "/staff") {
+      return NextResponse.redirect(getPublicUrl(request, "/"));
+    }
+    return nextPrivateResponse();
   }
 
   if (isApiPath(pathname)) {
-    return NextResponse.json({ error: "Login required." }, { status: 401 });
+    return NextResponse.json(
+      { error: "Login required." },
+      { status: 401, headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   const loginUrl = getPublicUrl(request, "/login");
   loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
-  if (!process.env.DASHBOARD_PASSWORD) {
+  const authStatus = getDashboardAuthStatus();
+  if (!authStatus.hasOwnerPassword) {
     loginUrl.searchParams.set("setup", "missing-password");
+  } else if (!authStatus.hasSessionSecret) {
+    loginUrl.searchParams.set("setup", "missing-session-secret");
+  } else if (!authStatus.sessionSecretStrong) {
+    loginUrl.searchParams.set("setup", "weak-session-secret");
   }
   return NextResponse.redirect(loginUrl);
 }

@@ -1,12 +1,47 @@
 import { NextResponse } from "next/server";
-import { DASHBOARD_SESSION_COOKIE, getDashboardRoles, signDashboardSession } from "../../../lib/dashboard-auth.mjs";
+import {
+  DASHBOARD_SESSION_COOKIE,
+  DASHBOARD_SESSION_MAX_AGE_SECONDS,
+  matchDashboardRole,
+  requireDashboardAuthConfiguration,
+  signDashboardSession,
+} from "../../../lib/dashboard-auth.mjs";
+import {
+  dashboardLoginThrottle,
+  getLoginClientKey,
+} from "../../../lib/login-rate-limit.mjs";
+
+function jsonResponse(body, status = 200, headers = {}) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store",
+      ...headers,
+    },
+  });
+}
 
 export async function POST(request) {
-  const roles = getDashboardRoles();
-  if (!roles.some((entry) => entry.role === "owner")) {
-    return NextResponse.json(
-      { error: "DASHBOARD_PASSWORD is not configured." },
-      { status: 500 },
+  try {
+    requireDashboardAuthConfiguration();
+  } catch (error) {
+    return jsonResponse({
+      error: error.message || "Dashboard authentication is not configured.",
+      code: error.code || "DASHBOARD_AUTH_NOT_CONFIGURED",
+    }, 500);
+  }
+
+  const clientKey = getLoginClientKey(request);
+  const rateLimit = dashboardLoginThrottle.check(clientKey);
+  if (!rateLimit.allowed) {
+    return jsonResponse(
+      {
+        error: "Too many incorrect login attempts. Try again later.",
+        code: "LOGIN_RATE_LIMITED",
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+      },
+      429,
+      { "Retry-After": String(rateLimit.retryAfterSeconds) },
     );
   }
 
@@ -18,22 +53,33 @@ export async function POST(request) {
     submittedPassword = "";
   }
 
-  const matchedRole = roles.find((entry) => entry.role === "owner" && submittedPassword === entry.password)
-    || roles.find((entry) => entry.role === "employee" && submittedPassword === entry.password);
-
+  const matchedRole = matchDashboardRole(submittedPassword);
   if (!matchedRole) {
-    return NextResponse.json({ error: "Incorrect password." }, { status: 401 });
+    const failure = dashboardLoginThrottle.recordFailure(clientKey);
+    if (!failure.allowed) {
+      return jsonResponse(
+        {
+          error: "Too many incorrect login attempts. Try again later.",
+          code: "LOGIN_RATE_LIMITED",
+          retryAfterSeconds: failure.retryAfterSeconds,
+        },
+        429,
+        { "Retry-After": String(failure.retryAfterSeconds) },
+      );
+    }
+    return jsonResponse({ error: "Incorrect password.", code: "LOGIN_FAILED" }, 401);
   }
 
-  const response = NextResponse.json({ ok: true, role: matchedRole.role });
+  dashboardLoginThrottle.reset(clientKey);
+  const response = jsonResponse({ ok: true, role: matchedRole.role });
   response.cookies.set({
     name: DASHBOARD_SESSION_COOKIE,
-    value: await signDashboardSession(matchedRole.role, matchedRole.password),
+    value: await signDashboardSession(matchedRole.role),
     httpOnly: true,
     sameSite: "strict",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 24 * 7,
+    maxAge: DASHBOARD_SESSION_MAX_AGE_SECONDS,
   });
   return response;
 }

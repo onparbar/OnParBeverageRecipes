@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
+import {
+  buildCurrentTapAssignments,
+  getTapPricingRepresentativeAssignment,
+} from "../../../lib/tap-pricing-assignments.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,11 +86,14 @@ function getConfig() {
   if (!baseUrl) {
     throw new Error("Missing PMB_API_BASE_URL in .env.local");
   }
+  const username = (process.env.PMB_API_USERNAME || "").trim();
+  const password = (process.env.PMB_API_PASSWORD || "").trim();
+  if (!username || !password) throw new Error("Missing PMB_API_USERNAME or PMB_API_PASSWORD in .env.local");
 
   return {
     baseUrl,
-    username: (process.env.PMB_API_USERNAME || "admin").trim(),
-    password: (process.env.PMB_API_PASSWORD || "admin").trim(),
+    username,
+    password,
     clientId: Number(process.env.PMB_API_CLIENT_ID || "910423"),
     clientName: (process.env.PMB_API_CLIENT_NAME || "PourMyBeer API").trim(),
   };
@@ -258,26 +265,6 @@ function getMatchedTap(productName, tapLookup) {
   return null;
 }
 
-function buildCurrentTapLookup(rows, tapLookup) {
-  const byPlu = new Map();
-  rows.forEach((row) => {
-    const plu = toNumber(row.plu);
-    const tapNumber = toNumber(row.tapNumber);
-    if (!plu || !tapNumber || row.unused) return;
-    const template = tapLookup.byTap.get(tapNumber) || {};
-    byPlu.set(plu, {
-      tapNumber,
-      wall: template.wall || "",
-      type: template.type || "",
-      brand: clean(row.product) || template.brand || "",
-      templateBrand: template.brand || "",
-      deviceId: toNumber(row.deviceId),
-      lineNum: toNumber(row.lineNum),
-    });
-  });
-  return byPlu;
-}
-
 function isLiquorTap(tapNumber) {
   return (tapNumber >= 1 && tapNumber <= 20) || (tapNumber >= 83 && tapNumber <= 92);
 }
@@ -295,6 +282,40 @@ function getItemPrice(item) {
   return price / (10 ** (Number.isFinite(decimalPlaces) ? decimalPlaces : 2));
 }
 
+const PMB_PORTION_ITEM_ID_FIELD = clean(process.env.PMB_PORTION_ITEM_ID_FIELD);
+const PMB_PORTION_QUANTITY_FIELD = clean(process.env.PMB_PORTION_QUANTITY_FIELD);
+const PMB_PORTION_QUANTITY_DP_FIELD = clean(process.env.PMB_PORTION_QUANTITY_DP_FIELD);
+
+function getPositiveInteger(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function getVerifiedItemIdentity(item) {
+  if (!PMB_PORTION_ITEM_ID_FIELD || !PMB_PORTION_QUANTITY_FIELD) return null;
+  const itemId = clean(item?.[PMB_PORTION_ITEM_ID_FIELD]);
+  const rawQuantity = Number(item?.[PMB_PORTION_QUANTITY_FIELD]);
+  const quantityDpRaw = PMB_PORTION_QUANTITY_DP_FIELD
+    ? Number(item?.[PMB_PORTION_QUANTITY_DP_FIELD])
+    : 0;
+  const quantityDp = Number.isSafeInteger(quantityDpRaw) && quantityDpRaw >= 0 && quantityDpRaw <= 6
+    ? quantityDpRaw
+    : -1;
+  const quantityOz = quantityDp >= 0 ? rawQuantity / (10 ** quantityDp) : 0;
+  const priceRaw = getPositiveInteger(item?.price);
+  const priceDp = Number(item?.price_dp);
+  if (
+    !itemId
+    || !Number.isFinite(quantityOz)
+    || quantityOz <= 0
+    || !priceRaw
+    || !Number.isSafeInteger(priceDp)
+    || priceDp < 0
+    || priceDp > 6
+  ) return null;
+  return { itemId, quantityOz, priceRaw, priceDp };
+}
+
 function buildItemPriceMap(itemlist = []) {
   const byPlu = new Map();
   itemlist.forEach((item) => {
@@ -306,6 +327,7 @@ function buildItemPriceMap(itemlist = []) {
     byPlu.get(plu).push({
       name: portionName,
       price,
+      ...getVerifiedItemIdentity(item),
     });
   });
 
@@ -335,8 +357,13 @@ export async function GET() {
     }
 
     const itemPricesByPlu = buildItemPriceMap(itemPrices.json?.itemlist || []);
-    const currentTapByPlu = buildCurrentTapLookup(tapConfigRows, tapLookup);
-    const occupiedTapNumbers = new Set([...currentTapByPlu.values()].map((tap) => toNumber(tap.tapNumber)).filter(Boolean));
+    const currentTapAssignmentsByPlu = buildCurrentTapAssignments(tapConfigRows, tapLookup);
+    const occupiedTapNumbers = new Set(
+      [...currentTapAssignmentsByPlu.values()]
+        .flat()
+        .map((tap) => toNumber(tap.tapNumber))
+        .filter(Boolean),
+    );
 
     const items = products.json.productlist
       .map((product) => {
@@ -344,7 +371,8 @@ export async function GET() {
         const name = normalizeProductName(product.name);
         if (!name || !chargePerOz || /coming soon/i.test(name)) return null;
         const plu = Number(product.plu || 0) || null;
-        const currentTap = currentTapByPlu.get(plu);
+        const assignments = currentTapAssignmentsByPlu.get(plu) || [];
+        const currentTap = getTapPricingRepresentativeAssignment(assignments);
         const fallbackTap = currentTap ? null : getMatchedTap(name, tapLookup);
         const matchedTap = currentTap || (fallbackTap && !occupiedTapNumbers.has(toNumber(fallbackTap.tapNumber)) ? fallbackTap : null);
         const portions = matchedTap?.tapNumber && isLiquorTap(matchedTap.tapNumber)
@@ -355,8 +383,11 @@ export async function GET() {
           tapPosition: matchedTap?.tapNumber ?? null,
           wall: matchedTap?.wall || "",
           type: matchedTap?.type || "",
-          matchedBrand: matchedTap?.brand || "",
+          matchedBrand: matchedTap?.matchedBrand || matchedTap?.brand || "",
           templateBrand: matchedTap?.templateBrand || matchedTap?.brand || "",
+          deviceId: currentTap?.deviceId ?? null,
+          lineNum: currentTap?.lineNum ?? null,
+          assignments,
           plu,
           name,
           chargePerOz,
@@ -382,6 +413,16 @@ export async function GET() {
     return NextResponse.json({
       updatedAt: new Date().toISOString(),
       items,
+      portionPricing: {
+        writeAvailable: false,
+        schemaConfigured: Boolean(PMB_PORTION_ITEM_ID_FIELD && PMB_PORTION_QUANTITY_FIELD),
+        code: PMB_PORTION_ITEM_ID_FIELD && PMB_PORTION_QUANTITY_FIELD
+          ? "PMB_PORTION_FORM_UNVERIFIED"
+          : "PMB_PORTION_SCHEMA_UNVERIFIED",
+        message: PMB_PORTION_ITEM_ID_FIELD && PMB_PORTION_QUANTITY_FIELD
+          ? "The PMB item edit form still needs one on-site read-only verification before live shot-price saves can be enabled."
+          : "The PMB portion item IDs and quantities need one on-site read-only verification before live shot-price saves can be enabled.",
+      },
     });
   } catch (error) {
     return NextResponse.json(

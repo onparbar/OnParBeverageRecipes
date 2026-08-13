@@ -324,6 +324,22 @@ test("backfills an empty PMB queue when reading shared state written before the 
   assert.equal(state.revision, 2);
 });
 
+test("backfills an empty monitoring slice for shared state created before compliance watch", async () => {
+  const legacyData = createEmptySharedDashboardData();
+  delete legacyData.monitoring;
+  const fetchImpl = createSupabaseFetch(makeRow({
+    revision: 3,
+    initialized: true,
+    initialized_at: "2026-07-29T12:00:00.000Z",
+    data: legacyData,
+  }));
+  const store = createSharedDashboardStore({ env: makeEnvironment(), fetchImpl });
+
+  const state = await store.read();
+  assert.deepEqual(state.data.monitoring.ohioComplianceAcknowledgement, {});
+  assert.equal(state.revision, 3);
+});
+
 test("same-revision concurrent writers cannot silently overwrite one another", async () => {
   const data = createEmptySharedDashboardData();
   const fetchImpl = createSupabaseFetch(makeRow({
@@ -425,6 +441,10 @@ test("employee projection returns operational recipes without live pricing or pr
     payload: { kegCost: 185 },
   }];
   data.products.tapReplacementOverrides = { "tap-1": { newChargePerOz: 0.42 } };
+  data.monitoring.ohioComplianceAcknowledgement = {
+    fingerprint: `ohio-compliance-v1:${"a".repeat(64)}`,
+    acknowledgedAt: "2026-08-12T16:00:00.000Z",
+  };
   data.recipes.customRecipes = [{
     id: "profit-punch",
     title: "Profit Punch",
@@ -486,6 +506,7 @@ test("employee projection returns operational recipes without live pricing or pr
   const projected = projectSharedDashboardStateForRole(state, "employee");
   assert.deepEqual(projected.data.pricing, createEmptySharedDashboardData().pricing);
   assert.deepEqual(projected.data.products, createEmptySharedDashboardData().products);
+  assert.deepEqual(projected.data.monitoring, createEmptySharedDashboardData().monitoring);
   assert.deepEqual(projected.data.recipes.inactiveRecipeIds, ["retired-recipe"]);
 
   const recipe = projected.data.recipes.customRecipes[0];
@@ -518,6 +539,7 @@ test("employee projection returns operational recipes without live pricing or pr
 
   assert.equal(JSON.stringify(projected).includes("secret-beer"), false);
   assert.equal(JSON.stringify(projected).includes("queued-secret"), false);
+  assert.equal(JSON.stringify(projected).includes("ohio-compliance-v1"), false);
   assert.equal(JSON.stringify(projected).includes("25.85"), false);
   assert.equal(JSON.stringify(projected).includes("$41.35"), false);
   assert.equal(data.recipes.customRecipes[0].batchCost, 43.5);

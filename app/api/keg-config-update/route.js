@@ -57,6 +57,7 @@ async function postJson(baseUrl, path, body, token = "") {
     },
     body: JSON.stringify(body),
     cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
   });
 
   const raw = await response.text();
@@ -72,11 +73,14 @@ function getConfig() {
   if (!baseUrl) {
     throw new Error("Missing PMB_API_BASE_URL in .env.local");
   }
+  const username = (process.env.PMB_API_USERNAME || "").trim();
+  const password = (process.env.PMB_API_PASSWORD || "").trim();
+  if (!username || !password) throw new Error("Missing PMB_API_USERNAME or PMB_API_PASSWORD in .env.local");
 
   return {
     baseUrl,
-    username: (process.env.PMB_API_USERNAME || "admin").trim(),
-    password: (process.env.PMB_API_PASSWORD || "admin").trim(),
+    username,
+    password,
     clientId: Number(process.env.PMB_API_CLIENT_ID || "910423"),
     clientName: (process.env.PMB_API_CLIENT_NAME || "PourMyBeer API").trim(),
   };

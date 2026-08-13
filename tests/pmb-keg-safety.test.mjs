@@ -195,6 +195,17 @@ test("checks every PMB keg-level response status before using its body", () => {
       },
       { deviceId: 9001, lineNum: 1 },
     ),
+    (error) => (
+      error.code === "PMB_KEG_LEVEL_READ_FAILED"
+      && error.status === 503
+      && error.details.failureReason.includes("fill_level_perc")
+    ),
+  );
+  assert.throws(
+    () => requireSuccessfulKegLevelResponse(
+      { status: 200, json: { fill_level_perc: "", fill_level_keg_size: 1984, fill_level_keg_size_dp: 0 } },
+      { deviceId: 9001, lineNum: 1 },
+    ),
     (error) => error.code === "PMB_KEG_LEVEL_READ_FAILED" && error.status === 503,
   );
 

@@ -8,6 +8,7 @@ We are working on the On Par Beverage Recipes dashboard.
 Please read these files first:
 - scratchpad.md
 - SETUP-CHECKLIST.md
+- OPERATIONS.md
 
 Then inspect the repo and summarize:
 1. current project structure
@@ -20,12 +21,15 @@ After that, wait for my next instruction before making changes.
 
 ## Important local notes
 
-- Main repo: `C:\Users\info\Projects\OnParBeverageRecipes` on the old PC
+- Production service checkout: `/Users/onparmarketing/OnParBeverageRecipes-service`
 - Main local site: `http://localhost:3000`
-- Run a build before pushing:
+- Run the complete check before proposing a production release:
 
 ```bash
-npm run build
+npm run check
 ```
 
-- If Next.js gets weird, delete `.next` and restart dev server.
+- Production is the on-site Mac behind the Cloudflare tunnel. Vercel builds are
+  previews only because they cannot reach the venue's PourMyBeer service.
+- Use the scripts and rollback procedure in `OPERATIONS.md`; do not deploy from
+  an arbitrary development checkout.

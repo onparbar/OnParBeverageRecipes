@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import http from "node:http";
 import sharp from "sharp";
+import { fetchRemoteBuffer } from "../../../lib/safe-remote-fetch.mjs";
 
 export const runtime = "nodejs";
 
@@ -9,6 +10,7 @@ const PRODUCT_IMAGE_WIDTH = 676;
 const PRODUCT_IMAGE_HEIGHT = 540;
 const PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 const PRODUCT_IMAGE_SOURCE_MAX_BYTES = 15 * 1024 * 1024;
+const SAFE_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif", "image/gif", "image/apng"];
 
 function parseJsonLoose(text) {
   try {
@@ -265,11 +267,14 @@ function getConfig() {
   if (!baseUrl) {
     throw new Error("Missing PMB_API_BASE_URL in .env.local");
   }
+  const username = (process.env.PMB_API_USERNAME || "").trim();
+  const password = (process.env.PMB_API_PASSWORD || "").trim();
+  if (!username || !password) throw new Error("Missing PMB_API_USERNAME or PMB_API_PASSWORD in .env.local");
 
   return {
     baseUrl,
-    username: (process.env.PMB_API_USERNAME || "admin").trim(),
-    password: (process.env.PMB_API_PASSWORD || "admin").trim(),
+    username,
+    password,
     clientId: Number(process.env.PMB_API_CLIENT_ID || "910423"),
     clientName: (process.env.PMB_API_CLIENT_NAME || "PourMyBeer API").trim(),
   };
@@ -337,25 +342,21 @@ async function readImageSourceBuffer(imageUrl) {
     throw new Error("PMB product image must use http or https.");
   }
 
-  const response = await fetch(parsedUrl, {
+  const response = await fetchRemoteBuffer(parsedUrl, {
+    acceptedContentTypes: SAFE_IMAGE_TYPES,
     headers: {
       "User-Agent": "OnParBeverageDashboard/1.0",
-      Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      Accept: "image/avif,image/webp,image/apng,image/png,image/jpeg,image/gif",
     },
-    cache: "no-store",
-    redirect: "follow",
+    maxBytes: PRODUCT_IMAGE_SOURCE_MAX_BYTES,
+    timeoutMs: 10_000,
   });
 
   if (!response.ok) {
     throw new Error(`PMB product image download failed (${response.status}).`);
   }
 
-  const contentType = response.headers.get("content-type") || "";
-  if (!contentType.startsWith("image/")) {
-    throw new Error("PMB product image URL did not return an image.");
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
+  const buffer = response.buffer;
   if (!buffer.length) throw new Error("PMB product image was empty.");
   if (buffer.byteLength > PRODUCT_IMAGE_SOURCE_MAX_BYTES) {
     throw new Error("PMB product image source is too large. Use an image under 15MB before cropping.");
@@ -369,7 +370,7 @@ async function buildPmbImageFile(imageUrl, productName) {
   if (!sourceBuffer) return null;
 
   for (const quality of [88, 82, 76, 70, 64, 58, 52]) {
-    const output = await sharp(sourceBuffer, { animated: false })
+    const output = await sharp(sourceBuffer, { animated: false, limitInputPixels: 40_000_000 })
       .rotate()
       .resize(PRODUCT_IMAGE_WIDTH, PRODUCT_IMAGE_HEIGHT, { fit: "cover", position: "center" })
       .withMetadata({ density: 72 })

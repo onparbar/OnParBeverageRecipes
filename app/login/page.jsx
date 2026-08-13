@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getSafeDashboardNextPath } from "../../lib/dashboard-navigation.mjs";
 
 export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isMissingSetup, setIsMissingSetup] = useState(false);
+  const [setupIssue, setSetupIssue] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    setIsMissingSetup(params.get("setup") === "missing-password");
+    setSetupIssue(params.get("setup") || "");
   }, []);
 
   async function handleSubmit(event) {
@@ -31,8 +32,8 @@ export default function LoginPage() {
       }
 
       const params = new URLSearchParams(window.location.search);
-      const nextPath = params.get("next") || "/";
-      window.location.assign(nextPath.startsWith("/") ? nextPath : "/");
+      const nextPath = getSafeDashboardNextPath(params.get("next"));
+      window.location.assign(result?.role === "employee" ? "/staff" : nextPath);
     } catch (error) {
       setMessage(error.message || "Could not log in.");
     } finally {
@@ -61,8 +62,14 @@ export default function LoginPage() {
             {isSubmitting ? "Checking..." : "Log in"}
           </button>
         </form>
-        {isMissingSetup ? (
-          <p className="login-message">Set DASHBOARD_PASSWORD in the environment to enable login.</p>
+        {setupIssue ? (
+          <p className="login-message">
+            {setupIssue === "missing-password"
+              ? "Set DASHBOARD_PASSWORD in the service environment to enable login."
+              : setupIssue === "weak-session-secret"
+                ? "DASHBOARD_SESSION_SECRET must contain at least 32 characters."
+                : "Set DASHBOARD_SESSION_SECRET in the service environment, then restart the dashboard."}
+          </p>
         ) : null}
         {message ? <p className="login-message">{message}</p> : null}
       </section>

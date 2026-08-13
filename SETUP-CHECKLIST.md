@@ -1,13 +1,17 @@
 # Setup Checklist
 
-## New Computer Setup
+## On-site Mac service setup
+
+The production architecture and release procedure are documented in
+`OPERATIONS.md`. The production checkout is
+`/Users/onparmarketing/OnParBeverageRecipes-service`; Vercel is preview-only.
 
 ### 1. Install the basics
 
 - Install `Node.js` LTS
 - Install `Git`
 - Install `VS Code` if you want a code editor
-- Install the `Vercel` CLI only if you want local Vercel commands
+- Install `cloudflared` for the separately managed production tunnel
 
 ### 2. Copy the project
 
@@ -22,11 +26,13 @@
 
 ### 4. Install packages
 
-Run:
+For the production Mac, run the checked-in setup command:
 
 ```bash
-npm install
+./scripts/setup-mac-tools.command
 ```
+
+For a development checkout, use `npm ci`.
 
 ### 5. Start the app locally
 
@@ -48,19 +54,11 @@ If you see chunk/module errors like:
 - `Cannot find module './833.js'`
 - `__webpack_modules__[moduleId] is not a function`
 
-Delete `.next` and restart:
+Move the generated build aside and restart:
 
 ```bash
-rm -rf .next
+mv .next ".next-stale-$(date +%s)"
 npm run dev
-```
-
-On Windows PowerShell, use:
-
-```powershell
-Stop-Process -Name node -Force -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force .next -ErrorAction SilentlyContinue
-npm.cmd run dev
 ```
 
 ### 7. Build before pushing
@@ -68,22 +66,33 @@ npm.cmd run dev
 Run:
 
 ```bash
-npm run build
+npm run check
 ```
 
 ### 8. Push / deploy flow
 
-- GitHub `main` deploys to Vercel
-- Before pushing:
-  - run local check
-  - run `npm run build`
+- GitHub `main` is the reviewed source of truth.
+- Merging does not by itself authorize or perform the production deployment.
+- Deploy from the on-site Mac with `.deploy/deploy-on-site.sh`.
+- If the checkout predates that script, use the exact one-time bootstrap command
+  in `OPERATIONS.md`; do not manually copy or partially switch release files.
+- Validate and roll back using the procedures in `OPERATIONS.md`.
+- Production uses Node.js 22. Setup, service, deploy, and rollback wrappers reject
+  other Node major versions.
+- When a checked-in LaunchAgent plist changes, use
+  `.deploy/reload-launch-agents.sh` so launchd reads the new definition safely.
 
-### 9. Vercel env vars
+### 9. Service environment
 
-Make sure Vercel has the same env vars your app needs.
+Keep production secrets in `.env.local` on the on-site service Mac. Preview
+environments should receive only credentials suitable for previews and cannot
+reach PMB on the venue LAN.
 
 Important ones used in this project include:
 
+- `DASHBOARD_PASSWORD`
+- `DASHBOARD_SESSION_SECRET` (at least 32 characters)
+- `EMPLOYEE_DASHBOARD_PASSWORD` (optional)
 - `PROVI_COOKIE_HEADER`
 - `PROVI_RETAILER_CONTEXT`
 - `PROVI_OHLQ_ACCOUNT_NUMBER`
@@ -95,7 +104,6 @@ Important ones used in this project include:
 - `PMB_API_PASSWORD`
 - `PMB_API_CLIENT_ID`
 - `PMB_API_CLIENT_NAME`
-- `PMB_KEG_DEVICE_ID`
 - `UNTAPPD_BUSINESS_EMAIL`
 - `UNTAPPD_BUSINESS_API_TOKEN`
 - `SUPABASE_URL`
@@ -130,12 +138,19 @@ recommendations, apply
 This creates an empty container only. Use the manager-only Keg Levels import
 button from the service computer; do not initialize it from a home browser.
 
+If `EMPLOYEE_DASHBOARD_PASSWORD` is enabled, create a separate browser profile
+for staff and open `/staff` there. Do not use the owner browser profile for an
+employee login. The staff page deliberately locks when it detects owner
+dashboard storage. Do not clear that storage to bypass the check because it may
+contain unsynced owner edits; use a new dedicated staff profile instead.
+
 ### 10. Local network note
 
 For Pour My Beer / keg level work:
 
 - the computer must be on the same network as the PMB server
 - the PMB local IP must still be reachable
+- device and line identities are auto-discovered from the authenticated PMB tap configuration and coverage-checked against the tap template
 - live PMB calls begin only when you open a PMB-backed section or press its refresh button
 - shared prices, recipes, and product setup use Supabase and remain available away from the work network when internet access is available
 - after its one-time service-computer import, shared inventory also uses Supabase; saving a Monday snapshot still requires complete live PMB tap coverage
@@ -145,18 +160,19 @@ For Pour My Beer / keg level work:
 
 ### 11. Provi security
 
-- Run `npm run provi:session` under the same Windows account that will run the service
-- The setup automatically locks `.FoodOrderAgent\provi` to that Windows account, `SYSTEM`, and local Administrators
+- Run `npm run provi:session` under the same macOS account that runs the service
+- Restrict `~/.FoodOrderAgent/provi` to the service account
 - Provi diagnostic captures redact login, cookie, token, personal, and payment fields
 - Old capture JSON files are removed after the configured retention window/count
 - Do not copy or share the `.FoodOrderAgent\provi` folder; the live browser session state is still a credential
 
 ### 12. Helpful files
 
-- [scratchpad.md](C:\Users\info\Projects\OnParBeverageRecipes\scratchpad.md)
-- [app/page.jsx](C:\Users\info\Projects\OnParBeverageRecipes\app\page.jsx)
-- [app/globals.css](C:\Users\info\Projects\OnParBeverageRecipes\app\globals.css)
-- [public/dashboard.js](C:\Users\info\Projects\OnParBeverageRecipes\public\dashboard.js)
+- `scratchpad.md`
+- `OPERATIONS.md`
+- `app/page.jsx`
+- `app/globals.css`
+- `public/dashboard.js`
 
 ### 13. Quick sanity check after setup
 

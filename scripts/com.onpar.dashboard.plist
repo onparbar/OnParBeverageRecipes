@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.onpar.beverage-dashboard</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/onparmarketing/OnParBeverageRecipes-service/.deploy/run-dashboard.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/onparmarketing/OnParBeverageRecipes-service</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ONPAR_SERVICE_DIR</key>
+    <string>/Users/onparmarketing/OnParBeverageRecipes-service/current</string>
+    <key>ONPAR_DEPLOYMENT_TARGET</key>
+    <string>on-site</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/onparmarketing/OnParBeverageRecipes-service/logs/dashboard.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/onparmarketing/OnParBeverageRecipes-service/logs/dashboard.err.log</string>
+</dict>
+</plist>

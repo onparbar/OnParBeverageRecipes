@@ -77,7 +77,12 @@ export async function POST(request) {
       case "save-snapshot":
       case "delete-snapshot":
       case "restore-snapshot":
-        state = await mutateSharedInventoryState(String(body.action), body, role);
+        state = await mutateSharedInventoryState(
+          String(body.action),
+          body,
+          role,
+          { expectedRevision: body.expectedRevision },
+        );
         break;
       default:
         return NextResponse.json(
