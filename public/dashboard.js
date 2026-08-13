@@ -4051,15 +4051,23 @@ async function submitPmbPriceIncrease(updateKey) {
     });
     const refreshed = await runTapPricingSync();
     const refreshedPrice = toNumber(pricingAdvisorInputsByKey.get(key)?.currentPricePerOz);
-    const priceConfirmed = refreshed && Math.abs(refreshedPrice - newPricePerOz) < 0.005;
+    const verifiedPrice = toNumber(result?.product?.pricePerOz);
+    const backendVerified = Math.abs(verifiedPrice - newPricePerOz) < 0.005;
+    const dashboardConfirmed = refreshed && Math.abs(refreshedPrice - newPricePerOz) < 0.005;
+    const priceConfirmed = backendVerified || dashboardConfirmed;
     const warningCopy = [
-      configUpdateIncomplete ? "The PMB configuration refresh did not complete." : "",
-      backendWarning,
+      backendWarning || (configUpdateIncomplete ? "The PMB configuration refresh did not complete." : ""),
     ].filter(Boolean).join(" ");
+    const dashboardRefreshWarning = dashboardConfirmed
+      ? ""
+      : refreshed && refreshedPrice
+        ? `The dashboard refresh still returned ${money(refreshedPrice)} / oz; refresh PMB prices again before another change. Do not submit this price again.`
+        : "The dashboard price list did not reload; refresh PMB prices before another change. Do not submit this price again.";
+    const completeWarning = [warningCopy, dashboardRefreshWarning].filter(Boolean).join(" ");
     pmbPriceUpdateMessages.set(key, {
-      tone: priceConfirmed ? (warningCopy ? "warning" : "success") : "error",
+      tone: priceConfirmed ? (completeWarning ? "warning" : "success") : "error",
       text: priceConfirmed
-        ? `Live PMB price confirmed at ${money(newPricePerOz)} / oz.${warningCopy ? ` ${warningCopy}` : ""}`
+        ? `PMB price verified at ${money(newPricePerOz)} / oz.${completeWarning ? ` ${completeWarning}` : ""}`
         : refreshed && refreshedPrice
           ? `PMB accepted the update, but the refresh returned ${money(refreshedPrice)} / oz. Verify PMB before retrying.${warningCopy ? ` ${warningCopy}` : ""}`
           : `PMB accepted the update, but the live price could not be refreshed. Refresh PMB prices before another change.${warningCopy ? ` ${warningCopy}` : ""}`,

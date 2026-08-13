@@ -2146,8 +2146,11 @@ td {
 
 .pricing-advisor-action {
   display: grid;
-  gap: 6px;
-  min-width: 170px;
+  align-content: start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .pricing-advisor-action--unavailable {
@@ -2164,47 +2167,69 @@ td {
 }
 
 .pricing-advisor-action label {
-  position: relative;
-  display: block;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(24, 33, 31, 0.18);
+  border-radius: 6px;
+  background: var(--paper-strong);
+}
+
+.pricing-advisor-action label:focus-within {
+  border-color: var(--juniper);
+  box-shadow: 0 0 0 2px rgba(31, 95, 84, 0.12);
 }
 
 .pricing-advisor-action__currency {
-  position: absolute;
-  left: 9px;
-  top: 50%;
+  position: static;
+  flex: 0 0 auto;
+  padding-left: 10px;
   color: var(--muted);
   font-size: 0.78rem;
-  transform: translateY(-50%);
   pointer-events: none;
 }
 
 .pricing-advisor-action input {
-  width: 100%;
-  min-width: 92px;
-  border: 1px solid rgba(24, 33, 31, 0.18);
-  border-radius: 6px;
-  padding: 7px 8px 7px 20px;
-  background: var(--paper-strong);
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 7px 8px 7px 4px;
+  background: transparent;
   color: var(--ink);
   font: inherit;
   font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pricing-advisor-action input:focus {
+  outline: none;
 }
 
 .pricing-advisor-action input:disabled {
   color: var(--muted);
-  background: rgba(24, 33, 31, 0.035);
+  background: transparent;
 }
 
 .pricing-advisor-action .mini-button {
   justify-content: center;
   width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 36px;
+  padding: 7px 8px;
+  line-height: 1.25;
+  white-space: normal;
 }
 
 .pricing-advisor-action__message {
   display: block;
+  min-width: 0;
   font-size: 0.72rem;
   font-weight: 750;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .pricing-advisor-action__message--pending {

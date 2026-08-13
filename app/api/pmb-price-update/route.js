@@ -3,6 +3,11 @@ import http from "node:http";
 import { NextResponse } from "next/server";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 import { requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
+import {
+  buildTargetedPmbConfigUpdatePayload,
+  isSuccessfulPmbConfigUpdateStatus,
+} from "../../../lib/pmb-config-update.mjs";
+import { parsePmbJson } from "../../../lib/pmb-json.mjs";
 import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
 import {
   buildPmbPriceOnlyEditEntries,
@@ -39,14 +44,6 @@ function getConfig() {
   };
 }
 
-function parseJsonLoose(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
 async function postJson(config, path, body, token = "") {
   const response = await fetch(`${config.baseUrl}${path}`, {
     method: "POST",
@@ -60,7 +57,7 @@ async function postJson(config, path, body, token = "") {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   const raw = await response.text();
-  return { status: response.status, json: parseJsonLoose(raw), raw };
+  return { status: response.status, json: parsePmbJson(raw), raw };
 }
 
 async function getAuthtoken(config) {
@@ -234,13 +231,37 @@ async function saveProductEditForm(config, entries, cookieJar) {
   }
 }
 
-async function refreshDevice(config, deviceId) {
+async function refreshDevice(config, token, deviceId) {
+  const attempts = [];
   const request = urlEncodedBody([
     ["fd_device_id", String(deviceId)],
     ["fd_do_sendconfigupdate", "config update"],
   ]);
-  const result = await digestRequest(config, "POST", "/pages/tapconfig", request.body, request.headers);
-  return { deviceId, ok: result.status === 200, status: result.status };
+  try {
+    const result = await digestRequest(config, "POST", "/pages/tapconfig", request.body, request.headers);
+    attempts.push({ path: "/pages/tapconfig", status: result.status });
+    if (isSuccessfulPmbConfigUpdateStatus(result.status)) {
+      return { deviceId, ok: true, path: "/pages/tapconfig", status: result.status, attempts };
+    }
+  } catch {
+    attempts.push({ path: "/pages/tapconfig", status: 0 });
+  }
+
+  const payload = buildTargetedPmbConfigUpdatePayload(config.clientId, deviceId);
+  for (const path of ["/api/configupdate", "/m2m/api/configupdate"]) {
+    try {
+      const result = await postJson(config, path, payload, token);
+      attempts.push({ path, status: result.status });
+      if (isSuccessfulPmbConfigUpdateStatus(result.status)) {
+        return { deviceId, ok: true, path, status: result.status, attempts };
+      }
+    } catch {
+      attempts.push({ path, status: 0 });
+    }
+  }
+
+  const last = attempts[attempts.length - 1];
+  return { deviceId, ok: false, path: last?.path || "", status: last?.status || 0, attempts };
 }
 
 function dollars(cents) {
@@ -287,7 +308,7 @@ export async function POST(request) {
     const deviceIds = [...new Set(affectedAssignments.map((assignment) => assignment.deviceId))];
     const refreshResults = await Promise.all(deviceIds.map(async (deviceId) => {
       try {
-        return await refreshDevice(config, deviceId);
+        return await refreshDevice(config, token, deviceId);
       } catch {
         return { deviceId, ok: false, status: 0 };
       }
