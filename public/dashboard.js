@@ -37,9 +37,11 @@ import {
   findWeeklyUsageIdentityMatch,
   hasCompleteWeeklyUsageRows,
   hasWeeklyUsagePhysicalIdentityConflict,
+  isRecommendationForOperatingWeek,
   isWeeklyUsageNameFallbackEligible,
   isRecommendationSourceRevisionCurrent,
   isWeeklyPlanHandoffAllowed,
+  shouldRefreshMondayPlanForUsage,
 } from "./weekly-action-plan.mjs";
 import {
   canSafelyRetryOperationalOutbox,
@@ -1070,12 +1072,13 @@ async function runOwnerLoginSync() {
         ? runPmbWeeklyUsageSync({ automatic: true })
         : Promise.resolve({ ok: false, skipped: true }),
     ]);
-    const kegResult = kegOutcome.status === "fulfilled" && kegOutcome.value;
+    let kegResult = kegOutcome.status === "fulfilled" && kegOutcome.value;
     const usageResult = usageOutcome.status === "fulfilled" ? usageOutcome.value : null;
     if (!lockToken) {
       renderDashboardOverview();
       return;
     }
+    if (!kegResult) kegResult = await runKegLevelSync();
     if (
       !kegResult
       || !usageResult?.ok
@@ -1088,7 +1091,11 @@ async function runOwnerLoginSync() {
     const inventorySaved = await flushPendingInventoryFieldSyncs();
     const parInputsSaved = await flushPendingParAgentStateSync();
     if (!usageSaved || !inventorySaved || !parInputsSaved) return;
-    await runKegParAgent();
+    const recommendations = parAgentState?.recommendations;
+    const mondayPlanIsCurrent = hasCurrentParAgentRecommendations()
+      && isRecommendationForOperatingWeek(recommendations?.generatedAt, new Date())
+      && !shouldRefreshMondayPlanForUsage(recommendations?.generatedAt, weeklyUsageLastSyncAt, new Date());
+    if (!mondayPlanIsCurrent) await runKegParAgent();
     renderDashboardOverview();
   } finally {
     if (lockToken) releaseOwnerLoginSyncLock(lockToken);
@@ -4661,10 +4668,8 @@ function getPmbKegLevelOverviewFeed() {
         ? "partial"
         : "online"
       : kegSyncAttempted
-        ? "loading"
-        : /could not|unavailable|failed|timed out|connect/i.test(kegSyncMessage)
-          ? "offline"
-          : "not-checked";
+        ? "offline"
+        : "not-checked";
   return {
     status,
     capturedCount,
@@ -4684,10 +4689,8 @@ function getPmbPricingOverviewFeed() {
         ? "partial"
         : "online"
       : tapPricingSyncAttempted
-        ? "loading"
-        : /could not|unavailable|failed|timed out|connect/i.test(liveTapPricingMessage)
-          ? "offline"
-          : "not-checked";
+        ? "offline"
+        : "not-checked";
   return {
     status,
     capturedCount,
@@ -5362,8 +5365,8 @@ function renderWeeklyPlan() {
   const freshness = getWeeklyPlanFreshness(plan);
   const handoffAllowed = isWeeklyPlanHandoffAllowed(freshness.readiness.status);
   const updatedText = recommendations?.generatedAt
-    ? `Keg and prep recommendations last calculated ${formatUpdatedAt(recommendations.generatedAt)}. Active cabinet orders recalculate immediately from saved counts.`
-    : "Cabinet orders use saved counts. Update the plan to check completed Weekly Usage, save pending inputs, and calculate keg and prep recommendations.";
+    ? `This week's plan was calculated ${formatUpdatedAt(recommendations.generatedAt)} from the Monday inputs. It remains the operating plan through Sunday unless saved keg, inventory, par, or On Deck inputs change.`
+    : "Update the plan on Monday after counts are entered to publish the operating plan through Sunday.";
   const priceNote = summary.estimatedPurchaseCostComplete
     ? "All active purchase lines are priced."
     : `${summary.missingPriceCount ? `${formatNumber(summary.missingPriceCount)} active line${summary.missingPriceCount === 1 ? " is" : "s are"} missing a price. ` : ""}The total shown is the known-price subtotal, not a complete spend total.`;
@@ -8875,6 +8878,7 @@ function hasCurrentParAgentRecommendations() {
   return isRecommendationSourceRevisionCurrent(
     parAgentState?.revision,
     recommendations.sourceStateRevision,
+    recommendations.publishedStateRevision,
   );
 }
 
@@ -9216,8 +9220,10 @@ async function runKegLevelSync() {
   let succeeded = false;
 
   try {
-    const response = await fetch("/api/keg-levels");
-    const result = await parseJsonResponse(response);
+    const { response, result } = await fetchPmbJsonWithRetry({
+      fetcher: () => fetch("/api/keg-levels", { cache: "no-store" }),
+      parseResponse: parseJsonResponse,
+    });
     if (!response.ok) {
       throw new Error(result?.error || "Could not load keg levels.");
     }
@@ -9235,7 +9241,6 @@ async function runKegLevelSync() {
     renderPricing();
     succeeded = true;
   } catch (error) {
-    kegSyncAttempted = false;
     kegSyncMessage = getPmbConnectionErrorMessage(error, "Could not load live keg levels.");
   } finally {
     kegSyncLoading = false;
@@ -9284,7 +9289,6 @@ async function runTapPricingSync() {
     renderStats();
     succeeded = true;
   } catch (error) {
-    tapPricingSyncAttempted = false;
     liveTapPricingUpdatedAt = "";
     liveTapPricingMessage = getPmbConnectionErrorMessage(error, "Could not load current tap pricing.");
     renderPricing();

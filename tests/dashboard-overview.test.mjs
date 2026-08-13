@@ -306,21 +306,16 @@ test("offline price sync suppresses advisor claims while keeping the owner actio
   assert.equal(pricingAction.target, DASHBOARD_OVERVIEW_TARGETS.pricing);
 });
 
-test("deferred cocktail ingredient and liquor refill netting remains explicit", () => {
+test("deferred cocktail ingredient and liquor refill netting stays explicit without a duplicate alert", () => {
   const signals = readySignals();
   delete signals.deferred;
 
   const overview = buildDashboardOverview(signals, { now });
-  const alert = overview.alerts.find((item) => item.id === "deferred-order-netting");
   const cocktailKpi = overview.kpis.find((item) => item.id === "cocktails-to-make");
 
-  assert.ok(alert);
-  assert.equal(alert.severity, "info");
-  assert.match(alert.title, /Cocktail ingredient and refill netting is deferred/);
-  assert.match(alert.message, /do not yet expand into or net against liquor and mixer order lines/);
-  assert.match(alert.message, /manual-review holds/);
+  assert.equal(overview.alerts.some((item) => item.id === "deferred-order-netting"), false);
   assert.match(cocktailKpi.detail, /ingredient netting deferred/);
-  assert.equal(overview.status, "ready", "a disclosed deferred feature is informational, not a false blocker");
+  assert.equal(overview.status, "ready", "a disclosed deferred feature is not a false blocker or duplicate alert");
 });
 
 test("timestamps use the supplied clock to identify stale plan and PMB signals", () => {

@@ -622,34 +622,6 @@ function buildPricingAlerts(feed, feedAgeState, pricing) {
   return { alerts, priceFeedCurrent };
 }
 
-function buildDeferredAlert(rawDeferred = {}) {
-  const deferred = rawDeferred && typeof rawDeferred === "object" ? rawDeferred : {};
-  const cocktailIngredientNetting = deferred.cocktailIngredientNetting !== false;
-  const liquorRefillNetting = deferred.liquorRefillNetting !== false;
-  if (!cocktailIngredientNetting && !liquorRefillNetting) return null;
-
-  const details = [];
-  if (cocktailIngredientNetting) {
-    details.push("Cocktail batch quantities do not yet expand into or net against liquor and mixer order lines.");
-  }
-  if (liquorRefillNetting) {
-    details.push("Liquor-tap refill recommendations remain manual-review holds and are not active order quantities.");
-  }
-  return makeAlert({
-    id: "deferred-order-netting",
-    severity: "info",
-    priority: 110,
-    title: cocktailIngredientNetting && liquorRefillNetting
-      ? "Cocktail ingredient and refill netting is deferred"
-      : cocktailIngredientNetting
-        ? "Cocktail ingredient netting is deferred"
-        : "Liquor-tap refill netting is deferred",
-    message: details.join(" "),
-    details,
-    action: makeAction("Review Manual Holds", DASHBOARD_OVERVIEW_TARGETS.weeklyPlan),
-  });
-}
-
 function buildKpis({
   planState,
   summary,
@@ -896,9 +868,6 @@ export function buildDashboardOverview(signals = {}, options = {}) {
       action: makeAction("Review Product Queue", DASHBOARD_OVERVIEW_TARGETS.addProduct),
     }));
   }
-
-  const deferredAlert = buildDeferredAlert(deferred);
-  if (deferredAlert) extraAlerts.push(deferredAlert);
 
   const alerts = sortDashboardOverviewAlerts([
     ...sharedResult.alerts,

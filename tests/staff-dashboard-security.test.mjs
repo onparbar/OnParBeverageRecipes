@@ -44,7 +44,7 @@ test("staff profile guard detects owner storage without reading or mutating its 
   assert.match(staffBundle, /Do not clear this profile's site data/);
 });
 
-test("staff bundle communicates only with session and sanitized recipe endpoints", async () => {
+test("staff bundle communicates only with session, sanitized recipes, and prep checklist endpoints", async () => {
   const staffBundle = await readProjectFile("public/staff-dashboard.js");
   const literalApiPaths = [...staffBundle.matchAll(/["'`](\/api\/[a-z0-9?=${}.\-_/]+)["'`]/gi)]
     .map((match) => match[1]);
@@ -53,7 +53,7 @@ test("staff bundle communicates only with session and sanitized recipe endpoints
   assert.ok(literalApiPaths.some((path) => path.startsWith("/api/recipe-data")));
   assert.deepEqual(
     [...new Set(literalApiPaths.map((path) => path.split("?")[0]))].sort(),
-    ["/api/recipe-data", "/api/session"],
+    ["/api/recipe-data", "/api/session", "/api/staff-prep-plan"],
   );
 });
 
@@ -66,6 +66,8 @@ test("staff page loads only its dedicated bundle", async () => {
   assert.equal(page.includes("Beverage Ops"), false);
   assert.equal(page.includes("Inventory"), false);
   assert.equal(page.includes("Pricing"), false);
+  assert.match(page, /Cocktails to make/);
+  assert.match(await readProjectFile("public/staff-dashboard.js"), /Prepared by/);
 });
 
 test("middleware redirects employee root access and blocks non-staff assets", async () => {

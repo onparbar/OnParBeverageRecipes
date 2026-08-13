@@ -59,8 +59,9 @@ test("owner login automatically attempts every read-only PMB refresh", () => {
   assert.match(dashboardSource, /flushPendingSharedWeeklyUsageSave\(\)/);
   assert.match(dashboardSource, /flushPendingInventoryFieldSyncs\(\)/);
   assert.match(dashboardSource, /flushPendingParAgentStateSync\(\)/);
-  assert.match(dashboardSource, /await runKegParAgent\(\)/);
-  assert.match(dashboardSource, /await runKegParAgent\(\);\s+renderDashboardOverview\(\)/);
+  assert.match(dashboardSource, /isRecommendationForOperatingWeek/);
+  assert.match(dashboardSource, /shouldRefreshMondayPlanForUsage/);
+  assert.match(dashboardSource, /if \(!mondayPlanIsCurrent\) await runKegParAgent\(\)/);
   assert.match(dashboardSource, /parAgentRunning = false;\s+renderKegLevels\(\);\s+renderWeeklyPlan\(\);\s+renderDashboardOverview\(\)/);
   assert.match(dashboardSource, /Automatic PMB check paused for owner review/);
   assert.match(dashboardSource, /nothing was accepted or saved automatically/);
@@ -70,9 +71,26 @@ test("owner login automatically attempts every read-only PMB refresh", () => {
   const ownerSyncEnd = dashboardSource.indexOf("function acquireOwnerLoginSyncLock", ownerSyncStart);
   const ownerSyncSource = dashboardSource.slice(ownerSyncStart, ownerSyncEnd);
   assert.match(ownerSyncSource, /runKegLevelSync\(\)/);
+  assert.match(ownerSyncSource, /if \(!kegResult\) kegResult = await runKegLevelSync\(\)/);
   assert.match(ownerSyncSource, /runTapPricingSync\(\)/);
   assert.match(ownerSyncSource, /lockToken\s*\? runPmbWeeklyUsageSync/);
   assert.doesNotMatch(ownerSyncSource, /if \(!lockToken\) return;/);
+});
+
+test("PMB refresh alerts distinguish attempted failures from unchecked feeds", () => {
+  assert.match(dashboardSource, /fetchPmbJsonWithRetry\(\{\s*fetcher: \(\) => fetch\("\/api\/keg-levels"/s);
+  assert.match(dashboardSource, /kegSyncAttempted\s*\?\s*"offline"\s*:\s*"not-checked"/s);
+  assert.match(dashboardSource, /tapPricingSyncAttempted\s*\?\s*"offline"\s*:\s*"not-checked"/s);
+
+  const kegSyncStart = dashboardSource.indexOf("async function runKegLevelSync()");
+  const kegSyncEnd = dashboardSource.indexOf("async function runTapPricingSync()", kegSyncStart);
+  assert.doesNotMatch(dashboardSource.slice(kegSyncStart, kegSyncEnd), /kegSyncAttempted = false/);
+});
+
+test("Tap Pricing gives slow PMB configuration reads time to finish and marks them retryable", async () => {
+  const tapPricingRoute = await readFile("app/api/tap-pricing/route.js", "utf8");
+  assert.match(tapPricingRoute, /PMB_TAP_CONFIG_TIMEOUT_MS = 15000/);
+  assert.match(tapPricingRoute, /status: upstreamFailure \? 503 : 500/);
 });
 
 test("the authoritative computer can initialize shared setup from bundled defaults", () => {

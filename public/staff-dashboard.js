@@ -4,8 +4,12 @@ const categoryFilter = document.querySelector("#staff-category-filter");
 const statusPanel = document.querySelector("#staff-recipe-status");
 const statsGrid = document.querySelector("#staff-stats-grid");
 const recipeGrid = document.querySelector("#staff-recipe-grid");
+const prepStatusPanel = document.querySelector("#staff-prep-status");
+const prepSummary = document.querySelector("#staff-prep-summary");
+const prepList = document.querySelector("#staff-prep-list");
 
 let recipes = [];
+let prepPlan = { available: false, generatedAt: "", items: [], completedCount: 0, totalCount: 0 };
 
 initStaffRecipes();
 
@@ -32,14 +36,17 @@ async function initStaffRecipes() {
       return;
     }
 
-    const [activeCsv, newCsv, sharedResult] = await Promise.all([
+    const [activeCsv, newCsv, sharedResult, prepResult] = await Promise.all([
       fetchStaffRecipeCsv("active"),
       fetchStaffRecipeCsv("new"),
       fetchSharedRecipeUpdates(),
+      fetchStaffPrepPlan(),
     ]);
     recipes = buildRecipeCollection(activeCsv, newCsv, sharedResult.recipes);
+    prepPlan = prepResult;
     populateCategoryFilter();
     bindStaffRecipeEvents();
+    renderStaffPrepPlan();
     renderStaffRecipes();
     statusPanel.textContent = sharedResult.available
       ? "Current shared recipe updates are included."
@@ -47,6 +54,10 @@ async function initStaffRecipes() {
   } catch (error) {
     statusPanel.textContent = error?.message || "Recipes could not be loaded.";
     statusPanel.dataset.state = "error";
+    prepStatusPanel.dataset.state = "error";
+    prepStatusPanel.textContent = "The weekly prep checklist could not be loaded.";
+    prepList.setAttribute("aria-busy", "false");
+    prepList.replaceChildren(createEmptyState("Ask a manager to check the dashboard service."));
     recipeGrid.setAttribute("aria-busy", "false");
     recipeGrid.replaceChildren(createEmptyState("Recipe data is unavailable. Ask a manager to check the dashboard service."));
   }
@@ -68,10 +79,16 @@ function inspectStaffBrowserProfile() {
 
 function lockStaffRecipesForBrowserProfile(storageUnavailable) {
   statusPanel.dataset.state = "error";
+  prepStatusPanel.dataset.state = "error";
+  prepStatusPanel.textContent = "The staff prep checklist is locked in this browser profile.";
   statusPanel.textContent = storageUnavailable
     ? "Staff recipes are locked because this browser profile's site storage could not be checked. Use a dedicated staff browser profile."
     : "Staff recipes are locked because this browser profile contains owner dashboard data. Use a separate browser profile reserved for staff.";
   recipeGrid.setAttribute("aria-busy", "false");
+  prepList.setAttribute("aria-busy", "false");
+  prepList.replaceChildren(createEmptyState(
+    "Open the staff page in a new, dedicated staff browser profile.",
+  ));
   recipeGrid.replaceChildren(createEmptyState(
     "Do not clear this profile's site data; it may contain unsynced owner edits. Open the staff page in a new, dedicated staff browser profile instead.",
   ));
@@ -100,6 +117,190 @@ async function fetchSharedRecipeUpdates() {
   } catch {
     return { available: false, recipes: null };
   }
+}
+
+async function fetchStaffPrepPlan() {
+  try {
+    const response = await fetch("/api/staff-prep-plan", {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) throw new Error(result?.error || "The weekly prep checklist is unavailable.");
+    return {
+      available: result?.available === true,
+      generatedAt: clean(result?.generatedAt),
+      items: Array.isArray(result?.items) ? result.items : [],
+      completedCount: number(result?.completedCount),
+      totalCount: number(result?.totalCount),
+      message: clean(result?.message),
+    };
+  } catch (error) {
+    return {
+      available: false,
+      generatedAt: "",
+      items: [],
+      completedCount: 0,
+      totalCount: 0,
+      message: error?.message || "The weekly prep checklist is unavailable.",
+    };
+  }
+}
+
+function renderStaffPrepPlan() {
+  prepList.replaceChildren();
+  prepList.setAttribute("aria-busy", "false");
+  if (!prepPlan.available) {
+    prepStatusPanel.dataset.state = "error";
+    prepStatusPanel.textContent = prepPlan.message || "A manager has not published this week's cocktail prep plan yet.";
+    prepSummary.textContent = "";
+    prepList.append(createEmptyState("There are no current cocktail prep assignments to check off."));
+    return;
+  }
+
+  delete prepStatusPanel.dataset.state;
+  prepStatusPanel.textContent = prepPlan.generatedAt
+    ? `Showing the shared ${formatPlanWeek(prepPlan.generatedAt)} plan.`
+    : "Showing the current shared weekly plan.";
+  prepSummary.textContent = prepPlan.totalCount
+    ? `${formatNumber(prepPlan.completedCount)} of ${formatNumber(prepPlan.totalCount)} cocktail${prepPlan.totalCount === 1 ? "" : "s"} prepared`
+    : "No cocktail kegs need to be made this week.";
+  if (!prepPlan.items.length) {
+    prepList.append(createEmptyState("Nothing needs to be made from the current weekly plan."));
+    return;
+  }
+  prepPlan.items.forEach((item) => prepList.append(createStaffPrepItem(item)));
+}
+
+function createStaffPrepItem(item) {
+  const form = document.createElement("form");
+  form.className = `staff-prep-item${item.completed ? " is-complete" : ""}`;
+
+  const checkLabel = document.createElement("label");
+  checkLabel.className = "staff-prep-check";
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = item.completed === true;
+  const checkText = document.createElement("span");
+  checkText.textContent = item.completed ? "Prepared" : "Check off when prepared";
+  checkLabel.append(checkbox, checkText);
+
+  const details = document.createElement("div");
+  details.className = "staff-prep-item__details";
+  const heading = document.createElement("h3");
+  heading.textContent = item.name;
+  const meta = document.createElement("p");
+  const taps = Array.isArray(item.tapNumbers) && item.tapNumbers.length
+    ? ` · Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.join(", ")}`
+    : "";
+  meta.textContent = `${formatNumber(item.quantity)} keg${number(item.quantity) === 1 ? "" : "s"} to make${taps}`;
+  details.append(heading, meta);
+  if (item.completed && item.completedAt) {
+    const completion = document.createElement("small");
+    completion.textContent = `Completed ${formatCompletionTime(item.completedAt)}`;
+    details.append(completion);
+  }
+
+  const preparedField = document.createElement("label");
+  preparedField.className = "staff-prep-name-field";
+  const fieldLabel = document.createElement("span");
+  fieldLabel.textContent = "Prepared by";
+  const preparedInput = document.createElement("input");
+  preparedInput.type = "text";
+  preparedInput.maxLength = 80;
+  preparedInput.autoComplete = "name";
+  preparedInput.placeholder = "Employee name";
+  preparedInput.value = clean(item.preparedBy);
+  preparedField.append(fieldLabel, preparedInput);
+
+  const saveButton = document.createElement("button");
+  saveButton.className = "primary-button staff-prep-save";
+  saveButton.type = "submit";
+  saveButton.textContent = "Save";
+  const rowStatus = document.createElement("p");
+  rowStatus.className = "staff-prep-item__status";
+  rowStatus.setAttribute("role", "status");
+  rowStatus.setAttribute("aria-live", "polite");
+
+  checkbox.addEventListener("change", () => {
+    checkText.textContent = checkbox.checked ? "Prepared" : "Check off when prepared";
+    if (checkbox.checked && !clean(preparedInput.value)) preparedInput.focus();
+  });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const preparedBy = clean(preparedInput.value);
+    if (checkbox.checked && !preparedBy) {
+      rowStatus.textContent = "Enter who prepared this cocktail before checking it off.";
+      rowStatus.dataset.state = "error";
+      preparedInput.focus();
+      return;
+    }
+    saveButton.disabled = true;
+    checkbox.disabled = true;
+    preparedInput.disabled = true;
+    saveButton.textContent = "Saving...";
+    rowStatus.textContent = "";
+    delete rowStatus.dataset.state;
+    try {
+      const response = await fetch("/api/staff-prep-plan", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          generatedAt: prepPlan.generatedAt,
+          itemId: item.id,
+          completed: checkbox.checked,
+          preparedBy,
+        }),
+      });
+      const result = await parseJsonResponse(response);
+      if (!response.ok) throw new Error(result?.error || "The checklist update could not be saved.");
+      prepPlan = {
+        available: result.available === true,
+        generatedAt: clean(result.generatedAt),
+        items: Array.isArray(result.items) ? result.items : [],
+        completedCount: number(result.completedCount),
+        totalCount: number(result.totalCount),
+        message: clean(result.message),
+      };
+      renderStaffPrepPlan();
+    } catch (error) {
+      saveButton.disabled = false;
+      checkbox.disabled = false;
+      preparedInput.disabled = false;
+      saveButton.textContent = "Save";
+      rowStatus.textContent = error?.message || "The checklist update could not be saved.";
+      rowStatus.dataset.state = "error";
+    }
+  });
+
+  form.append(checkLabel, details, preparedField, saveButton, rowStatus);
+  return form;
+}
+
+function formatPlanWeek(value) {
+  const generated = new Date(value || "");
+  if (Number.isNaN(generated.getTime())) return "current Monday–Sunday";
+  const monday = new Date(generated);
+  const daysSinceMonday = (monday.getDay() + 6) % 7;
+  monday.setDate(monday.getDate() - daysSinceMonday);
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  const start = monday.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const end = sunday.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return `${start}–${end}`;
+}
+
+function formatCompletionTime(value) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 async function parseJsonResponse(response) {

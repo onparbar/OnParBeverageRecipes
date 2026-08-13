@@ -63,12 +63,15 @@ existing sessions. The stronger session format is intentionally incompatible
 with older password-derived cookies, so the first release containing it signs
 everyone out once.
 
-## Staff recipe access
+## Staff prep and recipe access
 
-The employee password opens the dedicated `/staff` recipe-only page. Employee
-sessions cannot open the owner dashboard, its client bundle, operational APIs,
-or direct data files. The staff page receives only sanitized recipe quantities;
-pricing and ordering code is not shipped to that page.
+The employee password opens the dedicated `/staff` prep-and-recipe page. It
+shows the cocktail kegs from the current Monday-Sunday Weekly Plan and lets a
+staff member record their name and shared completion status. Employee sessions
+cannot open the owner dashboard, its client bundle, pricing, inventory, keg
+levels, ordering APIs, or direct data files. The staff page receives only the
+current cocktail prep checklist and sanitized recipe quantities; pricing and
+ordering code is not shipped to that page.
 
 Use a separate browser profile reserved for staff. The staff page fails closed
 if the profile contains any owner dashboard storage, and it does not read or

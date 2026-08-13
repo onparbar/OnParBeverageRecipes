@@ -216,16 +216,56 @@ export function hasCompleteWeeklyUsageRows(items = [], hasSavedRow = () => false
   return items.length > 0 && items.every((item) => hasSavedRow(item));
 }
 
-export function isRecommendationSourceRevisionCurrent(stateRevision, sourceStateRevision) {
+export function isRecommendationSourceRevisionCurrent(
+  stateRevision,
+  sourceStateRevision,
+  publishedStateRevision,
+) {
   if (stateRevision === null || stateRevision === undefined || stateRevision === "") return false;
-  if (sourceStateRevision === null || sourceStateRevision === undefined || sourceStateRevision === "") return false;
   const currentRevision = Number(stateRevision);
+  const publishedRevision = Number(publishedStateRevision);
+  if (
+    publishedStateRevision !== null
+    && publishedStateRevision !== undefined
+    && publishedStateRevision !== ""
+  ) {
+    return Number.isInteger(currentRevision)
+      && Number.isInteger(publishedRevision)
+      && currentRevision > 0
+      && publishedRevision > 0
+      && currentRevision === publishedRevision;
+  }
+  if (sourceStateRevision === null || sourceStateRevision === undefined || sourceStateRevision === "") return false;
   const sourceRevision = Number(sourceStateRevision);
   return Number.isInteger(currentRevision)
     && Number.isInteger(sourceRevision)
     && currentRevision > 0
     && sourceRevision >= 0
     && currentRevision === sourceRevision + 1;
+}
+
+function getMondayWeekStartTime(value) {
+  const time = parseTime(value);
+  if (!time) return 0;
+  const date = new Date(time);
+  const daysSinceMonday = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - daysSinceMonday);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+export function isRecommendationForOperatingWeek(generatedAt, now = new Date()) {
+  const generatedWeek = getMondayWeekStartTime(generatedAt);
+  const currentWeek = getMondayWeekStartTime(now);
+  return generatedWeek > 0 && currentWeek > 0 && generatedWeek === currentWeek;
+}
+
+export function shouldRefreshMondayPlanForUsage(generatedAt, weeklyUsageLastSyncAt, now = new Date()) {
+  if (!isRecommendationForOperatingWeek(generatedAt, now)) return true;
+  const currentTime = parseTime(now);
+  const generatedTime = parseTime(generatedAt);
+  const usageTime = parseTime(weeklyUsageLastSyncAt);
+  return new Date(currentTime).getDay() === 1 && usageTime > generatedTime;
 }
 
 export function isWeeklyPlanHandoffAllowed(readinessStatus) {
@@ -280,8 +320,10 @@ export function evaluateWeeklyPlanReadiness({
   if (generatedTime && !recommendationSourceCurrent) {
     staleReasons.push("Keg Levels inputs changed after these recommendations; the old order and prep quantities are hidden until refreshed.");
   }
-  if (generatedTime && parseTime(weeklyUsageLastSyncAt) > generatedTime) {
-    staleReasons.push("Weekly Usage changed after these keg and prep recommendations were generated.");
+  if (generatedTime && !isRecommendationForOperatingWeek(generatedTime, currentTime)) {
+    staleReasons.push("A new Monday operating week has started. Calculate this week's plan from the new Monday inputs.");
+  } else if (generatedTime && shouldRefreshMondayPlanForUsage(generatedTime, weeklyUsageLastSyncAt, currentTime)) {
+    staleReasons.push("Monday Weekly Usage changed after this week's plan was calculated.");
   }
   if (generatedTime && parseTime(parInputsChangedAt) > generatedTime) {
     staleReasons.push("Keg counts, pars, or On Deck choices changed after this run.");

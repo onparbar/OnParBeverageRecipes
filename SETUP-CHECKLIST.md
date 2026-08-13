@@ -143,6 +143,9 @@ for staff and open `/staff` there. Do not use the owner browser profile for an
 employee login. The staff page deliberately locks when it detects owner
 dashboard storage. Do not clear that storage to bypass the check because it may
 contain unsynced owner edits; use a new dedicated staff profile instead.
+The staff page shows the current Monday-Sunday cocktail prep plan, requires the
+preparer's name before an item can be checked off, and shares that completion
+with every staff session.
 
 ### 10. Local network note
 

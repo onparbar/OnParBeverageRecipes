@@ -12,7 +12,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const PMB_API_TIMEOUT_MS = 15000;
-const PMB_TAP_CONFIG_TIMEOUT_MS = 6000;
+const PMB_TAP_CONFIG_TIMEOUT_MS = 15000;
 
 function parseJsonLoose(text) {
   try {
@@ -423,9 +423,11 @@ export async function GET() {
       },
     });
   } catch (error) {
+    const message = error.message || "Could not load tap pricing.";
+    const upstreamFailure = /PMB|tap configuration|timed out|fetch|socket|network/i.test(message);
     return NextResponse.json(
-      { error: error.message || "Could not load tap pricing." },
-      { status: 500 },
+      { error: message },
+      { status: upstreamFailure ? 503 : 500 },
     );
   }
 }

@@ -8,10 +8,12 @@ import {
   findWeeklyUsageIdentityMatch,
   hasCompleteWeeklyUsageRows,
   hasWeeklyUsagePhysicalIdentityConflict,
+  isRecommendationForOperatingWeek,
   isWeeklyUsageNameFallbackEligible,
   isRecommendationSourceRevisionCurrent,
   isWeeklyPlanHandoffAllowed,
   normalizeWeeklyPlanProductName,
+  shouldRefreshMondayPlanForUsage,
 } from "../public/weekly-action-plan.mjs";
 
 test("combines repeated beer and cocktail products across tap walls", () => {
@@ -218,6 +220,54 @@ test("readiness blocks incomplete inputs, marks changed inputs stale, and expose
   assert.equal(evaluateWeeklyPlanReadiness({ ...base, missingPriceCount: 1 }).status, "review");
 });
 
+test("a Monday plan remains current through Sunday despite later read-only usage checks", () => {
+  const mondayPlan = {
+    parInitialized: true,
+    recommendationGeneratedAt: "2026-08-10T14:00:00.000Z",
+    recommendationSourceCurrent: true,
+    weeklyUsageInitialized: true,
+    latestCompletedUsageSaved: true,
+    weeklyUsageLastSyncAt: "2026-08-13T16:00:00.000Z",
+    inventoryInitialized: true,
+  };
+
+  assert.equal(isRecommendationForOperatingWeek(
+    mondayPlan.recommendationGeneratedAt,
+    "2026-08-16T18:00:00.000Z",
+  ), true);
+  assert.equal(shouldRefreshMondayPlanForUsage(
+    mondayPlan.recommendationGeneratedAt,
+    mondayPlan.weeklyUsageLastSyncAt,
+    "2026-08-13T18:00:00.000Z",
+  ), false);
+  assert.equal(evaluateWeeklyPlanReadiness({
+    ...mondayPlan,
+    now: "2026-08-13T18:00:00.000Z",
+  }).status, "ready");
+});
+
+test("new Monday inputs start a new Weekly Plan cycle", () => {
+  const base = {
+    parInitialized: true,
+    recommendationGeneratedAt: "2026-08-10T14:00:00.000Z",
+    recommendationSourceCurrent: true,
+    weeklyUsageInitialized: true,
+    latestCompletedUsageSaved: true,
+    inventoryInitialized: true,
+  };
+
+  assert.equal(evaluateWeeklyPlanReadiness({
+    ...base,
+    weeklyUsageLastSyncAt: "2026-08-10T16:00:00.000Z",
+    now: "2026-08-10T17:00:00.000Z",
+  }).status, "stale");
+  assert.equal(evaluateWeeklyPlanReadiness({
+    ...base,
+    weeklyUsageLastSyncAt: "2026-08-17T13:00:00.000Z",
+    now: "2026-08-17T14:00:00.000Z",
+  }).status, "stale");
+});
+
 test("weekly usage identity prefers a physical tap and uses PLU only when unique", () => {
   const reports = [
     { tapNumber: 21, plu: 500, volumeOz: 100 },
@@ -251,6 +301,8 @@ test("recommendations are current only for the immediately published source revi
   assert.equal(isRecommendationSourceRevisionCurrent(10, 10), false);
   assert.equal(isRecommendationSourceRevisionCurrent(1, undefined), false);
   assert.equal(isRecommendationSourceRevisionCurrent(1, null), false);
+  assert.equal(isRecommendationSourceRevisionCurrent(12, 10, 12), true);
+  assert.equal(isRecommendationSourceRevisionCurrent(13, 10, 12), false);
 });
 
 test("Weekly Plan handoff is locked for blocked and stale plans", () => {
