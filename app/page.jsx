@@ -166,7 +166,7 @@ export default function DashboardPage() {
         <section className="panel" id="recipes-panel" role="tabpanel" aria-labelledby="recipes-tab">
           <header className="recipe-workspace-header">
             <div>
-              <h2>Cocktail Recipes</h2>
+              <h2>Recipe library</h2>
             </div>
             <div className="recipe-view-switcher" role="tablist" aria-label="Recipe status">
               <button
@@ -447,7 +447,7 @@ export default function DashboardPage() {
           >
             <div className="form-header">
               <div>
-                <h2>Add beer product</h2>
+                <h2>Beer details</h2>
               </div>
               <div className="form-actions">
                 <button className="primary-button" id="pmb-product-submit" type="submit">Save beer to queue</button>
@@ -526,7 +526,7 @@ export default function DashboardPage() {
           >
             <div className="form-header">
               <div>
-                <h2>Add liquor tap</h2>
+                <h2>Liquor details</h2>
               </div>
               <div className="form-actions">
                 <button className="primary-button" id="liquor-product-submit" type="submit">Save liquor to queue</button>

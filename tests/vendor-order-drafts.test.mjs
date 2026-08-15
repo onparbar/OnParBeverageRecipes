@@ -97,3 +97,72 @@ test("builds an approval-ready vendor draft but keeps real submission disabled",
   assert.equal(adapter.enabled, false);
   await assert.rejects(adapter.submit(), (error) => error.code === "VENDOR_ORDER_SUBMISSION_DISABLED");
 });
+
+test("tops up Proof only with shelf-stable products justified by projected cocktail prep usage", () => {
+  const result = buildVendorOrderDrafts(inventoryPlan({ estimatedCost: 300, unitCost: 25 }), {
+    ...options,
+    proofMinimumCandidates: [{
+      id: "lime-juice",
+      name: "Lime Juice",
+      vendor: "Proof",
+      vendorSku: "PROOF-LIME-12",
+      vendorProductName: "Shelf Stable Lime Juice",
+      casePackaged: true,
+      shelfStable: true,
+      packSize: 12,
+      projectedPrepUseUnits: 24,
+      unitCost: 5,
+    }],
+  });
+  const draft = result.drafts[0];
+  const topUp = draft.lines.find((line) => line.id === "lime-juice");
+
+  assert.equal(topUp.requestedCases, 1);
+  assert.equal(topUp.requestedUnits, 12);
+  assert.equal(draft.estimatedTotal, 360);
+  assert.match(topUp.reason, /projected cocktail prep usage/);
+  assert.ok(draft.warnings.some((item) => item.code === "PROOF_MINIMUM_TOP_UP"));
+  assert.equal(draft.warnings.some((item) => item.code === "PROOF_DELIVERY_FEE"), false);
+});
+
+test("does not use refrigerated or unjustified Proof products as minimum filler", () => {
+  const result = buildVendorOrderDrafts(inventoryPlan({ estimatedCost: 300, unitCost: 25 }), {
+    ...options,
+    proofMinimumCandidates: [{
+      id: "fresh-juice",
+      name: "Fresh Juice",
+      vendor: "Proof",
+      vendorSku: "PROOF-FRESH-6",
+      casePackaged: true,
+      shelfStable: false,
+      packSize: 6,
+      projectedPrepUseUnits: 12,
+      unitCost: 10,
+    }],
+  });
+
+  assert.equal(result.drafts[0].lineCount, 1);
+  assert.equal(result.drafts[0].estimatedTotal, 300);
+  assert.ok(result.drafts[0].warnings.some((item) => item.code === "PROOF_DELIVERY_FEE"));
+});
+
+test("includes Proof minimum top-ups in the idempotency identity", () => {
+  const candidate = {
+    id: "lime-juice",
+    name: "Lime Juice",
+    vendor: "Proof",
+    vendorSku: "PROOF-LIME-12",
+    casePackaged: true,
+    shelfStable: true,
+    packSize: 12,
+    projectedPrepUseUnits: 24,
+    unitCost: 5,
+  };
+  const withoutTopUp = buildVendorOrderDrafts(inventoryPlan({ estimatedCost: 300, unitCost: 25 }), options);
+  const withTopUp = buildVendorOrderDrafts(inventoryPlan({ estimatedCost: 300, unitCost: 25 }), {
+    ...options,
+    proofMinimumCandidates: [candidate],
+  });
+
+  assert.notEqual(withTopUp.drafts[0].id, withoutTopUp.drafts[0].id);
+});

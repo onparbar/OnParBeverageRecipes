@@ -258,7 +258,7 @@ export function buildLastWeekProjectedSalesMix(
       if (distinctPouredValues.length !== 1) return;
 
       const pouredOz = distinctPouredValues[0];
-      const category = getWeeklyUsagePerformanceCategory(item);
+      const category = resolveCategory(item);
       if (!CATEGORY_ORDER.includes(category)) return;
       capturedTapCount += 1;
       const sellingPricePerOz = resolveSellingPricePerOz(getSellingPricePerOz, item, {

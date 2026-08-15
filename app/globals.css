@@ -7383,6 +7383,8 @@ td {
   .top-actions {
     width: 100%;
     flex-wrap: nowrap;
+    gap: 2px;
+    padding: 4px;
   }
 
   .topbar-actions {
@@ -7419,7 +7421,10 @@ td {
   }
 
   .tab-button {
-    flex: 1 1 0;
+    flex: 1 1 auto;
+    min-height: 38px;
+    padding-inline: 4px;
+    font-size: clamp(0.625rem, 2.3vw, 0.75rem);
   }
 
   .dashboard-data-search__form > div,
@@ -7855,5 +7860,291 @@ td {
   .inventory-table.keg-table thead th:nth-child(2) {
     z-index: 3;
     background: #f8f1e3;
+  }
+}
+
+/* Friendly dashboard polish */
+:root {
+  --ink: #22302c;
+  --muted: #6f7c76;
+  --paper: #fbf7ee;
+  --paper-strong: #fffdf8;
+  --line: #e6dfd1;
+  --juniper: #2f6b5f;
+  --juniper-dark: #245348;
+  --tomato: #b95f49;
+  --gold: #d9b45a;
+  --shadow: 0 16px 42px rgba(45, 57, 51, 0.09);
+  --soft-shadow: 0 8px 24px rgba(45, 57, 51, 0.075);
+  --friendly-radius: 18px;
+}
+
+body {
+  background:
+    radial-gradient(circle at 8% 4%, rgba(217, 180, 90, 0.12), transparent 30%),
+    radial-gradient(circle at 92% 12%, rgba(47, 107, 95, 0.11), transparent 34%),
+    repeating-linear-gradient(90deg, rgba(34, 48, 44, 0.022) 0 1px, transparent 1px 76px),
+    var(--paper);
+}
+
+.topbar {
+  position: relative;
+  gap: 14px;
+  border: 1px solid rgba(47, 107, 95, 0.12);
+  border-radius: 30px;
+  padding: 24px 26px;
+  background:
+    radial-gradient(circle at 94% 4%, rgba(217, 180, 90, 0.11), transparent 34%),
+    rgba(255, 253, 248, 0.94);
+  box-shadow: var(--soft-shadow);
+}
+
+.topbar > h1 {
+  padding-right: 104px;
+}
+
+.topbar .logout-link {
+  position: absolute;
+  top: 24px;
+  right: 26px;
+}
+
+.topbar h1 {
+  font-size: clamp(1.85rem, 4vw, 2.7rem);
+  line-height: 1.05;
+}
+
+.topbar-actions {
+  gap: 6px;
+  border: 1px solid rgba(47, 107, 95, 0.1);
+  border-radius: 18px;
+  padding: 6px;
+  background: rgba(245, 240, 224, 0.74);
+  scrollbar-width: none;
+}
+
+.topbar-actions::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-button,
+.operation-tab,
+.ghost-button,
+.primary-button,
+.mini-button,
+.icon-button,
+.global-search-trigger,
+button[type="submit"] {
+  border-radius: 12px;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.tab-button:hover,
+.operation-tab:hover,
+.ghost-button:hover,
+.primary-button:hover,
+.mini-button:hover,
+.icon-button:hover,
+.global-search-trigger:hover,
+button[type="submit"]:hover {
+  transform: translateY(-1px);
+}
+
+.tab-button.is-active,
+.operation-tab.is-active,
+.tab-button[aria-selected="true"],
+.operation-tab[aria-selected="true"],
+.primary-button,
+button[type="submit"] {
+  box-shadow: 0 6px 14px rgba(36, 83, 72, 0.16);
+}
+
+.ghost-button,
+.mini-button,
+.icon-button,
+.global-search-trigger {
+  background: rgba(255, 253, 248, 0.9);
+}
+
+input,
+select,
+textarea {
+  border-color: rgba(47, 107, 95, 0.16);
+  border-radius: 12px;
+  background: rgba(255, 254, 250, 0.96);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: rgba(47, 107, 95, 0.32);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: rgba(47, 107, 95, 0.58);
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(47, 107, 95, 0.11);
+  background: var(--paper-strong);
+}
+
+.panel.is-active {
+  animation: friendly-rise 220ms ease-out both;
+}
+
+.panel [class$="-card"],
+.panel [class*="-card "],
+.weekly-plan-header,
+.weekly-plan-readiness,
+.weekly-plan-provenance > div,
+.weekly-plan-stats > div,
+.weekly-plan-group,
+.pmb-reconciliation,
+.empty-state,
+.pmb-queue-item,
+.coming-soon-item {
+  border-color: rgba(47, 107, 95, 0.12);
+  border-radius: var(--friendly-radius);
+  box-shadow: var(--soft-shadow);
+}
+
+.pmb-reconciliation {
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(238, 248, 243, 0.92), rgba(255, 253, 248, 0.95));
+}
+
+.pmb-reconciliation__stats span {
+  border-color: rgba(47, 107, 95, 0.14);
+  padding: 6px 10px;
+  background: rgba(255, 253, 248, 0.92);
+}
+
+.empty-state,
+.pmb-queue-empty {
+  border-style: dashed;
+  padding: 28px;
+  background: linear-gradient(145deg, rgba(255, 253, 248, 0.96), rgba(246, 242, 229, 0.8));
+  text-align: center;
+  line-height: 1.55;
+}
+
+.sync-status,
+.sync-copy,
+.muted {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.dashboard-overview__hero,
+.dashboard-overview-hero,
+.overview-hero {
+  border: 1px solid rgba(47, 107, 95, 0.14);
+  border-radius: 24px;
+  background: linear-gradient(135deg, #315f56, #426f62 58%, #6f7d5d);
+  box-shadow: var(--soft-shadow);
+}
+
+th {
+  color: #718079;
+  letter-spacing: 0.025em;
+}
+
+td,
+th {
+  border-bottom-color: rgba(47, 107, 95, 0.09);
+  padding: 12px 14px;
+}
+
+tbody tr {
+  transition: background-color 140ms ease;
+}
+
+tbody tr:hover {
+  background: rgba(47, 107, 95, 0.045);
+}
+
+.coming-soon-item {
+  overflow: hidden;
+  background: rgba(255, 253, 248, 0.92);
+}
+
+.coming-soon-item__image {
+  border-radius: 14px;
+}
+
+@keyframes friendly-rise {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 860px) {
+  .shell {
+    width: min(100% - 20px, 1500px);
+    padding-top: 14px;
+  }
+
+  .topbar {
+    gap: 12px;
+    border-radius: 24px;
+    padding: 20px;
+  }
+
+  .topbar > h1 {
+    padding-right: 88px;
+  }
+
+  .topbar .logout-link {
+    top: 18px;
+    right: 20px;
+  }
+
+  .topbar h1 {
+    font-size: clamp(1.7rem, 7vw, 2.3rem);
+  }
+
+  .topbar-actions {
+    margin-inline: -2px;
+  }
+
+  .topbar-actions > * {
+    flex: 0 0 auto;
+  }
+
+  .panel [class$="-card"],
+  .panel [class*="-card "],
+  .weekly-plan-header,
+  .weekly-plan-readiness,
+  .weekly-plan-group,
+  .pmb-reconciliation,
+  .empty-state,
+  .pmb-queue-item,
+  .coming-soon-item {
+    border-radius: 15px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel.is-active {
+    animation: none;
+  }
+
+  .tab-button,
+  .operation-tab,
+  .ghost-button,
+  .primary-button,
+  .mini-button,
+  .icon-button,
+  .global-search-trigger,
+  button[type="submit"] {
+    transition: none;
   }
 }

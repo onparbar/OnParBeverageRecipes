@@ -638,17 +638,17 @@ function buildKpis({
   const costComplete = summary.estimatedPurchaseCostComplete === true && missingPriceCount === 0;
   const hasUsageCoverage = usage.hasCurrentPeriod;
   const pricingKnown = priceFeedCurrent && pricing.total > 0;
-  const planUnavailableDetail = "Hidden until readiness, shared-save, PMB, and Weekly Usage checks are current.";
+  const planUnavailableDetail = "";
 
   return [
     {
       id: "order-readiness",
-      label: "Order readiness",
+      label: "Order status",
       value: planState.label,
       rawValue: planState.status,
       detail: planState.details[0] || (planState.status === "ready"
-        ? "All required Weekly Plan inputs passed their readiness checks."
-        : "Open Weekly Plan for the complete readiness review."),
+        ? "Ready to lock."
+        : ""),
       tone: planState.actionable ? (planState.status === "review" ? "warning" : "positive") : "critical",
       confidence: planState.actionable ? "verified" : "unavailable",
       target: DASHBOARD_OVERVIEW_TARGETS.weeklyPlan,

@@ -41,7 +41,7 @@ function issue(code, message) {
 
 export function createVendorOrderDraftId(generatedAt, vendor, items = []) {
   const identity = items
-    .map((item) => `${clean(item.id || item.internalId)}:${clean(item.name)}:${Number(item.quantity) || 0}`)
+    .map((item) => `${clean(item.id || item.internalId)}:${clean(item.name)}:${Number(item.quantity ?? item.requestedUnits) || 0}`)
     .sort()
     .join("|");
   return `order-draft:${slug(vendor) || "unknown"}:${hash(`${clean(generatedAt)}|${identity}`)}`;
@@ -126,6 +126,78 @@ function buildDraftLine(item, vendor, sourceDate) {
   };
 }
 
+function selectProofMinimumTopUps(candidates = [], subtotal = 0, minimum = 350) {
+  const gapCents = Math.max(0, Math.ceil((minimum - subtotal) * 100));
+  if (!gapCents) return [];
+  const eligible = candidates.map((item) => {
+    const packSize = Math.max(1, Number(item.packSize) || 1);
+    const unitCost = numberOrNull(item.unitCost);
+    const projectedPrepUseUnits = Math.floor(Number(item.projectedPrepUseUnits) || 0);
+    return {
+      ...item,
+      packSize,
+      unitCost,
+      maxCases: Math.floor(projectedPrepUseUnits / packSize),
+      caseCostCents: unitCost === null ? 0 : Math.round(unitCost * packSize * 100),
+    };
+  }).filter((item) => (
+    normalizeVendor(item.vendor) === "Proof"
+    && item.shelfStable === true
+    && item.casePackaged === true
+    && clean(item.id || item.internalId)
+    && clean(item.vendorSku || item.preferredSku)
+    && item.maxCases > 0
+    && item.caseCostCents > 0
+  )).sort((a, b) => clean(a.name).localeCompare(clean(b.name)));
+
+  let combinations = new Map([[0, new Map()]]);
+  eligible.forEach((item) => {
+    const identity = clean(item.id || item.internalId);
+    for (let count = 0; count < item.maxCases; count += 1) {
+      const next = new Map(combinations);
+      combinations.forEach((selection, costCents) => {
+        const nextCost = costCents + item.caseCostCents;
+        const nextSelection = new Map(selection);
+        nextSelection.set(identity, (nextSelection.get(identity) || 0) + 1);
+        if (!next.has(nextCost)) next.set(nextCost, nextSelection);
+      });
+      combinations = next;
+    }
+  });
+  const selectedCost = [...combinations.keys()].filter((cost) => cost >= gapCents).sort((a, b) => a - b)[0];
+  if (selectedCost === undefined) return [];
+  const selected = combinations.get(selectedCost);
+  return eligible.filter((item) => selected.has(clean(item.id || item.internalId))).map((item) => {
+    const caseCount = selected.get(clean(item.id || item.internalId));
+    const quantity = caseCount * item.packSize;
+    return {
+      ...item,
+      quantity,
+      caseCount,
+      estimatedCost: quantity * item.unitCost,
+      hasKnownPrice: true,
+      reason: "Minimum top-up; replaces projected cocktail prep usage.",
+    };
+  });
+}
+
+function applyProofMinimumTopUps(lines, candidates, subtotal, minimum, sourceDate) {
+  const additions = selectProofMinimumTopUps(candidates, subtotal, minimum);
+  additions.forEach((item) => {
+    const identity = clean(item.id || item.internalId).toLowerCase();
+    const existing = lines.find((line) => line.internalId.toLowerCase() === identity);
+    if (existing) {
+      existing.requestedUnits += item.quantity;
+      existing.requestedCases = (existing.requestedCases || 0) + item.caseCount;
+      existing.extendedCost += item.estimatedCost;
+      existing.reason = `${existing.reason} Minimum top-up replaces projected cocktail prep usage.`;
+      return;
+    }
+    lines.push(buildDraftLine(item, "Proof", sourceDate));
+  });
+  return additions;
+}
+
 export function buildVendorOrderDrafts(plan = {}, {
   generatedAt = "",
   sourceDate = "",
@@ -133,6 +205,7 @@ export function buildVendorOrderDrafts(plan = {}, {
   deliveryLocations = {},
   budgetLimit = null,
   proofMinimum = 350,
+  proofMinimumCandidates = [],
   now = new Date(),
   confirmationRecipient = "samantha@onparbar.com",
 } = {}) {
@@ -157,6 +230,10 @@ export function buildVendorOrderDrafts(plan = {}, {
         line.confidence = "blocked";
       }
     });
+    const proofTopUps = vendor === "Proof"
+      ? applyProofMinimumTopUps(lines, proofMinimumCandidates, Number(group.estimatedCost) || 0, proofMinimum, sourceDate)
+      : [];
+    const estimatedTotal = lines.reduce((total, line) => total + (numberOrNull(line.extendedCost) || 0), 0);
     const deliveryLocation = clean(deliveryLocations[vendor] || deliveryLocations[group.vendor]);
     const blockers = [...schedule.blockers];
     const warnings = [...schedule.warnings];
@@ -164,17 +241,18 @@ export function buildVendorOrderDrafts(plan = {}, {
     if (!clean(generatedAt)) blockers.push(issue("LOCKED_PLAN_REQUIRED", "A locked Monday Weekly Plan is required."));
     if (["blocked", "stale"].includes(clean(freshness?.status).toLowerCase())) blockers.push(issue("SOURCE_DATA_NOT_READY", "Weekly Plan source data is blocked or stale."));
     lines.forEach((line) => blockers.push(...line.blockers));
-    if (vendor === "Proof" && group.estimatedCost < proofMinimum) warnings.push(issue("PROOF_DELIVERY_FEE", `Proof subtotal is below $${proofMinimum}; a delivery fee may apply.`));
+    if (vendor === "Proof" && estimatedTotal < proofMinimum) warnings.push(issue("PROOF_DELIVERY_FEE", `Proof subtotal is below $${proofMinimum}; no shelf-stable projected prep replacement can safely close the gap, so a delivery fee may apply.`));
+    if (proofTopUps.length) warnings.push(issue("PROOF_MINIMUM_TOP_UP", `${proofTopUps.length} shelf-stable Proof product${proofTopUps.length === 1 ? " was" : "s were"} added to replace projected cocktail prep usage and meet the $${proofMinimum} minimum.`));
     lines.forEach((line) => warnings.push(...line.warnings));
     return {
-      id: createVendorOrderDraftId(generatedAt, vendor, group.items),
+      id: createVendorOrderDraftId(generatedAt, vendor, lines),
       generatedAt: clean(generatedAt),
       sourceDate: clean(sourceDate),
       vendor,
       deliveryLocation,
       confirmationRecipient: clean(confirmationRecipient),
       lineCount: lines.length,
-      estimatedTotal: Number(group.estimatedCost) || 0,
+      estimatedTotal,
       hasCompletePricing: group.hasCompletePricing && lines.every((line) => line.unitCost > 0 && line.extendedCost > 0),
       substitutionsAllowed: false,
       lines,

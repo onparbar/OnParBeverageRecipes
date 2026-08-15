@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -216,4 +216,23 @@ test("rejects incomplete PMB coverage and recomputes derived beverage totals", a
   });
   assert.equal(state.snapshots[0].summary.currentLineValue, 40);
   assert.equal(state.snapshots[0].summary.totalBeverageInventoryValue, 60);
+});
+
+test("recovers the latest Monday snapshot from the atomic backup", async () => {
+  const statePath = await useTemporaryState();
+  await hydrateInventoryState({});
+  await saveInventorySnapshot([
+    { id: "vodka", name: "Vodka", group: "Liquor Cabinet", onHandDisplay: "2", parDisplay: "4" },
+  ], "owner", new Date(2026, 7, 10, 12), {
+    bottleInventoryValue: 20,
+    connectedLineValue: 30,
+    backupKegValue: 10,
+    liveTapCount: 1,
+    tapCount: 1,
+  });
+  await writeFile(statePath, "not json", "utf8");
+
+  const recovered = await readInventoryState();
+  assert.equal(recovered.snapshots[0].weekOf, "2026-08-10");
+  assert.equal(recovered.snapshots[0].items[0].onHandDisplay, "2");
 });

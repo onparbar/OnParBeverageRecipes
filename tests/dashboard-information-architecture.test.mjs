@@ -54,7 +54,7 @@ test("Dashboard owns the combined beverage pulse instead of duplicating it in We
   assert.match(dashboardSource, /buildDashboardOverview\(/);
   assert.match(dashboardSource, /buildWeeklyPlanTrends\(/);
   assert.match(dashboardSource, /id="dashboard-beverage-pulse"/);
-  assert.match(dashboardSource, /What guests are pouring/);
+  assert.match(dashboardSource, /Guest favorites/);
 
   const weeklyPlanStart = dashboardSource.indexOf("function renderWeeklyPlan()");
   const weeklyPlanEnd = dashboardSource.indexOf("function renderKegLevels", weeklyPlanStart);
@@ -251,11 +251,11 @@ test("the initial Dashboard uses a light visual beverage pulse and change-only O
   assert.match(dashboardSource, /Top beers/);
   assert.match(dashboardSource, /Top cocktails/);
   assert.match(dashboardSource, /Top liquor/);
-  assert.match(dashboardSource, /\$ vs Oz/);
+  assert.match(dashboardSource, /Rank by/);
   assert.match(dashboardSource, /buildLastWeekPourLeaders/);
   assert.match(dashboardSource, /No liquor pours were saved for the Patio or Karaoke wall last week/);
   assert.match(dashboardSource, /Projected sales mix/);
-  assert.match(dashboardSource, /buildLastWeekProjectedSalesMix\(weeklyUsageItems/);
+  assert.match(dashboardSource, /const projectedSalesMix = buildLastWeekProjectedSalesMix\(/);
   assert.match(dashboardSource, /Exact PMB ounces × current prices/);
   assert.match(dashboardSource, /dashboard-pulse-bar/);
   assert.match(dashboardSource, /data-seller-ranking-wall/);

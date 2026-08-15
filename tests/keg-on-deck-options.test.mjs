@@ -129,3 +129,19 @@ test("recognizes an On Deck product after it becomes the live tap product", () =
     { name: "Angry Orchard 1", plu: 9876 },
   ), false);
 });
+
+test("offers an active Octoberfest Coming Soon beer for On Deck selection", () => {
+  const options = buildKegOnDeckOptions({
+    comingSoonItems: [{ id: "beer:octoberfest", name: "Octoberfest", kind: "beer", kegCost: 185 }],
+  });
+
+  assert.equal(resolveKegOnDeckOption(options, "beer:octoberfest")?.name, "Octoberfest");
+});
+
+test("offers an active queued liquor tap for On Deck selection", () => {
+  const options = buildKegOnDeckOptions({
+    comingSoonItems: [{ id: "liquor:woodford-reserve", name: "Woodford Reserve", kind: "liquor" }],
+  });
+
+  assert.equal(resolveKegOnDeckOption(options, "liquor:woodford-reserve")?.name, "Woodford Reserve");
+});

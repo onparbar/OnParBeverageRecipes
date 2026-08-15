@@ -89,6 +89,23 @@ test("returns an honest unavailable state when last-week pours have no current p
   assert.equal(mix.categories.reduce((total, row) => total + row.sharePercent, 0), 0);
 });
 
+test("uses authoritative tap ranges when PMB type labels are not category names", () => {
+  const mix = buildLastWeekProjectedSalesMix([
+    item({ id: "seasonal-beer", tapNumber: 21, type: "Seasonal", history: [pmb(latestLabel, 100)] }),
+    item({ id: "house-cocktail", tapNumber: 47, type: "House Batch", history: [pmb(latestLabel, 50)] }),
+  ], {
+    wall: "main",
+    getSellingPricePerOz: () => 2,
+  });
+
+  assert.equal(mix.available, true);
+  assert.equal(mix.projectedSales, 300);
+  assert.deepEqual(
+    mix.categories.map((row) => [row.category, row.projectedSales]),
+    [["cocktail", 100], ["beer", 200], ["liquor", 0]],
+  );
+});
+
 test("keeps beer and cocktail leaders on the selected wall while combining Patio and Karaoke liquor", () => {
   const leaders = buildLastWeekPourLeaders([
     item({ id: "main-beer", name: "Main Beer", tapNumber: 21, history: [pmb(latestLabel, 120)] }),

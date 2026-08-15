@@ -66,3 +66,47 @@ test("labels beer, liquor, and cocktail Coming Soon items correctly", () => {
   assert.equal(getComingSoonKindLabel("recipe"), "Cocktail recipe");
   assert.equal(getComingSoonKindLabel("liquor", { compact: true }), "liquor");
 });
+
+test("includes an unpublished queued beer in Coming Soon immediately", () => {
+  const merged = mergeRequiredComingSoonItems([], [{
+    id: "pmb-publish:beer:octoberfest",
+    kind: "beer",
+    name: "Octoberfest",
+    status: "ready",
+    updatedAt: "2026-08-15T05:32:00.000Z",
+    payload: {
+      name: "Octoberfest",
+      kegCost: 185,
+      kegOz: 1984,
+      pricePerOz: 0.52,
+      abvPercent: 5.3,
+    },
+  }]);
+  const octoberfest = merged.find(({ id }) => id === "beer:octoberfest");
+
+  assert.equal(octoberfest?.kind, "beer");
+  assert.equal(octoberfest?.name, "Octoberfest");
+  assert.equal(octoberfest?.kegCost, 185);
+  assert.equal(octoberfest?.source, "PMB publishing queue");
+});
+
+test("includes an unpublished queued liquor tap in Coming Soon immediately", () => {
+  const merged = mergeRequiredComingSoonItems([], [{
+    id: "pmb-publish:liquor:woodford-reserve",
+    kind: "liquor",
+    name: "Woodford Reserve",
+    status: "ready",
+    payload: {
+      name: "Woodford Reserve",
+      bottleCost: 64,
+      bottleOz: 59.1745,
+      pricePerOz: 2.25,
+      abvPercent: 45.2,
+    },
+  }]);
+  const woodford = merged.find(({ id }) => id === "liquor:woodford-reserve");
+
+  assert.equal(woodford?.kind, "liquor");
+  assert.equal(woodford?.bottleCost, 64);
+  assert.equal(woodford?.bottleOz, 59.1745);
+});

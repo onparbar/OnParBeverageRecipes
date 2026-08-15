@@ -125,6 +125,8 @@ import {
   mergeRequiredComingSoonItems,
 } from "./coming-soon-items.mjs";
 import { buildVendorOrderDrafts } from "./vendor-order-drafts.mjs";
+import { buildProofPrepReplacementCandidates } from "./proof-prep-replacements.mjs";
+import { selectPmbCurrentTapSnapshot } from "./pmb-current-tap-snapshot.mjs";
 
 const CSV_PATH = "./data/cocktail-recipes.csv";
 const NEW_COCKTAILS_CSV_PATH = "./data/new-cocktails.csv";
@@ -157,6 +159,7 @@ const CUSTOM_LIQUOR_TAP_STORAGE_KEY = "cocktail-dashboard-custom-liquor-taps";
 const PMB_PUBLISH_QUEUE_STORAGE_KEY = "cocktail-dashboard-pmb-publish-queue";
 const COMING_SOON_STORAGE_KEY = "cocktail-dashboard-coming-soon";
 const TAP_REPLACEMENT_STORAGE_KEY = "cocktail-dashboard-tap-replacements";
+const PMB_CURRENT_TAP_SNAPSHOT_STORAGE_KEY = "cocktail-dashboard-pmb-current-tap-snapshot";
 const DASHBOARD_STATE_OUTBOX_STORAGE_KEY = "cocktail-dashboard-shared-state-outbox";
 const EMPLOYEE_SHARED_RECIPE_CACHE_STORAGE_KEY = "cocktail-dashboard-employee-shared-recipes";
 const OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY = "cocktail-dashboard-owner-login-sync-lock";
@@ -387,27 +390,27 @@ const DEFAULT_KEG_PRICE_OVERRIDES = {
   "miller-lite": {
     kegOz: "1984",
     kegPrice: "130",
-    updatedAt: "Bonbright manual pricing 2026-07-24",
+    updatedAt: "Bonbright manual pricing 2026-08-15",
   },
   "coors-light": {
     kegOz: "1984",
     kegPrice: "130",
-    updatedAt: "Bonbright manual pricing 2026-07-24",
+    updatedAt: "Bonbright manual pricing 2026-08-15",
   },
   "pabst-blue-ribbon": {
     kegOz: "1984",
     kegPrice: "89",
-    updatedAt: "Bonbright manual pricing 2026-07-24",
+    updatedAt: "Bonbright manual pricing 2026-08-15",
   },
   modelo: {
     kegOz: "1984",
     kegPrice: "143",
-    updatedAt: "Bonbright manual pricing 2026-07-24",
+    updatedAt: "Bonbright manual pricing 2026-08-15",
   },
   "blue-moon": {
     kegOz: "1984",
     kegPrice: "171",
-    updatedAt: "Bonbright manual pricing 2026-07-24",
+    updatedAt: "Bonbright manual pricing 2026-08-15",
   },
   guinness: {
     kegOz: String(GUINNESS_KEG_OZ),
@@ -417,42 +420,42 @@ const DEFAULT_KEG_PRICE_OVERRIDES = {
   "dortmunder-gold-lager": {
     kegOz: "1984",
     kegPrice: "175",
-    updatedAt: "Bonbright manual pricing 2026-07-24",
+    updatedAt: "Bonbright manual pricing 2026-08-15",
   },
   "garage-beer": {
     kegOz: "1984",
     kegPrice: "135",
-    updatedAt: "Bonbright manual pricing 2026-07-24",
+    updatedAt: "Bonbright manual pricing 2026-08-15",
   },
   "garage-beer-lime": {
     kegOz: "1984",
     kegPrice: "135",
-    updatedAt: "Bonbright manual pricing 2026-07-24",
+    updatedAt: "Bonbright manual pricing 2026-08-15",
   },
   "astra-red-cream-soda": {
     kegOz: "1984",
     kegPrice: "96",
-    updatedAt: "Bonbright manual pricing 2026-07-24",
+    updatedAt: "Bonbright manual pricing 2026-08-15",
   },
   "voodoo-ranger-ipa": {
     kegOz: "1984",
     kegPrice: "160",
-    updatedAt: "Bonbright manual pricing 2026-07-24",
+    updatedAt: "Bonbright manual pricing 2026-08-15",
   },
   "voodoo-ranger-juicy-haze": {
     kegOz: "1984",
     kegPrice: "185",
-    updatedAt: "Bonbright manual pricing 2026-07-24",
+    updatedAt: "Bonbright manual pricing 2026-08-15",
   },
   "two-hearted-ipa": {
     kegOz: "1984",
     kegPrice: "186",
-    updatedAt: "Bonbright manual pricing 2026-07-24",
+    updatedAt: "Bonbright manual pricing 2026-08-15",
   },
   corona: {
     kegOz: "1984",
     kegPrice: "143",
-    updatedAt: "Bonbright manual pricing 2026-07-24",
+    updatedAt: "Bonbright manual pricing 2026-08-15",
   },
 };
 const KEG_PRICING_KEY_ALIASES = {
@@ -516,7 +519,6 @@ const KEG_VENDOR_MAPPINGS = {
   "dortmunder-gold-lager": "Bonbright",
   "garage-beer-lime": "Bonbright",
   corona: "Bonbright",
-  "breakfast-stout": "Bonbright",
   "garage-beer": "Bonbright",
   guinness: "Bonbright",
   "voodoo-ranger-ipa": "Bonbright",
@@ -928,7 +930,7 @@ let chargeOverrides = loadChargeOverrides();
 let customBeerKegs = loadCustomBeerKegs();
 let customLiquorTaps = loadCustomLiquorTaps();
 let pmbPublishQueue = loadPmbPublishQueue();
-let comingSoonItems = mergeRequiredComingSoonItems(loadComingSoonItems());
+let comingSoonItems = mergeRequiredComingSoonItems(loadComingSoonItems(), pmbPublishQueue);
 let tapReplacementOverrides = loadTapReplacementOverrides();
 let customRecipes = loadCustomRecipes();
 let inactiveRecipeIds = loadInactiveRecipeIds();
@@ -1016,6 +1018,7 @@ let editingRecipeId = null;
 let vendorSyncScope = "all";
 let vendorSyncMessage = "Prices sync automatically.";
 let vendorSyncRunning = false;
+let pmbCurrentTapSnapshot = loadPmbCurrentTapSnapshot();
 let kegLiveLevels = new Map();
 let kegSyncMessage = "Refresh keg levels to pull current percentages from Pour My Beer.";
 let kegSyncLoading = false;
@@ -1876,6 +1879,7 @@ function applySharedDashboardState(rawState) {
   pmbPublishQueue = normalizePmbPublishQueue(effectiveState.products.pmbPublishQueue);
   comingSoonItems = mergeRequiredComingSoonItems(
     cloneDashboardStateValue(effectiveState.products.comingSoonItems),
+    pmbPublishQueue,
   );
   tapReplacementOverrides = cloneDashboardStateValue(effectiveState.products.tapReplacementOverrides);
   ohioComplianceAcknowledgement = cloneDashboardStateValue(
@@ -3244,7 +3248,7 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
   const query = clean(dashboardDataSearchInput.value);
   if (!query) {
     dashboardDataSearchFeedback.textContent = submitted ? "Enter a question to search dashboard data." : "";
-    dashboardDataSearchResults.innerHTML = '<div class="dashboard-data-search-empty">Search results will appear here.</div>';
+    dashboardDataSearchResults.innerHTML = "";
     return;
   }
 
@@ -5083,7 +5087,7 @@ function renderWeeklyPlanTapRows(items, { action, unit = "kegs" } = {}) {
 }
 
 function renderWeeklyPlanCocktailRows(items) {
-  if (!items.length) return '<p class="weekly-plan-empty">No cocktail labels are needed this week.</p>';
+  if (!items.length) return '<p class="weekly-plan-empty">None this week.</p>';
   const orderedItems = [...items].sort((a, b) => (
     toNumber(a.tapNumbers?.[0]) - toNumber(b.tapNumbers?.[0])
     || clean(a.name).localeCompare(clean(b.name))
@@ -5417,7 +5421,7 @@ function renderDashboardOverview() {
   dashboardOverview.innerHTML = `
     <header class="dashboard-overview-hero dashboard-overview-hero--${escapeHtml(overview.status)}">
       <div class="dashboard-overview-hero__copy">
-        <h2>This week, at a glance</h2>
+        <h2>This week</h2>
         <div class="dashboard-overview-status">
           <span>${escapeHtml(overview.statusLabel)}</span>
           <strong>${formatNumber(overview.alertCounts.critical)} urgent · ${formatNumber(overview.alertCounts.warning)} to review</strong>
@@ -5759,7 +5763,7 @@ function renderDashboardPulseCategoryLeaders({ pourLeaders, wallLabel }) {
       <section aria-labelledby="dashboard-pulse-liquor-leaders-title">
         <div class="dashboard-pulse-leader-heading"><h3 id="dashboard-pulse-liquor-leaders-title">Top liquor</h3><small>${metricLabel}</small></div>
         ${renderDashboardPulseLeaderList(pourLeaders.sections.liquor.rows, metric, metric === "sales"
-          ? "Current PMB prices are needed to rank the Patio and Karaoke liquor taps by projected sales."
+          ? "Add current PMB prices to rank liquor."
           : "No liquor pours were saved for the Patio or Karaoke wall last week.")}
       </section>
     </div>
@@ -5832,11 +5836,14 @@ function renderDashboardBeveragePulse() {
       limit: 3,
     },
   );
-  const projectedSalesMix = buildLastWeekProjectedSalesMix(weeklyUsageItems, {
+  const projectedSalesMix = buildLastWeekProjectedSalesMix(
+    [...weeklyUsageItems, ...weeklyUsageArchivedItems],
+    {
     wall: sellerRankingWall,
     getFullOunces: getWeeklyUsageFullOunces,
     getSellingPricePerOz: getWeeklyUsageItemSellingRate,
-  });
+    },
+  );
   const favorite = leaders[0] || null;
   const favoriteName = clean(favorite?.name).toLowerCase();
   const rising = [
@@ -5854,15 +5861,15 @@ function renderDashboardBeveragePulse() {
   container.innerHTML = `
     <header class="dashboard-pulse-header">
       <div>
-        <h2 id="dashboard-beverage-pulse-title">What guests are pouring</h2>
+        <h2 id="dashboard-beverage-pulse-title">Guest favorites</h2>
       </div>
       <div class="dashboard-pulse-controls">
-        <label class="dashboard-pulse-wall"><span>Show me</span><select data-seller-ranking-wall>
+        <label class="dashboard-pulse-wall"><span>Wall</span><select data-seller-ranking-wall>
           <option value="main"${sellerRankingWall === "main" ? " selected" : ""}>Main wall</option>
           <option value="karaoke"${sellerRankingWall === "karaoke" ? " selected" : ""}>Karaoke wall</option>
           <option value="patio"${sellerRankingWall === "patio" ? " selected" : ""}>Patio liquor wall</option>
         </select></label>
-        <label class="dashboard-pulse-wall dashboard-pulse-metric"><span>$ vs Oz</span><select data-dashboard-pulse-metric>
+        <label class="dashboard-pulse-wall dashboard-pulse-metric"><span>Rank by</span><select data-dashboard-pulse-metric>
           <option value="oz"${dashboardPulseRankingMetric === "oz" ? " selected" : ""}>Oz</option>
           <option value="sales"${dashboardPulseRankingMetric === "sales" ? " selected" : ""}>$</option>
         </select></label>
@@ -5875,7 +5882,7 @@ function renderDashboardBeveragePulse() {
         symbol: "★",
         eyebrow: "Crowd favorite",
         item: favorite,
-        copy: `Most poured on the ${wallLabel.toLowerCase()} across recent saved weeks.`,
+        copy: "",
         emptyCopy: "A favorite will show up here",
       })}
       ${renderDashboardPulseStory({
@@ -6093,6 +6100,11 @@ function renderWeeklyPlanReview(plan) {
 function getVendorOrderDraftModel(plan, freshness) {
   const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
   return buildVendorOrderDrafts(plan, {
+    proofMinimumCandidates: buildProofPrepReplacementCandidates({
+      cocktails: plan?.prep?.cocktails,
+      recipes,
+      inventoryItems,
+    }),
     generatedAt: snapshot?.generatedAt || "",
     sourceDate: snapshot?.publishedAt || "",
     freshness: freshness.readiness,
@@ -6110,10 +6122,10 @@ function renderVendorOrderDraftWorkspace(plan, freshness) {
   return `
     <section class="vendor-order-drafts" aria-labelledby="vendor-order-drafts-title">
       <header class="vendor-order-drafts__header">
-        <div><p class="eyebrow">Approval required</p><h2 id="vendor-order-drafts-title">Vendor Order Drafts</h2><p>Prepare Monday; all vendor orders are due Tuesday by 4:00 PM. Substitutions are not allowed.</p></div>
+        <div><p class="eyebrow">Approval required</p><h2 id="vendor-order-drafts-title">Vendor Order Drafts</h2><p>Due Tuesday by 4 PM · no substitutions.</p></div>
         <div><strong>${escapeHtml(model.schedule.label)}</strong><span>${money(model.weeklyTotal)} known total</span></div>
       </header>
-      <p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage || "Drafts are shared after creation. Real vendor submission is disabled.")}</p>
+      <p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage || "Draft only · vendor submission disabled.")}</p>
       <div class="vendor-order-drafts__grid">
         ${model.drafts.map((draft) => {
           const saved = savedById.get(draft.id) || {};
@@ -6497,8 +6509,8 @@ function renderPmbReconciliationReport() {
         <span>${report.queueCount} queued product change${report.queueCount === 1 ? "" : "s"}</span>
       </div>
       ${report.unmatchedSaved.length || report.unmatchedRemote.length ? `<p class="sync-status">${escapeHtml([
-        report.unmatchedSaved.length ? `Saved only: ${report.unmatchedSaved.slice(0, 4).join(", ")}${report.unmatchedSaved.length > 4 ? "…" : ""}` : "",
-        report.unmatchedRemote.length ? `PMB only: ${report.unmatchedRemote.slice(0, 4).join(", ")}${report.unmatchedRemote.length > 4 ? "…" : ""}` : "",
+        report.unmatchedSaved.length ? `Saved only: ${report.unmatchedSaved.join(", ")}` : "",
+        report.unmatchedRemote.length ? `PMB only: ${report.unmatchedRemote.join(", ")}` : "",
       ].filter(Boolean).join(" · "))}</p>` : `<p class="sync-status">Saved tap names match the current PMB tap list. No changes were made.</p>`}
     </div>
   `;
@@ -10096,11 +10108,19 @@ async function runKegLevelSync() {
       throw new Error(result?.error || "Could not load keg levels.");
     }
 
-    kegLiveLevels = buildKegLiveLevelMap(result.items || []);
-    kegDeviceLevels = buildKegDeviceLevelsMap(result.deviceLevels || {});
-    kegTemplateAssignments = buildKegTemplateAssignments();
-    kegPricingItems = buildKegPricingCatalog(kegWallItems, getCurrentKegPricingTapItems());
-    kegUpdatedAt = result.updatedAt || new Date().toISOString();
+    const selection = selectPmbCurrentTapSnapshot({
+      candidate: result,
+      fallback: pmbCurrentTapSnapshot,
+      expectedTapNumbers: kegWallItems.map((item) => item.tapNumber),
+    });
+    if (selection.source !== "candidate") {
+      if (selection.snapshot) applyPmbCurrentTapSnapshot(selection.snapshot);
+      throw new Error(selection.issue || "PMB did not return the complete wall.");
+    }
+
+    pmbCurrentTapSnapshot = selection.snapshot;
+    savePmbCurrentTapSnapshot();
+    applyPmbCurrentTapSnapshot(pmbCurrentTapSnapshot);
     const installedOnDeckItems = reconcileInstalledKegOnDeckProducts();
     kegSyncMessage = installedOnDeckItems.length
       ? `Found live levels for ${result.items?.length || 0} products. Removed ${installedOnDeckItems.map((entry) => `${entry.name} from On Deck on tap ${entry.tapNumber}`).join(", ")} because ${installedOnDeckItems.length === 1 ? "it is" : "they are"} now connected.`
@@ -10109,7 +10129,14 @@ async function runKegLevelSync() {
     renderPricing();
     succeeded = true;
   } catch (error) {
-    kegSyncMessage = getPmbConnectionErrorMessage(error, "Could not load live keg levels.");
+    const fallback = selectPmbCurrentTapSnapshot({
+      fallback: pmbCurrentTapSnapshot,
+      expectedTapNumbers: kegWallItems.map((item) => item.tapNumber),
+    });
+    if (fallback.snapshot) applyPmbCurrentTapSnapshot(fallback.snapshot);
+    kegSyncMessage = fallback.snapshot
+      ? "PMB unavailable. Showing last complete sync."
+      : getPmbConnectionErrorMessage(error, "Could not load live keg levels.");
   } finally {
     kegSyncLoading = false;
     renderKegLevels();
@@ -10404,6 +10431,14 @@ function buildKegDeviceLevelsMap(rawDeviceLevels) {
       Array.isArray(levels) ? levels.slice().sort((a, b) => a.lineNum - b.lineNum) : [],
     ]),
   );
+}
+
+function applyPmbCurrentTapSnapshot(snapshot) {
+  kegLiveLevels = buildKegLiveLevelMap(snapshot?.items || []);
+  kegDeviceLevels = buildKegDeviceLevelsMap(snapshot?.deviceLevels || {});
+  kegTemplateAssignments = buildKegTemplateAssignments();
+  kegPricingItems = buildKegPricingCatalog(kegWallItems, getCurrentKegPricingTapItems());
+  kegUpdatedAt = snapshot?.updatedAt || "";
 }
 
 function buildKegTemplateAssignments() {
@@ -12342,9 +12377,10 @@ async function addPmbProduct(event) {
     const queued = enqueuePmbPublishItem(pmbPublishQueue, payload);
     pmbPublishQueue = queued.queue;
     savePmbPublishQueue();
+    addComingSoonItemFromPmbProduct(payload);
 
     setPmbProductStatus(
-      `${name} was ${queued.replaced ? "updated in" : "saved to"} the PMB publishing queue. Nothing was sent to Pour My Beer.`,
+      `${name} was ${queued.replaced ? "updated" : "saved"} for PMB review.`,
       "success",
     );
     cancelUntappdProductSearch("beer");
@@ -12410,15 +12446,17 @@ async function addLiquorProduct(event) {
   liquorProductSaving = true;
   if (liquorProductSubmitButton) liquorProductSubmitButton.textContent = "Saving...";
   if (liquorProductSubmitButton) liquorProductSubmitButton.disabled = true;
-  setLiquorProductStatus("Saving the liquor tap to the Pour My Beer queue...", "loading");
+  setLiquorProductStatus("", "loading");
 
   try {
     const queued = enqueuePmbPublishItem(pmbPublishQueue, payload);
     pmbPublishQueue = queued.queue;
     savePmbPublishQueue();
+    comingSoonItems = mergeRequiredComingSoonItems(comingSoonItems, pmbPublishQueue);
+    saveComingSoonItems();
 
     setLiquorProductStatus(
-      `${name} was ${queued.replaced ? "updated in" : "saved to"} the PMB publishing queue. Nothing was sent to Pour My Beer.`,
+      `${name} was ${queued.replaced ? "updated" : "saved"} for PMB review.`,
       "success",
     );
     cancelUntappdProductSearch("liquor");
@@ -13318,7 +13356,7 @@ function clearBeerLookupResult({ keepStatus = false } = {}) {
     setPmbProductImage("");
   }
   hideUntappdSearchResults("beer");
-  if (!keepStatus) setPmbProductStatus("Enter a beer name to search Untappd, then add the keg cost.", "");
+  if (!keepStatus) setPmbProductStatus("", "");
 }
 
 function buildRecipeDescription(title, category, recipeIngredients = getRecipeBuilderIngredientsFromRows()) {
@@ -13444,7 +13482,7 @@ function syncPmbProductDefaults() {
     if (pmbGeneratedSummary) {
       pmbGeneratedSummary.textContent = chargePerOz
         ? `Generated: ${money(chargePerOz)}/oz at ${formatNumber(targetMargin)}% margin, 16 oz serving, ${formatNumber(kegOz)} oz keg.`
-        : "Enter a keg cost to generate the PMB price, serving size, keg size, description, and picture.";
+        : "";
     }
     return;
   }
@@ -16058,6 +16096,23 @@ function loadKegOnHandOverrides() {
     return JSON.parse(localStorage.getItem(KEG_ON_HAND_STORAGE_KEY) || "{}");
   } catch {
     return {};
+  }
+}
+
+function loadPmbCurrentTapSnapshot() {
+  try {
+    const snapshot = JSON.parse(localStorage.getItem(PMB_CURRENT_TAP_SNAPSHOT_STORAGE_KEY) || "null");
+    return snapshot && typeof snapshot === "object" ? snapshot : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePmbCurrentTapSnapshot() {
+  try {
+    localStorage.setItem(PMB_CURRENT_TAP_SNAPSHOT_STORAGE_KEY, JSON.stringify(pmbCurrentTapSnapshot));
+  } catch {
+    // A live complete snapshot still remains authoritative for this session.
   }
 }
 
