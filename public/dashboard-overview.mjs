@@ -191,7 +191,8 @@ function getPlanState(weeklyPlan, nowTime, staleAfterDays) {
   const ageState = generatedAt
     ? getAgeState(generatedAt, nowTime, nonNegativeNumber(staleAfterDays) * DAY_MS)
     : "unknown";
-  const ageStale = ageState === "stale";
+  const lockedForWeek = weeklyPlan?.lockedForWeek === true;
+  const ageStale = !lockedForWeek && ageState === "stale";
   const details = [
     ...cleanList(readiness.blockers),
     ...cleanList(readiness.staleReasons),
@@ -211,6 +212,7 @@ function getPlanState(weeklyPlan, nowTime, staleAfterDays) {
     details,
     generatedAt,
     ageStale,
+    lockedForWeek,
     actionable: ["ready", "review"].includes(status) && !ageStale,
   };
 }
@@ -283,23 +285,8 @@ function buildSharedAlerts(sharedSources) {
   const alerts = [];
   const unavailable = sharedSources.filter((source) => !source.checked || !source.available);
   const uninitialized = sharedSources.filter((source) => source.available && !source.initialized);
-  const uninitializedDashboard = uninitialized.filter((source) => source.key === "dashboard");
   const uninitializedOperations = uninitialized.filter((source) => source.key !== "dashboard");
-  const failed = sharedSources.filter((source) => source.saveError || !source.durable);
   const pending = sharedSources.filter((source) => source.savePending && !source.saveError && source.durable);
-
-  if (failed.length) {
-    const labels = failed.map((source) => source.label);
-    alerts.push(makeAlert({
-      id: "shared-save-failed",
-      severity: "critical",
-      priority: 10,
-      title: "Shared changes are not safely published",
-      message: `${joinLabels(labels)} ${failed.length === 1 ? "has" : "have"} a save or recovery problem. Do not assume another device has these changes.`,
-      details: failed.map((source) => source.saveError || `${source.label} could not preserve its pending browser recovery copy.`),
-      action: makeAction("Review shared data", failed[0].target),
-    }));
-  }
 
   if (unavailable.length) {
     const labels = unavailable.map((source) => source.label);
@@ -325,21 +312,6 @@ function buildSharedAlerts(sharedSources) {
     }));
   }
 
-  if (uninitializedDashboard.length) {
-    const dashboardSetup = uninitializedDashboard[0];
-    alerts.push(makeAlert({
-      id: "shared-dashboard-setup-incomplete",
-      severity: "warning",
-      priority: 35,
-      title: "Dashboard setup is not shared yet",
-      message: dashboardSetup.setupMessage
-        || "Recipe, pricing, product, and tap-replacement setup is still being read from this browser. Review the one-time import before relying on those values from another device.",
-      action: dashboardSetup.setupActionAvailable
-        ? makeAction("Review dashboard setup", dashboardSetup.target)
-        : null,
-    }));
-  }
-
   if (pending.length) {
     const labels = pending.map((source) => source.label);
     alerts.push(makeAlert({
@@ -355,8 +327,7 @@ function buildSharedAlerts(sharedSources) {
   return {
     alerts,
     blocksPlanNumbers: unavailable.length > 0
-      || uninitialized.length > 0
-      || failed.length > 0
+      || uninitializedOperations.length > 0
       || pending.length > 0,
   };
 }
@@ -622,6 +593,32 @@ function buildPricingAlerts(feed, feedAgeState, pricing) {
   return { alerts, priceFeedCurrent };
 }
 
+function combinePmbConnectionAlerts({
+  kegFeed,
+  kegAlerts,
+  pricingFeed,
+  pricingResult,
+}) {
+  if (kegFeed.status !== "offline" || pricingFeed.status !== "offline") {
+    return [...kegAlerts, ...pricingResult.alerts];
+  }
+
+  const connectionDetails = [...new Set([
+    clean(kegFeed.error),
+    clean(pricingFeed.error),
+  ].filter(Boolean))];
+
+  return [makeAlert({
+    id: "pmb-connection-offline",
+    severity: "critical",
+    priority: 60,
+    title: "PMB connection is unavailable",
+    message: "Live keg levels and tap pricing could not be refreshed. Saved information remains visible, but treat it as unverified until PMB reconnects.",
+    details: connectionDetails,
+    action: makeAction("Retry PMB Connection", DASHBOARD_OVERVIEW_TARGETS.kegLevels),
+  })];
+}
+
 function buildKpis({
   planState,
   summary,
@@ -830,8 +827,40 @@ export function buildDashboardOverview(signals = {}, options = {}) {
   const kegAlerts = buildKegLevelAlerts(kegFeed, kegFeedAgeState);
   const usageAlerts = buildUsageAlerts(usage, usageAgeState);
   const pricingResult = buildPricingAlerts(pricingFeed, pricingFeedAgeState, pricing);
+  const pmbAlerts = combinePmbConnectionAlerts({
+    kegFeed,
+    kegAlerts,
+    pricingFeed,
+    pricingResult,
+  });
   const planAlerts = buildPlanAlerts(planState, staleAfterDays);
   const extraAlerts = [];
+
+  const notReceivedItems = Array.isArray(signals.orders?.notReceivedItems)
+    ? signals.orders.notReceivedItems.filter((item) => item && typeof item === "object")
+    : [];
+  if (notReceivedItems.length > 0) {
+    extraAlerts.push(makeAlert({
+      id: "weekly-order-not-received",
+      severity: "critical",
+      priority: 55,
+      title: `${formatCount(notReceivedItems.length)} ordered ${plural(notReceivedItems.length, "item was", "items were")} short or not received`,
+      message: "A delivery was checked and at least one planned quantity was missing. Review the vendor order and arrange the follow-up.",
+      details: notReceivedItems.map((item) => {
+        const quantity = nonNegativeNumber(item.quantity);
+        const receivedQuantity = nonNegativeNumber(item.receivedQuantity);
+        const missingQuantity = nonNegativeNumber(item.missingQuantity || quantity - receivedQuantity);
+        const identity = [clean(item.vendor), clean(item.name)].filter(Boolean).join(" · ");
+        const unit = clean(item.unit) || plural(quantity, "unit");
+        const amount = quantity
+          ? `${formatQuantity(receivedQuantity)} of ${formatQuantity(quantity)} ${unit} received${missingQuantity ? ` (${formatQuantity(missingQuantity)} missing)` : ""}`
+          : "";
+        const reporter = clean(item.handledBy) ? `reported by ${clean(item.handledBy)}` : "";
+        return [identity, amount, reporter].filter(Boolean).join(" · ");
+      }),
+      action: makeAction("Review Delivery", DASHBOARD_OVERVIEW_TARGETS.weeklyPlan),
+    }));
+  }
 
   const missingCurrentCount = count(inventory.missingCurrentCount);
   if (missingCurrentCount > 0) {
@@ -857,32 +886,24 @@ export function buildDashboardOverview(signals = {}, options = {}) {
     }));
   }
 
-  const pendingPublishCount = count(signals.products?.pendingPublishCount);
-  if (pendingPublishCount > 0) {
-    extraAlerts.push(makeAlert({
-      id: "pmb-products-pending",
-      severity: "info",
-      priority: 105,
-      title: `${formatCount(pendingPublishCount)} PMB ${plural(pendingPublishCount, "product is", "products are")} awaiting owner review`,
-      message: "Queued products are not live until an owner verifies the work-network connection and publishes them.",
-      action: makeAction("Review Product Queue", DASHBOARD_OVERVIEW_TARGETS.addProduct),
-    }));
-  }
-
   const alerts = sortDashboardOverviewAlerts([
     ...sharedResult.alerts,
     ...planAlerts,
-    ...kegAlerts,
+    ...pmbAlerts,
     ...usageAlerts,
-    ...pricingResult.alerts,
     ...extraAlerts,
   ]);
-  const usageBlocksPlanNumbers = !usage.hasCurrentPeriod || !usage.currentComplete;
-  const kegBlocksPlanNumbers = ["partial", "offline", "not-checked", "stale"].includes(kegFeed.status)
-    || kegFeedAgeState === "stale";
-  const inventoryBlocksPlanNumbers = missingCurrentCount > 0;
+  const usageBlocksPlanNumbers = !planState.lockedForWeek && (
+    !usage.hasCurrentPeriod || !usage.currentComplete
+  );
+  const kegBlocksPlanNumbers = !planState.lockedForWeek && (
+    ["partial", "offline", "not-checked", "stale"].includes(kegFeed.status)
+    || kegFeedAgeState === "stale"
+  );
+  const inventoryBlocksPlanNumbers = !planState.lockedForWeek && missingCurrentCount > 0;
+  const sharedBlocksPlanNumbers = !planState.lockedForWeek && sharedResult.blocksPlanNumbers;
   const planNumbersAvailable = planState.actionable
-    && !sharedResult.blocksPlanNumbers
+    && !sharedBlocksPlanNumbers
     && !usageBlocksPlanNumbers
     && !kegBlocksPlanNumbers
     && !inventoryBlocksPlanNumbers;

@@ -13,10 +13,6 @@ const operationSections = [
 function OperationsBar({ context }) {
   return (
     <div className="operations-bar">
-      <div>
-        <p className="eyebrow">Beverage ops</p>
-        <h2>Weekly Beverage Operations</h2>
-      </div>
       <div className="operation-tabs" role="tablist" aria-label="Beverage operations sections">
         {operationSections.map(([id, label]) => (
           <button
@@ -93,7 +89,6 @@ export default function DashboardPage() {
       <div className="shell">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Batch cocktail costing</p>
             <h1>Beverage Dashboard</h1>
           </div>
         </header>
@@ -110,27 +105,16 @@ export default function DashboardPage() {
     <div className="shell" data-dashboard-role={sessionRole}>
       <header className="topbar">
         <div>
-          <p className="eyebrow">{isEmployee ? "Staff recipe view" : "Batch cocktail costing"}</p>
           <h1>Beverage Dashboard</h1>
         </div>
         <div className="topbar-actions">
-          <button
-            className="global-search-trigger dashboard-owner-only"
-            id="global-search-trigger"
-            type="button"
-            aria-haspopup="dialog"
-            aria-controls="global-search-dialog"
-          >
-            <span aria-hidden="true">⌕</span>
-            <span>Search dashboard</span>
-            <kbd>⌘ K</kbd>
-          </button>
           <div className="top-actions dashboard-owner-only" aria-label="Dashboard sections">
             <button className="tab-button is-active" id="dashboard-tab" data-tab="dashboard" type="button">Dashboard</button>
             <button className="tab-button" id="operations-tab" data-tab="operations" type="button">Beverage Ops</button>
             <button className="tab-button" id="weekly-usage-tab" data-tab="weekly-usage" type="button">Weekly Usage</button>
             <button className="tab-button" id="recipes-tab" data-tab="recipes" data-recipe-view="current" type="button">Recipes</button>
             <button className="tab-button" id="add-tab" data-tab="add" type="button">Add Product</button>
+            <button className="tab-button" id="search-tab" data-tab="search" type="button">Search</button>
           </div>
           <a className="logout-link" href="/api/logout" aria-label={`Log out of the ${sessionRole} dashboard`}>Log out</a>
         </div>
@@ -152,7 +136,7 @@ export default function DashboardPage() {
           </label>
           <button className="global-search-close" id="global-search-close" type="button" aria-label="Close dashboard search">Esc</button>
         </div>
-        <p className="global-search-hint" id="global-search-hint">Start typing, or choose a dashboard section.</p>
+        <p className="global-search-hint" id="global-search-hint"></p>
         <div className="global-search-results" id="global-search-results" role="listbox" aria-label="Dashboard search results"></div>
       </dialog>
 
@@ -161,12 +145,28 @@ export default function DashboardPage() {
           <div className="dashboard-overview" id="dashboard-overview"></div>
         </section>
 
+        <section className="panel" id="search-panel" role="tabpanel" aria-labelledby="search-tab">
+          <div className="dashboard-data-search">
+            <form className="dashboard-data-search__form" id="dashboard-data-search-form">
+              <label htmlFor="dashboard-data-search-input">What do you want to know?</label>
+              <div>
+                <input
+                  id="dashboard-data-search-input"
+                  type="search"
+                  autoComplete="off"
+                />
+                <button className="primary-button" type="submit">Search</button>
+              </div>
+            </form>
+            <p className="dashboard-data-search__feedback" id="dashboard-data-search-feedback" aria-live="polite"></p>
+            <div className="dashboard-data-search__results" id="dashboard-data-search-results"></div>
+          </div>
+        </section>
+
         <section className="panel" id="recipes-panel" role="tabpanel" aria-labelledby="recipes-tab">
           <header className="recipe-workspace-header">
             <div>
-              <p className="eyebrow">Recipe library</p>
               <h2>Cocktail Recipes</h2>
-              <p>Work with the active menu or reopen a recipe from the archive without leaving this page.</p>
             </div>
             <div className="recipe-view-switcher" role="tablist" aria-label="Recipe status">
               <button
@@ -238,11 +238,8 @@ export default function DashboardPage() {
           <section className="pricing-advisor" aria-labelledby="pricing-advisor-title">
             <div className="pricing-advisor__header">
               <div>
-                <p className="eyebrow">Owner review required</p>
-                <h2 id="pricing-advisor-title">82% minimum gross-margin suggestions</h2>
-                <p>The suggested price is prefilled for beer and cocktails below 82%. Review any cost warning, then choose Approve &amp; update PMB. Nothing is sent until you confirm the live change.</p>
+                <h2 id="pricing-advisor-title">82% Price Suggestions</h2>
               </div>
-              <span className="pricing-advisor__mode">Confirm before sending</span>
             </div>
             <div className="pricing-advisor__summary" id="pricing-advisor-summary" aria-live="polite"></div>
             <div className="pricing-table-wrap">
@@ -267,7 +264,6 @@ export default function DashboardPage() {
           <div className="pricing-layout">
             <aside className="pricing-summary" id="pricing-summary"></aside>
             <div className="pricing-table-wrap">
-              <p className="pricing-calculation-note">Current-wall reference list. Beer and cocktail PMB approvals are in the 82% suggestion table above; cocktail inputs here change dashboard calculations only.</p>
               <table className="pricing-table">
                 <thead>
                   <tr>
@@ -286,11 +282,8 @@ export default function DashboardPage() {
           <section className="shot-pricing" aria-labelledby="shot-pricing-title">
             <div className="shot-pricing__header">
               <div>
-                <p className="eyebrow">Portion Mode · liquor only</p>
                 <h2 id="shot-pricing-title">Shot pricing</h2>
-                <p>Edit the two PMB portion prices together. Shot prices are manual owner decisions and are never governed by the 82% beer-and-cocktail rule below.</p>
               </div>
-              <span className="pricing-advisor__mode">Two-price review</span>
             </div>
             <div className="shot-pricing__summary" id="shot-pricing-summary" aria-live="polite"></div>
             <div className="pricing-table-wrap">
@@ -372,7 +365,6 @@ export default function DashboardPage() {
           >
             <div className="form-header">
               <div>
-                <p className="eyebrow">Product builder</p>
                 <h2 id="recipe-form-title">Add cocktail product</h2>
               </div>
               <div className="form-actions">
@@ -426,7 +418,7 @@ export default function DashboardPage() {
                 <h3>Ingredients</h3>
                 <button className="ghost-button" id="add-ingredient-row" type="button">Add ingredient</button>
               </div>
-              <p className="formula-note">Put the liquor as the first ingredient. The dashboard uses that first row to calculate how many ounces of cocktail equal 1.5 oz of alcohol.</p>
+              <p className="formula-note">List the liquor first.</p>
               <div className="new-ingredient-table-wrap">
                 <table className="new-ingredient-table">
                   <thead>
@@ -455,7 +447,6 @@ export default function DashboardPage() {
           >
             <div className="form-header">
               <div>
-                <p className="eyebrow">Pour My Beer</p>
                 <h2>Add beer product</h2>
               </div>
               <div className="form-actions">
@@ -478,7 +469,6 @@ export default function DashboardPage() {
                   aria-expanded="false"
                   aria-controls="beer-untappd-results"
                 />
-                <span className="untappd-search-hint">Searches the official Untappd beer database.</span>
                 <div className="untappd-search-results" id="beer-untappd-results" role="listbox" hidden></div>
               </div>
               <label>
@@ -523,7 +513,7 @@ export default function DashboardPage() {
                 </div>
               </div>
             </div>
-            <div className="pmb-product-status" id="pmb-product-status">Ready to save a beer for later Pour My Beer publishing.</div>
+            <div className="pmb-product-status" id="pmb-product-status"></div>
           </form>
 
           <form
@@ -536,7 +526,6 @@ export default function DashboardPage() {
           >
             <div className="form-header">
               <div>
-                <p className="eyebrow">Pour My Beer</p>
                 <h2>Add liquor tap</h2>
               </div>
               <div className="form-actions">
@@ -558,7 +547,6 @@ export default function DashboardPage() {
                   aria-expanded="false"
                   aria-controls="liquor-untappd-results"
                 />
-                <span className="untappd-search-hint">Searches spirits already carried on On Par’s Untappd menus.</span>
                 <div className="untappd-search-results" id="liquor-untappd-results" role="listbox" hidden></div>
               </div>
               <label>
@@ -586,20 +574,18 @@ export default function DashboardPage() {
                 <textarea id="liquor-product-notes" rows="3" placeholder="Optional PMB tasting notes"></textarea>
               </label>
             </div>
-            <div className="pmb-product-status" id="liquor-product-status">Ready to save a straight liquor tap for later Pour My Beer publishing.</div>
+            <div className="pmb-product-status" id="liquor-product-status"></div>
           </form>
 
           <section className="pmb-publish-queue dashboard-owner-only" aria-labelledby="pmb-publish-queue-title">
             <div className="pmb-publish-queue__header">
               <div>
-                <p className="eyebrow">Work-network handoff</p>
                 <h2 id="pmb-publish-queue-title">Pour My Beer publishing queue</h2>
-                <p>Prepare products anywhere. Nothing is sent until an owner reviews one item and publishes it while connected to the work network.</p>
               </div>
               <button className="ghost-button" id="check-pmb-queue-connection" type="button">Check PMB connection</button>
             </div>
             <div className="pmb-queue-connection" id="pmb-queue-connection" data-state="idle" aria-live="polite">
-              Connection not checked. Publishing remains locked until this dashboard reaches Pour My Beer.
+              PMB connection not checked.
             </div>
             <div className="pmb-publish-queue__summary" id="pmb-publish-queue-summary"></div>
             <div className="pmb-publish-queue__list" id="pmb-publish-queue-list"></div>
@@ -623,7 +609,6 @@ export default function DashboardPage() {
               <section className="inventory-block">
                 <div className="inventory-block__header">
                   <div>
-                    <p className="eyebrow">Cocktail Ingredients</p>
                     <h2>Ingredient Pricing</h2>
                   </div>
                 </div>
@@ -633,8 +618,8 @@ export default function DashboardPage() {
                       <tr>
                         <th>Ingredient</th>
                         <th>Current $/oz</th>
-                        <th>Bottle oz</th>
-                        <th>Bottle price</th>
+                        <th>Package size</th>
+                        <th>Package price</th>
                         <th>Last updated</th>
                         <th></th>
                       </tr>
@@ -647,7 +632,6 @@ export default function DashboardPage() {
               <section className="inventory-block">
                 <div className="inventory-block__header pricing-section-header">
                   <div>
-                    <p className="eyebrow">Beer Kegs</p>
                     <h2>Keg Pricing</h2>
                   </div>
                   <button className="ghost-button" id="clear-keg-prices" type="button">Clear keg overrides</button>
@@ -688,7 +672,6 @@ export default function DashboardPage() {
               <section className="inventory-block">
                 <div className="inventory-block__header">
                   <div>
-                    <p className="eyebrow">Snapshot</p>
                     <h2>Current Inventory</h2>
                   </div>
                   <form className="custom-inventory-form" id="custom-inventory-form">
@@ -747,9 +730,8 @@ export default function DashboardPage() {
               <section className="inventory-block">
                 <div className="inventory-block__header">
                   <div>
-                    <p className="eyebrow">Reorder List</p>
                     <h2>Needs To Be Ordered</h2>
-                    <p className="formula-note inventory-note">Counts and pars use individual units. Packaged products round up to their full case size.</p>
+                    <p className="formula-note inventory-note">Orders round to full cases.</p>
                   </div>
                 </div>
                 <div className="inventory-table-wrap">
@@ -773,7 +755,6 @@ export default function DashboardPage() {
               <section className="inventory-block">
                 <div className="inventory-block__header">
                   <div>
-                    <p className="eyebrow">Weekly History</p>
                     <h2>Saved Inventory Snapshots</h2>
                   </div>
                 </div>
@@ -806,7 +787,6 @@ export default function DashboardPage() {
               <section className="inventory-block">
                 <div className="inventory-block__header">
                   <div>
-                    <p className="eyebrow">Historical Usage</p>
                     <h2>Weekly Usage Tracker</h2>
                   </div>
                 </div>

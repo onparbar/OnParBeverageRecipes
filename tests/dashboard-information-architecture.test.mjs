@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [pageSource, dashboardSource] = await Promise.all([
+const [pageSource, dashboardSource, inventorySource, staffDashboardSource] = await Promise.all([
   readFile(new URL("../app/page.jsx", import.meta.url), "utf8"),
   readFile(new URL("../public/dashboard.js", import.meta.url), "utf8"),
+  readFile(new URL("../public/data/inventory-2026-06-01.csv", import.meta.url), "utf8"),
+  readFile(new URL("../public/staff-dashboard.js", import.meta.url), "utf8"),
 ]);
 
 test("the owner dashboard is the initial page and recipes appear later in navigation", () => {
@@ -33,35 +35,108 @@ test("current and old recipes share one Recipes workspace", () => {
   assert.match(dashboardSource, /recipeView: inactive \? "old" : "current"/);
 });
 
-test("Dashboard and Weekly Plan render the new overview and PMB trend layers", () => {
+test("new recipe cards use spirit labels without physical-wall suffixes", () => {
+  assert.match(dashboardSource, /canonicalTitle: "Whiskey Smash \(Jim Beam\)"/);
+  assert.match(dashboardSource, /canonicalTitle: "Apple Jack \(Jack Fire\)"/);
+  assert.match(dashboardSource, /canonicalTitle: "On Par Tee \(Crown Royal\)"/);
+  assert.match(dashboardSource, /canonicalTitle: "Bacardi Sunset"/);
+  assert.doesNotMatch(dashboardSource, /canonicalTitle: "(?:Whiskey Smash|Apple Jack|On Par Tee|Bacardi Sunset)[^"]*\) 1"/);
+  assert.doesNotMatch(dashboardSource, /\["WHISKEY SMASH", "Whiskey Smash"\]/);
+  assert.doesNotMatch(dashboardSource, /\["ON PAR TEE", "On Par Tee"\]/);
+  assert.match(dashboardSource, /function getCanonicalProductDisplayName\(/);
+  assert.match(dashboardSource, /getCanonicalProductDisplayName\(item\.orderProductName \|\| item\.name\)/);
+  assert.match(dashboardSource, /getCanonicalProductDisplayName\(item\.name\)/);
+  assert.match(dashboardSource, /getCanonicalProductDisplayName\(recommendation\.orderProductName\)/);
+});
+
+test("Dashboard owns the combined beverage pulse instead of duplicating it in Weekly Plan", () => {
   assert.match(pageSource, /id="dashboard-overview"/);
   assert.match(dashboardSource, /buildDashboardOverview\(/);
   assert.match(dashboardSource, /buildWeeklyPlanTrends\(/);
-  assert.match(dashboardSource, /What changed in the pours/);
-  assert.match(dashboardSource, /Pour My Beer ounces—not drinks sold or revenue/);
+  assert.match(dashboardSource, /id="dashboard-beverage-pulse"/);
+  assert.match(dashboardSource, /What guests are pouring/);
+
+  const weeklyPlanStart = dashboardSource.indexOf("function renderWeeklyPlan()");
+  const weeklyPlanEnd = dashboardSource.indexOf("function renderKegLevels", weeklyPlanStart);
+  assert.doesNotMatch(dashboardSource.slice(weeklyPlanStart, weeklyPlanEnd), /renderWeeklyPlanTrends\(\)/);
+});
+
+test("Weekly Plan uses one Monday lock action without print or CSV controls", () => {
+  assert.match(dashboardSource, /Lock Monday Plan/);
+  assert.doesNotMatch(dashboardSource, /id="export-weekly-plan"/);
+  assert.doesNotMatch(dashboardSource, /id="print-weekly-plan"/);
+  assert.doesNotMatch(dashboardSource, /function exportWeeklyPlanCsv/);
+});
+
+test("prepared ingredients expose purchased package prices instead of editable diluted yields", () => {
+  assert.match(pageSource, /<th>Package size<\/th>/);
+  assert.match(pageSource, /<th>Package price<\/th>/);
+  assert.match(dashboardSource, /getPreparedIngredientYieldNote/);
+  assert.match(dashboardSource, /preparedPurchase\?\.priceInputLabel/);
+});
+
+test("pricing rows omit redundant vendor-sync badges", () => {
+  assert.doesNotMatch(dashboardSource, />via Provi<\/span>/);
+  assert.doesNotMatch(dashboardSource, /title="\$\{escapeHtml\(ingredient\.vendorProduct\.productName\)\}">\$\{escapeHtml\(ingredient\.vendorProduct\.vendor\)\}<\/span>/);
+  assert.doesNotMatch(dashboardSource, /title="\$\{escapeHtml\(kegItem\.vendorProduct\.productName\)\}">Provi<\/span>/);
+});
+
+test("Triple Jam and Truly use exact Heidelberg half-barrel mappings", () => {
+  assert.match(dashboardSource, /productName: "Blake's Hard Cider Triple Jam"/);
+  assert.match(dashboardSource, /preferredSku: "41189"/);
+  assert.match(dashboardSource, /productName: "TRULY Hard Seltzer Wild Berry"/);
+  assert.match(dashboardSource, /preferredSku: "42517"/);
+});
+
+test("weekly prep is a wall-specific cocktail label list without redundant order-type identifiers", () => {
+  assert.match(dashboardSource, /function renderWeeklyPlanCocktailRows\(/);
+  assert.match(dashboardSource, /batchSizeOz/);
+  assert.match(dashboardSource, /label\${item\.quantity === 1 \? "" : "s"}/);
+  assert.match(staffDashboardSource, /item\.wall.*wall/);
+  assert.match(staffDashboardSource, /item\.batchSizeOz/);
+
+  const vendorRendererStart = dashboardSource.indexOf("function renderWeeklyPlanByVendor");
+  const vendorRendererEnd = dashboardSource.indexOf("function renderWeeklyPlanReview", vendorRendererStart);
+  assert.doesNotMatch(dashboardSource.slice(vendorRendererStart, vendorRendererEnd), /escapeHtml\(item\.lineType\)/);
+  assert.doesNotMatch(staffDashboardSource, /clean\(item\.lineType\)/);
+});
+
+test("the owner dashboard keeps completed cocktail prep visible for the current Monday plan", () => {
+  assert.match(dashboardSource, /Cocktails Prepped/);
+  assert.match(dashboardSource, /Prepped by \$\{escapeHtml\(item\.preparedBy\)\}/);
+  assert.match(dashboardSource, /formatDashboardPrepTime\(item\.completedAt\)/);
+  assert.match(dashboardSource, /fetch\("\/api\/staff-prep-plan"/);
+  assert.match(dashboardSource, /refreshDashboardStaffPrepPlan\(\)/);
+  assert.match(dashboardSource, /window\.setInterval\([\s\S]*refreshDashboardStaffPrepPlan\(\)[\s\S]*30_000/);
+});
+
+test("locking a new Monday plan clears the prior plan's prep history", async () => {
+  const parAgentSource = await readFile("lib/par-agent.mjs", "utf8");
+  const publishStart = parAgentSource.indexOf("export async function publishWeeklyPlanSnapshot");
+  const publishEnd = parAgentSource.indexOf("export function validateTapConfigCoverage", publishStart);
+  const publishSource = parAgentSource.slice(publishStart, publishEnd);
+  assert.match(publishSource, /prepChecklist: \{\}/);
 });
 
 test("Tap Pricing displays only PMB-verified current wall products", () => {
   assert.match(dashboardSource, /liveTapPriceItems = filterCurrentTapPricingItems\(result\.items\)/);
   assert.match(dashboardSource, /if \(!liveTapPriceItems\.length\) return \[\];/);
-  assert.match(pageSource, /82% minimum gross-margin suggestions/);
-  assert.match(pageSource, /Nothing is sent until you confirm the live change/);
+  assert.match(pageSource, /82% Price Suggestions/);
   assert.match(dashboardSource, /Approve & update PMB/);
 });
 
-test("owner login automatically attempts every read-only PMB refresh", () => {
+test("owner login automatically attempts PMB and mapped vendor price refreshes", () => {
   assert.match(dashboardSource, /void runOwnerLoginSync\(\)/);
   assert.match(dashboardSource, /acquireOwnerLoginSyncLock\(\)/);
   assert.match(dashboardSource, /releaseOwnerLoginSyncLock\(lockToken\)/);
   assert.match(dashboardSource, /runKegLevelSync\(\)/);
   assert.match(dashboardSource, /runTapPricingSync\(\)/);
   assert.match(dashboardSource, /runPmbWeeklyUsageSync\(\{ automatic: true \}\)/);
+  assert.match(dashboardSource, /runVendorSync\(\{ automatic: true \}\)/);
   assert.match(dashboardSource, /flushPendingSharedWeeklyUsageSave\(\)/);
   assert.match(dashboardSource, /flushPendingInventoryFieldSyncs\(\)/);
   assert.match(dashboardSource, /flushPendingParAgentStateSync\(\)/);
   assert.match(dashboardSource, /isRecommendationForOperatingWeek/);
-  assert.match(dashboardSource, /shouldRefreshMondayPlanForUsage/);
-  assert.match(dashboardSource, /if \(!mondayPlanIsCurrent\) await runKegParAgent\(\)/);
   assert.match(dashboardSource, /parAgentRunning = false;\s+renderKegLevels\(\);\s+renderWeeklyPlan\(\);\s+renderDashboardOverview\(\)/);
   assert.match(dashboardSource, /Automatic PMB check paused for owner review/);
   assert.match(dashboardSource, /nothing was accepted or saved automatically/);
@@ -74,7 +149,17 @@ test("owner login automatically attempts every read-only PMB refresh", () => {
   assert.match(ownerSyncSource, /if \(!kegResult\) kegResult = await runKegLevelSync\(\)/);
   assert.match(ownerSyncSource, /runTapPricingSync\(\)/);
   assert.match(ownerSyncSource, /lockToken\s*\? runPmbWeeklyUsageSync/);
+  assert.match(ownerSyncSource, /lockToken\s*\? runVendorSync/);
+  assert.match(ownerSyncSource, /mondaySnapshot\?\.kegPlanSnapshot/);
+  assert.doesNotMatch(ownerSyncSource, /runKegParAgent\(\)/);
   assert.doesNotMatch(ownerSyncSource, /if \(!lockToken\) return;/);
+});
+
+test("vendor price sync is automatic at owner login and still supports a manual retry", () => {
+  assert.match(dashboardSource, /async function runVendorSync\(\{ automatic = false \} = \{\}\)/);
+  assert.match(dashboardSource, /const syncScope = automatic \? "all" : vendorSyncScope/);
+  assert.match(dashboardSource, /Prices sync automatically/);
+  assert.match(dashboardSource, /id="run-vendor-sync"/);
 });
 
 test("PMB refresh alerts distinguish attempted failures from unchecked feeds", () => {
@@ -99,35 +184,106 @@ test("the authoritative computer can initialize shared setup from bundled defaul
   assert.match(dashboardSource, /Type \$\{SHARED_DASHBOARD_IMPORT_PHRASE\}/);
 });
 
-test("every Weekly Usage tap row renders an accessible week-by-week trend graph", () => {
-  assert.match(dashboardSource, /buildWeeklyUsageTrend\(item\.history, historyHeaders\)/);
-  assert.match(dashboardSource, /Avg weekly \+ trend/);
-  assert.match(dashboardSource, /missing .* shown as a gap, not zero/);
-  assert.match(dashboardSource, /weekly-usage-trend__point/);
+test("Weekly Plan ignores food-department Sour Mix ordering while inventory keeps its COGS value", () => {
+  assert.match(dashboardSource, /isFoodDepartmentOrderedInventoryItem/);
+  assert.match(dashboardSource, /item\.orderHoldReason \|\| isFoodDepartmentOrderedInventoryItem\(item\.name\)/);
+  assert.match(inventorySource, /Bombay Sapphire,3,,\$42\.30,,\$126\.90,,0,0,Bombay Sapphire,/);
+  assert.match(inventorySource, /sweet and sour.*Ordered by the food department; included in beverage cost of goods\./);
 });
 
-test("the initial Dashboard prioritizes On Par rankings and change-only Ohio compliance", () => {
-  assert.match(dashboardSource, /On Par performance/);
-  assert.match(dashboardSource, /Show per list/);
-  assert.match(dashboardSource, /data-seller-ranking-list-size/);
-  assert.match(dashboardSource, /Top \$\{formatNumber\(listSize\)\}/);
-  assert.match(dashboardSource, /Bottom \$\{formatNumber\(listSize\)\}/);
-  assert.match(dashboardSource, /Last 6 saved weeks/);
-  assert.match(dashboardSource, /All saved PMB weeks/);
-  assert.match(dashboardSource, /Cocktails/);
-  assert.match(dashboardSource, /Liquor/);
+test("straight liquor tap bottles stay in the Liquor Cabinet inventory group", () => {
+  assert.match(dashboardSource, /STRAIGHT_LIQUOR_TAP_INGREDIENTS\.some\(\(item\) => item\.toLowerCase\(\) === normalized\)\) return "Liquor"/);
+  ["Jameson", "Screwball", "Pink Whitney", "Patron Silver"].forEach((name) => {
+    assert.match(dashboardSource, new RegExp(`"${name}"`));
+  });
+});
+
+test("retired Bottle Service inventory is removed without removing liquor-cabinet products", () => {
+  assert.doesNotMatch(inventorySource, /Bottle Service Karaoke Cooler/);
+  assert.doesNotMatch(dashboardSource, /"Bottle Service"/);
+  assert.match(inventorySource, /^Patron,,,\$94\.00/m);
+});
+
+test("inventory keeps advanced controls behind one row Edit action and retires Bubbly", () => {
+  assert.match(dashboardSource, /inventory-row-edit-toggle/);
+  assert.doesNotMatch(dashboardSource, /inventory-par-toggle/);
+  assert.doesNotMatch(dashboardSource, /custom-inventory-price/);
+  assert.doesNotMatch(dashboardSource, />Find price</);
+  assert.match(dashboardSource, /if \(currentSection === "Bubbly in patio cooler"\) return;/);
+  assert.doesNotMatch(dashboardSource, /\["Liquor Cabinet", "Mixer Cabinet", "Other", "Bubbly"\]/);
+});
+
+test("custom cabinet bottles inherit the requested Proof and OHLQ mappings", () => {
+  assert.match(dashboardSource, /"korbel-brut": \{ vendor: "Proof"/);
+  assert.match(dashboardSource, /"buffalo-trace": \{ vendor: "OHLQ"/);
+  assert.match(dashboardSource, /"makers-mark": \{ vendor: "OHLQ"/);
+  assert.match(dashboardSource, /getVendorMapping\(id\) \|\| item\.vendorProduct/);
+});
+
+test("Weekly Plan requires and reads the current Monday inventory snapshot", () => {
+  assert.match(dashboardSource, /getCurrentMondayInventorySnapshot\(inventoryHistory/);
+  assert.match(dashboardSource, /Save this week's Monday Inventory Snapshot before locking the plan/);
+  assert.match(dashboardSource, /kegPlanSnapshot: mondaySnapshot\.kegPlanSnapshot/);
+  assert.match(dashboardSource, /tapInputs: \(parAgentState\.recommendations\.items \|\| \[\]\)\.map/);
+  assert.match(dashboardSource, /backup\/on-hand keg fields are cleared for the next count/);
+  const lockStart = dashboardSource.indexOf("async function runWeeklyPlanUpdate()");
+  const lockEnd = dashboardSource.indexOf("async function initializeSharedKegLevelsFromServiceComputer", lockStart);
+  const lockSource = dashboardSource.slice(lockStart, lockEnd);
+  assert.match(lockSource, /publishCurrentWeeklyPlanSnapshot\(\)/);
+  assert.doesNotMatch(lockSource, /runKegParAgent\(\)/);
+  assert.doesNotMatch(lockSource, /runKegLevelSync\(\)/);
+  assert.doesNotMatch(lockSource, /runPmbWeeklyUsageSync\(\)/);
+});
+
+test("Weekly Usage keeps averages and history without rising or falling labels", () => {
+  assert.match(dashboardSource, /Avg weekly/);
+  assert.doesNotMatch(dashboardSource, /buildWeeklyUsageTrend/);
+  assert.doesNotMatch(dashboardSource, /renderWeeklyUsageTrend/);
+  assert.doesNotMatch(dashboardSource, /weekly-usage-trend-label/);
+  assert.doesNotMatch(dashboardSource, /getWeeklyUsageTrendDirectionCopy/);
+  assert.doesNotMatch(pageSource, /Compared with the prior completed week/);
+});
+
+test("the initial Dashboard uses a light visual beverage pulse and change-only Ohio compliance", () => {
+  assert.match(dashboardSource, /Crowd favorite/);
+  assert.match(dashboardSource, /Gaining attention/);
+  assert.match(dashboardSource, /Worth a glance/);
+  assert.match(dashboardSource, /Top beers/);
+  assert.match(dashboardSource, /Top cocktails/);
+  assert.match(dashboardSource, /Top liquor/);
+  assert.match(dashboardSource, /\$ vs Oz/);
+  assert.match(dashboardSource, /buildLastWeekPourLeaders/);
+  assert.match(dashboardSource, /No liquor pours were saved for the Patio or Karaoke wall last week/);
+  assert.match(dashboardSource, /Projected sales mix/);
+  assert.match(dashboardSource, /buildLastWeekProjectedSalesMix\(weeklyUsageItems/);
+  assert.match(dashboardSource, /Exact PMB ounces × current prices/);
+  assert.match(dashboardSource, /dashboard-pulse-bar/);
+  assert.match(dashboardSource, /data-seller-ranking-wall/);
   assert.match(dashboardSource, /Main wall/);
   assert.match(dashboardSource, /Karaoke wall/);
   assert.match(dashboardSource, /Patio liquor wall/);
-  assert.doesNotMatch(dashboardSource, />All walls</);
   assert.match(dashboardSource, /let sellerRankingWall = "main"/);
-  assert.match(dashboardSource, />1 week</);
-  assert.match(dashboardSource, />6 weeks</);
-  assert.match(dashboardSource, />All time</);
-  assert.match(dashboardSource, /Est\. profit \(today's rates\)/);
+  assert.doesNotMatch(dashboardSource, /Quick actions/);
   assert.match(dashboardSource, /fetch\(`\/api\/beverage-news\?scope=compliance/);
   assert.doesNotMatch(dashboardSource, /Beverage radar/);
   assert.doesNotMatch(dashboardSource, /Industry &amp; trend stories/);
   assert.match(dashboardSource, /target="_blank" rel="noopener noreferrer"/);
   assert.match(dashboardSource, /official Ohio/);
+});
+
+test("dashboard workspaces omit redundant eyebrow labels and explanatory blurbs", () => {
+  [
+    /Product builder/,
+    /Batch cocktail costing/,
+    /Weekly Beverage Operations/,
+    /All required shared inputs are current and no review warnings remain/,
+    /Calculation scope:/,
+    /Submit separately to/,
+    /One weekly checklist/,
+    /Current-wall reference list/,
+  ].forEach((pattern) => {
+    assert.doesNotMatch(`${pageSource}\n${dashboardSource}`, pattern);
+  });
+  assert.match(pageSource, /<h2 id="recipe-form-title">Add cocktail product<\/h2>/);
+  assert.match(dashboardSource, /Update needs/);
 });

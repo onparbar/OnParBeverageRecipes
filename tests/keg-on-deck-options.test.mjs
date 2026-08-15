@@ -8,8 +8,8 @@ import {
 } from "../public/keg-on-deck-options.mjs";
 
 const recipes = [
-  { id: "whiskey-smash", title: "Whiskey Smash" },
-  { id: "on-par-tee", title: "On Par Tee" },
+  { id: "whiskey-smash", title: "Whiskey Smash (Jim Beam) 1" },
+  { id: "on-par-tee", title: "On Par Tee (Crown Royal) 1" },
   { id: "washington-apple", title: "Washington Apple" },
 ];
 
@@ -25,14 +25,14 @@ test("includes all static On Deck recipes when Coming Soon is empty", () => {
     {
       id: "recipe:on-par-tee",
       recipeId: "on-par-tee",
-      name: "On Par Tee",
+      name: "On Par Tee (Crown Royal) 1",
       kind: "recipe",
       plu: 0,
     },
     {
       id: "recipe:whiskey-smash",
       recipeId: "whiskey-smash",
-      name: "Whiskey Smash",
+      name: "Whiskey Smash (Jim Beam) 1",
       kind: "recipe",
       plu: 0,
     },

@@ -11,22 +11,47 @@ function recommendations(overrides = {}) {
   return {
     generatedAt: "2026-08-10T14:00:00.000Z",
     items: [
-      { actionType: "make", orderQty: 1, name: "Bacardi Sunset 1", tapNumber: 4, wall: "Main", priority: 2 },
-      { actionType: "make", orderQty: 2, name: "Bacardi Sunset 2", tapNumber: 7, wall: "Main", priority: 1 },
+      { actionType: "make", orderQty: 1, name: "Bacardi Sunset 1", tapNumber: 47, wall: "Main", priority: 2 },
+      { actionType: "make", orderQty: 2, name: "Bacardi Sunset 2", tapNumber: 93, wall: "Karaoke", priority: 1 },
       { actionType: "order", orderQty: 1, name: "Beer", tapNumber: 9, wall: "Main" },
     ],
     ...overrides,
   };
 }
 
-test("staff prep plan contains only aggregated cocktails from the weekly plan", () => {
+test("staff prep plan keeps wall labels separate and includes the label ounces", () => {
   const plan = buildStaffPrepPlan(recommendations());
 
-  assert.equal(plan.totalCount, 1);
-  assert.equal(plan.items[0].name, "Bacardi Sunset");
-  assert.equal(plan.items[0].quantity, 3);
-  assert.deepEqual(plan.items[0].tapNumbers, [4, 7]);
+  assert.equal(plan.totalCount, 2);
+  assert.deepEqual(plan.items.map((item) => ({
+    name: item.name,
+    displayName: item.displayName,
+    quantity: item.quantity,
+    wall: item.wall,
+    batchSizeOz: item.batchSizeOz,
+    taps: item.tapNumbers,
+  })), [
+    { name: "Bacardi Sunset 1", displayName: "Bacardi Sunset 1", quantity: 1, wall: "Main", batchSizeOz: 1379.05, taps: [47] },
+    { name: "Bacardi Sunset 2", displayName: "Bacardi Sunset 2", quantity: 2, wall: "Karaoke", batchSizeOz: 1379.05, taps: [93] },
+  ]);
   assert.equal(plan.items[0].completed, false);
+});
+
+test("a completed legacy combined checklist carries forward to both wall labels", () => {
+  const base = recommendations({
+    prepChecklist: {
+      "cocktail:bacardi%20sunset": {
+        completed: true,
+        preparedBy: "Alex",
+        completedAt: "2026-08-11T16:30:00.000Z",
+      },
+    },
+  });
+
+  const plan = buildStaffPrepPlan(base);
+
+  assert.equal(plan.completedCount, 2);
+  assert.deepEqual(plan.items.map((item) => item.preparedBy), ["Alex", "Alex"]);
 });
 
 test("checking off prep requires a preparer and records shared completion metadata", () => {

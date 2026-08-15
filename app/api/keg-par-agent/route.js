@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { readParAgentState, runParAgentUpdate, syncParAgentState } from "../../../lib/par-agent.mjs";
+import {
+  publishWeeklyPlanSnapshot,
+  readParAgentState,
+  runParAgentUpdate,
+  syncParAgentState,
+} from "../../../lib/par-agent.mjs";
 import { DASHBOARD_SESSION_COOKIE, getDashboardSessionRole } from "../../../lib/dashboard-auth.mjs";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 
@@ -70,6 +75,24 @@ export async function POST(request) {
         role,
       });
       recordDashboardActivity({ area: "Keg Levels", action: "ran par agent", role, revision: state.revision, summary: "Generated shared keg par recommendations." }).catch(() => {});
+      return jsonResponse(state);
+    }
+
+    if (action === "publish-weekly-plan") {
+      const state = await publishWeeklyPlanSnapshot({
+        expectedRevision: body.expectedRevision,
+        inventoryItems: body.inventoryItems,
+        recommendationPricing: body.recommendationPricing,
+        kegPlanSnapshot: body.kegPlanSnapshot,
+        role,
+      });
+      recordDashboardActivity({
+        area: "Weekly Plan",
+        action: "published Monday plan",
+        role,
+        revision: state.revision,
+        summary: "Locked the shared order and prep plan through Sunday.",
+      }).catch(() => {});
       return jsonResponse(state);
     }
 

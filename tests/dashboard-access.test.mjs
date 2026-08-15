@@ -21,13 +21,16 @@ test("employee access is restricted to the dedicated staff page and bundle", () 
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/beer-keg-pricing.mjs", method: "GET" }), false);
 });
 
-test("employee API access is limited to recipes and the shared prep checklist", () => {
+test("employee API access is limited to recipes, prep, and delivery receipt tracking", () => {
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/api/session", method: "GET" }), true);
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/api/recipe-data", method: "GET" }), true);
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/api/recipe-data", method: "POST" }), false);
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/api/staff-prep-plan", method: "GET" }), true);
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/api/staff-prep-plan", method: "POST" }), true);
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/api/staff-prep-plan", method: "DELETE" }), false);
+  assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/api/weekly-order-tracking", method: "GET" }), true);
+  assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/api/weekly-order-tracking", method: "POST" }), true);
+  assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/api/weekly-order-tracking", method: "DELETE" }), false);
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/api/logout", method: "GET" }), true);
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/api/logout", method: "POST" }), true);
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/api/dashboard-state", method: "GET" }), false);

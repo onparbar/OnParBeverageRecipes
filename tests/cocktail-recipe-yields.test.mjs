@@ -93,6 +93,7 @@ const sourceRecipes = [
   ["Whiskey Smash", 1463],
   ["Apple Jack (Whiskey)", 1530],
   ["On Par Tee", 1452],
+  ["Bacardi Sunset", 1379.05],
   ["Crown Apple 'rita(Whiskey)", 1471],
   ["Vodka Cran(Vodka)", 1379],
   ["Lemon Drop Martini(Vodka)", 1448],
@@ -145,21 +146,21 @@ const activeDisplayAliases = [
   ["WHISKEY SOUR (JACK DANIELS)", 1360],
 ];
 
-test("resolves all 24 source recipe titles to their declared batch yields", () => {
-  assert.equal(COCKTAIL_RECIPE_YIELDS.length, 24);
+test("resolves all 25 source recipe titles to their declared batch yields", () => {
+  assert.equal(COCKTAIL_RECIPE_YIELDS.length, 25);
   sourceRecipes.forEach(([name, expectedYieldOz]) => {
     assert.equal(getCocktailRecipeYieldOz(name), expectedYieldOz, name);
   });
 });
 
 test("canonical yields stay synchronized with the recipe CSV", async () => {
-  const source = await readFile(
-    new URL("../public/data/cocktail-recipes.csv", import.meta.url),
-    "utf8",
-  );
-  const declaredYields = getDeclaredRecipeYields(source);
+  const sources = await Promise.all([
+    "../public/data/cocktail-recipes.csv",
+    "../public/data/new-cocktails.csv",
+  ].map((file) => readFile(new URL(file, import.meta.url), "utf8")));
+  const declaredYields = new Map(sources.flatMap((source) => [...getDeclaredRecipeYields(source)]));
 
-  assert.equal(declaredYields.size, 24);
+  assert.equal(declaredYields.size, 25);
   COCKTAIL_RECIPE_YIELDS.forEach(({ sourceTitle, yieldOz }) => {
     assert.equal(declaredYields.get(sourceTitle), yieldOz, sourceTitle);
   });
@@ -209,7 +210,16 @@ test("Whiskey Smash and On Par Tee source instructions agree with their ounce ma
   }
 });
 
-test("Whiskey Smash and On Par Tee costs and pricing metrics agree in both recipe files", async () => {
+test("Bacardi Sunset uses eight gallons of strawberry lemonade and six 1.75L Bacardi bottles", async () => {
+  const source = await readFile(new URL("../public/data/new-cocktails.csv", import.meta.url), "utf8");
+  const recipe = getRecipeColumn(source, "Bacardi Sunset");
+
+  assert.equal(recipe.find(({ label }) => label === "Bacardi Superior = 6 bottles (1.75L)")?.oz, 355.05);
+  assert.equal(recipe.find(({ label }) => label === "Strawberry Lemonade = 8 gallons")?.oz, 1024);
+  assert.equal(getRecipeMetric(recipe, "Total oz"), 1379.05);
+});
+
+test("new cocktail costs and pricing metrics agree with their recipe files", async () => {
   const fixtures = [
     {
       file: "../public/data/cocktail-recipes.csv",
@@ -262,6 +272,17 @@ test("Whiskey Smash and On Par Tee costs and pricing metrics agree in both recip
           margin: 81.56,
           pourOz: 5.26,
           chargePerPour: 10.47,
+        },
+        {
+          title: "Bacardi Sunset",
+          totalCost: 184.42,
+          totalOz: 1379.05,
+          costPerOz: 0.13,
+          chargePerOz: 1.99,
+          profitPerOz: 1.86,
+          margin: 93.28,
+          pourOz: 5.83,
+          chargePerPour: 11.60,
         },
       ],
     },

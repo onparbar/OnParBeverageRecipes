@@ -63,12 +63,14 @@ export function buildWeeklyUsageTrend(history = [], labelsNewestFirst = [], opti
 
   const recorded = points.filter((point) => point.hasValue);
   const firstValue = recorded[0]?.value ?? null;
-  const lastValue = recorded.at(-1)?.value ?? null;
-  const previousValue = recorded.at(-2)?.value ?? null;
+  const latestPoint = points.at(-1);
+  const previousPoint = points.at(-2);
+  const lastValue = latestPoint?.value ?? null;
+  const previousValue = previousPoint?.value ?? null;
   const change = Number.isFinite(previousValue) && Number.isFinite(lastValue)
     ? round(lastValue - previousValue)
     : null;
-  const direction = recorded.length < 2
+  const direction = !Number.isFinite(previousValue) || !Number.isFinite(lastValue)
     ? "unavailable"
     : Math.abs(change) < 0.0005
       ? "flat"

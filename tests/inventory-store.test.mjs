@@ -106,6 +106,67 @@ test("uses Monday as the snapshot week and replaces that week's prior save", asy
   assert.equal(state.snapshots.length, 1);
   assert.equal(state.snapshots[0].items[0].onHandDisplay, "3");
   assert.deepEqual(state.snapshots[0].summary, summary);
+  assert.deepEqual(state.current.onHandOverrides, {});
+});
+
+test("saving Monday inventory preserves the snapshot and clears current counts only", async () => {
+  await useTemporaryState();
+  await hydrateInventoryState({
+    onHandOverrides: { vodka: "3", gin: "2" },
+    parOverrides: { vodka: "5", gin: "4" },
+  });
+  const state = await saveInventorySnapshot([
+    { id: "vodka", name: "Vodka", group: "Liquor Cabinet", onHandDisplay: "3", parDisplay: "5" },
+    { id: "gin", name: "Gin", group: "Liquor Cabinet", onHandDisplay: "2", parDisplay: "4" },
+  ], "owner", new Date(2026, 7, 10, 12), {
+    bottleInventoryValue: 50,
+    connectedLineValue: 30,
+    backupKegValue: 10,
+    liveTapCount: 2,
+    tapCount: 2,
+  });
+
+  assert.deepEqual(state.snapshots[0].items.map(({ id, onHandDisplay }) => ({ id, onHandDisplay })), [
+    { id: "vodka", onHandDisplay: "3" },
+    { id: "gin", onHandDisplay: "2" },
+  ]);
+  assert.deepEqual(state.current.onHandOverrides, {});
+  assert.deepEqual(state.current.parOverrides, { vodka: "5", gin: "4" });
+});
+
+test("Monday inventory embeds frozen keg inputs, cocktail prep, and active orders", async () => {
+  await useTemporaryState();
+  await hydrateInventoryState({});
+  const generatedAt = "2026-08-10T14:00:00.000Z";
+  const state = await saveInventorySnapshot([
+    { id: "vodka", name: "Vodka", group: "Liquor Cabinet", onHandDisplay: "2", parDisplay: "4" },
+  ], "owner", new Date(2026, 7, 10, 12), {
+    bottleInventoryValue: 50,
+    connectedLineValue: 30,
+    backupKegValue: 10,
+    liveTapCount: 2,
+    tapCount: 2,
+  }, {
+    generatedAt,
+    summary: { tapCount: 2, cocktailMakeCount: 1, kegOrderCount: 0 },
+    tapInputs: [
+      { key: "main-47-cocktail", tapNumber: 47, wall: "Main", name: "Blue Dot 1", liveFraction: 0.2, backupKegs: 1, avgWeeklyKegs: 1.4 },
+      { key: "main-21-beer", tapNumber: 21, wall: "Main", name: "Beer", liveFraction: 0.8, backupKegs: 0, avgWeeklyKegs: 0.5 },
+    ],
+    items: [
+      { key: "main-47-cocktail", tapNumber: 47, wall: "Main", name: "Blue Dot 1", isKegTap: true, actionType: "make", orderQty: 1, rawOrderQty: 1, orderProductName: "Blue Dot 1", currentStockKegs: 1.2, avgWeeklyKegs: 1.4 },
+      { key: "main-21-beer", tapNumber: 21, wall: "Main", name: "Beer", isKegTap: true, actionType: "order", orderQty: 0, rawOrderQty: 0 },
+    ],
+  });
+
+  assert.equal(state.snapshots[0].kegPlanSnapshot.generatedAt, generatedAt);
+  assert.equal(state.snapshots[0].kegPlanSnapshot.tapInputs.length, 2);
+  assert.equal(state.snapshots[0].kegPlanSnapshot.tapInputs[0].backupKegs, 1);
+  assert.deepEqual(
+    state.snapshots[0].kegPlanSnapshot.items.map(({ actionType, orderProductName, orderQty }) => ({ actionType, orderProductName, orderQty })),
+    [{ actionType: "make", orderProductName: "Blue Dot 1", orderQty: 1 }],
+  );
+  assert.equal(state.snapshots[0].kegPlanSnapshot.summary.cocktailMakeCount, 1);
 });
 
 test("restores and deletes a snapshot", async () => {

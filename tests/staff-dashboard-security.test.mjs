@@ -44,7 +44,20 @@ test("staff profile guard detects owner storage without reading or mutating its 
   assert.match(staffBundle, /Do not clear this profile's site data/);
 });
 
-test("staff bundle communicates only with session, sanitized recipes, and prep checklist endpoints", async () => {
+test("an explicit loopback-only preview can show the sanitized employee view", async () => {
+  const staffBundle = await readProjectFile("public/staff-dashboard.js");
+  const previewStart = staffBundle.indexOf("function isLocalStaffPreview()");
+  const previewEnd = staffBundle.indexOf("function inspectStaffBrowserProfile()", previewStart);
+  const previewSource = staffBundle.slice(previewStart, previewEnd);
+
+  assert.match(staffBundle, /!profileCheck\.safe && !isLocalStaffPreview\(\)/);
+  assert.match(previewSource, /hostname === "localhost"/);
+  assert.match(previewSource, /hostname === "127\.0\.0\.1"/);
+  assert.match(previewSource, /hostname === "::1"/);
+  assert.match(previewSource, /new URLSearchParams\(window\.location\.search\)\.get\("preview"\) === "1"/);
+});
+
+test("staff bundle communicates only with session, sanitized recipes, prep, and receipt endpoints", async () => {
   const staffBundle = await readProjectFile("public/staff-dashboard.js");
   const literalApiPaths = [...staffBundle.matchAll(/["'`](\/api\/[a-z0-9?=${}.\-_/]+)["'`]/gi)]
     .map((match) => match[1]);
@@ -53,7 +66,7 @@ test("staff bundle communicates only with session, sanitized recipes, and prep c
   assert.ok(literalApiPaths.some((path) => path.startsWith("/api/recipe-data")));
   assert.deepEqual(
     [...new Set(literalApiPaths.map((path) => path.split("?")[0]))].sort(),
-    ["/api/recipe-data", "/api/session", "/api/staff-prep-plan"],
+    ["/api/recipe-data", "/api/session", "/api/staff-prep-plan", "/api/weekly-order-tracking"],
   );
 });
 
@@ -67,7 +80,9 @@ test("staff page loads only its dedicated bundle", async () => {
   assert.equal(page.includes("Inventory"), false);
   assert.equal(page.includes("Pricing"), false);
   assert.match(page, /Cocktails to make/);
+  assert.match(page, /Orders to receive/);
   assert.match(await readProjectFile("public/staff-dashboard.js"), /Prepared by/);
+  assert.match(await readProjectFile("public/staff-dashboard.js"), /Quantity received/);
 });
 
 test("middleware redirects employee root access and blocks non-staff assets", async () => {

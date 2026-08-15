@@ -1,4 +1,38 @@
 const DEFAULT_BATCH_LABEL = "12 gallon keg";
+const STAFF_MENU_ORDER = [
+  ["GIN & JUICE (BOMBAY)", "Ginny from the Block (Gin)"],
+  ["CAPTAIN QUENCHER (CAPTAIN MORGAN)", "Captain Quencher (Rum)"],
+  ["BLUEBERRY MARGARITA (JOSE CUERVO)", "Strawberry/Watermelon/Peach/Blueberry Marg (Tequilla)"],
+  ["HOUSE MARGARITA (JOSE CUERVO)", "House Margarita (Tequilla)"],
+  ["PEACH MARGARITA (JOSE CUERVO)", "Strawberry/Watermelon/Peach/Blueberry Marg (Tequilla)"],
+  ["RASPBERRY MARGARITA (JOSE CUERVO)", "Strawberry/Watermelon/Peach/Blueberry Marg (Tequilla)"],
+  ["STRAWBERRY MARGARITA (JOSE CUERVO)", "Strawberry/Watermelon/Peach/Blueberry Marg (Tequilla)"],
+  ["WATERMELON MARGARITA (JOSE CUERVO)", "Strawberry/Watermelon/Peach/Blueberry Marg (Tequilla)"],
+  ["STRAWBERRY SENORITA (JOSE CUERVO)", "Strawberry Senorita (Tequilla)"],
+  ["APPLETINI (TITO'S)", "Apple-tini(Vodka)"],
+  ["BLUE DOT (SVEDKA)", "Blue Dot (Vodka)"],
+  ["BOOZY CUCUMBER LEMONADE (KETEL ONE)", "Boozy Cucumber Lemonade (Vodka)"],
+  ["ESPRESSO MARTINI (TITO'S)", "Espresso Martini"],
+  ["LEMON DROP MARTINI (ABSOLUT CITRON)", "Lemon Drop Martini(Vodka)"],
+  ["POMEGRANATE MARTINI (TITO'S)", "Pomegranate Martini(Tito's)"],
+  ["SPIKED ARNOLD PALMER (TITO'S)", "Spiked Arnold Palmer (Vodka)"],
+  ["SPIKED CRANBERRY LEMONADE (TITO'S)", "Spiked Cranberry Lemonade (Vodka)"],
+  ["SPIKED PINK LEMONADE (TITO'S)", "Spiked Strawberry Lemonade (Vodka)"],
+  ["SPIKED STRAWBERRY LEMONADE (TITO'S)", "Spiked Strawberry Lemonade (Vodka)"],
+  ["VODKA CRAN (TITO'S)", "Vodka Cran(Vodka)"],
+  ["CROWN APPLE 'RITA", "Crown Apple 'rita(Whiskey)"],
+  ["JACKED UP STRAWBERRY LEMONADE (JACK DANIELS)", "Jacked Up Strawberry Lemonade (Whiskey)"],
+  ["OLD FASHIONED (BULLEIT)", "Old fashioned (Whiskey)"],
+  ["JACK & LEMONADE", "Jack and Lemonade (Whiskey)"],
+  ["WASHINGTON APPLE (CROWN ROYAL APPLE)", "Washington Apple (Whiskey)"],
+  ["WHISKEY SOUR (JACK DANIELS)", "Whiskey Sour (Whiskey)"],
+];
+const STAFF_NEW_RECIPE_ORDER = [
+  ["Bacardi Sunset", "Bacardi Sunset"],
+  ["Whiskey Smash", "Whiskey Smash"],
+  ["APPLE JACK (WHISKEY)", "Apple Jack (Whiskey)"],
+  ["On Par Tee", "On Par Tee"],
+];
 const searchInput = document.querySelector("#staff-recipe-search");
 const categoryFilter = document.querySelector("#staff-category-filter");
 const statusPanel = document.querySelector("#staff-recipe-status");
@@ -7,9 +41,27 @@ const recipeGrid = document.querySelector("#staff-recipe-grid");
 const prepStatusPanel = document.querySelector("#staff-prep-status");
 const prepSummary = document.querySelector("#staff-prep-summary");
 const prepList = document.querySelector("#staff-prep-list");
+const orderStatusPanel = document.querySelector("#staff-order-status");
+const orderSummary = document.querySelector("#staff-order-summary");
+const orderList = document.querySelector("#staff-order-list");
+const recipeViewButtons = [...document.querySelectorAll("[data-staff-recipe-view]")];
+const currentRecipeCount = document.querySelector("#staff-current-recipe-count");
+const inactiveRecipeCount = document.querySelector("#staff-inactive-recipe-count");
+const sectionTabButtons = [...document.querySelectorAll("[data-staff-section-tab]")];
+const sectionPanels = [...document.querySelectorAll("main > [role='tabpanel']")];
+const overviewTargets = [...document.querySelectorAll("[data-staff-section-target]")];
+const overviewWeek = document.querySelector("#staff-overview-week");
+const overviewPrepValue = document.querySelector("#staff-overview-prep-value");
+const overviewPrepDetail = document.querySelector("#staff-overview-prep-detail");
+const overviewOrderValue = document.querySelector("#staff-overview-order-value");
+const overviewOrderDetail = document.querySelector("#staff-overview-order-detail");
+const overviewRecipeValue = document.querySelector("#staff-overview-recipe-value");
+const overviewRecipeDetail = document.querySelector("#staff-overview-recipe-detail");
 
 let recipes = [];
+let activeRecipeView = "current";
 let prepPlan = { available: false, generatedAt: "", items: [], completedCount: 0, totalCount: 0 };
+let orderTracking = { available: false, generatedAt: "", vendors: [], itemCount: 0, receivedCount: 0, notReceivedCount: 0 };
 
 initStaffRecipes();
 
@@ -30,24 +82,30 @@ async function initStaffRecipes() {
       return;
     }
 
+    bindStaffSectionEvents();
+
     const profileCheck = inspectStaffBrowserProfile();
-    if (!profileCheck.safe) {
+    if (!profileCheck.safe && !isLocalStaffPreview()) {
       lockStaffRecipesForBrowserProfile(profileCheck.storageUnavailable);
       return;
     }
 
-    const [activeCsv, newCsv, sharedResult, prepResult] = await Promise.all([
+    const [activeCsv, newCsv, sharedResult, prepResult, orderResult] = await Promise.all([
       fetchStaffRecipeCsv("active"),
       fetchStaffRecipeCsv("new"),
       fetchSharedRecipeUpdates(),
       fetchStaffPrepPlan(),
+      fetchWeeklyOrderTracking(),
     ]);
     recipes = buildRecipeCollection(activeCsv, newCsv, sharedResult.recipes);
     prepPlan = prepResult;
+    orderTracking = orderResult;
     populateCategoryFilter();
     bindStaffRecipeEvents();
     renderStaffPrepPlan();
+    renderWeeklyOrderTracking();
     renderStaffRecipes();
+    renderStaffOverview();
     statusPanel.textContent = sharedResult.available
       ? "Current shared recipe updates are included."
       : "Core recipes are available. Shared recipe updates could not be checked right now.";
@@ -58,9 +116,19 @@ async function initStaffRecipes() {
     prepStatusPanel.textContent = "The weekly prep checklist could not be loaded.";
     prepList.setAttribute("aria-busy", "false");
     prepList.replaceChildren(createEmptyState("Ask a manager to check the dashboard service."));
+    orderStatusPanel.dataset.state = "error";
+    orderStatusPanel.textContent = "The weekly delivery checklist could not be loaded.";
+    orderList.setAttribute("aria-busy", "false");
+    orderList.replaceChildren(createEmptyState("Ask a manager to check the dashboard service."));
     recipeGrid.setAttribute("aria-busy", "false");
     recipeGrid.replaceChildren(createEmptyState("Recipe data is unavailable. Ask a manager to check the dashboard service."));
   }
+}
+
+function isLocalStaffPreview() {
+  const hostname = clean(window.location.hostname).toLowerCase();
+  const isLoopback = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  return isLoopback && new URLSearchParams(window.location.search).get("preview") === "1";
 }
 
 function inspectStaffBrowserProfile() {
@@ -81,12 +149,18 @@ function lockStaffRecipesForBrowserProfile(storageUnavailable) {
   statusPanel.dataset.state = "error";
   prepStatusPanel.dataset.state = "error";
   prepStatusPanel.textContent = "The staff prep checklist is locked in this browser profile.";
+  orderStatusPanel.dataset.state = "error";
+  orderStatusPanel.textContent = "The delivery checklist is locked in this browser profile.";
   statusPanel.textContent = storageUnavailable
     ? "Staff recipes are locked because this browser profile's site storage could not be checked. Use a dedicated staff browser profile."
     : "Staff recipes are locked because this browser profile contains owner dashboard data. Use a separate browser profile reserved for staff.";
   recipeGrid.setAttribute("aria-busy", "false");
   prepList.setAttribute("aria-busy", "false");
+  orderList.setAttribute("aria-busy", "false");
   prepList.replaceChildren(createEmptyState(
+    "Open the staff page in a new, dedicated staff browser profile.",
+  ));
+  orderList.replaceChildren(createEmptyState(
     "Open the staff page in a new, dedicated staff browser profile.",
   ));
   recipeGrid.replaceChildren(createEmptyState(
@@ -148,6 +222,226 @@ async function fetchStaffPrepPlan() {
   }
 }
 
+async function fetchWeeklyOrderTracking() {
+  try {
+    const response = await fetch("/api/weekly-order-tracking", {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) throw new Error(result?.error || "The delivery checklist is unavailable.");
+    return normalizeOrderTracking(result);
+  } catch (error) {
+    return {
+      available: false,
+      generatedAt: "",
+      vendors: [],
+      itemCount: 0,
+      receivedCount: 0,
+      notReceivedCount: 0,
+      message: error?.message || "The delivery checklist is unavailable.",
+    };
+  }
+}
+
+function normalizeOrderTracking(result = {}) {
+  return {
+    available: result?.available === true,
+    generatedAt: clean(result?.generatedAt),
+    vendors: Array.isArray(result?.vendors) ? result.vendors : [],
+    itemCount: number(result?.itemCount),
+    receivedCount: number(result?.receivedCount),
+    notReceivedCount: number(result?.notReceivedCount),
+    message: clean(result?.message),
+  };
+}
+
+function renderWeeklyOrderTracking() {
+  orderList.replaceChildren();
+  orderList.setAttribute("aria-busy", "false");
+  if (!orderTracking.available) {
+    orderStatusPanel.dataset.state = "error";
+    orderStatusPanel.textContent = orderTracking.message || "A manager has not published this week's order plan yet.";
+    orderSummary.textContent = "";
+    orderList.append(createEmptyState("There are no current delivery assignments."));
+    return;
+  }
+
+  delete orderStatusPanel.dataset.state;
+  orderStatusPanel.textContent = orderTracking.generatedAt
+    ? `Showing deliveries for the shared ${formatPlanWeek(orderTracking.generatedAt)} plan.`
+    : "Showing the current shared weekly order.";
+  orderSummary.textContent = orderTracking.itemCount
+    ? `${formatNumber(orderTracking.receivedCount)} fully received · ${formatNumber(orderTracking.notReceivedCount)} short or missing · ${formatNumber(orderTracking.itemCount)} total items`
+    : "No vendor deliveries are on this week's plan.";
+  if (!orderTracking.vendors.length) {
+    orderList.append(createEmptyState("Nothing is scheduled for delivery from the current weekly plan."));
+    return;
+  }
+
+  orderTracking.vendors.forEach((vendor) => {
+    const section = document.createElement("section");
+    section.className = "staff-order-vendor";
+    const header = document.createElement("header");
+    const heading = document.createElement("h3");
+    heading.textContent = `${clean(vendor.vendor)} order`;
+    const ordered = document.createElement("p");
+    ordered.textContent = vendor.ordered
+      ? `Ordered by ${clean(vendor.orderedBy)}${vendor.orderedAt ? ` · ${formatCompletionTime(vendor.orderedAt)}` : ""}`
+      : "The manager has not recorded who placed this order yet.";
+    header.append(heading, ordered);
+    section.append(header);
+    (vendor.items || []).forEach((item) => section.append(createOrderReceiptItem(item)));
+    orderList.append(section);
+  });
+}
+
+function createOrderReceiptItem(item) {
+  const form = document.createElement("form");
+  form.className = `staff-order-item staff-order-item--${clean(item.status) || "pending"}`;
+
+  const details = document.createElement("div");
+  details.className = "staff-order-item__details";
+  const heading = document.createElement("h4");
+  heading.textContent = clean(item.name);
+  const meta = document.createElement("p");
+  const taps = Array.isArray(item.tapNumbers) && item.tapNumbers.length
+    ? ` · Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.join(", ")}`
+    : "";
+  meta.textContent = `${formatNumber(item.quantity)} ${clean(item.unit)}${taps}`;
+  details.append(heading, meta);
+  if (item.status !== "pending" && item.updatedAt) {
+    const saved = document.createElement("small");
+    const receiptSummary = item.status === "received"
+      ? `All ${formatNumber(item.quantity)} received`
+      : `${formatNumber(item.receivedQuantity)} of ${formatNumber(item.quantity)} received`;
+    saved.textContent = `${receiptSummary} by ${clean(item.handledBy)} · ${formatCompletionTime(item.updatedAt)}`;
+    details.append(saved);
+  }
+
+  const choices = document.createElement("fieldset");
+  choices.className = "staff-order-receipt-choices";
+  const legend = document.createElement("legend");
+  legend.textContent = "Delivery received";
+  choices.append(legend);
+  const fullReceiptLabel = document.createElement("label");
+  fullReceiptLabel.className = "staff-order-full-receipt";
+  const fullReceipt = document.createElement("input");
+  fullReceipt.type = "checkbox";
+  fullReceipt.checked = item.status === "pending" || item.status === "received";
+  const fullReceiptText = document.createElement("span");
+  fullReceiptText.textContent = "Received full order";
+  fullReceiptLabel.append(fullReceipt, fullReceiptText);
+  choices.append(fullReceiptLabel);
+
+  const quantityField = document.createElement("label");
+  quantityField.className = "staff-order-quantity-field";
+  const quantityLabel = document.createElement("span");
+  quantityLabel.textContent = "Quantity received";
+  const quantityControls = document.createElement("span");
+  const quantityInput = document.createElement("input");
+  quantityInput.type = "number";
+  quantityInput.min = "0";
+  quantityInput.max = String(number(item.quantity));
+  quantityInput.step = "1";
+  quantityInput.inputMode = "numeric";
+  quantityInput.value = String(item.status === "pending" || item.status === "received"
+    ? number(item.quantity)
+    : number(item.receivedQuantity));
+  quantityInput.disabled = fullReceipt.checked;
+  const quantityTotal = document.createElement("small");
+  quantityTotal.textContent = `of ${formatNumber(item.quantity)} ${clean(item.unit)}`;
+  quantityControls.append(quantityInput, quantityTotal);
+  quantityField.append(quantityLabel, quantityControls);
+  choices.append(quantityField);
+
+  fullReceipt.addEventListener("change", () => {
+    quantityInput.disabled = fullReceipt.checked;
+    if (fullReceipt.checked) {
+      quantityInput.value = String(number(item.quantity));
+    } else {
+      quantityInput.focus();
+      quantityInput.select();
+    }
+  });
+
+  const nameField = document.createElement("label");
+  nameField.className = "staff-prep-name-field";
+  const nameLabel = document.createElement("span");
+  nameLabel.textContent = "Checked by";
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.maxLength = 80;
+  nameInput.autoComplete = "name";
+  nameInput.placeholder = "Employee name";
+  nameInput.value = clean(item.handledBy);
+  nameField.append(nameLabel, nameInput);
+
+  const saveButton = document.createElement("button");
+  saveButton.className = "primary-button staff-prep-save";
+  saveButton.type = "submit";
+  saveButton.textContent = "Save";
+  const rowStatus = document.createElement("p");
+  rowStatus.className = "staff-prep-item__status";
+  rowStatus.setAttribute("role", "status");
+  rowStatus.setAttribute("aria-live", "polite");
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const receivedQuantity = fullReceipt.checked ? number(item.quantity) : Number(quantityInput.value);
+    const status = fullReceipt.checked
+      ? "received"
+      : receivedQuantity > 0 ? "partial" : "not-received";
+    const handledBy = clean(nameInput.value);
+    if (!Number.isInteger(receivedQuantity) || receivedQuantity < 0 || receivedQuantity > number(item.quantity)) {
+      rowStatus.textContent = `Enter a whole quantity from 0 to ${formatNumber(item.quantity)}.`;
+      rowStatus.dataset.state = "error";
+      quantityInput.focus();
+      return;
+    }
+    if (!handledBy) {
+      rowStatus.textContent = "Enter your name before saving the delivery status.";
+      rowStatus.dataset.state = "error";
+      nameInput.focus();
+      return;
+    }
+    const inputs = [...form.querySelectorAll("input, button")];
+    inputs.forEach((input) => { input.disabled = true; });
+    saveButton.textContent = "Saving...";
+    rowStatus.textContent = "";
+    delete rowStatus.dataset.state;
+    try {
+      const response = await fetch("/api/weekly-order-tracking", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "set-receipt",
+          generatedAt: orderTracking.generatedAt,
+          itemId: item.id,
+          status,
+          receivedQuantity,
+          handledBy,
+        }),
+      });
+      const result = await parseJsonResponse(response);
+      if (!response.ok) throw new Error(result?.error || "The delivery update could not be saved.");
+      orderTracking = normalizeOrderTracking(result);
+      renderWeeklyOrderTracking();
+      renderStaffOverview();
+    } catch (error) {
+      inputs.forEach((input) => { input.disabled = false; });
+      saveButton.textContent = "Save";
+      rowStatus.textContent = error?.message || "The delivery update could not be saved.";
+      rowStatus.dataset.state = "error";
+    }
+  });
+
+  form.append(details, choices, nameField, saveButton, rowStatus);
+  return form;
+}
+
 function renderStaffPrepPlan() {
   prepList.replaceChildren();
   prepList.setAttribute("aria-busy", "false");
@@ -176,6 +470,7 @@ function renderStaffPrepPlan() {
 function createStaffPrepItem(item) {
   const form = document.createElement("form");
   form.className = `staff-prep-item${item.completed ? " is-complete" : ""}`;
+  const recipe = findStaffRecipeForPrepItem(item);
 
   const checkLabel = document.createElement("label");
   checkLabel.className = "staff-prep-check";
@@ -188,14 +483,42 @@ function createStaffPrepItem(item) {
 
   const details = document.createElement("div");
   details.className = "staff-prep-item__details";
-  const heading = document.createElement("h3");
-  heading.textContent = item.name;
+  let recipePanel = null;
+  if (recipe) {
+    const recipePanelId = `staff-prep-recipe-${slugify(item.id)}`;
+    const recipeToggle = document.createElement("button");
+    recipeToggle.className = "staff-prep-recipe-toggle";
+    recipeToggle.type = "button";
+    recipeToggle.setAttribute("aria-expanded", "false");
+    recipeToggle.setAttribute("aria-controls", recipePanelId);
+    const recipeName = document.createElement("strong");
+    recipeName.className = "staff-cocktail-name";
+    recipeName.textContent = formatStaffCocktailName(clean(item.displayName) || item.name);
+    const recipeHint = document.createElement("span");
+    recipeHint.textContent = "View recipe +";
+    recipeToggle.append(recipeName, recipeHint);
+    details.append(recipeToggle);
+    recipePanel = createInlineStaffPrepRecipe(recipe, recipePanelId);
+    recipeToggle.addEventListener("click", () => {
+      const expanded = recipeToggle.getAttribute("aria-expanded") === "true";
+      recipeToggle.setAttribute("aria-expanded", String(!expanded));
+      recipeHint.textContent = expanded ? "View recipe +" : "Hide recipe −";
+      recipePanel.hidden = expanded;
+    });
+  } else {
+    const heading = document.createElement("h3");
+    heading.className = "staff-cocktail-name";
+    heading.textContent = formatStaffCocktailName(clean(item.displayName) || item.name);
+    details.append(heading);
+  }
   const meta = document.createElement("p");
-  const taps = Array.isArray(item.tapNumbers) && item.tapNumbers.length
-    ? ` · Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.join(", ")}`
-    : "";
-  meta.textContent = `${formatNumber(item.quantity)} keg${number(item.quantity) === 1 ? "" : "s"} to make${taps}`;
-  details.append(heading, meta);
+  const labelDetails = [
+    item.wall ? `${clean(item.wall)} wall` : "",
+    number(item.batchSizeOz) > 0 ? `${formatNumber(item.batchSizeOz)} oz` : "",
+    number(item.quantity) > 1 ? `${formatNumber(item.quantity)} labels` : "",
+  ].filter(Boolean);
+  meta.textContent = labelDetails.join(" · ");
+  details.append(meta);
   if (item.completed && item.completedAt) {
     const completion = document.createElement("small");
     completion.textContent = `Completed ${formatCompletionTime(item.completedAt)}`;
@@ -265,6 +588,7 @@ function createStaffPrepItem(item) {
         message: clean(result.message),
       };
       renderStaffPrepPlan();
+      renderStaffOverview();
     } catch (error) {
       saveButton.disabled = false;
       checkbox.disabled = false;
@@ -276,7 +600,109 @@ function createStaffPrepItem(item) {
   });
 
   form.append(checkLabel, details, preparedField, saveButton, rowStatus);
+  if (recipePanel) form.append(recipePanel);
   return form;
+}
+
+function findStaffRecipeForPrepItem(item) {
+  const candidates = [item?.displayName, item?.name]
+    .map(getStaffPrepRecipeMatchKey)
+    .filter(Boolean);
+  const activeRecipes = recipes.filter((recipe) => !recipe.inactive);
+  return activeRecipes.find((recipe) => candidates.includes(getStaffPrepRecipeMatchKey(recipe.title))) || null;
+}
+
+function getStaffPrepRecipeMatchKey(value) {
+  return normalizeTitle(
+    clean(value)
+      .replace(/\s+\d+\s*$/, "")
+      .replace(/\s*\([^)]*\)\s*/g, " "),
+  );
+}
+
+function createInlineStaffPrepRecipe(recipe, panelId) {
+  const panel = document.createElement("section");
+  panel.className = "staff-prep-recipe-panel";
+  panel.id = panelId;
+  panel.hidden = true;
+
+  const header = document.createElement("header");
+  const title = document.createElement("h4");
+  title.textContent = "Recipe";
+  const total = document.createElement("strong");
+  total.textContent = `${formatNumber(getTotalOunces(recipe))} total oz`;
+  header.append(title, total);
+
+  const table = document.createElement("table");
+  table.className = "staff-prep-recipe-table";
+  const body = document.createElement("tbody");
+  recipe.ingredients.forEach((ingredient) => {
+    const row = document.createElement("tr");
+    const name = document.createElement("td");
+    name.textContent = ingredient.name;
+    const amount = document.createElement("td");
+    amount.textContent = getIngredientAddAmount(ingredient.raw) || `${formatNumber(ingredient.oz)} oz`;
+    row.append(name, amount);
+    body.append(row);
+    const progress = getOptionalIngredientProgress(ingredient.raw);
+    if (progress) body.append(createOptionalIngredientProgressRow(ingredient.name, progress));
+  });
+  table.append(body);
+  panel.append(header, table);
+  return panel;
+}
+
+function getOptionalIngredientProgress(rawValue) {
+  const amount = getIngredientAddAmount(rawValue);
+  const standard = amount.match(/^(\d+)\s*(gallons?|bottles?|btls?|bts|packets?|pitchers?|boxes?|cans?)\b/i);
+  const sizedBottles = amount.match(/^(\d+)\s*\([^)]*(?:btls?|bts)\b[^)]*\)/i);
+  const match = standard || sizedBottles;
+  if (!match) return null;
+  const count = Number(match[1]);
+  if (!Number.isInteger(count) || count < 1 || count > 20) return null;
+  const rawUnit = standard?.[2] || "bottles";
+  const unit = /^(?:bottles?|btls?|bts)$/i.test(rawUnit)
+    ? (count === 1 ? "bottle" : "bottles")
+    : rawUnit.toLowerCase();
+  return { count, unit };
+}
+
+function createOptionalIngredientProgressRow(ingredientName, progress) {
+  const row = document.createElement("tr");
+  row.className = "staff-prep-recipe-progress-row";
+  const cell = document.createElement("td");
+  cell.colSpan = 2;
+  const tracker = document.createElement("div");
+  tracker.className = "staff-ingredient-progress";
+  const header = document.createElement("div");
+  const label = document.createElement("span");
+  label.textContent = "Optional progress";
+  const count = document.createElement("small");
+  count.textContent = `0 of ${progress.count} ${progress.unit}`;
+  header.append(label, count);
+  const checks = document.createElement("div");
+  checks.className = "staff-ingredient-progress__checks";
+  const inputs = [];
+  for (let index = 1; index <= progress.count; index += 1) {
+    const checkLabel = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.setAttribute("aria-label", `${ingredientName}: ${progress.unit} ${index} added`);
+    const checkNumber = document.createElement("span");
+    checkNumber.textContent = String(index);
+    checkLabel.append(checkbox, checkNumber);
+    checks.append(checkLabel);
+    inputs.push(checkbox);
+  }
+  checks.addEventListener("change", () => {
+    const completed = inputs.filter((input) => input.checked).length;
+    count.textContent = `${completed} of ${progress.count} ${progress.unit}`;
+    tracker.classList.toggle("is-complete", completed === progress.count);
+  });
+  tracker.append(header, checks);
+  cell.append(tracker);
+  row.append(cell);
+  return row;
 }
 
 function formatPlanWeek(value) {
@@ -312,32 +738,48 @@ async function parseJsonResponse(response) {
 }
 
 function buildRecipeCollection(activeCsv, newCsv, sharedRecipes) {
-  const byId = new Map();
-  [...parseRecipes(parseCsv(activeCsv)), ...parseRecipes(parseCsv(newCsv))].forEach((recipe) => {
-    if (!byId.has(recipe.id)) byId.set(recipe.id, recipe);
-  });
-
+  const sourceRecipes = [
+    ...applyStaffRecipeOrder(parseRecipes(parseCsv(activeCsv)), STAFF_MENU_ORDER),
+    ...applyStaffRecipeOrder(parseRecipes(parseCsv(newCsv)), STAFF_NEW_RECIPE_ORDER),
+  ];
   const customRecipes = Array.isArray(sharedRecipes?.customRecipes)
     ? sharedRecipes.customRecipes.map(normalizeSharedRecipe).filter(Boolean)
     : [];
-  customRecipes.forEach((recipe) => byId.set(recipe.id, recipe));
-
   const edits = isPlainRecord(sharedRecipes?.editedRecipes)
     ? sharedRecipes.editedRecipes
     : {};
-  Object.entries(edits).forEach(([id, rawEdit]) => {
-    const current = byId.get(id);
-    const edit = normalizeSharedRecipe({ ...(current || {}), ...rawEdit, id });
-    if (!edit) return;
-    byId.set(id, current ? mergeRecipeEdit(current, edit, rawEdit) : edit);
-  });
-
   const inactiveIds = new Set(
     Array.isArray(sharedRecipes?.inactiveRecipeIds) ? sharedRecipes.inactiveRecipeIds : [],
   );
-  return [...byId.values()]
-    .filter((recipe) => !inactiveIds.has(recipe.id))
+  return [...sourceRecipes, ...customRecipes]
+    .map((recipe) => {
+      const rawEdit = edits[recipe.id];
+      const edit = rawEdit ? normalizeSharedRecipe({ ...recipe, ...rawEdit, id: recipe.id }) : null;
+      const merged = edit ? mergeRecipeEdit(recipe, edit, rawEdit) : recipe;
+      return { ...merged, inactive: inactiveIds.has(recipe.id) };
+    })
     .sort((left, right) => left.title.localeCompare(right.title));
+}
+
+function applyStaffRecipeOrder(sourceRecipes, order) {
+  const byTitle = new Map(sourceRecipes.map((recipe) => [normalizeTitle(recipe.title), recipe]));
+  return order.map(([displayTitle, sourceTitle]) => {
+    const source = byTitle.get(normalizeTitle(sourceTitle));
+    if (!source) return null;
+    return {
+      ...source,
+      id: slugify(displayTitle),
+      title: displayTitle,
+      ingredients: source.ingredients.map((ingredient) => ({
+        ...ingredient,
+        name: getIngredientName(ingredient.raw, displayTitle),
+      })),
+    };
+  }).filter(Boolean);
+}
+
+function normalizeTitle(value) {
+  return clean(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function mergeRecipeEdit(current, edit, rawEdit) {
@@ -451,35 +893,118 @@ function populateCategoryFilter() {
 function bindStaffRecipeEvents() {
   searchInput.addEventListener("input", renderStaffRecipes);
   categoryFilter.addEventListener("change", renderStaffRecipes);
+  recipeViewButtons.forEach((button) => {
+    button.addEventListener("click", () => switchStaffRecipeView(button.dataset.staffRecipeView));
+  });
+}
+
+function bindStaffSectionEvents() {
+  sectionTabButtons.forEach((button) => {
+    button.addEventListener("click", () => switchStaffSection(button.dataset.staffSectionTab));
+  });
+  overviewTargets.forEach((button) => {
+    button.addEventListener("click", () => switchStaffSection(button.dataset.staffSectionTarget));
+  });
+}
+
+function switchStaffSection(section) {
+  const nextSection = ["overview", "prep", "recipes", "orders"].includes(section) ? section : "overview";
+  sectionTabButtons.forEach((button) => {
+    const selected = button.dataset.staffSectionTab === nextSection;
+    button.classList.toggle("is-active", selected);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
+  sectionPanels.forEach((panel) => {
+    const selected = panel.id === `staff-${nextSection === "orders" ? "orders" : nextSection}-panel`;
+    panel.classList.toggle("is-active", selected);
+    panel.hidden = !selected;
+  });
+  document.querySelector(".staff-section-tabs")?.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+function renderStaffOverview() {
+  const currentRecipes = recipes.filter((recipe) => !recipe.inactive);
+  const inactiveRecipes = recipes.filter((recipe) => recipe.inactive);
+  const planDate = prepPlan.generatedAt || orderTracking.generatedAt;
+  overviewWeek.textContent = planDate
+    ? formatPlanWeek(planDate)
+    : "No Monday plan has been published yet.";
+
+  if (prepPlan.available) {
+    const remainingPrep = Math.max(0, prepPlan.totalCount - prepPlan.completedCount);
+    overviewPrepValue.textContent = `${formatNumber(remainingPrep)} left`;
+    overviewPrepDetail.textContent = `${formatNumber(prepPlan.completedCount)} of ${formatNumber(prepPlan.totalCount)} prepared`;
+  } else {
+    overviewPrepValue.textContent = "No plan";
+    overviewPrepDetail.textContent = "Waiting for the Monday plan";
+  }
+
+  if (orderTracking.available) {
+    const checkedOrders = orderTracking.receivedCount + orderTracking.notReceivedCount;
+    const remainingOrders = Math.max(0, orderTracking.itemCount - checkedOrders);
+    overviewOrderValue.textContent = `${formatNumber(remainingOrders)} left`;
+    overviewOrderDetail.textContent = orderTracking.notReceivedCount
+      ? `${formatNumber(orderTracking.notReceivedCount)} short or missing`
+      : `${formatNumber(checkedOrders)} of ${formatNumber(orderTracking.itemCount)} checked`;
+  } else {
+    overviewOrderValue.textContent = "No plan";
+    overviewOrderDetail.textContent = "Waiting for the Monday plan";
+  }
+
+  overviewRecipeValue.textContent = `${formatNumber(currentRecipes.length)} current`;
+  overviewRecipeDetail.textContent = `${formatNumber(inactiveRecipes.length)} deactivated`;
+}
+
+function switchStaffRecipeView(view) {
+  activeRecipeView = view === "inactive" ? "inactive" : "current";
+  searchInput.value = "";
+  categoryFilter.value = "all";
+  recipeViewButtons.forEach((button) => {
+    const selected = button.dataset.staffRecipeView === activeRecipeView;
+    button.classList.toggle("is-active", selected);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
+  searchInput.placeholder = activeRecipeView === "inactive"
+    ? "Search deactivated cocktails..."
+    : "Search cocktails, liquor, juice...";
+  renderStaffRecipes();
 }
 
 function renderStaffRecipes() {
   const search = clean(searchInput.value).toLowerCase();
   const category = categoryFilter.value;
-  const visible = recipes.filter((recipe) => {
+  const currentRecipes = recipes.filter((recipe) => !recipe.inactive);
+  const inactiveRecipes = recipes.filter((recipe) => recipe.inactive);
+  const selectedRecipes = activeRecipeView === "inactive" ? inactiveRecipes : currentRecipes;
+  const visible = selectedRecipes.filter((recipe) => {
     if (category !== "all" && recipe.category !== category) return false;
     const searchText = `${recipe.title} ${recipe.batch} ${recipe.category} ${recipe.ingredients.map((item) => `${item.name} ${item.raw}`).join(" ")}`.toLowerCase();
     return searchText.includes(search);
   });
 
+  currentRecipeCount.textContent = `(${currentRecipes.length})`;
+  inactiveRecipeCount.textContent = `(${inactiveRecipes.length})`;
   renderStats(visible.length);
   recipeGrid.replaceChildren();
   visible.forEach((recipe) => recipeGrid.append(createRecipeCard(recipe)));
-  if (!visible.length) recipeGrid.append(createEmptyState("No recipes match that search."));
+  if (!visible.length) {
+    recipeGrid.append(createEmptyState(
+      activeRecipeView === "inactive" && !inactiveRecipes.length
+        ? "No deactivated recipes."
+        : "No recipes match that search.",
+    ));
+  }
+  renderStaffOverview();
   recipeGrid.setAttribute("aria-busy", "false");
 }
 
 function renderStats(visibleCount) {
-  const ingredientNames = new Set(recipes.flatMap((recipe) => recipe.ingredients.map((item) => item.name.toLowerCase())));
-  const spiritGroups = new Set(recipes.map((recipe) => recipe.category));
-  const totalBatchOz = recipes.reduce((total, recipe) => total + getTotalOunces(recipe), 0);
-  const stats = [
-    [String(recipes.length), "Recipes"],
-    [String(spiritGroups.size), "Spirit groups"],
-    [String(ingredientNames.size), "Ingredients"],
-    [formatNumber(recipes.length ? totalBatchOz / recipes.length : 0), "Avg batch oz"],
-  ];
-  if (visibleCount !== recipes.length) stats[0] = [String(visibleCount), "Recipes shown"];
+  const stats = [[
+    String(visibleCount),
+    visibleCount === recipes.length ? "Recipes" : "Recipes shown",
+  ]];
 
   statsGrid.replaceChildren();
   stats.forEach(([value, label]) => {
@@ -499,35 +1024,20 @@ function createRecipeCard(recipe) {
   article.className = "recipe-card staff-recipe-card";
 
   const header = document.createElement("div");
-  header.className = "recipe-card__header";
+  header.className = "recipe-card__header staff-recipe-card__header";
   const headingGroup = document.createElement("div");
-  const batch = document.createElement("p");
-  batch.className = "recipe-card__batch";
-  batch.textContent = formatBatchLabel(recipe.batch);
   const heading = document.createElement("h2");
-  heading.textContent = recipe.title;
-  headingGroup.append(batch, heading);
-  const category = document.createElement("span");
-  category.className = "spirit-pill";
-  category.textContent = recipe.category;
-  header.append(headingGroup, category);
-
-  const metrics = document.createElement("div");
-  metrics.className = "recipe-card__numbers";
-  [
-    [formatNumber(getTotalOunces(recipe)), "Total oz"],
-    [String(recipe.ingredients.length), "Ingredients"],
-    [formatBatchLabel(recipe.batch), "Batch"],
-  ].forEach(([value, label]) => {
-    const item = document.createElement("div");
-    item.className = "recipe-number";
-    const strong = document.createElement("strong");
-    strong.textContent = value;
-    const span = document.createElement("span");
-    span.textContent = label;
-    item.append(strong, span);
-    metrics.append(item);
-  });
+  heading.className = "staff-cocktail-name";
+  heading.textContent = getStaffRecipeDisplayTitle(recipe.title);
+  headingGroup.append(heading);
+  const total = document.createElement("div");
+  total.className = "staff-recipe-card__total";
+  const totalValue = document.createElement("strong");
+  totalValue.textContent = formatNumber(getTotalOunces(recipe));
+  const totalLabel = document.createElement("span");
+  totalLabel.textContent = "Total oz";
+  total.append(totalValue, totalLabel);
+  header.append(headingGroup, total);
 
   const tableWrap = document.createElement("div");
   tableWrap.className = "recipe-table-wrap";
@@ -535,7 +1045,7 @@ function createRecipeCard(recipe) {
   table.className = "recipe-table staff-recipe-table";
   const thead = document.createElement("thead");
   const headerRow = document.createElement("tr");
-  ["Ingredient", "Prep amount", "Oz"].forEach((label) => {
+  ["Ingredient", "Add"].forEach((label) => {
     const cell = document.createElement("th");
     cell.textContent = label;
     headerRow.append(cell);
@@ -549,16 +1059,30 @@ function createRecipeCard(recipe) {
     strong.textContent = ingredient.name;
     name.append(strong);
     const prep = document.createElement("td");
-    prep.textContent = getIngredientAddAmount(ingredient.raw) || "—";
-    const ounces = document.createElement("td");
-    ounces.textContent = formatNumber(ingredient.oz);
-    row.append(name, prep, ounces);
+    const addAmount = getIngredientAddAmount(ingredient.raw) || `${formatNumber(ingredient.oz)} oz`;
+    prep.textContent = addAmount;
+    if (/\bbottles?\b/i.test(addAmount) && /\([^)]*(?:l|ml)[^)]*\)/i.test(addAmount)) {
+      prep.classList.add("staff-recipe-add--bottle-size");
+    }
+    row.append(name, prep);
     tbody.append(row);
   });
   table.append(thead, tbody);
   tableWrap.append(table);
-  article.append(header, metrics, tableWrap);
+  article.append(header, tableWrap);
   return article;
+}
+
+function getStaffRecipeDisplayTitle(value) {
+  return formatStaffCocktailName(clean(value).replace(/\s*\([^)]*\)\s*$/, "").trim());
+}
+
+function formatStaffCocktailName(value) {
+  return clean(value)
+    .toLocaleLowerCase("en-US")
+    .replace(/(^|[\s/&'-])([a-z])/g, (_match, separator, letter) => `${separator}${letter.toLocaleUpperCase("en-US")}`)
+    .replace(/'S\b/g, "'s")
+    .replace(/\b(?:And|Of|The)\b/g, (word) => word.toLocaleLowerCase("en-US"));
 }
 
 function createEmptyState(message) {

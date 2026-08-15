@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { NextResponse } from "next/server";
 
-import { getProductLineScore, selectBottleCandidate } from "../../../lib/vendor-product-matching.mjs";
+import {
+  getProductLineScore,
+  productLineMatchesDistributor,
+  selectBottleCandidate,
+} from "../../../lib/vendor-product-matching.mjs";
 
 const PROVI_BASE_URL = "https://app.provi.com";
 const PROVI_CAPTURE_PATH = path.join(os.homedir(), ".FoodOrderAgent", "provi", "captures", "latest-provi-capture.json");
@@ -79,6 +83,7 @@ async function syncOhlqPrices(items, context) {
     ...context,
     vendorName: "OHLQ",
     distributorHints: ["Ohio Liquor - OHLQ", "OHLQ"],
+    distributorIds: [16114],
   });
 }
 
@@ -104,7 +109,13 @@ async function syncVendorWithProvi(items, context) {
     if (!product?.productName) continue;
 
     try {
-      const matchedProduct = await fetchMatchedProviProduct(item, sessionContext, context.proviSearchCache, context.distributorHints);
+      const matchedProduct = await fetchMatchedProviProduct(
+        item,
+        sessionContext,
+        context.proviSearchCache,
+        context.distributorHints,
+        context.distributorIds,
+      );
       if (!matchedProduct) continue;
 
       const bottlePrice = getMatchedInventoryPrice(matchedProduct, item);
@@ -145,12 +156,21 @@ async function syncVendorWithProvi(items, context) {
   };
 }
 
-async function fetchMatchedProviProduct(item, sessionContext, searchCache, distributorHints = []) {
+async function fetchMatchedProviProduct(
+  item,
+  sessionContext,
+  searchCache,
+  distributorHints = [],
+  distributorIds = [],
+) {
   const product = item?.vendorProduct || {};
   const queries = getSearchQueries(product, item);
   const activeDistributorHints = Array.isArray(product.distributorHints) && product.distributorHints.length
     ? product.distributorHints
     : distributorHints;
+  const activeDistributorIds = Array.isArray(product.distributorIds) && product.distributorIds.length
+    ? product.distributorIds
+    : distributorIds;
 
   for (const query of queries) {
     const cacheKey = `${sessionContext.retailerContext}::${query}`;
@@ -161,7 +181,12 @@ async function fetchMatchedProviProduct(item, sessionContext, searchCache, distr
       searchCache.set(cacheKey, results);
     }
 
-    const match = findMatchingProviProductLine(results, item, activeDistributorHints);
+    const match = findMatchingProviProductLine(
+      results,
+      item,
+      activeDistributorHints,
+      activeDistributorIds,
+    );
     if (match) return match;
   }
 
@@ -191,20 +216,15 @@ async function fetchProviProductLines(productName, sessionContext) {
   return Array.isArray(payload) ? payload : [];
 }
 
-function findMatchingProviProductLine(results, item, distributorHints = []) {
+function findMatchingProviProductLine(results, item, distributorHints = [], distributorIds = []) {
   if (!Array.isArray(results) || !results.length) return null;
 
   const expectedName = normalizeName(stripSizeLabel(item?.vendorProduct?.productName || item?.name || ""));
   const expectedIngredientName = normalizeName(item?.name || "");
   const targetBottleOz = toNumber(item?.vendorProduct?.bottleOz);
-  const normalizedHints = distributorHints.map((value) => normalizeName(value));
 
   const candidateLines = results
-    .filter((line) => {
-      if (!normalizedHints.length) return true;
-      const distributorName = normalizeName(line?.distributor_info?.distributor_name || line?.distributor?.name || "");
-      return normalizedHints.some((hint) => distributorName.includes(hint));
-    })
+    .filter((line) => productLineMatchesDistributor(line, { distributorHints, distributorIds }))
     .map((line) => ({
       line,
       score: getProductLineScore(line?.name, expectedName, expectedIngredientName),
@@ -444,6 +464,8 @@ function toNumber(value) {
 
 function normalizeName(value) {
   return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();

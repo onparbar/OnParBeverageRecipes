@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildActiveComingSoonBeerItems,
   buildAssignedOnDeckBeerItems,
   buildVerifiedCurrentBeerTapItems,
   filterCurrentTapPricingItems,
@@ -51,6 +52,26 @@ test("uses verified physical PMB products instead of old template products", () 
   assert.equal(result.some((item) => /breakfast stout/i.test(item.name)), false);
 });
 
+test("keeps saved active wall products when live keg levels are only partial", () => {
+  const result = buildVerifiedCurrentBeerTapItems({
+    wallItems,
+    weeklyUsageItems: [
+      { tapNumber: 39, name: "Guinness Draught 1", plu: 39001 },
+      { tapNumber: 42, name: "Voodoo Ranger IPA 1", plu: 42001 },
+    ],
+    liveLevelItems: [
+      { tapNumber: 42, name: "Voodoo Ranger IPA 1", plu: 42001 },
+    ],
+    tapPriceItems: [],
+    isBeerTapPosition: isBeerTap,
+  });
+
+  assert.deepEqual(result.map(({ tapPosition, name, tapMatchSource }) => ({ tapPosition, name, tapMatchSource })), [
+    { tapPosition: 39, name: "Guinness Draught 1", tapMatchSource: "saved-weekly-usage" },
+    { tapPosition: 42, name: "Voodoo Ranger IPA 1", tapMatchSource: "pmb-keg-levels" },
+  ]);
+});
+
 test("accepts only tap-pricing rows verified by PMB tap configuration", () => {
   const result = buildVerifiedCurrentBeerTapItems({
     wallItems,
@@ -86,5 +107,28 @@ test("adds assigned On Deck beers but excludes cocktail choices", () => {
     type: "Beer",
     sourceTapLabel: "On Deck for Main 39",
     isOnDeckProduct: true,
+  }]);
+});
+
+test("keeps only active beer products from Coming Soon", () => {
+  const result = buildActiveComingSoonBeerItems({
+    comingSoonItems: [
+      { id: "beer:future-lager", name: "Future Lager", kind: "beer", kegOz: 1984 },
+      { id: "beer:old-ipa", name: "Old IPA", kind: "beer", replacedAt: "2026-08-01T12:00:00.000Z" },
+      { id: "recipe:on-par-tee", name: "On Par Tee", kind: "recipe" },
+      { id: "liquor:woodford", name: "Woodford Reserve", kind: "liquor" },
+    ],
+  });
+
+  assert.deepEqual(result, [{
+    id: "beer:future-lager",
+    name: "Future Lager",
+    kind: "beer",
+    kegOz: 1984,
+    tapNumber: 0,
+    wall: "Coming Soon",
+    type: "Beer",
+    sourceTapLabel: "Coming Soon",
+    isComingSoonProduct: true,
   }]);
 });

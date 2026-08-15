@@ -37,7 +37,7 @@ test("the direction arrow describes the latest week-to-week movement", () => {
   assert.equal(trend.direction, "down");
 });
 
-test("breaks the line at missing weeks instead of plotting them as zero", () => {
+test("a missing immediately previous week never becomes a false week-over-week direction", () => {
   const trend = buildWeeklyUsageTrend([
     { label: newest, value: 0.4 },
     { label: oldest, value: 0.2 },
@@ -46,7 +46,9 @@ test("breaks the line at missing weeks instead of plotting them as zero", () => 
   assert.deepEqual(trend.points.map((point) => point.value), [0.2, null, 0.4]);
   assert.equal(trend.missingCount, 1);
   assert.equal(trend.segments.length, 2);
-  assert.equal(trend.direction, "up");
+  assert.equal(trend.previousValue, null);
+  assert.equal(trend.change, null);
+  assert.equal(trend.direction, "unavailable");
 });
 
 test("keeps recorded zeroes and distinguishes flat or insufficient history", () => {

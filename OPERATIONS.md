@@ -80,6 +80,32 @@ check: it may contain unsynced edits. Create a new staff browser profile, sign
 in there with `EMPLOYEE_DASHBOARD_PASSWORD`, and keep owner work in the owner
 profile.
 
+## Monday order plan
+
+Publish the Weekly Plan on Monday for Thursday delivery. Publishing stores one
+shared order-and-prep snapshot and locks it through Sunday. Later PMB keg-level
+refreshes, inventory counts, and staff prep checkoffs remain live but do not
+rewrite that published order. On the next Monday, publish the new week's plan.
+
+Purchasing is grouped by distributor by default. Bonbright and Heidelberg are
+shown as separate orders and remain separate sections in the CSV export. Items
+with a par of zero are excluded from both ordering and review warnings, and new
+products waiting in the product workflow do not create a dashboard alert merely
+because they are new.
+
+Straight-liquor taps use a per-physical-tap bottle rule. When the ounces left in
+a Patio or Karaoke liquor keg are below that tap's saved weekly average plus
+100 oz, that tap adds two bottles to the active order. Matching products across
+walls are combined after the per-tap calculation, so two low Patron taps create
+one four-bottle Patron order line.
+
+Each vendor order also has shared handoff tracking. An owner records who placed
+the order from Weekly Plan. Employees use the dedicated `/staff` page to mark
+each delivery line `Received` or `Not received` and enter their name. A line
+marked `Not received` creates a critical owner-dashboard alert containing the
+vendor, item, quantity, and reporting employee. Returning the line to
+`Received` clears it from that alert.
+
 ## First installation
 
 Production is pinned to Node.js 22. The setup script installs Homebrew's

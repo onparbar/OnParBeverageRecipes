@@ -1,0 +1,195 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { createWeeklyPlanSnapshot } from "../public/weekly-action-plan.mjs";
+import {
+  WeeklyOrderTrackingError,
+  applyWeeklyOrderTrackingUpdate,
+  buildWeeklyOrderTracking,
+} from "../lib/weekly-order-tracking.mjs";
+
+const generatedAt = "2026-08-10T14:00:00.000Z";
+const clock = () => new Date("2026-08-13T16:30:00.000Z");
+
+function recommendations(overrides = {}) {
+  const items = [
+    {
+      key: "main-42-bud-light",
+      actionType: "order",
+      isKegTap: true,
+      orderQty: 1,
+      orderProductName: "Bud Light",
+      vendor: "Heidelberg",
+      unitCost: 120,
+      tapNumber: 42,
+      wall: "Main",
+    },
+    {
+      key: "patio-12-patron",
+      actionType: "order",
+      isLiquorTap: true,
+      orderQty: 2,
+      orderProductName: "Patron Silver (Tequila) 3",
+      vendor: "OHLQ",
+      unitCost: 98.7,
+      tapNumber: 12,
+      wall: "Patio",
+    },
+  ];
+  return {
+    generatedAt,
+    items,
+    weeklyPlanSnapshot: createWeeklyPlanSnapshot({ generatedAt, recommendations: items }),
+    ...overrides,
+  };
+}
+
+test("builds a sanitized receipt checklist from the locked vendor orders", () => {
+  const plan = buildWeeklyOrderTracking(recommendations(), clock());
+
+  assert.deepEqual(plan.vendors.map((vendor) => vendor.vendor), ["Heidelberg", "OHLQ"]);
+  assert.equal(plan.itemCount, 2);
+  assert.equal(plan.receivedCount, 0);
+  assert.equal(plan.notReceivedCount, 0);
+  assert.deepEqual(
+    plan.vendors.flatMap((vendor) => vendor.items).map((item) => ({
+      name: item.name,
+      quantity: item.quantity,
+      unit: item.unit,
+    })),
+    [
+      { name: "Bud Light", quantity: 1, unit: "keg" },
+      { name: "Patron Silver", quantity: 2, unit: "bottles" },
+    ],
+  );
+});
+
+test("only an owner can record who placed a vendor order", () => {
+  const base = recommendations();
+  const vendor = buildWeeklyOrderTracking(base, clock()).vendors[0];
+
+  assert.throws(
+    () => applyWeeklyOrderTrackingUpdate(base, {
+      action: "set-ordered",
+      generatedAt,
+      vendorId: vendor.id,
+      ordered: true,
+      orderedBy: "Sam",
+    }, { role: "employee", now: clock }),
+    (error) => error instanceof WeeklyOrderTrackingError
+      && error.code === "OWNER_ORDER_TRACKING_REQUIRED",
+  );
+
+  const updated = applyWeeklyOrderTrackingUpdate(base, {
+    action: "set-ordered",
+    generatedAt,
+    vendorId: vendor.id,
+    ordered: true,
+    orderedBy: "  Sam   W. ",
+  }, { role: "owner", now: clock });
+  const plan = buildWeeklyOrderTracking(updated, clock());
+
+  assert.equal(plan.vendors[0].ordered, true);
+  assert.equal(plan.vendors[0].orderedBy, "Sam W.");
+  assert.equal(plan.vendors[0].orderedAt, "2026-08-13T16:30:00.000Z");
+});
+
+test("an employee can mark an item not received and expose it for a dashboard alert", () => {
+  const base = recommendations();
+  const item = buildWeeklyOrderTracking(base, clock()).vendors[1].items[0];
+  const updated = applyWeeklyOrderTrackingUpdate(base, {
+    action: "set-receipt",
+    generatedAt,
+    itemId: item.id,
+    status: "not-received",
+    handledBy: "  Jordan  ",
+  }, { role: "employee", now: clock });
+  const plan = buildWeeklyOrderTracking(updated, clock());
+
+  assert.equal(plan.notReceivedCount, 1);
+  assert.deepEqual(plan.notReceivedItems.map((entry) => ({
+    vendor: entry.vendor,
+    name: entry.name,
+    handledBy: entry.handledBy,
+  })), [{ vendor: "OHLQ", name: "Patron Silver", handledBy: "Jordan" }]);
+});
+
+test("an employee can record a partial bottle delivery", () => {
+  const bottleItems = [{
+    key: "crown-apple-order",
+    actionType: "order",
+    isLiquorTap: true,
+    orderQty: 18,
+    orderProductName: "Crown Apple",
+    vendor: "OHLQ",
+    unitCost: 35,
+    lineType: "Liquor tap bottle",
+  }];
+  const base = {
+    generatedAt,
+    items: bottleItems,
+    weeklyPlanSnapshot: createWeeklyPlanSnapshot({ generatedAt, recommendations: bottleItems }),
+  };
+  const item = buildWeeklyOrderTracking(base, clock()).vendors[0].items[0];
+  const updated = applyWeeklyOrderTrackingUpdate(base, {
+    action: "set-receipt",
+    generatedAt,
+    itemId: item.id,
+    status: "partial",
+    receivedQuantity: 14,
+    handledBy: "Jordan",
+  }, { role: "employee", now: clock });
+  const plan = buildWeeklyOrderTracking(updated, clock());
+  const saved = plan.vendors[0].items[0];
+
+  assert.equal(saved.status, "partial");
+  assert.equal(saved.quantity, 18);
+  assert.equal(saved.receivedQuantity, 14);
+  assert.equal(saved.missingQuantity, 4);
+  assert.equal(plan.receivedCount, 0);
+  assert.equal(plan.notReceivedCount, 1);
+  assert.equal(plan.notReceivedItems[0].name, "Crown Apple");
+});
+
+test("receipt quantities cannot exceed the amount ordered", () => {
+  const base = recommendations();
+  const item = buildWeeklyOrderTracking(base, clock()).vendors[1].items[0];
+
+  assert.throws(
+    () => applyWeeklyOrderTrackingUpdate(base, {
+      action: "set-receipt",
+      generatedAt,
+      itemId: item.id,
+      status: "partial",
+      receivedQuantity: 3,
+      handledBy: "Jordan",
+    }, { role: "employee", now: clock }),
+    (error) => error.code === "RECEIVED_QUANTITY_INVALID",
+  );
+});
+
+test("receipt tracking requires the current plan and the employee name", () => {
+  const base = recommendations();
+  const item = buildWeeklyOrderTracking(base, clock()).vendors[0].items[0];
+
+  assert.throws(
+    () => applyWeeklyOrderTrackingUpdate(base, {
+      action: "set-receipt",
+      generatedAt: "2026-08-03T14:00:00.000Z",
+      itemId: item.id,
+      status: "received",
+      handledBy: "Jordan",
+    }, { role: "employee", now: clock }),
+    (error) => error.code === "WEEKLY_ORDER_PLAN_CHANGED",
+  );
+  assert.throws(
+    () => applyWeeklyOrderTrackingUpdate(base, {
+      action: "set-receipt",
+      generatedAt,
+      itemId: item.id,
+      status: "received",
+      handledBy: "",
+    }, { role: "employee", now: clock }),
+    (error) => error.code === "RECEIVED_BY_REQUIRED",
+  );
+});

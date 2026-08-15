@@ -300,13 +300,13 @@ test("uses the 0.25-keg threshold for karaoke cocktail kegs", () => {
   assert.equal(result.orderQty, 1);
 });
 
-test("flags patio and karaoke liquor refill gaps for deferred manual review", () => {
+test("orders two bottles per low patio or karaoke liquor tap", () => {
   const fixtures = [
     [liquorTap("Patio", 1, "Hennessy (Cognac) 3"), 50, 0],
-    [liquorTap("Karaoke", 83, "Grey Goose (Vodka) 2"), 49.8, 1],
+    [liquorTap("Karaoke", 83, "Grey Goose (Vodka) 2"), 49.8, 2],
   ];
 
-  fixtures.forEach(([tap, fillLevelPercent, expectedDeferredQty]) => {
+  fixtures.forEach(([tap, fillLevelPercent, expectedBottleQty]) => {
     const result = buildRawRecommendation(
       tap,
       { fillLevelPercent, rawKegSize: 500, rawKegSizeDp: 0 },
@@ -318,12 +318,13 @@ test("flags patio and karaoke liquor refill gaps for deferred manual review", ()
     assert.equal(result.isLiquorTap, true);
     assert.equal(result.avgWeeklyOunces, 150);
     assert.equal(result.targetStockOunces, 250);
-    assert.equal(result.orderQty, 0);
-    assert.equal(result.suggestedRefillQty, expectedDeferredQty);
-    assert.equal(result.deferredQty, expectedDeferredQty);
-    assert.equal(result.deferredReview, Boolean(expectedDeferredQty));
-    assert.equal(result.actionType, expectedDeferredQty ? "review" : "none");
-    assert.equal(result.currentStockOunces, expectedDeferredQty ? 249 : 250);
+    assert.equal(result.orderQty, expectedBottleQty);
+    assert.equal(result.suggestedBottleOrderQty, expectedBottleQty);
+    assert.equal(result.suggestedRefillQty, 0);
+    assert.equal(result.deferredQty, 0);
+    assert.equal(result.deferredReview, false);
+    assert.equal(result.actionType, expectedBottleQty ? "order" : "none");
+    assert.equal(result.currentStockOunces, expectedBottleQty ? 249 : 250);
   });
 });
 
@@ -345,8 +346,9 @@ test("uses saved Weekly Usage ounces for liquor taps too", () => {
 
   assert.equal(result.avgWeeklyOunces, 160);
   assert.equal(result.targetStockOunces, 260);
-  assert.equal(result.orderQty, 0);
-  assert.equal(result.deferredQty, 1);
+  assert.equal(result.orderQty, 2);
+  assert.equal(result.suggestedBottleOrderQty, 2);
+  assert.equal(result.deferredQty, 0);
   assert.deepEqual(result.weeklyOunces, [120, 200]);
 });
 
@@ -370,9 +372,10 @@ test("uses a 500-ounce fallback when a liquor tap has no PMB keg-size metadata",
   assert.equal(getKegFullOunces(liveLevel, tap), 500);
   assert.equal(result.currentStockOunces, 250);
   assert.equal(result.targetStockOunces, 260);
-  assert.equal(result.orderQty, 0);
-  assert.equal(result.deferredQty, 1);
-  assert.match(result.reason, /manual/i);
+  assert.equal(result.orderQty, 2);
+  assert.equal(result.suggestedBottleOrderQty, 2);
+  assert.equal(result.deferredQty, 0);
+  assert.match(result.reason, /order 2 bottles/i);
 });
 
 test("fails closed when the live PMB tap configuration cannot be read", async () => {

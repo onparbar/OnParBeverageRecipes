@@ -16,6 +16,7 @@ export function filterCurrentTapPricingItems(items = []) {
 
 export function buildVerifiedCurrentBeerTapItems({
   wallItems = [],
+  weeklyUsageItems = [],
   liveLevelItems = [],
   tapPriceItems = [],
   isBeerTapPosition = () => false,
@@ -25,32 +26,61 @@ export function buildVerifiedCurrentBeerTapItems({
       .filter((item) => isBeerTapPosition(item))
       .map((item) => [tapNumberOf(item), item]),
   );
-  const verifiedLevelsByTap = new Map();
+  const currentItemsByTap = new Map();
+
+  weeklyUsageItems.forEach((item) => {
+    const tapNumber = tapNumberOf(item);
+    const wallItem = beerWallByTap.get(tapNumber);
+    const name = String(item?.name || item?.tapProduct || "").trim();
+    if (!tapNumber || !wallItem || !name || currentItemsByTap.has(tapNumber)) return;
+    currentItemsByTap.set(tapNumber, {
+      ...item,
+      tapNumber,
+      tapPosition: tapNumber,
+      wall: item.wall || wallItem.wall,
+      type: item.type || wallItem.type || "Beer",
+      matchedBrand: name,
+      templateBrand: wallItem.brand || "",
+      isCurrentTap: true,
+      tapMatchSource: "saved-weekly-usage",
+    });
+  });
+
+  tapPriceItems.forEach((item) => {
+    const tapNumber = tapNumberOf(item);
+    const wallItem = beerWallByTap.get(tapNumber);
+    const name = String(item?.name || item?.tapProduct || "").trim();
+    if (item?.isCurrentTap !== true || !tapNumber || !wallItem || !name) return;
+    currentItemsByTap.set(tapNumber, {
+      ...item,
+      tapNumber,
+      tapPosition: tapNumber,
+      wall: item.wall || wallItem.wall,
+      type: item.type || wallItem.type || "Beer",
+      matchedBrand: name,
+      templateBrand: wallItem.brand || "",
+    });
+  });
 
   liveLevelItems.forEach((item) => {
     const tapNumber = tapNumberOf(item);
     const wallItem = beerWallByTap.get(tapNumber);
-    if (!tapNumber || !wallItem || verifiedLevelsByTap.has(tapNumber)) return;
-    verifiedLevelsByTap.set(tapNumber, {
+    const name = String(item?.tapProduct || item?.name || "").trim();
+    if (!tapNumber || !wallItem || !name) return;
+    currentItemsByTap.set(tapNumber, {
       ...item,
       tapNumber,
       tapPosition: tapNumber,
       wall: wallItem.wall,
       type: wallItem.type || "Beer",
-      matchedBrand: item.tapProduct || item.name || "",
+      matchedBrand: name,
       templateBrand: wallItem.brand || "",
       isCurrentTap: true,
       tapMatchSource: "pmb-keg-levels",
     });
   });
 
-  if (verifiedLevelsByTap.size) {
-    return [...verifiedLevelsByTap.values()].sort((a, b) => tapNumberOf(a) - tapNumberOf(b));
-  }
-
-  return tapPriceItems
-    .filter((item) => item?.isCurrentTap === true && isBeerTapPosition(item))
-    .slice()
+  return [...currentItemsByTap.values()]
     .sort((a, b) => tapNumberOf(a) - tapNumberOf(b));
 }
 
@@ -71,6 +101,23 @@ export function buildAssignedOnDeckBeerItems({
       type: "Beer",
       sourceTapLabel: `On Deck for ${item.wall || "wall"} ${tapNumber}`,
       isOnDeckProduct: true,
+    }];
+  });
+}
+
+export function buildActiveComingSoonBeerItems({
+  comingSoonItems = [],
+} = {}) {
+  return comingSoonItems.flatMap((item) => {
+    const name = String(item?.name || "").trim();
+    if (!name || String(item?.kind || "").toLowerCase() !== "beer" || item?.replacedAt) return [];
+    return [{
+      ...item,
+      tapNumber: 0,
+      wall: "Coming Soon",
+      type: "Beer",
+      sourceTapLabel: "Coming Soon",
+      isComingSoonProduct: true,
     }];
   });
 }

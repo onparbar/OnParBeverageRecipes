@@ -13,7 +13,10 @@ function wantsDeepCheck(request) {
 
 function wantsStorageCheck(request) {
   const value = new URL(request.url).searchParams.get("storage");
-  return value === "1" || value === "true";
+  // The public health check should prove the required shared rows are reachable,
+  // not merely that Supabase credentials exist. Callers can still request the
+  // inexpensive configuration-only check explicitly with ?storage=0.
+  return value !== "0" && value !== "false";
 }
 
 export async function GET(request) {

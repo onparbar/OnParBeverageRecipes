@@ -595,3 +595,45 @@ curl -I 'https://onparbev.com/dashboard.js?v=check'
 - Estimated profit requires exact PMB tap + PLU identity, current verified price, and mapped cost. Liquor stays unavailable unless both PMB portion quantities resolve to the same price per ounce; historical realized profit is never implied.
 - Tap-pricing refresh no longer reconciles Weekly Usage, because pricing responses are product-centric and can represent one PLU on multiple physical walls. Weekly Usage reconciliation remains tied to the complete physical-tap PMB report.
 - Weekly Movement now compares only taps with valid PMB poured ounces in both consecutive weeks. Excluded taps are listed with tap number, product, and reason; taps with current data but no prior or older PMB history are identified as likely new/newly assigned. Missing readings are never treated as zero.
+
+## Cocktail Label Prep Handoff - 2026-08-14
+
+- Cocktail prep rows now preserve their wall suffix instead of merging matching Main and Karaoke batches. For example, Blue Dot is handed off as separate `Blue Dot 1` and `Blue Dot 2` labels while retaining the same recipe-yield mapping.
+- Manager and staff prep lists show only label-ready details: product label, wall, recipe batch ounces, and label count. Blue Dot displays `Main wall · 1,508 oz` or `Karaoke wall · 1,508 oz`.
+- Existing locked Monday snapshots are upgraded in memory without changing their total prep quantities. Legacy combined completion records carry forward to both split wall labels and migrate safely when edited.
+- Redundant beer-keg, liquor-bottle, and mixer type text was removed from vendor and delivery rows; the internal line types remain intact for ordering IDs, units, exports, and receipt mappings.
+
+## Monday Plan, Kahlua, and Prepared Ingredient Pricing - 2026-08-14
+
+- Weekly Plan now has one `Lock Monday Plan` action. The CSV export and print controls, their readiness note, and the unused CSV-generation code were removed.
+- Kahlua is mapped to the live OHLQ/Provi identity `Kahlúa`, 1 L, SKU `0893L`. Provi omits the line-level distributor name for this item, so OHLQ matching now safely accepts its exact distributor ID (`16114`) and normalizes the accented product name.
+- Live owner-dashboard verification synced Kahlua at `$27.26` and stamped the row with the current sync time.
+- Cold Brew Coffee is priced as a purchased 32 oz concentrate bottle. Two bottles plus 2.5 gallons of water make the 384 oz recipe batch; the prior `$51.67` batch default migrates to `$25.835` per bottle without changing batch cost.
+- Blue Dot Juice is priced as one six-packet Starburst box per gallon of water. The 1,152 oz recipe line now displays `9 Starburst boxes (54 packets) + 9 gallons water`, costs nine box prices, and drops the old zero-ounce duplicate formula note.
+- Both prepared ingredients show a fixed package/yield description and only an editable package-price field. Their recipe calculations still use the finished diluted yield, with water at no cost.
+- Verification passed: `412` automated tests, zero-warning lint, optimized production build, and live browser checks for Weekly Plan controls, prepared-ingredient rows/recipe amounts, and Kahlua OHLQ sync.
+
+## Triple Jam / Truly Mapping and Pricing Label Cleanup - 2026-08-14
+
+- Removed the redundant `Provi`, `via Provi`, `OHLQ`, and `Proof` identifier badges from ingredient and keg pricing rows and their inline editors. Distributor names remain where they are operationally useful.
+- Triple Jam now maps directly to Provi's `Blake's Hard Cider Triple Jam`, Heidelberg SKU `41189`, 15.5-gallon keg, `$189`.
+- Truly Wild Berry now maps directly to Provi's `TRULY Hard Seltzer Wild Berry`, Heidelberg SKU `42517`, half-barrel keg, `$182`.
+- The prior failures were product-name matching gaps, not absent Provi products. Live dashboard verification synced both rows and increased the successful automatic price count from 49 to 51.
+- Verification passed: `414` automated tests, zero-warning lint, optimized production build, diff check, and live browser validation of both synced keg-price rows.
+
+## Active Keg Pricing Scope and Guinness Recovery - 2026-08-14
+
+- Keg Pricing now includes only products on the current physical beer walls plus active beer products in Coming Soon or assigned On Deck; the stale static tap template is no longer used as a pricing-list fallback.
+- Current products are assembled per physical tap from saved active Weekly Usage assignments, then upgraded by verified Tap Pricing and live Keg Levels when those feeds are available. A partial PMB keg-level response can no longer drop an active tap from pricing.
+- This repaired Main tap `39`: `Guinness Draught` now appears with its canonical `1,689.6` ounces and `$185` keg price, while the obsolete `Breakfast Stout` row is removed.
+- Live browser validation covered all `36` physical beer taps as `26` distinct current products, including all Main taps `21-46` and Karaoke taps `73-82`.
+- Verification passed: `416` automated tests, zero-warning lint, optimized production build, diff check, and live browser validation.
+
+## Inventory Editing, Bottle Mapping, and Monday Snapshot Workflow - 2026-08-14
+
+- Inventory rows now show one calm `Edit` action. Reordering controls, custom-item maintenance, price lookup, and par editing appear only while that row is being edited; on-hand counting remains directly available.
+- The retired Bubbly section is omitted from current inventory. The custom Korbel Brut row remains in Other and is mapped to Proof/Provi for automatic pricing.
+- Captain Morgan, Buffalo Trace, Jim Beam, and Maker's Mark are mapped to their OHLQ bottle products. Custom cabinet items now inherit canonical vendor mappings and participate in automatic price sync.
+- Weekly Plan inventory orders are calculated from the saved snapshot for the current Monday, not later live counts or keg levels. Locking a plan is blocked until that Monday snapshot exists.
+- A successful Monday snapshot preserves the saved count and pars, then clears only the current on-hand fields. Restoring the snapshot repopulates those fields so a corrected snapshot can be saved again.
+- Verification passed: `421` automated tests, zero-warning lint, optimized production build, and a local production-browser check confirming no Bubbly section, one Korbel row, hidden reorder arrows, and row-scoped par editing.

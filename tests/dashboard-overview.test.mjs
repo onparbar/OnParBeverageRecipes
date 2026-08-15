@@ -86,7 +86,6 @@ function readySignals() {
     products: { pendingPublishCount: 0 },
     deferred: {
       cocktailIngredientNetting: false,
-      liquorRefillNetting: false,
     },
   };
 }
@@ -195,7 +194,7 @@ test("a real reporting gap still produces a week-over-week alert when new taps a
   assert.doesNotMatch(alert.details[0], /New Cocktail/);
 });
 
-test("shared setup, save, durability, and pending states fail closed and sort deterministically", () => {
+test("shared setup failures alert without a duplicate shared-save warning", () => {
   const signals = readySignals();
   signals.shared = {
     dashboard: { available: false, initialized: false },
@@ -219,17 +218,31 @@ test("shared setup, save, durability, and pending states fail closed and sort de
 
   assert.equal(overview.status, "critical");
   assert.equal(overview.planNumbersAvailable, false);
-  assert.deepEqual(ids.slice(0, 3), [
-    "shared-save-failed",
+  assert.deepEqual(ids.slice(0, 2), [
     "shared-state-unavailable",
     "shared-setup-incomplete",
   ]);
-  assert.match(overview.alerts[0].message, /Inventory and Keg Levels/);
-  assert.match(overview.alerts[0].details.join(" "), /Revision conflict/);
+  assert.ok(!ids.includes("shared-save-failed"));
   assert.ok(!ids.includes("shared-changes-pending"), "failed saves should not also be presented as ordinary in-progress saves");
 });
 
-test("dashboard-only setup uses an exact warning and a working setup action", () => {
+test("shared save recovery issues stay in their workspace instead of creating a dashboard alert", () => {
+  const signals = readySignals();
+  signals.shared.inventory = {
+    available: true,
+    initialized: true,
+    saveError: "Revision conflict",
+    hasOutbox: true,
+  };
+
+  const overview = buildDashboardOverview(signals, { now });
+
+  assert.ok(!overview.alerts.some((item) => item.id === "shared-save-failed"));
+  assert.ok(!overview.alerts.some((item) => item.title === "Shared changes are not safely published"));
+  assert.equal(overview.planNumbersAvailable, true);
+});
+
+test("dashboard-only setup does not create an alert or hide weekly plan numbers", () => {
   const signals = readySignals();
   signals.shared.dashboard = {
     available: true,
@@ -238,18 +251,28 @@ test("dashboard-only setup uses an exact warning and a working setup action", ()
   };
 
   const overview = buildDashboardOverview(signals, { now });
-  const alert = overview.alerts.find((item) => item.id === "shared-dashboard-setup-incomplete");
 
-  assert.ok(alert);
-  assert.equal(alert.severity, "warning");
-  assert.match(alert.message, /Recipe, pricing, product, and tap-replacement setup/);
-  assert.doesNotMatch(alert.message, /Weekly ordering is not reliable/);
-  assert.equal(alert.action.label, "Review dashboard setup");
-  assert.equal(alert.action.target, DASHBOARD_OVERVIEW_TARGETS.sharedDashboardSetup);
+  assert.ok(!overview.alerts.some((item) => item.id === "shared-dashboard-setup-incomplete"));
   assert.ok(!overview.alerts.some((item) => item.id === "shared-setup-incomplete"));
+  assert.equal(overview.planNumbersAvailable, true);
 });
 
-test("dashboard setup explains when this browser has nothing safe to import", () => {
+test("a refresh error without unpublished changes is not mislabeled as a shared-save failure", () => {
+  const signals = readySignals();
+  signals.shared.kegLevels = {
+    available: true,
+    initialized: true,
+    saveError: "Weekly Plan refresh failed.",
+    savePending: false,
+  };
+
+  const overview = buildDashboardOverview(signals, { now });
+
+  assert.ok(!overview.alerts.some((item) => item.id === "shared-save-failed"));
+  assert.equal(overview.planNumbersAvailable, true);
+});
+
+test("a blocked dashboard import still does not create a setup alert", () => {
   const signals = readySignals();
   signals.shared.dashboard = {
     available: true,
@@ -259,10 +282,9 @@ test("dashboard setup explains when this browser has nothing safe to import", ()
   };
 
   const overview = buildDashboardOverview(signals, { now });
-  const alert = overview.alerts.find((item) => item.id === "shared-dashboard-setup-incomplete");
 
-  assert.match(alert.message, /import is blocked because this browser has no saved non-default configuration/);
-  assert.equal(alert.action, null);
+  assert.ok(!overview.alerts.some((item) => item.id === "shared-dashboard-setup-incomplete"));
+  assert.equal(overview.planNumbersAvailable, true);
 });
 
 test("partial PMB keg reads are critical and never interpret missing rows as zero", () => {
@@ -306,7 +328,43 @@ test("offline price sync suppresses advisor claims while keeping the owner actio
   assert.equal(pricingAction.target, DASHBOARD_OVERVIEW_TARGETS.pricing);
 });
 
-test("deferred cocktail ingredient and liquor refill netting stays explicit without a duplicate alert", () => {
+test("one PMB connection alert replaces duplicate keg-level and pricing failures", () => {
+  const signals = readySignals();
+  signals.pmb.kegLevels = {
+    status: "offline",
+    error: "Could not connect to PMB.",
+  };
+  signals.pmb.pricing = {
+    status: "offline",
+    error: "Could not connect to PMB.",
+  };
+
+  const overview = buildDashboardOverview(signals, { now });
+  const pmbAlerts = overview.alerts.filter((item) => item.id.startsWith("pmb-"));
+
+  assert.equal(pmbAlerts.length, 1);
+  assert.equal(pmbAlerts[0].id, "pmb-connection-offline");
+  assert.equal(pmbAlerts[0].severity, "critical");
+  assert.match(pmbAlerts[0].message, /keg levels and tap pricing/i);
+  assert.deepEqual(pmbAlerts[0].details, ["Could not connect to PMB."]);
+  assert.equal(pmbAlerts[0].action.label, "Retry PMB Connection");
+  assert.equal(overview.planNumbersAvailable, false);
+});
+
+test("a pricing-only PMB failure keeps its specific alert", () => {
+  const signals = readySignals();
+  signals.pmb.pricing = {
+    status: "offline",
+    error: "Could not load current prices.",
+  };
+
+  const overview = buildDashboardOverview(signals, { now });
+
+  assert.ok(overview.alerts.some((item) => item.id === "pmb-pricing-offline"));
+  assert.ok(!overview.alerts.some((item) => item.id === "pmb-connection-offline"));
+});
+
+test("deferred cocktail ingredient netting stays explicit without a duplicate alert", () => {
   const signals = readySignals();
   delete signals.deferred;
 
@@ -354,8 +412,68 @@ test("adds operational alerts and stable action targets for recipes and pricing"
   assert.equal(byId["pricing-below-floor"].action.target, DASHBOARD_OVERVIEW_TARGETS.pricing);
   assert.match(byId["pricing-below-floor"].message, /never recommends lowering/);
   assert.equal(byId["recipe-coverage-missing"].action.target, DASHBOARD_OVERVIEW_TARGETS.recipes);
-  assert.equal(byId["pmb-products-pending"].action.target, DASHBOARD_OVERVIEW_TARGETS.addProduct);
+  assert.equal(byId["pmb-products-pending"], undefined);
   assert.equal(overview.quickActions.find((item) => item.id === "recipes")?.label, "Add Missing Recipe Cards");
+});
+
+test("a delivery item marked not received creates an owner dashboard alert", () => {
+  const signals = readySignals();
+  signals.orders = {
+    notReceivedItems: [{
+      vendor: "Heidelberg",
+      name: "Bud Light",
+      quantity: 2,
+      receivedQuantity: 0,
+      missingQuantity: 2,
+      unit: "kegs",
+      handledBy: "Jordan",
+    }],
+  };
+
+  const overview = buildDashboardOverview(signals, { now });
+  const alert = overview.alerts.find((item) => item.id === "weekly-order-not-received");
+
+  assert.equal(alert.severity, "critical");
+  assert.match(alert.title, /1 ordered item was short or not received/);
+  assert.match(alert.details[0], /Heidelberg.*Bud Light.*0 of 2 kegs received.*2 missing.*Jordan/);
+  assert.equal(alert.action.target, DASHBOARD_OVERVIEW_TARGETS.weeklyPlan);
+});
+
+test("a locked Monday plan keeps its numbers when later keg levels are unavailable", () => {
+  const signals = readySignals();
+  signals.weeklyPlan.lockedForWeek = true;
+  signals.pmb.kegLevels = {
+    status: "offline",
+    error: "PMB is temporarily unavailable.",
+  };
+
+  const overview = buildDashboardOverview(signals, { now });
+  const kpis = Object.fromEntries(overview.kpis.map((item) => [item.id, item]));
+
+  assert.ok(overview.alerts.some((item) => item.id === "pmb-keg-levels-offline"));
+  assert.equal(overview.planNumbersAvailable, true);
+  assert.equal(kpis["items-to-order"].value, "9");
+  assert.equal(kpis["cocktails-to-make"].value, "3");
+});
+
+test("a locked Monday plan keeps its numbers when later usage, inventory, or shared checks change", () => {
+  const signals = readySignals();
+  signals.weeklyPlan.lockedForWeek = true;
+  signals.weeklyPlan.generatedAt = "2026-08-10T10:00:00.000Z";
+  signals.usage.performance.currentComplete = false;
+  signals.inventory.missingCurrentCount = 3;
+  signals.shared.kegLevels.available = false;
+
+  const overview = buildDashboardOverview(signals, {
+    now: "2026-08-16T18:00:00.000Z",
+    planStaleAfterDays: 1,
+  });
+
+  assert.equal(overview.planNumbersAvailable, true);
+  assert.equal(overview.kpis.find((item) => item.id === "items-to-order")?.value, "9");
+  assert.equal(overview.alerts.some((item) => item.id === "weekly-plan-age-stale"), false);
+  assert.ok(overview.alerts.some((item) => item.id === "shared-state-unavailable"));
+  assert.ok(overview.alerts.some((item) => item.id === "inventory-counts-missing"));
 });
 
 test("alert sorting is severity-first, then priority, then stable id", () => {

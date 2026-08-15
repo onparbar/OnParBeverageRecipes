@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getProductLineScore, selectBottleCandidate } from "../lib/vendor-product-matching.mjs";
+import {
+  getProductLineScore,
+  productLineMatchesDistributor,
+  selectBottleCandidate,
+} from "../lib/vendor-product-matching.mjs";
 
 function inventoryProduct({ id, size, bottleOz, sku, price }) {
   return {
@@ -46,4 +50,28 @@ test("mapped bottle products do not fall back to a different size", () => {
 test("an exact bottle size does not make an unrelated brand a valid match", () => {
   assert.equal(getProductLineScore("Remy Martin VSOP", "Bacardi", "Bacardi 1L"), 0);
   assert.equal(getProductLineScore("Bacardi Superior White Rum", "Bacardi", "Bacardi 1L"), 80);
+});
+
+test("matches accented Kahlúa spelling to the unaccented ingredient mapping", () => {
+  assert.equal(getProductLineScore("Kahlúa", "Kahlua", "Kahlua"), 100);
+});
+
+test("uses inventory distributor ids when Provi omits line-level OHLQ metadata", () => {
+  const line = {
+    name: "Kahlúa",
+    distributor_info: {},
+    products: [{
+      container_size: "1 L",
+      inventory: [{ sku: "0893L", distributor_id: 16114, unit_price: 27.26 }],
+    }],
+  };
+
+  assert.equal(productLineMatchesDistributor(line, {
+    distributorHints: ["Ohio Liquor - OHLQ", "OHLQ"],
+    distributorIds: [16114],
+  }), true);
+  assert.equal(productLineMatchesDistributor(line, {
+    distributorHints: ["Heidelberg Distributing"],
+    distributorIds: [898],
+  }), false);
 });

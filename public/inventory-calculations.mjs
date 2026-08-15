@@ -5,6 +5,25 @@ function toFiniteNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+export function getInventoryMondayKey(value = new Date()) {
+  const date = value instanceof Date ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+export function getCurrentMondayInventorySnapshot(snapshots = [], now = new Date()) {
+  const currentMonday = getInventoryMondayKey(now);
+  if (!currentMonday) return null;
+  return (Array.isArray(snapshots) ? snapshots : [])
+    .find((snapshot) => String(snapshot?.weekOf || "") === currentMonday) || null;
+}
+
 export function normalizeInventoryBaseName(value) {
   return String(value ?? "")
     .replace(/\b1\.75(?:\s*(?:ml|l))?\b/gi, "")

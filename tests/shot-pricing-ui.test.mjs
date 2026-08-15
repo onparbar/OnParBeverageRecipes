@@ -10,9 +10,7 @@ const [page, dashboard, updateRoute, tapPricingRoute] = await Promise.all([
 ]);
 
 test("shot pricing is a separate two-portion owner workflow", () => {
-  assert.match(page, /Portion Mode · liquor only/);
-  assert.match(page, /Edit the two PMB portion prices together/);
-  assert.match(page, /never governed by the 82% beer-and-cocktail rule/);
+  assert.match(page, /id="shot-pricing-title">Shot pricing/);
   assert.match(page, /id="shot-pricing-table"/);
   assert.match(dashboard, /buildShotPricingRows/);
   assert.match(dashboard, /Update both in PMB/);

@@ -1,5 +1,6 @@
 import {
   convertLegacyCaseCountToUnits,
+  getCurrentMondayInventorySnapshot,
   getInventoryItemId,
   getInventoryOnHandUnits,
   getInventoryUnitCost,
@@ -35,13 +36,16 @@ import {
   canReuseWeeklyUsageHistory,
   evaluateWeeklyPlanReadiness,
   findWeeklyUsageIdentityMatch,
+  getCocktailPrepDisplayName,
+  getCurrentWeeklyPlanSnapshot,
+  groupWeeklyPlanOrdersByVendor,
   hasCompleteWeeklyUsageRows,
   hasWeeklyUsagePhysicalIdentityConflict,
   isRecommendationForOperatingWeek,
   isWeeklyUsageNameFallbackEligible,
   isRecommendationSourceRevisionCurrent,
-  isWeeklyPlanHandoffAllowed,
-  shouldRefreshMondayPlanForUsage,
+  normalizeLiquorTapProductName,
+  refreshWeeklyPlanMetadata,
 } from "./weekly-action-plan.mjs";
 import {
   canSafelyRetryOperationalOutbox,
@@ -59,11 +63,22 @@ import {
   normalizeKegOnHandDraft,
 } from "./keg-on-hand-input.mjs";
 import {
+  buildActiveComingSoonBeerItems,
   buildAssignedOnDeckBeerItems,
   buildVerifiedCurrentBeerTapItems,
   filterCurrentTapPricingItems,
 } from "./keg-pricing-scope.mjs";
 import { REQUIRED_INGREDIENT_PRICE_DEFAULTS } from "./ingredient-price-defaults.mjs";
+import {
+  getPreparedIngredientCost,
+  getPreparedIngredientCanonicalName,
+  getPreparedIngredientFinishedUnitCost,
+  getPreparedIngredientPurchase,
+  getPreparedIngredientRecipeAmount,
+  getPreparedIngredientYieldNote,
+  isPreparedIngredientRecipeNote,
+  normalizePreparedIngredientPriceOverrides,
+} from "./prepared-ingredient-pricing.mjs";
 import {
   enqueuePmbPublishItem,
   getPmbPublishQueueCounts,
@@ -73,7 +88,10 @@ import {
   removePmbPublishItem,
 } from "./pmb-publish-queue.mjs";
 import { fetchPmbJsonWithRetry } from "./pmb-refresh.mjs";
-import { searchDashboardItems } from "./global-dashboard-search.mjs";
+import {
+  searchDashboardData,
+  searchDashboardItems,
+} from "./global-dashboard-search.mjs";
 import {
   buildPricingAdvisor,
   getPmbPriceEditorDefault,
@@ -81,8 +99,11 @@ import {
   isPricingAdvisorEligibleKind,
   validatePmbPriceIncrease,
 } from "./pricing-advisor.mjs";
-import { buildWeeklyUsagePerformance } from "./weekly-usage-performance.mjs";
-import { buildWeeklyUsageTrend } from "./weekly-usage-trend.mjs";
+import {
+  buildWeeklyUsagePerformance,
+  getWeeklyUsageEntryPouredOz,
+  getWeeklyUsagePerformanceCategory,
+} from "./weekly-usage-performance.mjs";
 import { buildWeeklyPlanTrends } from "./weekly-plan-trends.mjs";
 import {
   buildDashboardOverview,
@@ -91,10 +112,19 @@ import {
 import { buildOhioComplianceWatchViewModel } from "./ohio-compliance-watch.mjs";
 import { buildWeeklyUsageSellerRankings } from "./weekly-usage-seller-rankings.mjs";
 import {
+  buildLastWeekPourLeaders,
+  buildLastWeekProjectedSalesMix,
+} from "./dashboard-beverage-pulse.mjs";
+import {
   buildShotPricingRows,
   summarizeShotPricingRows,
   validateShotPricePair,
 } from "./shot-pricing-view.mjs";
+import {
+  getComingSoonKindLabel,
+  mergeRequiredComingSoonItems,
+} from "./coming-soon-items.mjs";
+import { buildVendorOrderDrafts } from "./vendor-order-drafts.mjs";
 
 const CSV_PATH = "./data/cocktail-recipes.csv";
 const NEW_COCKTAILS_CSV_PATH = "./data/new-cocktails.csv";
@@ -117,7 +147,7 @@ const INVENTORY_ORDER_STORAGE_KEY = "cocktail-dashboard-inventory-order";
 const INVENTORY_UNIT_MODEL_STORAGE_KEY = "cocktail-dashboard-inventory-unit-model";
 const INVENTORY_UNIT_MODEL_VERSION = "2";
 const PRICE_OVERRIDE_MODEL_STORAGE_KEY = "cocktail-dashboard-price-override-model";
-const PRICE_OVERRIDE_MODEL_VERSION = "2";
+const PRICE_OVERRIDE_MODEL_VERSION = "3";
 const KEG_ON_HAND_STORAGE_KEY = "cocktail-dashboard-keg-on-hand";
 const KEG_PAR_STORAGE_KEY = "cocktail-dashboard-keg-par";
 const KEG_ON_DECK_STORAGE_KEY = "cocktail-dashboard-keg-on-deck";
@@ -187,13 +217,13 @@ const DEFAULT_PRICE_OVERRIDES = {
     updatedAt: "Default OHLQ pricing",
   },
   "blue-dot-juice": {
-    bottleOz: "128",
+    bottleOz: "1",
     bottlePrice: "1",
     updatedAt: "Default pricing",
   },
   "cold-brew-coffee": {
-    bottleOz: "384",
-    bottlePrice: "51.67",
+    bottleOz: "32",
+    bottlePrice: "25.835",
     updatedAt: "Default pricing",
   },
   "cranberry-juice": {
@@ -491,9 +521,56 @@ const KEG_VENDOR_MAPPINGS = {
   guinness: "Bonbright",
   "voodoo-ranger-ipa": "Bonbright",
 };
+
+const KEG_VENDOR_PRODUCT_CATALOG = {
+  "michelob-ultra": { vendor: "Heidelberg", vendorSku: "014676-C", productName: "Michelob Ultra 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 135, currentPrice: 130, promotion: true, priceCheckedAt: "2026-08-14" },
+  "busch-light": { vendor: "Heidelberg", vendorSku: "010376-C", productName: "Busch Light 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 115, currentPrice: 115, promotion: false, priceCheckedAt: "2026-08-14" },
+  "bud-light": { vendor: "Heidelberg", vendorSku: "011276-C", productName: "Bud Light 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 126, currentPrice: 126, promotion: false, priceCheckedAt: "2026-08-14" },
+  "cincy-light": { vendor: "Heidelberg", vendorSku: "057895-C", productName: "Rhinegeist Cincy Light 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 130, currentPrice: 130, promotion: false, priceCheckedAt: "2026-08-14" },
+  "summer-ale": { vendor: "Heidelberg", vendorSku: "048166-C", productName: "Samuel Adams Summer Ale 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 182, currentPrice: 182, promotion: false, priceCheckedAt: "2026-08-14" },
+  "kona-big-wave": { vendor: "Heidelberg", vendorSku: "011400-C", productName: "Kona Big Wave 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 170, currentPrice: 150, promotion: true, priceCheckedAt: "2026-08-14" },
+  truth: { vendor: "Heidelberg", vendorSku: "054519-C", productName: "Rhinegeist Truth 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 182, currentPrice: 182, promotion: false, priceCheckedAt: "2026-08-14" },
+  "stella-artois": { vendor: "Heidelberg", vendorSku: "082476-C", productName: "Stella Artois 13.2 gal Keg", packSize: 1, kegOz: 1690.7, listPrice: 170, currentPrice: 150, promotion: true, priceCheckedAt: "2026-08-14" },
+  "angry-orchard": { vendor: "Heidelberg", vendorSku: "083700-C", productName: "Angry Orchard Crisp Apple 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 182, currentPrice: 182, promotion: false, priceCheckedAt: "2026-08-14" },
+  "truly-wild-berry": { vendor: "Heidelberg", vendorSku: "042517-C", productName: "Truly Wild Berry 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 182, currentPrice: 182, promotion: false, priceCheckedAt: "2026-08-14" },
+  "goose-ipa": { vendor: "Heidelberg", vendorSku: "075908-C", productName: "Goose Island IPA 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 150, currentPrice: 122, promotion: true, priceCheckedAt: "2026-08-14" },
+  budweiser: { vendor: "Heidelberg", vendorSku: "011176-C", productName: "Budweiser 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 126, currentPrice: 109, promotion: true, priceCheckedAt: "2026-08-14" },
+  "triple-jam-cider": { vendor: "Heidelberg", vendorSku: "041189-C", productName: "Blake's Triple Jam 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 189, currentPrice: 189, promotion: false, priceCheckedAt: "2026-08-14" },
+  yuengling: { vendor: "Heidelberg", vendorSku: "013476-C", productName: "Yuengling Traditional Lager 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 126, currentPrice: 126, promotion: false, priceCheckedAt: "2026-08-14" },
+  octoberfest: { vendor: "Heidelberg", vendorSku: "048110-C", productName: "Samuel Adams Octoberfest 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 182, currentPrice: 182, promotion: false, priceCheckedAt: "2026-08-14" },
+};
+
+function normalizeKegVendorCatalogKey(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\s+[12]$/, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function getKegVendorCatalogProduct(...values) {
+  for (const value of values) {
+    const product = KEG_VENDOR_PRODUCT_CATALOG[normalizeKegVendorCatalogKey(value)];
+    if (product) return product;
+  }
+  return null;
+}
 const KEG_PROVI_DISTRIBUTOR_HINTS = {
   Heidelberg: ["Heidelberg", "Heidelberg Distributing", "Heidelberg Distributing Company"],
   Bonbright: ["Bonbright", "Bonbright Distributors", "Bonbright Distributing"],
+};
+const KEG_PROVI_PRODUCT_MAPPINGS = {
+  "triple-jam-cider": {
+    productName: "Blake's Hard Cider Triple Jam",
+    preferredSku: "41189",
+    searchAliases: ["Triple Jam Cider", "Blake's Triple Jam"],
+  },
+  "truly-wild-berry": {
+    productName: "TRULY Hard Seltzer Wild Berry",
+    preferredSku: "42517",
+    searchAliases: ["Truly Wild Berry", "Truly Hard Seltzer Wild Berry"],
+  },
 };
 const INVENTORY_CABINET_ORDER = [
   "Bulleit Bourbon",
@@ -507,6 +584,10 @@ const INVENTORY_CABINET_ORDER = [
   "Captain Morgan",
   "Bombay Sapphire",
   "Jack Daniel's",
+  "Jameson",
+  "Screwball",
+  "Pink Whitney",
+  "Patron Silver",
   "Blue Rasp Powder",
   "Bitters",
   "Lemon Juice",
@@ -526,50 +607,62 @@ const INVENTORY_CABINET_ORDER = [
 ];
 const DEFAULT_BATCH_LABEL = "12 gallon keg";
 const PROOF_MAPPINGS = {
-  "apple-pucker": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Sour Apple Schnapps Pucker 30 1L", bottleOz: 33.81, searchAliases: ["Apple Pucker", "Pucker Sour Apple", "DeKuyper Pucker Sour Apple Schnapps"] },
-  "apple-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "Llord's Apple Schnapps 1L", bottleOz: 33.81 },
-  bitters: { vendor: "Proof", syncVendor: "Provi", productName: "Angostura Bitters Aromatic 16oz", bottleOz: 16 },
-  "blueberry-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Blueberry Schnapps 30 1L", bottleOz: 33.81, searchAliases: ["Blueberry Schnapps", "DeKuyper Blueberry Schnapps"] },
-  "creme-de-cacao": { vendor: "Proof", syncVendor: "Provi", productName: "Llords Creme De Cacao 30 1L", bottleOz: 33.81, searchAliases: ["Llord's Creme De Cacao White", "Creme De Cacao White"] },
-  "lemon-juice": { vendor: "Proof", syncVendor: "Provi", productName: "Finest Call Single Pressed Lemon Juice 1L", bottleOz: 33.81 },
-  "lime-juice": { vendor: "Proof", syncVendor: "Provi", productName: "Finest Call Lime Juice 1L", bottleOz: 33.81 },
-  mint: { vendor: "Proof", syncVendor: "Provi", productName: "Master of Mixes Cocktail Mixer - Other Mint Syrup Cocktail Essentials 375mL", bottleOz: 12.68, searchAliases: ["Master of Mixes Mint Syrup", "Mint Syrup"] },
-  "peach-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Peach Schnapps Peachtree 30 1L", bottleOz: 33.81, searchAliases: ["Peachtree", "DeKuyper Peachtree Schnapps"] },
-  "pomegranate-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Pomegranate Schnapps Pomegranate Pleasure 30 1L", bottleOz: 33.81, searchAliases: ["Pomegranate Schnapps", "DeKuyper Pomegranate Schnapps"] },
-  "raspberry-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Raspberry Schnapps 33 1L", bottleOz: 33.81, searchAliases: ["DeKuyper Razzmatazz Schnapps", "Razzmatazz"] },
-  "strawberry-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Sour Strawberry Schnapps Pucker 30 1L", bottleOz: 33.81, searchAliases: ["Strawberry Pucker", "DeKuyper Pucker Strawberry Schnapps"] },
-  "triple-sec": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Triple Sec 30 1L", bottleOz: 33.81 },
-  "watermelon-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Sour Watermelon Schnapps Pucker 30 1L", bottleOz: 33.81, searchAliases: ["Watermelon Pucker", "DeKuyper Pucker Watermelon Schnapps"] },
+  "apple-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "Llord's Apple Schnapps 30 1L", bottleOz: 33.81, preferredSku: "615006", packSize: 12, casePrice: 44.47, unitPrice: 3.71, priceCheckedAt: "2026-08-14" },
+  bitters: { vendor: "Proof", syncVendor: "Provi", productName: "Angostura Bitters Aromatic 16oz", bottleOz: 16, preferredSku: "38000", packSize: 12, casePrice: 287.9, unitPrice: 23.99, priceCheckedAt: "2026-08-14" },
+  "blueberry-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Blueberry Schnapps 30 1L", bottleOz: 33.81, preferredSku: "301977", packSize: 12, casePrice: 144.4, unitPrice: 12.03, priceCheckedAt: "2026-08-14", searchAliases: ["Blueberry Schnapps", "DeKuyper Blueberry Schnapps"] },
+  "creme-de-cacao": { vendor: "Proof", syncVendor: "Provi", productName: "Llord's Creme De Cacao 30 1L", bottleOz: 33.81, preferredSku: "614536", packSize: 12, casePrice: 44.47, unitPrice: 3.71, priceCheckedAt: "2026-08-14", searchAliases: ["Llord's Creme De Cacao White", "Creme De Cacao White"] },
+  "lemon-juice": { vendor: "Proof", syncVendor: "Provi", productName: "Finest Call Single Pressed Lemon Juice 1L", bottleOz: 33.81, preferredSku: "472535", packSize: 12, casePrice: 75.2, unitPrice: 6.27, priceCheckedAt: "2026-08-14" },
+  "lime-juice": { vendor: "Proof", syncVendor: "Provi", productName: "Finest Call Lime Juice 1L", bottleOz: 33.81, preferredSku: "437071", packSize: 12, casePrice: 62.3, unitPrice: 5.19, priceCheckedAt: "2026-08-14" },
+  "korbel-brut": { vendor: "Proof", syncVendor: "Provi", productName: "Korbel Brut Sparkling Wine America 250 Years California 750mL", bottleOz: 25.3605, preferredSku: "697774", packSize: 12, casePrice: 119.95, unitPrice: 10, priceCheckedAt: "2026-08-14", specialEdition: true, searchAliases: ["Korbel Brut", "Korbel California Champagne"] },
+  mint: { vendor: "Proof", syncVendor: "Provi", productName: "Master of Mixes Mint Syrup Cocktail Essentials 375mL", bottleOz: 12.68, preferredSku: "437102", packSize: 12, unitPrice: 3.67, priceCheckedAt: "2026-08-14", searchAliases: ["Master of Mixes Mint Syrup", "Mint Syrup"] },
+  "peach-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Peach Schnapps Peachtree 30 1L", bottleOz: 33.81, preferredSku: "25213", packSize: 12, casePrice: 144.4, unitPrice: 12.03, priceCheckedAt: "2026-08-14", searchAliases: ["Peachtree", "DeKuyper Peachtree Schnapps"] },
+  "pomegranate-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Pomegranate Schnapps Pomegranate Pleasure 30 1L", bottleOz: 33.81, preferredSku: "186701", packSize: 12, casePrice: 144.4, unitPrice: 12.03, priceCheckedAt: "2026-08-14", searchAliases: ["Pomegranate Schnapps", "DeKuyper Pomegranate Schnapps"] },
+  "raspberry-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Raspberry Schnapps Razzmatazz 33 1L", bottleOz: 33.81, preferredSku: "293371", packSize: 12, casePrice: 144.4, unitPrice: 12.03, priceCheckedAt: "2026-08-14", searchAliases: ["DeKuyper Razzmatazz Schnapps", "Razzmatazz"] },
+  "strawberry-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Sour Strawberry Schnapps Pucker 30 1L", bottleOz: 33.81, preferredSku: "220898", packSize: 12, casePrice: 144.4, unitPrice: 12.03, priceCheckedAt: "2026-08-14", searchAliases: ["Strawberry Pucker", "DeKuyper Pucker Strawberry Schnapps"] },
+  "triple-sec": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Triple Sec 30 1L", bottleOz: 33.81, preferredSku: "33497", packSize: 12, casePrice: 57.5, unitPrice: 4.79, priceCheckedAt: "2026-08-14" },
+  "watermelon-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "DeKuyper Sour Watermelon Schnapps Pucker 30 1L", bottleOz: 33.81, preferredSku: "49357", packSize: 12, casePrice: 144.4, unitPrice: 12.03, priceCheckedAt: "2026-08-14", searchAliases: ["Watermelon Pucker", "DeKuyper Pucker Watermelon Schnapps"] },
 };
 const OHLQ_MAPPINGS = {
-  "1800-reposado": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "1800 Reposado Tequila 1.75L", bottleOz: 59.1745 },
-  "absolut-raspberri": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Absolut Raspberri Vodka 1L", bottleOz: 33.814 },
-  "absolut-vanilia": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Absolut Vanilia Vodka 1L", bottleOz: 33.814 },
-  "absolut-citron": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Absolut Citron Vodka 1.75L", bottleOz: 59.17 },
-  "bacardi-superior": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Bacardi Superior White Rum 1.75L", bottleOz: 59.1745 },
-  "bombay-sapphire": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Bombay Sapphire Gin 1.75L", bottleOz: 59.17 },
-  "bulleit-bourbon": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Bulleit Bourbon 1.75L", bottleOz: 59.17 },
-  "captain-morgan": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Captain Morgan Original Spiced Rum 1.75L", bottleOz: 59.17 },
-  "crown-apple": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Crown Royal Regal Apple 1.75L", bottleOz: 59.17 },
-  "crown-royal-peach": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Crown Royal Peach Whisky 1.75L", bottleOz: 59.1745 },
-  "crown-royal": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Crown Royal Canadian Whisky 1.75L", bottleOz: 59.17 },
-  "don-julio-blanco": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Don Julio Blanco Tequila 750mL", bottleOz: 25.3605 },
-  "grey-goose": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Grey Goose Vodka 1.75L", bottleOz: 59.1745 },
-  hennessy: { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Hennessy VS Cognac 1.75L", bottleOz: 59.1745 },
-  "jack-daniel-s": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Jack Daniel's Old No. 7 1.75L", bottleOz: 59.17 },
-  "jack-daniel-s-fire": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Jack Daniel's Tennessee Fire 1.75L", bottleOz: 59.17 },
-  "fireball-cinnamon-whisky": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Fireball Cinnamon Whisky 1.75L", bottleOz: 59.17 },
-  jameson: { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Jameson Irish Whiskey 1.75L", bottleOz: 59.1745 },
-  "jim-beam": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Jim Beam Bourbon 1.75L", bottleOz: 59.17 },
-  "jose-cuervo-gold": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Jose Cuervo Especial Gold 1.75L", bottleOz: 59.1745 },
-  "jose-cuervo-silver": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Jose Cuervo Especial Silver 1.75L", bottleOz: 59.17 },
-  kahlua: { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Kahlua Coffee Liqueur 1L", bottleOz: 33.81 },
-  "ketel-one-cucumber-vodka": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Ketel One Botanical Cucumber & Mint 1L", bottleOz: 33.81 },
-  "patron-silver": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Patron Silver Tequila 1.75L", bottleOz: 59.1745 },
-  "pink-whitney": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "New Amsterdam Pink Whitney Vodka 1.75L", bottleOz: 59.1745 },
-  screwball: { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Skrewball Peanut Butter Whiskey 750mL", bottleOz: 25.3605 },
-  "svedka-blue-raspberry-vodka": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Svedka Blue Raspberry Vodka 750mL", bottleOz: 25.36 },
-  "tito-s": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Tito's Handmade Vodka 1.75L", bottleOz: 59.17, preferredSku: "9232D" },
+  "1800-reposado": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "1800 Reposado Tequila 1.75L", bottleOz: 59.1745, preferredSku: "2411D", unitPrice: 42.3, priceCheckedAt: "2026-08-15" },
+  "absolut-raspberri": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Absolut Raspberri Vodka 750mL", bottleOz: 25.3605, preferredSku: "0068B", unitPrice: 16.92, priceCheckedAt: "2026-08-15" },
+  "absolut-vanilia": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Absolut Vanilia Vodka 1L", bottleOz: 33.814, preferredSku: "0069L", unitPrice: 25.38, priceCheckedAt: "2026-08-15" },
+  "absolut-citron": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Absolut Citron Vodka 1.75L", bottleOz: 59.17, preferredSku: "0028D", unitPrice: 32.9, priceCheckedAt: "2026-08-15" },
+  "bacardi-superior": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Bacardi Superior Traveler Rum 1.75L", bottleOz: 59.1745, preferredSku: "0439D", unitPrice: 26.32, priceCheckedAt: "2026-08-15" },
+  "bombay-sapphire": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Bombay Sapphire Gin 1.75L", bottleOz: 59.17, preferredSku: "1327D", unitPrice: 44.18, priceCheckedAt: "2026-08-15" },
+  "buffalo-trace": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Buffalo Trace Bourbon 1L", bottleOz: 33.814, preferredSku: "1499L", packSize: 12, minimumOrderUnits: 12, casePrice: 417.36, unitPrice: 34.78, wholesaleOnly: true, priceCheckedAt: "2026-08-15", searchAliases: ["Buffalo Trace", "Buffalo Trace Kentucky Straight Bourbon"] },
+  "bulleit-bourbon": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Bulleit Bourbon 1.75L", bottleOz: 59.17, preferredSku: "1497D", unitPrice: 51.7, priceCheckedAt: "2026-08-15" },
+  "captain-morgan": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Captain Morgan Original Spiced Rum 1.75L", bottleOz: 59.1745, preferredSku: "1755D", unitPrice: 26.32, priceCheckedAt: "2026-08-15", searchAliases: ["Captain Morgan", "Captain Morgan Original Spiced Rum"] },
+  "crown-apple": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Crown Royal Regal Apple 1.75L", bottleOz: 59.17, preferredSku: "2383D", unitPrice: 53.58, priceCheckedAt: "2026-08-15" },
+  "crown-royal-peach": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Crown Royal Peach Whisky 1.75L", bottleOz: 59.1745, preferredSku: "2375D", unitPrice: 53.58, priceCheckedAt: "2026-08-15" },
+  "crown-royal": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Crown Royal Canadian Whisky 1.75L", bottleOz: 59.17, preferredSku: "8894D", unitPrice: 53.58, priceCheckedAt: "2026-08-15" },
+  "don-julio-blanco": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Don Julio Blanco Tequila 1.75L", bottleOz: 59.1745, preferredSku: "2722D", unitPrice: 98.7, priceCheckedAt: "2026-08-15" },
+  "grey-goose": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Grey Goose Vodka 1.75L", bottleOz: 59.1745, preferredSku: "3907D", unitPrice: 47, priceCheckedAt: "2026-08-15" },
+  hennessy: { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Hennessy VS Cognac 1.75L", bottleOz: 59.1745, preferredSku: "0461D", unitPrice: 75.2, priceCheckedAt: "2026-08-15" },
+  "jack-daniel-s": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Jack Daniel's Old No. 7 1.75L", bottleOz: 59.17, preferredSku: "0066D", unitPrice: 47, priceCheckedAt: "2026-08-15" },
+  "jack-daniel-s-fire": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Jack Daniel's Tennessee Fire 1.75L", bottleOz: 59.17, preferredSku: "4982D", unitPrice: 47, priceCheckedAt: "2026-08-15" },
+  "fireball-cinnamon-whisky": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Fireball Cinnamon Whisky 1.75L", bottleOz: 59.17, preferredSku: "3024D", unitPrice: 25.38, priceCheckedAt: "2026-08-15" },
+  jameson: { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Jameson Irish Whiskey 1.75L", bottleOz: 59.1745, preferredSku: "0281D", unitPrice: 51.7, priceCheckedAt: "2026-08-15" },
+  "jim-beam": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Jim Beam Bourbon Whiskey 1.75L", bottleOz: 59.1745, preferredSku: "4116D", unitPrice: 32.9, priceCheckedAt: "2026-08-15", searchAliases: ["Jim Beam", "Jim Beam Bourbon", "Jim Beam Bourbon Whiskey Traveler"] },
+  "jose-cuervo-gold": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Jose Cuervo Especial Gold 1.75L", bottleOz: 59.1745, preferredSku: "2410D", unitPrice: 34.78, priceCheckedAt: "2026-08-15" },
+  "jose-cuervo-silver": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Jose Cuervo Especial Silver 1.75L", bottleOz: 59.17, preferredSku: "5247D", unitPrice: 34.78, priceCheckedAt: "2026-08-15" },
+  kahlua: {
+    vendor: "OHLQ",
+    syncVendor: "OHLQ",
+    productName: "Kahlúa 1L",
+    bottleOz: 33.814,
+    preferredSku: "0893L",
+    unitPrice: 27.26,
+    priceCheckedAt: "2026-08-15",
+    searchAliases: ["Kahlua", "Kahlúa"],
+  },
+  "makers-mark": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Maker's Mark Bourbon 1.75L", bottleOz: 59.1745, preferredSku: "6060D", unitPrice: 47, priceCheckedAt: "2026-08-15", searchAliases: ["Makers Mark", "Maker's Mark", "Maker's Mark Bourbon"] },
+  "ketel-one-cucumber-vodka": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Ketel One Botanical Cucumber & Mint 1L", bottleOz: 33.81, preferredSku: "5376L", unitPrice: 28.2, priceCheckedAt: "2026-08-15" },
+  "patron-silver": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Patron Silver Tequila 1.75L", bottleOz: 59.1745, preferredSku: "7984D", unitPrice: 98.7, priceCheckedAt: "2026-08-15" },
+  "pink-whitney": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "New Amsterdam Pink Whitney Vodka 1.75L", bottleOz: 59.1745, preferredSku: "6765D", unitPrice: 20.68, priceCheckedAt: "2026-08-15" },
+  screwball: { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Skrewball Peanut Butter Whiskey 750mL", bottleOz: 25.3605, preferredSku: "8780B", unitPrice: 18.8, priceCheckedAt: "2026-08-15" },
+  "svedka-blue-raspberry-vodka": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Svedka Blue Raspberry Vodka 750mL", bottleOz: 25.36, preferredSku: "8867B", unitPrice: 8.46, priceCheckedAt: "2026-08-15" },
+  "tito-s": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Tito's Handmade Vodka 1.75L", bottleOz: 59.17, preferredSku: "9232D", unitPrice: 34.78, priceCheckedAt: "2026-08-15" },
+  "woodford-reserve": { vendor: "OHLQ", syncVendor: "OHLQ", productName: "Woodford Reserve Bourbon 1.75L", bottleOz: 59.1745, preferredSku: "9674D", unitPrice: 66.74, priceCheckedAt: "2026-08-15" },
 };
 const INGREDIENT_ABV_PERCENT = {
   "1800-reposado": 40,
@@ -642,10 +735,32 @@ const MENU_ORDER = [
 ];
 const OPERATION_TAB_NAMES = ["weekly-plan", "keg-levels", "pricing", "ingredients", "inventory"];
 const NEW_RECIPE_ORDER = [
-  ["WHISKEY SMASH", "Whiskey Smash"],
+  ["Bacardi Sunset", "Bacardi Sunset"],
+  ["Whiskey Smash", "Whiskey Smash"],
   ["APPLE JACK (WHISKEY)", "Apple Jack (Whiskey)"],
-  ["ON PAR TEE", "On Par Tee"],
+  ["On Par Tee", "On Par Tee"],
 ];
+const STATIC_RECIPE_PRESENTATION = Object.freeze({
+  "bacardi-sunset": Object.freeze({
+    canonicalTitle: "Bacardi Sunset",
+    category: "Rum",
+    description: "Bacardi Sunset is a fruit-forward draft cocktail made with Bacardi Superior and strawberry lemonade for a bright, smooth, sunset-colored pour.",
+    imageUrl: "/images/products/bacardi-sunset-pmb.png",
+  }),
+  "whiskey-smash": Object.freeze({
+    canonicalTitle: "Whiskey Smash (Jim Beam)",
+  }),
+  "apple-jack-whiskey": Object.freeze({
+    canonicalTitle: "Apple Jack (Jack Fire)",
+  }),
+  "on-par-tee": Object.freeze({
+    canonicalTitle: "On Par Tee (Crown Royal)",
+  }),
+});
+const CANONICAL_PRODUCT_DISPLAY_NAMES = Object.freeze({
+  "whiskey smash": "Whiskey Smash (Jim Beam) 1",
+  "on par tee": "On Par Tee (Crown Royal) 1",
+});
 const STRAIGHT_LIQUOR_TAP_INGREDIENTS = [
   "1800 Reposado",
   "Absolut Raspberri",
@@ -682,6 +797,10 @@ const globalSearchInput = document.querySelector("#global-search-input");
 const globalSearchClose = document.querySelector("#global-search-close");
 const globalSearchHint = document.querySelector("#global-search-hint");
 const globalSearchResults = document.querySelector("#global-search-results");
+const dashboardDataSearchForm = document.querySelector("#dashboard-data-search-form");
+const dashboardDataSearchInput = document.querySelector("#dashboard-data-search-input");
+const dashboardDataSearchFeedback = document.querySelector("#dashboard-data-search-feedback");
+const dashboardDataSearchResults = document.querySelector("#dashboard-data-search-results");
 const categoryFilter = document.querySelector("#category-filter");
 const recipeSearch = document.querySelector("#recipe-search");
 const oldSearch = document.querySelector("#old-search");
@@ -809,7 +928,7 @@ let chargeOverrides = loadChargeOverrides();
 let customBeerKegs = loadCustomBeerKegs();
 let customLiquorTaps = loadCustomLiquorTaps();
 let pmbPublishQueue = loadPmbPublishQueue();
-let comingSoonItems = loadComingSoonItems();
+let comingSoonItems = mergeRequiredComingSoonItems(loadComingSoonItems());
 let tapReplacementOverrides = loadTapReplacementOverrides();
 let customRecipes = loadCustomRecipes();
 let inactiveRecipeIds = loadInactiveRecipeIds();
@@ -889,13 +1008,13 @@ let inventoryOutboxClientOrder = Math.max(
 let kegOnHandOverrides = loadKegOnHandOverrides();
 let kegParOverrides = loadKegParOverrides();
 let kegOnDeckOverrides = loadKegOnDeckOverrides();
-let inventoryParEditState = {};
+let inventoryRowEditState = {};
 let editingCustomInventoryId = "";
 let draggedInventoryItemId = "";
 const customInventoryPriceStatus = new Map();
 let editingRecipeId = null;
 let vendorSyncScope = "all";
-let vendorSyncMessage = "Press sync to check mapped vendors automatically. Vendors without a supported connection will report what is still needed.";
+let vendorSyncMessage = "Prices sync automatically.";
 let vendorSyncRunning = false;
 let kegLiveLevels = new Map();
 let kegSyncMessage = "Refresh keg levels to pull current percentages from Pour My Beer.";
@@ -905,7 +1024,7 @@ let kegUpdatedAt = "";
 let kegConfigUpdateRunning = false;
 let pmbReconciliationRunning = false;
 let pmbReconciliationReport = null;
-let pmbReconciliationMessage = "Run a read-only check from the work network to compare saved taps with Pour My Beer.";
+let pmbReconciliationMessage = "";
 let kegDeviceLevels = new Map();
 let kegTemplateAssignments = new Map();
 let parAgentState = null;
@@ -920,13 +1039,18 @@ let parAgentStateOutbox = loadKegLevelsOutbox();
 let parAgentStateOutboxDurable = true;
 let weeklyPlanUpdating = false;
 let weeklyPlanRefreshMessage = "";
-let weeklyPlanGroupMode = "category";
+let weeklyPlanGroupMode = "vendor";
+let weeklyOrderTracking = { available: false, generatedAt: "", drafts: [], vendors: [], itemCount: 0, receivedCount: 0, notReceivedCount: 0, notReceivedItems: [] };
+let weeklyOrderTrackingMessage = "Loading shared order tracking...";
+let weeklyOrderTrackingRefreshRunning = false;
+let dashboardStaffPrepPlan = { available: false, generatedAt: "", items: [], completedCount: 0, totalCount: 0 };
+let dashboardStaffPrepRefreshRunning = false;
 let activeKegAdjustKey = "";
 let pmbProductSaving = false;
 let liquorProductSaving = false;
 let activePmbQueuePublishId = "";
 let pmbQueueConnectionState = "idle";
-let pmbQueueConnectionMessage = "Connection not checked. Publishing remains locked until this dashboard reaches Pour My Beer.";
+let pmbQueueConnectionMessage = "PMB connection not checked.";
 let recipeImageShuffleIndex = 1;
 let pmbProductImageShuffleIndex = 1;
 let lastGeneratedRecipeDescription = "";
@@ -970,8 +1094,11 @@ let pricingAdvisorInputsByKey = new Map();
 let beverageNewsPayload = null;
 let beverageNewsLoading = false;
 let ohioComplianceAcknowledgement = {};
-let sellerRankingCategory = "all";
 let sellerRankingWall = "main";
+let dashboardPulseRankingMetric = "oz";
+// Kept for the detailed ranking renderer that remains available as a code-level
+// fallback; the owner Dashboard now intentionally exposes only the wall choice.
+let sellerRankingCategory = "all";
 let sellerRankingMetric = "volume";
 let sellerRankingPeriod = "six-weeks";
 let sellerRankingListSize = 5;
@@ -1027,6 +1154,7 @@ async function init() {
     ...applyRecipeOrder(parseRecipes(parseCsv(newCocktailsCsv)), NEW_RECIPE_ORDER),
     ...customRecipes,
   ].map(applyRecipeEdits);
+  hydrateComingSoonRecipeItems();
   ingredients = buildIngredientCatalog(getActiveRecipes());
   inventorySourceRows = parseCsv(inventoryCsv);
   migrateInventoryOnHandOverrides(inventorySourceRows);
@@ -1043,6 +1171,8 @@ async function init() {
   applyWeeklyUsageProductChangeovers();
   await loadSharedWeeklyUsageState();
   await loadParAgentState();
+  await loadWeeklyOrderTracking();
+  await loadDashboardStaffPrepPlan();
   await loadDashboardActivity();
   renderDashboardSharedStateStatus();
   hydrateCategoryFilter(recipes);
@@ -1056,6 +1186,7 @@ async function init() {
   syncRecipeBuilderSummary();
   clearBeerLookupResult();
   render();
+  void hydrateComingSoonLiquorItemsFromUntappd();
   loadBeverageNews();
   void runOwnerLoginSync();
 }
@@ -1070,6 +1201,9 @@ async function runOwnerLoginSync() {
       runTapPricingSync(),
       lockToken
         ? runPmbWeeklyUsageSync({ automatic: true })
+        : Promise.resolve({ ok: false, skipped: true }),
+      lockToken
+        ? runVendorSync({ automatic: true })
         : Promise.resolve({ ok: false, skipped: true }),
     ]);
     let kegResult = kegOutcome.status === "fulfilled" && kegOutcome.value;
@@ -1091,11 +1225,11 @@ async function runOwnerLoginSync() {
     const inventorySaved = await flushPendingInventoryFieldSyncs();
     const parInputsSaved = await flushPendingParAgentStateSync();
     if (!usageSaved || !inventorySaved || !parInputsSaved) return;
-    const recommendations = parAgentState?.recommendations;
-    const mondayPlanIsCurrent = hasCurrentParAgentRecommendations()
-      && isRecommendationForOperatingWeek(recommendations?.generatedAt, new Date())
-      && !shouldRefreshMondayPlanForUsage(recommendations?.generatedAt, weeklyUsageLastSyncAt, new Date());
-    if (!mondayPlanIsCurrent) await runKegParAgent();
+    const mondaySnapshot = getCurrentMondayInventorySnapshot(inventoryHistory, new Date());
+    const frozenKegPlan = mondaySnapshot?.kegPlanSnapshot;
+    if (frozenKegPlan && !getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations)) {
+      await publishCurrentWeeklyPlanSnapshot();
+    }
     renderDashboardOverview();
   } finally {
     if (lockToken) releaseOwnerLoginSyncLock(lockToken);
@@ -1725,10 +1859,10 @@ function applySharedDashboardState(rawState) {
     ),
   };
 
-  priceOverrides = {
+  priceOverrides = normalizePreparedIngredientPriceOverrides({
     ...DEFAULT_PRICE_OVERRIDES,
     ...cloneDashboardStateValue(effectiveState.pricing.ingredientPriceOverrides),
-  };
+  });
   kegPriceOverrides = normalizeKnownKegSizeOverrides({
     ...DEFAULT_KEG_PRICE_OVERRIDES,
     ...cloneDashboardStateValue(effectiveState.pricing.kegPriceOverrides),
@@ -1740,7 +1874,9 @@ function applySharedDashboardState(rawState) {
   customBeerKegs = cloneDashboardStateValue(effectiveState.products.customBeerKegs);
   customLiquorTaps = cloneDashboardStateValue(effectiveState.products.customLiquorTaps);
   pmbPublishQueue = normalizePmbPublishQueue(effectiveState.products.pmbPublishQueue);
-  comingSoonItems = cloneDashboardStateValue(effectiveState.products.comingSoonItems);
+  comingSoonItems = mergeRequiredComingSoonItems(
+    cloneDashboardStateValue(effectiveState.products.comingSoonItems),
+  );
   tapReplacementOverrides = cloneDashboardStateValue(effectiveState.products.tapReplacementOverrides);
   ohioComplianceAcknowledgement = cloneDashboardStateValue(
     effectiveState.monitoring?.ohioComplianceAcknowledgement || {},
@@ -2679,6 +2815,7 @@ async function persistSharedDashboardPatch(patch, touchedFields, baseValues, gen
 
 function bindEvents() {
   bindGlobalSearchEvents();
+  bindDashboardDataSearchEvents();
   document.querySelectorAll(".tab-button").forEach((button) => {
     button.addEventListener("click", () => {
       if (button.dataset.recipeView) switchRecipeView(button.dataset.recipeView);
@@ -2715,38 +2852,17 @@ function bindEvents() {
     if (target.dataset.dashboardTarget === "recipes") switchRecipeView("current");
     switchTab(target.dataset.dashboardTarget);
   });
-  dashboardOverview?.addEventListener("change", async (event) => {
-    const categoryFilterControl = event.target.closest("[data-seller-ranking-category]");
-    if (categoryFilterControl) {
-      sellerRankingCategory = clean(categoryFilterControl.value).toLowerCase() || "all";
+  dashboardOverview?.addEventListener("change", (event) => {
+    const metricControl = event.target.closest("[data-dashboard-pulse-metric]");
+    if (metricControl) {
+      dashboardPulseRankingMetric = clean(metricControl.value).toLowerCase() === "sales" ? "sales" : "oz";
       renderDashboardOverview();
       return;
     }
     const wallFilterControl = event.target.closest("[data-seller-ranking-wall]");
-    if (wallFilterControl) {
-      sellerRankingWall = clean(wallFilterControl.value).toLowerCase() || "main";
-      renderDashboardOverview();
-      return;
-    }
-    const listSizeControl = event.target.closest("[data-seller-ranking-list-size]");
-    if (listSizeControl) {
-      sellerRankingListSize = Math.max(1, Math.min(25, Math.floor(toNumber(listSizeControl.value) || 5)));
-      renderDashboardOverview();
-      return;
-    }
-    const periodFilterControl = event.target.closest("[data-seller-ranking-period]");
-    if (periodFilterControl) {
-      sellerRankingPeriod = clean(periodFilterControl.value).toLowerCase() || "six-weeks";
-      renderDashboardOverview();
-      return;
-    }
-    const metricFilterControl = event.target.closest("[data-seller-ranking-metric]");
-    if (!metricFilterControl) return;
-    sellerRankingMetric = clean(metricFilterControl.value).toLowerCase() || "volume";
+    if (!wallFilterControl) return;
+    sellerRankingWall = clean(wallFilterControl.value).toLowerCase() || "main";
     renderDashboardOverview();
-    if (sellerRankingMetric === "profit" && !tapPricingSyncAttempted && !tapPricingSyncLoading) {
-      await runTapPricingSync();
-    }
   });
   document.querySelectorAll(".operation-tab").forEach((button) => {
     button.addEventListener("click", () => switchTab(button.dataset.operationTab));
@@ -2888,6 +3004,18 @@ function bindEvents() {
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".untappd-search-field")) hideUntappdSearchResults();
   });
+  window.addEventListener("focus", () => {
+    void refreshWeeklyOrderTracking();
+    void refreshDashboardStaffPrepPlan();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    void refreshWeeklyOrderTracking();
+    void refreshDashboardStaffPrepPlan();
+  });
+  window.setInterval(() => {
+    if (document.visibilityState === "visible") void refreshDashboardStaffPrepPlan();
+  }, 30_000);
 }
 
 function switchAddProductType(productType, { focus = false } = {}) {
@@ -2981,6 +3109,7 @@ function render() {
   renderOldRecipes();
   renderPmbPublishQueue();
   renderDashboardOverview();
+  renderDashboardDataSearch();
   refreshGlobalSearchIndex();
 }
 
@@ -3027,6 +3156,133 @@ function bindGlobalSearchEvents() {
       }
     }
   });
+}
+
+function bindDashboardDataSearchEvents() {
+  dashboardDataSearchForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    renderDashboardDataSearch({ submitted: true });
+  });
+  dashboardDataSearchResults?.addEventListener("click", (event) => {
+    const link = event.target.closest("[data-dashboard-data-search-name]");
+    if (!link || !weeklyUsageSearch) return;
+    weeklyUsageSearch.value = link.dataset.dashboardDataSearchName || "";
+    renderWeeklyUsage();
+    switchTab("weekly-usage");
+  });
+}
+
+function getDashboardDataSearchEntryOunces(item, entry) {
+  const exactOunces = getWeeklyUsageEntryPouredOz(item, entry, getWeeklyUsageFullOunces);
+  if (exactOunces !== null) return exactOunces;
+  const value = Number(entry?.value);
+  if (!Number.isFinite(value) || value < 0) return null;
+  if (clean(item?.displayUnit).toLowerCase() === "oz") return value;
+  const fullOunces = getWeeklyUsageFullOunces(item);
+  return fullOunces > 0 ? value * fullOunces : null;
+}
+
+function getDashboardDataSearchPeriod(item, label, entries, sellingPricePerOz) {
+  const ounceValues = entries
+    .map((entry) => getDashboardDataSearchEntryOunces(item, entry))
+    .filter((value) => value !== null);
+  if (!ounceValues.length) return null;
+  const ounces = ounceValues.reduce((total, value) => total + value, 0) / ounceValues.length;
+  return {
+    label,
+    ounces,
+    dollars: ounces === 0 ? 0 : sellingPricePerOz > 0 ? ounces * sellingPricePerOz : null,
+  };
+}
+
+function buildDashboardDataSearchItems() {
+  const sourceItems = [...weeklyUsageItems, ...weeklyUsageArchivedItems];
+  const recentLabels = getWeeklyUsageHistoryHeaders(sourceItems).slice(0, 6);
+  const latestLabel = recentLabels[0] || "";
+
+  return sourceItems.map((item, index) => {
+    const history = Array.isArray(item.history) ? item.history : [];
+    const entriesByLabel = new Map(history.map((entry) => [entry.label, entry]));
+    const recentEntries = recentLabels.map((label) => entriesByLabel.get(label)).filter(Boolean);
+    const latestEntry = latestLabel ? entriesByLabel.get(latestLabel) : null;
+    const sellingPricePerOz = toNumber(getWeeklyUsageItemSellingRate(item).sellingPricePerOz);
+    const currentOunces = Object.prototype.hasOwnProperty.call(item, "rawOz")
+      && Number.isFinite(Number(item.rawOz))
+      ? Number(item.rawOz)
+      : null;
+    const thisWeek = currentOunces === null ? null : {
+      label: "This week",
+      ounces: currentOunces,
+      dollars: currentOunces === 0 ? 0 : sellingPricePerOz > 0 ? currentOunces * sellingPricePerOz : null,
+    };
+
+    return {
+      id: item.archiveId || item.id || `usage-search-${index}`,
+      name: clean(item.name) || "Unnamed product",
+      tapNumber: toNumber(item.tapNumber) || null,
+      wall: getDashboardPulseWall(item) || clean(item.wall).toLowerCase(),
+      category: getWeeklyUsagePerformanceCategory(item),
+      hidden: item.hidden === true || weeklyUsageArchivedItems.includes(item),
+      periods: {
+        "this-week": thisWeek,
+        "last-week": latestEntry
+          ? getDashboardDataSearchPeriod(item, latestLabel, [latestEntry], sellingPricePerOz)
+          : null,
+        recent: getDashboardDataSearchPeriod(
+          item,
+          recentLabels.length ? `Recent ${recentLabels.length}-week average` : "Recent history",
+          recentEntries,
+          sellingPricePerOz,
+        ),
+      },
+    };
+  });
+}
+
+function renderDashboardDataSearch({ submitted = false } = {}) {
+  if (!dashboardDataSearchInput || !dashboardDataSearchResults || !dashboardDataSearchFeedback) return;
+  const query = clean(dashboardDataSearchInput.value);
+  if (!query) {
+    dashboardDataSearchFeedback.textContent = submitted ? "Enter a question to search dashboard data." : "";
+    dashboardDataSearchResults.innerHTML = '<div class="dashboard-data-search-empty">Search results will appear here.</div>';
+    return;
+  }
+
+  const search = searchDashboardData(buildDashboardDataSearchItems(), query);
+  if (search.status === "needs-clarification") {
+    dashboardDataSearchFeedback.textContent = "One quick question";
+    dashboardDataSearchResults.innerHTML = `<div class="dashboard-data-search-question">${escapeHtml(search.question)}</div>`;
+    return;
+  }
+
+  dashboardDataSearchFeedback.textContent = `${search.results.length} matching item${search.results.length === 1 ? "" : "s"}`;
+  if (!search.results.length) {
+    dashboardDataSearchResults.innerHTML = '<div class="dashboard-data-search-empty">No dashboard items match that search. Try another wall, period, or threshold.</div>';
+    return;
+  }
+
+  dashboardDataSearchResults.innerHTML = search.results.map((item) => {
+    const primaryValue = search.intent.metric === "dollars"
+      ? money(item.value)
+      : `${formatNumber(item.value)} oz`;
+    const secondaryValue = search.intent.metric === "dollars"
+      ? item.ounces === null ? "Sales estimate" : `${formatNumber(item.ounces)} oz poured`
+      : item.dollars === null ? "Poured volume" : `${money(item.dollars)} estimated sales`;
+    const wallLabel = item.wall ? `${normalizeTitle(item.wall)} wall` : "Historical";
+    return `
+      <article class="dashboard-data-search-result">
+        <div class="dashboard-data-search-result__identity">
+          <strong>${escapeHtml(item.name)}</strong>
+          <span>${escapeHtml(wallLabel)} · ${escapeHtml(getWeeklyUsagePerformanceCategoryLabel(item.category))}${item.tapNumber ? ` · Tap ${formatNumber(item.tapNumber)}` : ""}</span>
+        </div>
+        <div class="dashboard-data-search-result__value">
+          <strong>${escapeHtml(primaryValue)}</strong>
+          <small>${escapeHtml(item.periodLabel)} · ${escapeHtml(secondaryValue)}</small>
+        </div>
+        <button class="mini-button" type="button" data-dashboard-data-search-name="${escapeHtml(item.name)}">View in Weekly Usage</button>
+      </article>
+    `;
+  }).join("");
 }
 
 function openGlobalSearch() {
@@ -3095,9 +3351,7 @@ function refreshGlobalSearchIndex() {
       id: `ingredient:${ingredient.id}`,
       kind: "ingredient",
       title: ingredient.name,
-      subtitle: ingredient.vendorProduct?.vendor
-        ? `${ingredient.vendorProduct.vendor} · ${ingredient.vendorProduct.productName}`
-        : "Ingredient cost",
+      subtitle: ingredient.group || "Ingredient cost",
       section: "Ingredient & Keg Costs",
       searchText: [ingredient.group, ingredient.vendorProduct?.vendor, ingredient.vendorProduct?.productName, ...(ingredient.recipes || [])],
       tab: "ingredients",
@@ -3123,7 +3377,7 @@ function refreshGlobalSearchIndex() {
     id: `inventory:${item.id}`,
     kind: "inventory",
     title: item.name,
-    subtitle: [item.group, item.vendorProduct?.vendor].filter(Boolean).join(" · ") || "Inventory",
+    subtitle: item.group || "Inventory",
     section: "Inventory",
     searchText: [item.group, item.vendorProduct?.vendor, item.vendorProduct?.productName, item.orderQuantity > 0 ? "needs order reorder" : ""],
     tab: "inventory",
@@ -3193,8 +3447,8 @@ function renderGlobalSearchResults() {
   activeGlobalSearchResultIndex = visibleGlobalSearchResults.length ? 0 : -1;
   if (globalSearchHint) {
     globalSearchHint.textContent = clean(globalSearchInput.value)
-      ? `${visibleGlobalSearchResults.length} result${visibleGlobalSearchResults.length === 1 ? "" : "s"}. Use the arrow keys and Enter to open.`
-      : "Start typing, or choose a dashboard section.";
+      ? `${visibleGlobalSearchResults.length} result${visibleGlobalSearchResults.length === 1 ? "" : "s"}`
+      : "";
   }
   globalSearchResults.innerHTML = visibleGlobalSearchResults.length
     ? visibleGlobalSearchResults.map((item, index) => `
@@ -3283,10 +3537,6 @@ function renderStats() {
   const avgCostPerOz = totalOz ? totalCost / totalOz : 0;
   const totalRevenue = sum(activeRecipes.map((recipe) => getRecipePricing(recipe).revenue));
   const avgMargin = totalRevenue ? ((totalRevenue - totalCost) / totalRevenue) * 100 : 0;
-  const overrideCount = Object.keys(priceOverrides).filter((key) => {
-    const override = priceOverrides[key];
-    return toNumber(override?.bottleOz) && toNumber(override?.bottlePrice);
-  }).length;
   const stats = isEmployeeDashboard
     ? [
         ["Recipes", recipeCount.toLocaleString()],
@@ -3296,10 +3546,8 @@ function renderStats() {
       ]
     : [
         ["Recipes", recipeCount.toLocaleString()],
-        ["Total batch cost", money(totalCost)],
         ["Avg cost per oz", money(avgCostPerOz)],
         ["Avg profit margin", `${formatNumber(avgMargin)}%`],
-        ["Live ingredient prices", overrideCount.toLocaleString()],
       ];
 
   statsGrid.innerHTML = "";
@@ -3388,14 +3636,8 @@ function renderRecipeCoverageAlert() {
   recipeCoverageAlert.classList.toggle("is-complete", coverage.missing.length === 0);
 
   if (!coverage.missing.length) {
-    recipeCoverageAlert.innerHTML = `
-      <div class="recipe-coverage-alert__header">
-        <div>
-          <h2>Wall recipe check complete</h2>
-          <p>All ${coverage.totalTaps} cocktail taps have an active recipe card.</p>
-        </div>
-      </div>
-    `;
+    recipeCoverageAlert.hidden = true;
+    recipeCoverageAlert.innerHTML = "";
     return;
   }
 
@@ -3482,6 +3724,10 @@ function createRecipeCard(recipe, state) {
     actions.remove();
   } else {
     actions.innerHTML = `
+      <div class="recipe-card__total-oz" aria-label="Total batch ounces">
+        <strong>${formatNumber(totals.oz)}</strong>
+        <span>oz</span>
+      </div>
       <button class="mini-button" data-action="edit" type="button">Edit</button>
       <button class="mini-button" data-action="toggle" type="button">${state === "active" ? "Deactivate" : "Reactivate"}</button>
       ${state === "inactive" && recipe.isCustom ? '<button class="mini-button mini-button--danger" data-action="delete" type="button">Delete custom</button>' : ""}
@@ -3507,7 +3753,6 @@ function createRecipeCard(recipe, state) {
       ]
     : [
         ["Total cost", money(totals.cost)],
-        ["Total oz", formatNumber(totals.oz)],
         ["ABV", `${formatNumber(totals.abvPercent)}%`],
         ["Profit margin", `${formatNumber(pricing.margin)}%`],
       ];
@@ -3773,9 +4018,9 @@ function renderPricingAdvisor(visibleTapRows = []) {
   pricingAdvisorInputsByKey = advisorByKey;
   pricingAdvisorSummary.innerHTML = `
     <div><strong>${formatNumber(advisor.summary.priceChangeCount)}</strong><span>Price suggestions</span></div>
-    <div><strong>${formatNumber(advisor.summary.onTargetCount)}</strong><span>At or above 82%</span></div>
-    <div><strong>${formatNumber(advisor.summary.reviewCount)}</strong><span>Need input review</span></div>
-    <div><strong>${formatNumber(advisor.summary.blockedCount)}</strong><span>Missing required data</span></div>
+    ${advisor.summary.onTargetCount ? `<div><strong>${formatNumber(advisor.summary.onTargetCount)}</strong><span>At or above 82%</span></div>` : ""}
+    ${advisor.summary.reviewCount ? `<div><strong>${formatNumber(advisor.summary.reviewCount)}</strong><span>Need review</span></div>` : ""}
+    ${advisor.summary.blockedCount ? `<div><strong>${formatNumber(advisor.summary.blockedCount)}</strong><span>Missing data</span></div>` : ""}
   `;
 
   pricingAdvisorTable.innerHTML = advisor.rows.map((item) => {
@@ -4281,8 +4526,6 @@ function renderPricingSummary(visibleTapRows = getLiveTapPricingRows(pricingSear
   const cost = sum(pricing.map((item) => item.cost));
   const profit = revenue - cost;
   const margin = revenue ? (profit / revenue) * 100 : 0;
-  const liveStatus = liveTapPricingUpdatedAt ? `${visibleTapRows.length} current taps` : liveTapPricingMessage;
-
   pricingSummary.innerHTML = `
     <h2>Charge pricing</h2>
     <div class="sync-panel">
@@ -4291,8 +4534,6 @@ function renderPricingSummary(visibleTapRows = getLiveTapPricingRows(pricingSear
     </div>
     <div class="summary-line"><span>Cocktail recipes</span><strong>${activeRecipes.length}</strong></div>
     <div class="summary-line"><span>Current PMB taps</span><strong>${liveTapPriceItems.length || visibleTapRows.length}</strong></div>
-    <div class="summary-line"><span>Dashboard calculation overrides</span><strong>${countChargeOverrides()}</strong></div>
-    <div class="summary-line"><span>PMB live prices</span><strong>${escapeHtml(liveStatus)}</strong></div>
     <div class="summary-line"><span>Projected batch revenue</span><strong>${money(revenue)}</strong></div>
     <div class="summary-line"><span>Projected batch profit</span><strong>${money(profit)}</strong></div>
     <div class="summary-line"><span>Projected margin</span><strong>${formatNumber(margin)}%</strong></div>
@@ -4329,17 +4570,19 @@ function renderIngredients() {
       const override = priceOverrides[ingredient.id] || {};
       const currentUnitCost = getCatalogUnitCost(ingredient);
       const mappedBottleOz = ingredient.vendorProduct?.bottleOz ? formatNumber(ingredient.vendorProduct.bottleOz) : "";
+      const preparedPurchase = getPreparedIngredientPurchase(ingredient.id);
       const previousPriceNote = getPreviousPriceNote(override);
       const row = document.createElement("tr");
       row.dataset.globalSearchKey = `ingredient:${ingredient.id}`;
       row.innerHTML = `
         <td>
           <strong>${escapeHtml(ingredient.name)}</strong>
-          ${ingredient.vendorProduct ? `<span class="table-note table-note--accent">${escapeHtml(ingredient.vendorProduct.vendor)} mapped</span><span class="table-note">${escapeHtml(ingredient.vendorProduct.productName)}</span>` : ""}
         </td>
         <td>${money(currentUnitCost)}</td>
-        <td><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(override.bottleOz ?? "")}" placeholder="${escapeHtml(mappedBottleOz)}" aria-label="Bottle ounces for ${escapeHtml(ingredient.name)}"></td>
-        <td><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(override.bottlePrice ?? "")}" aria-label="Bottle price for ${escapeHtml(ingredient.name)}"></td>
+        <td>${preparedPurchase
+          ? `<span class="table-note">${escapeHtml(getPreparedIngredientYieldNote(ingredient.id))}</span><input type="hidden" value="${escapeHtml(preparedPurchase.purchaseUnitStorageValue)}">`
+          : `<input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(override.bottleOz ?? "")}" placeholder="${escapeHtml(mappedBottleOz)}" aria-label="Package size in ounces for ${escapeHtml(ingredient.name)}">`}</td>
+        <td><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(override.bottlePrice ?? "")}" aria-label="${escapeHtml(preparedPurchase?.priceInputLabel || `Package price for ${ingredient.name}`)}"></td>
         <td class="muted">${formatUpdatedAt(override.updatedAt)}${previousPriceNote ? `<span class="table-note">${escapeHtml(previousPriceNote)}</span>` : ""}</td>
         <td><button class="mini-button" type="button">Update</button></td>
       `;
@@ -4368,9 +4611,8 @@ function renderIngredients() {
         <td>
           <strong>${escapeHtml(item.name)}</strong>
           <span class="table-note table-note--accent">${escapeHtml(item.tapSummary)}</span>
-          ${item.vendorProduct ? `<span class="table-note table-note--accent">Provi mapped</span><span class="table-note">${escapeHtml(item.vendorProduct.productName)}</span>` : ""}
         </td>
-        <td>${vendorName === "Needs mapping" ? `<span class="table-note">${escapeHtml(vendorName)}</span>` : `${escapeHtml(vendorName)}<span class="table-note">via Provi</span>`}</td>
+        <td>${escapeHtml(vendorName)}</td>
         <td>${money(currentUnitCost)}</td>
         <td><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(getKegOverrideDisplayOz(item, override))}" placeholder="${escapeHtml(formatNumber(item.kegOz))}" aria-label="Keg ounces for ${escapeHtml(item.name)}"></td>
         <td><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(staleSmallKegOverride ? "" : override.kegPrice ?? "")}" aria-label="Keg price for ${escapeHtml(item.name)}"></td>
@@ -4389,17 +4631,12 @@ function renderIngredients() {
 function renderIngredientSummary(visibleIngredientsInput = ingredients.filter((ingredient) => ingredient.id !== "water"), visibleKegsInput = kegPricingItems) {
   const visibleIngredients = visibleIngredientsInput.filter((ingredient) => ingredient.id !== "water");
   const visibleKegs = visibleKegsInput;
-  const proofCount = countVendorMappingsByName(visibleIngredients, "Proof");
-  const ohlqCount = countVendorMappingsByName(visibleIngredients, "OHLQ");
-  const proviKegCount = visibleKegs.filter((item) => item.vendorProduct?.syncVendor === "Provi").length;
-  const kegOverrides = countKegPriceOverrides();
   const kegTrackedValue = sum(visibleKegs.map((item) => getKegPrice(item)));
 
   ingredientSummary.innerHTML = `
     <h2>Pricing</h2>
     <div class="sync-panel">
-      <h3>Vendor Sync</h3>
-      <p class="sync-copy">Updates mapped ingredients and beer kegs through the available vendor connections.</p>
+      <h3>Price Sync</h3>
       <label class="sync-field">
         <span>Vendor scope</span>
         <select id="vendor-sync-scope">
@@ -4413,16 +4650,9 @@ function renderIngredientSummary(visibleIngredientsInput = ingredients.filter((i
       </div>
       <p class="sync-status">${escapeHtml(vendorSyncMessage)}</p>
     </div>
-    <div class="summary-line"><span>Unique ingredients</span><strong>${visibleIngredients.length}</strong></div>
-    <div class="summary-line"><span>With bottle overrides</span><strong>${countOverrides()}</strong></div>
     <div class="summary-line"><span>Mapped to vendors</span><strong>${countVendorMappings(visibleIngredients)}</strong></div>
-    <div class="summary-line"><span>Proof mapped</span><strong>${proofCount}</strong></div>
-    <div class="summary-line"><span>OHLQ mapped</span><strong>${ohlqCount}</strong></div>
     <div class="summary-line"><span>Beer kegs tracked</span><strong>${visibleKegs.length}</strong></div>
-    <div class="summary-line"><span>Kegs via Provi</span><strong>${proviKegCount}</strong></div>
-    <div class="summary-line"><span>Keg overrides</span><strong>${kegOverrides}</strong></div>
     <div class="summary-line"><span>Keg catalog value</span><strong>${money(kegTrackedValue)}</strong></div>
-    <div class="summary-line"><span>Total ounces tracked</span><strong>${formatNumber(sum(visibleIngredients.map((item) => item.totalOz)))}</strong></div>
     <div class="summary-line"><span>Estimated catalog cost</span><strong>${money(sum(visibleIngredients.map((item) => getCatalogCost(item))))}</strong></div>
   `;
 
@@ -4442,52 +4672,377 @@ function renderInventory() {
 }
 
 function getWeeklyPlanInventoryItems() {
-  return inventoryItems
-    .filter((item) => item.orderQuantity > 0 || item.orderHoldReason)
-    .map((item) => {
-      const orderUnits = getInventoryRoundedOrderQuantity(item);
-      const hasCurrentCount = Object.prototype.hasOwnProperty.call(inventoryOnHandOverrides, item.id);
-      const countHoldReason = !hasCurrentCount && toNumber(item.parDisplay) > 0
-        ? `No current saved count; the displayed on-hand value is from the ${formatUpdatedAt(INVENTORY_BASELINE_DATE)} baseline.`
-        : "";
+  const mondaySnapshot = getCurrentMondayInventorySnapshot(inventoryHistory, new Date());
+  if (!mondaySnapshot) return [];
+  return (mondaySnapshot.items || [])
+    .filter((snapshotItem) => (
+      !isFoodDepartmentOrderedInventoryItem(snapshotItem.name)
+      && toNumber(snapshotItem.parDisplay) > 0
+      && toNumber(snapshotItem.orderDisplay) > 0
+    ))
+    .map((snapshotItem) => {
+      const item = inventoryItems.find((candidate) => candidate.id === snapshotItem.id)
+        || inventoryItems.find((candidate) => candidate.name === snapshotItem.name);
+      const vendorProduct = item?.vendorProduct || getVendorMapping(snapshotItem.id);
+      const orderUnits = toNumber(snapshotItem.orderDisplay);
+      const unitCost = toNumber(snapshotItem.unitCost);
       return {
-        id: item.id,
-        name: item.name,
-        group: item.group,
+        id: snapshotItem.id,
+        name: snapshotItem.name,
+        group: snapshotItem.group,
         orderUnits,
-        casePackaged: item.casePackaged,
-        packSize: item.packSize,
-        vendor: item.vendorProduct?.vendor || item.vendorProduct?.syncVendor || "",
-        estimatedCost: item.excludeFromInventoryValue ? 0 : orderUnits * toNumber(item.unitCost),
-        unitCost: item.excludeFromInventoryValue ? 0 : toNumber(item.unitCost),
-        hasKnownPrice: item.excludeFromInventoryValue || toNumber(item.unitCost) > 0,
-        onHand: toNumber(item.onHandDisplay),
-        par: toNumber(item.parDisplay),
-        hasCurrentCount,
-        orderHoldReason: item.orderHoldReason || countHoldReason,
+        casePackaged: Boolean(snapshotItem.casePackaged),
+        packSize: normalizePackSize(snapshotItem.packSize || 1),
+        vendor: vendorProduct?.vendor || vendorProduct?.syncVendor || "",
+        vendorSku: vendorProduct?.preferredSku || item?.matchedSku || "",
+        vendorProductName: vendorProduct?.productName || snapshotItem.name,
+        estimatedCost: item?.excludeFromInventoryValue ? 0 : orderUnits * unitCost,
+        unitCost: item?.excludeFromInventoryValue ? 0 : unitCost,
+        hasKnownPrice: Boolean(item?.excludeFromInventoryValue) || unitCost > 0,
+        onHand: toNumber(snapshotItem.onHandDisplay),
+        par: toNumber(snapshotItem.parDisplay),
+        hasCurrentCount: true,
+        orderHoldReason: "",
       };
     });
 }
 
+function getCurrentMondayKegPlanSnapshot(now = new Date()) {
+  return getCurrentMondayInventorySnapshot(inventoryHistory, now)?.kegPlanSnapshot || null;
+}
+
 function getWeeklyPlanRecommendations() {
-  if (!hasCurrentParAgentRecommendations()) return [];
-  return (parAgentState?.recommendations?.items || []).map((item) => {
+  const frozenKegPlan = getCurrentMondayKegPlanSnapshot();
+  const sourceItems = Array.isArray(frozenKegPlan?.items) ? frozenKegPlan.items : [];
+  return sourceItems.map((item) => {
+    if (item.isLiquorTap) {
+      const orderProductName = normalizeIngredientAlias(
+        normalizeLiquorTapProductName(item.orderProductName || item.name),
+      );
+      const ingredientId = slugify(orderProductName);
+      const inventoryItem = inventoryItems.find((candidate) => (
+        normalizeIngredientAlias(candidate.name) === orderProductName
+      ));
+      const vendorMapping = getVendorMapping(ingredientId);
+      const unitCost = toNumber(priceOverrides[ingredientId]?.bottlePrice)
+        || toNumber(inventoryItem?.unitCost);
+      return {
+        ...item,
+        internalId: ingredientId,
+        orderProductName,
+        vendor: vendorMapping?.vendor || inventoryItem?.vendorProduct?.vendor || "OHLQ",
+        vendorSku: vendorMapping?.preferredSku || inventoryItem?.vendorProduct?.preferredSku || inventoryItem?.matchedSku || "",
+        vendorProductName: vendorMapping?.productName || inventoryItem?.vendorProduct?.productName || orderProductName,
+        unitCost,
+      };
+    }
     if (!item.isKegTap || item.actionType !== "order") return item;
     const pricingItem = getKegPricingItem(item.orderProductName || item.name);
-    const unitCost = pricingItem ? getKegPrice(pricingItem) : 0;
+    const vendorCatalogProduct = getKegVendorCatalogProduct(
+      pricingItem?.id,
+      pricingItem?.name,
+      item.orderProductName,
+      item.name,
+    );
+    const unitCost = vendorCatalogProduct?.currentPrice ?? (pricingItem ? getKegPrice(pricingItem) : 0);
     return {
       ...item,
-      vendor: pricingItem?.vendor || "",
+      internalId: pricingItem?.id || item.key,
+      vendor: vendorCatalogProduct?.vendor || pricingItem?.vendor || "",
+      vendorSku: vendorCatalogProduct?.vendorSku || pricingItem?.vendorProduct?.preferredSku || pricingItem?.preferredSku || "",
+      vendorProductName: vendorCatalogProduct?.productName || pricingItem?.vendorProduct?.productName || pricingItem?.name || item.orderProductName || item.name,
       unitCost,
+      vendorListPrice: vendorCatalogProduct?.listPrice ?? unitCost,
+      vendorPriceCheckedAt: vendorCatalogProduct?.priceCheckedAt || "",
+      vendorPromotion: Boolean(vendorCatalogProduct?.promotion),
     };
   });
 }
 
-function getWeeklyPlanTapContext(item, unit) {
+function hasPublishedWeeklyPlanRecommendations(now = new Date()) {
+  return Boolean(parAgentState?.recommendations?.generatedAt)
+    && isRecommendationForOperatingWeek(parAgentState.recommendations.generatedAt, now);
+}
+
+function getWeeklyPlanModel() {
+  const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
+  const plan = snapshot
+    ? hydrateWeeklyPlanLiquorTapPricing(snapshot.plan)
+    : buildWeeklyActionPlan({
+      inventoryItems: getWeeklyPlanInventoryItems(),
+      recommendations: getWeeklyPlanRecommendations(),
+    });
+  return refreshWeeklyPlanMetadata(plan, {
+    resolveBeerOrder: (item) => {
+      const pricingKey = getKegPricingKey(item.name);
+      const pricingItem = getKegPricingItem(item.name);
+      const vendor = pricingItem?.vendor || KEG_VENDOR_MAPPINGS[pricingKey] || "";
+      const unitCost = pricingItem
+        ? getKegPrice(pricingItem)
+        : toNumber(kegPriceOverrides[pricingKey]?.kegPrice);
+      if (!vendor && !unitCost) return null;
+      return {
+        vendor,
+        vendorSku: pricingItem?.vendorProduct?.preferredSku || pricingItem?.preferredSku || item.vendorSku,
+        vendorProductName: pricingItem?.vendorProduct?.productName || pricingItem?.name || item.vendorProductName,
+        unitCost,
+      };
+    },
+    excludeInventoryReview: (item) => {
+      if (isFoodDepartmentOrderedInventoryItem(item.name)) return true;
+      const currentItem = inventoryItems.find((candidate) => candidate.id === item.id)
+        || inventoryItems.find((candidate) => candidate.name === item.name);
+      return Boolean(currentItem) && toNumber(currentItem.parDisplay) <= 0;
+    },
+  });
+}
+
+function hydrateWeeklyPlanLiquorTapPricing(plan) {
+  const liquorTapBottles = plan?.orders?.liquorTapBottles || [];
+  let resolvedMissingPriceCount = 0;
+  const pricedLiquorTapBottles = liquorTapBottles.map((item) => {
+    if (item.hasKnownPrice !== false && toNumber(item.estimatedCost) > 0) return item;
+    const ingredientId = slugify(normalizeIngredientAlias(item.name));
+    const unitCost = toNumber(priceOverrides[ingredientId]?.bottlePrice);
+    if (!unitCost) return item;
+    if (item.hasKnownPrice === false) resolvedMissingPriceCount += 1;
+    return {
+      ...item,
+      vendor: item.vendor || getVendorMapping(ingredientId)?.vendor || "OHLQ",
+      unitCost,
+      estimatedCost: toNumber(item.quantity) * unitCost,
+      hasKnownPrice: true,
+    };
+  });
+  if (!resolvedMissingPriceCount) return plan;
+  const priorLiquorTapCost = toNumber(plan.summary.estimatedLiquorTapCost);
+  const estimatedLiquorTapCost = pricedLiquorTapBottles
+    .reduce((total, item) => total + toNumber(item.estimatedCost), 0);
+  const missingPriceCount = Math.max(
+    0,
+    toNumber(plan.summary.missingPriceCount) - resolvedMissingPriceCount,
+  );
+  return {
+    ...plan,
+    orders: { ...plan.orders, liquorTapBottles: pricedLiquorTapBottles },
+    summary: {
+      ...plan.summary,
+      estimatedLiquorTapCost,
+      estimatedKnownPurchaseCost: toNumber(plan.summary.estimatedKnownPurchaseCost)
+        + estimatedLiquorTapCost
+        - priorLiquorTapCost,
+      missingPriceCount,
+      estimatedPurchaseCostComplete: missingPriceCount === 0,
+    },
+  };
+}
+
+async function publishCurrentWeeklyPlanSnapshot() {
+  const mondaySnapshot = getCurrentMondayInventorySnapshot(inventoryHistory, new Date());
+  if (!mondaySnapshot?.kegPlanSnapshot || !parAgentState?.initialized) return false;
+  try {
+    const recommendationPricing = getWeeklyPlanRecommendations().map((item) => ({
+      key: item.key,
+      vendor: item.vendor,
+      vendorSku: item.vendorSku,
+      vendorProductName: item.vendorProductName,
+      unitCost: item.unitCost,
+    }));
+    const result = await requestParAgentState({
+      action: "publish-weekly-plan",
+      expectedRevision: parAgentState.revision,
+      inventoryItems: getWeeklyPlanInventoryItems(),
+      recommendationPricing,
+      kegPlanSnapshot: mondaySnapshot.kegPlanSnapshot,
+    });
+    applyParAgentState(result);
+    await loadWeeklyOrderTracking();
+    await loadDashboardStaffPrepPlan();
+    return Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations));
+  } catch (error) {
+    weeklyPlanRefreshMessage = error?.message || "The Monday plan could not be locked for the week.";
+    return false;
+  }
+}
+
+function normalizeWeeklyOrderTracking(result = {}) {
+  return {
+    available: result?.available === true,
+    generatedAt: clean(result?.generatedAt),
+    drafts: Array.isArray(result?.drafts) ? result.drafts : [],
+    vendors: Array.isArray(result?.vendors) ? result.vendors : [],
+    itemCount: toNumber(result?.itemCount),
+    receivedCount: toNumber(result?.receivedCount),
+    notReceivedCount: toNumber(result?.notReceivedCount),
+    notReceivedItems: Array.isArray(result?.notReceivedItems) ? result.notReceivedItems : [],
+    stateRevision: toNumber(result?.stateRevision),
+    message: clean(result?.message),
+  };
+}
+
+async function loadWeeklyOrderTracking() {
+  try {
+    const response = await fetch("/api/weekly-order-tracking", {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) throw new Error(result?.error || "Weekly order tracking could not be loaded.");
+    weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
+    if (parAgentState && weeklyOrderTracking.stateRevision > toNumber(parAgentState.revision)) {
+      parAgentState.revision = weeklyOrderTracking.stateRevision;
+      if (parAgentState.recommendations) {
+        parAgentState.recommendations.publishedStateRevision = weeklyOrderTracking.stateRevision;
+      }
+    }
+    weeklyOrderTrackingMessage = weeklyOrderTracking.message;
+  } catch (error) {
+    weeklyOrderTracking = normalizeWeeklyOrderTracking();
+    weeklyOrderTrackingMessage = error?.message || "Weekly order tracking could not be loaded.";
+  }
+}
+
+async function refreshWeeklyOrderTracking() {
+  if (weeklyOrderTrackingRefreshRunning || isEmployeeDashboard) return;
+  weeklyOrderTrackingRefreshRunning = true;
+  try {
+    await loadWeeklyOrderTracking();
+    renderWeeklyPlan();
+    renderDashboardOverview();
+  } finally {
+    weeklyOrderTrackingRefreshRunning = false;
+  }
+}
+
+function normalizeDashboardStaffPrepPlan(result = {}) {
+  return {
+    available: result?.available === true,
+    generatedAt: clean(result?.generatedAt),
+    items: Array.isArray(result?.items) ? result.items : [],
+    completedCount: toNumber(result?.completedCount),
+    totalCount: toNumber(result?.totalCount),
+  };
+}
+
+async function loadDashboardStaffPrepPlan() {
+  try {
+    const response = await fetch("/api/staff-prep-plan", {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) throw new Error(result?.error || "Cocktail prep history could not be loaded.");
+    dashboardStaffPrepPlan = normalizeDashboardStaffPrepPlan(result);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function refreshDashboardStaffPrepPlan() {
+  if (dashboardStaffPrepRefreshRunning || isEmployeeDashboard) return;
+  dashboardStaffPrepRefreshRunning = true;
+  try {
+    const refreshed = await loadDashboardStaffPrepPlan();
+    if (refreshed) renderDashboardOverview();
+  } finally {
+    dashboardStaffPrepRefreshRunning = false;
+  }
+}
+
+async function saveWeeklyOrderPlaced(vendorId, ordered, orderedBy) {
+  weeklyOrderTrackingMessage = "Saving who placed the order...";
+  try {
+    const response = await fetch("/api/weekly-order-tracking", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "set-ordered",
+        generatedAt: weeklyOrderTracking.generatedAt,
+        vendorId,
+        ordered,
+        orderedBy,
+      }),
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) throw new Error(result?.error || "The ordered-by update could not be saved.");
+    weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
+    weeklyOrderTrackingMessage = "Ordered-by confirmation saved.";
+    await loadParAgentState();
+  } catch (error) {
+    weeklyOrderTrackingMessage = error?.message || "The ordered-by update could not be saved.";
+  }
+  renderWeeklyPlan();
+  renderDashboardOverview();
+}
+
+async function saveVendorOrderDraftAction(payload) {
+  weeklyOrderTrackingMessage = payload.action === "approve-draft" ? "Approving vendor draft..." : "Saving vendor draft...";
+  try {
+    const response = await fetch("/api/weekly-order-tracking", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ generatedAt: weeklyOrderTracking.generatedAt, ...payload }),
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) throw new Error(result?.error || "The vendor draft could not be saved.");
+    weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
+    weeklyOrderTrackingMessage = payload.action === "approve-draft"
+      ? "Vendor draft approved. Real vendor submission remains disabled."
+      : "Vendor draft saved for review.";
+    await loadParAgentState();
+  } catch (error) {
+    weeklyOrderTrackingMessage = error?.message || "The vendor draft could not be saved.";
+  }
+  renderWeeklyPlan();
+  renderDashboardOverview();
+}
+
+function escapeCsvValue(value) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function exportVendorOrderDraftCsv(draft) {
+  const headers = ["Vendor", "SKU", "Product", "Internal ID", "Line type", "Units", "Cases", "Pack size", "Unit cost", "Extended cost", "Reason", "Source date", "Substitutions"];
+  const rows = draft.lines.map((line) => [
+    draft.vendor,
+    line.vendorSku,
+    line.productName,
+    line.internalId,
+    line.lineType,
+    line.requestedUnits,
+    line.requestedCases ?? "",
+    line.packSize,
+    line.unitCost ?? "",
+    line.extendedCost ?? "",
+    line.reason,
+    line.sourceDate,
+    "Not allowed",
+  ]);
+  const csv = [headers, ...rows].map((row) => row.map(escapeCsvValue).join(",")).join("\n");
+  const blob = new Blob([`${csv}\n`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${slugify(draft.vendor)}-order-draft-${clean(draft.generatedAt).slice(0, 10) || "current"}.csv`;
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function getWeeklyPlanTapContext(item, unit, { compact = false } = {}) {
   const taps = item.tapNumbers.length
     ? `Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.map(formatNumber).join(", ")}`
     : "Tap assignment unavailable";
   const walls = item.walls.length ? ` · ${item.walls.join(", ")}` : "";
+  if (compact) return `${taps}${walls}`;
   if (unit === "oz") {
     return `${taps}${walls} · ${formatNumber(item.currentStockOunces)} oz current · ${formatNumber(item.avgWeeklyOunces)} oz avg/week`;
   }
@@ -4519,10 +5074,47 @@ function renderWeeklyPlanTapRows(items, { action, unit = "kegs" } = {}) {
   return `<div class="weekly-plan-list">${items.map((item) => `
     <div class="weekly-plan-item">
       <div>
-        <strong>${escapeHtml(item.name)}</strong>
-        <span>${escapeHtml(getWeeklyPlanTapContext(item, unit === "refills" ? "oz" : "kegs"))}</span>
+        <strong>${escapeHtml(getCanonicalProductDisplayName(item.name))}</strong>
+        <span>${escapeHtml(getWeeklyPlanTapContext(item, unit === "refills" ? "oz" : "kegs", { compact: true }))}</span>
       </div>
       <b>${escapeHtml(action)} ${formatNumber(item.quantity)} ${escapeHtml(unit === "refills" ? `refill${item.quantity === 1 ? "" : "s"}` : `keg${item.quantity === 1 ? "" : "s"}`)}</b>
+    </div>
+  `).join("")}</div>`;
+}
+
+function renderWeeklyPlanCocktailRows(items) {
+  if (!items.length) return '<p class="weekly-plan-empty">No cocktail labels are needed this week.</p>';
+  const orderedItems = [...items].sort((a, b) => (
+    toNumber(a.tapNumbers?.[0]) - toNumber(b.tapNumbers?.[0])
+    || clean(a.name).localeCompare(clean(b.name))
+  ));
+  return `<div class="weekly-plan-list weekly-plan-label-list">${orderedItems.map((item) => {
+    const wall = clean(item.walls?.[0]);
+    const details = [
+      wall ? `${wall} wall` : "Wall unavailable",
+      toNumber(item.batchSizeOz) > 0 ? `${formatNumber(item.batchSizeOz)} oz` : "Batch ounces unavailable",
+    ].join(" · ");
+    return `
+      <div class="weekly-plan-item weekly-plan-label-item">
+        <div>
+          <strong>${escapeHtml(getCocktailPrepDisplayName(getCanonicalProductDisplayName(item.name), wall))}</strong>
+          <span>${escapeHtml(details)}</span>
+        </div>
+        <b>${formatNumber(item.quantity)} label${item.quantity === 1 ? "" : "s"}</b>
+      </div>
+    `;
+  }).join("")}</div>`;
+}
+
+function renderWeeklyPlanLiquorTapRows(items) {
+  if (!items.length) return '<p class="weekly-plan-empty">No liquor-tap bottle orders this week.</p>';
+  return `<div class="weekly-plan-list">${items.map((item) => `
+    <div class="weekly-plan-item">
+      <div>
+        <strong>${escapeHtml(item.name)}</strong>
+        <span>${escapeHtml(getWeeklyPlanTapContext(item, "oz", { compact: true }))}${item.vendor ? ` · ${escapeHtml(item.vendor)}` : ""}${item.hasKnownPrice === false ? " · Price needed" : ""}</span>
+      </div>
+      <b>Order ${formatNumber(item.quantity)} bottle${item.quantity === 1 ? "" : "s"}</b>
     </div>
   `).join("")}</div>`;
 }
@@ -4548,6 +5140,7 @@ function getLatestPriceTimestamp() {
 }
 
 function getWeeklyPlanMissingInventoryCount() {
+  if (getCurrentMondayInventorySnapshot(inventoryHistory, new Date())) return 0;
   return inventoryItems.filter((item) => (
     toNumber(item.parDisplay) > 0
     && !Object.prototype.hasOwnProperty.call(inventoryOnHandOverrides, item.id)
@@ -4567,32 +5160,42 @@ function getWeeklyPlanFreshness(plan) {
     weeklyUsageItems,
     (item) => (item.history || []).some((entry) => getWeeklyUsageLabelTime(entry.label) === latestCompletedTime),
   );
-  const recommendationSummary = parAgentState?.recommendations?.summary || {};
+  const mondayKegPlan = getCurrentMondayKegPlanSnapshot();
+  const lockedSnapshot = Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date()));
+  const recommendationSummary = lockedSnapshot
+    ? parAgentState?.recommendations?.summary || {}
+    : mondayKegPlan?.summary || {};
+  const inventorySnapshotCurrent = Boolean(mondayKegPlan);
   const readiness = evaluateWeeklyPlanReadiness({
     parInitialized: Boolean(parAgentState?.initialized),
-    recommendationGeneratedAt: parAgentState?.recommendations?.generatedAt,
-    recommendationError: parAgentError || (parAgentStateOutbox ? "Keg Levels has an unsynced recovery operation." : ""),
+    recommendationGeneratedAt: lockedSnapshot
+      ? parAgentState?.recommendations?.generatedAt
+      : mondayKegPlan?.generatedAt,
+    recommendationError: lockedSnapshot ? "" : parAgentError || (parAgentStateOutbox ? "Keg Levels has an unsynced recovery operation." : ""),
     recommendationInventoryMissing: Boolean(recommendationSummary.inventoryStateMissing),
-    recommendationSourceCurrent: hasCurrentParAgentRecommendations(),
-    parInputsChangedAt: parAgentInputsChangedAt,
+    recommendationSourceCurrent: lockedSnapshot || Boolean(mondayKegPlan),
+    parInputsChangedAt: lockedSnapshot ? "" : parAgentInputsChangedAt,
     weeklyUsageInitialized: weeklyUsageSharedInitialized,
-    weeklyUsageSavePending: weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites > 0 || Boolean(weeklyUsageSharedSaveTimer) || Boolean(weeklyUsageSharedOutbox),
-    weeklyUsageSaveError: weeklyUsageSharedSaveError || (!weeklyUsageSharedOutboxDurable ? "Pending Weekly Usage could not be stored durably in this browser." : ""),
-    latestCompletedUsageSaved,
-    weeklyUsageLastSyncAt,
+    weeklyUsageSavePending: lockedSnapshot ? false : weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites > 0 || Boolean(weeklyUsageSharedSaveTimer) || Boolean(weeklyUsageSharedOutbox),
+    weeklyUsageSaveError: lockedSnapshot ? "" : weeklyUsageSharedSaveError || (!weeklyUsageSharedOutboxDurable ? "Pending Weekly Usage could not be stored durably in this browser." : ""),
+    latestCompletedUsageSaved: lockedSnapshot ? true : latestCompletedUsageSaved,
+    weeklyUsageLastSyncAt: mondayKegPlan?.generatedAt || weeklyUsageLastSyncAt,
     inventoryInitialized: inventorySharedInitialized,
-    inventorySavePending: inventorySharedSaving || inventoryFieldSyncPendingCount > 0 || inventoryFieldSyncTimers.size > 0 || Object.keys(inventoryFieldOutbox).length > 0 || inventoryActionOutbox.length > 0,
-    inventorySaveError: inventorySharedSaveError || (!inventoryFieldOutboxDurable || !inventoryActionOutboxDurable ? "Pending Inventory changes could not be stored durably in this browser." : ""),
-    missingInventoryCount: getWeeklyPlanMissingInventoryCount(),
+    inventorySnapshotCurrent: lockedSnapshot || inventorySnapshotCurrent,
+    inventorySavePending: lockedSnapshot ? false : inventorySharedSaving || inventoryFieldSyncPendingCount > 0 || inventoryFieldSyncTimers.size > 0 || Object.keys(inventoryFieldOutbox).length > 0 || inventoryActionOutbox.length > 0,
+    inventorySaveError: lockedSnapshot ? "" : inventorySharedSaveError || (!inventoryFieldOutboxDurable || !inventoryActionOutboxDurable ? "Pending Inventory changes could not be stored durably in this browser." : ""),
+    missingInventoryCount: lockedSnapshot ? 0 : getWeeklyPlanMissingInventoryCount(),
     heldLineCount: plan.summary.heldLineCount,
     excludedLineCount: plan.summary.excludedLineCount,
     missingPriceCount: plan.summary.missingPriceCount,
+    lockedForWeek: lockedSnapshot,
   });
   return {
     latestCompletedWeek,
     latestCompletedUsageSaved,
     latestCompletedUsageRowCount,
     requiredUsageRows,
+    lockedSnapshot,
     readiness,
   };
 }
@@ -4652,7 +5255,10 @@ function getKegLevelsSharedOverviewSource() {
     provisioned: Boolean(parAgentState),
     initialized: Boolean(parAgentState?.initialized),
     savePending: Boolean(parAgentStateSyncTimer || parAgentStateOutbox),
-    saveError: parAgentError,
+    // Recommendation refresh errors are shown by the Weekly Plan itself. Only
+    // report a shared-save error here when a recovery copy is actually waiting
+    // to be published; otherwise one failed refresh is mislabeled as lost data.
+    saveError: parAgentStateOutbox ? parAgentError : "",
     hasOutbox: Boolean(parAgentStateOutbox),
     durable: parAgentStateOutboxDurable,
   };
@@ -4716,12 +5322,55 @@ function renderDashboardAlert(alert) {
   `;
 }
 
+function getDashboardCompletedPrepItems() {
+  if (!dashboardStaffPrepPlan.available) return [];
+  return dashboardStaffPrepPlan.items
+    .filter((item) => item?.completed === true && clean(item?.preparedBy) && clean(item?.completedAt))
+    .sort((left, right) => Date.parse(right.completedAt) - Date.parse(left.completedAt));
+}
+
+function formatDashboardPrepTime(value) {
+  const completedAt = new Date(value);
+  if (Number.isNaN(completedAt.getTime())) return "Time unavailable";
+  return completedAt.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function renderDashboardCompletedPrep() {
+  const completedItems = getDashboardCompletedPrepItems();
+  if (!completedItems.length) return "";
+  return `
+    <section class="dashboard-prepped" aria-labelledby="dashboard-prepped-title">
+      <div class="dashboard-section-heading">
+        <h2 id="dashboard-prepped-title">Cocktails Prepped</h2>
+        <span>${formatNumber(completedItems.length)} done</span>
+      </div>
+      <div class="dashboard-prepped-list">
+        ${completedItems.map((item) => {
+          const wall = clean(item.wall || item.walls?.[0]);
+          return `
+            <article class="dashboard-prepped-item">
+              <span class="dashboard-prepped-check" aria-hidden="true">✓</span>
+              <div>
+                <strong>${escapeHtml(item.displayName || item.name)}</strong>
+                <small>${wall ? `${escapeHtml(wall)} wall · ` : ""}Prepped by ${escapeHtml(item.preparedBy)}</small>
+              </div>
+              <time datetime="${escapeHtml(item.completedAt)}">${escapeHtml(formatDashboardPrepTime(item.completedAt))}</time>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function renderDashboardOverview() {
   if (!dashboardOverview || isEmployeeDashboard) return;
-  const plan = buildWeeklyActionPlan({
-    inventoryItems: getWeeklyPlanInventoryItems(),
-    recommendations: getWeeklyPlanRecommendations(),
-  });
+  const plan = getWeeklyPlanModel();
   const freshness = getWeeklyPlanFreshness(plan);
   const usagePerformance = buildWeeklyUsagePerformance(weeklyUsageItems, {
     category: "all",
@@ -4732,11 +5381,11 @@ function renderDashboardOverview() {
     getLiveTapPricingRows("").map(buildPricingAdvisorInput).filter((item) => isPricingAdvisorEligibleKind(item.kind)),
   );
   const recipeCoverage = getWallCocktailRecipeCoverage();
-  const queueCounts = getPmbPublishQueueCounts(pmbPublishQueue);
   const overview = buildDashboardOverview({
     weeklyPlan: {
       readiness: freshness.readiness,
       generatedAt: parAgentState?.recommendations?.generatedAt,
+      lockedForWeek: hasPublishedWeeklyPlanRecommendations(),
       summary: plan.summary,
     },
     shared: {
@@ -4759,18 +5408,16 @@ function renderDashboardOverview() {
       advisorSummary: pricingAdvisor.summary,
     },
     inventory: { missingCurrentCount: getWeeklyPlanMissingInventoryCount() },
+    orders: { notReceivedItems: weeklyOrderTracking.notReceivedItems },
     recipes: { missingRecipeCount: recipeCoverage.missing.length },
-    products: { pendingPublishCount: queueCounts.ready + queueCounts.failed },
-    deferred: { cocktailIngredientNetting: true, liquorRefillNetting: true },
+    deferred: { cocktailIngredientNetting: true },
   }, { now: new Date() });
   const leadingAlerts = overview.alerts.slice(0, 6);
 
   dashboardOverview.innerHTML = `
     <header class="dashboard-overview-hero dashboard-overview-hero--${escapeHtml(overview.status)}">
       <div class="dashboard-overview-hero__copy">
-        <p class="eyebrow">Owner command center</p>
         <h2>This week, at a glance</h2>
-        <p>Orders, production, live-system checks, and owner alerts in one organized starting point.</p>
         <div class="dashboard-overview-status">
           <span>${escapeHtml(overview.statusLabel)}</span>
           <strong>${formatNumber(overview.alertCounts.critical)} urgent · ${formatNumber(overview.alertCounts.warning)} to review</strong>
@@ -4783,50 +5430,63 @@ function renderDashboardOverview() {
     </header>
 
     <section class="dashboard-kpi-grid" aria-label="Weekly operations summary">
-      ${overview.kpis.map((kpi) => `
-        <button class="dashboard-kpi dashboard-kpi--${escapeHtml(kpi.tone)}" type="button" data-dashboard-target="${escapeHtml(kpi.target)}">
-          <span>${escapeHtml(kpi.label)}</span>
-          <strong>${escapeHtml(kpi.value)}</strong>
-          <small>${escapeHtml(kpi.detail)}</small>
-          <em>${kpi.confidence === "verified" ? "Verified" : kpi.confidence === "partial" ? "Partial" : "Needs current data"}</em>
-        </button>
-      `).join("")}
+      ${overview.kpis.map((kpi) => {
+        const showDetail = kpi.confidence !== "verified" || ["items-to-order", "usage-coverage"].includes(kpi.id);
+        return `
+          <button class="dashboard-kpi dashboard-kpi--${escapeHtml(kpi.tone)}" type="button" data-dashboard-target="${escapeHtml(kpi.target)}">
+            <span>${escapeHtml(kpi.label)}</span>
+            <strong>${escapeHtml(kpi.value)}</strong>
+            ${showDetail ? `<small>${escapeHtml(kpi.detail)}</small>` : ""}
+            ${kpi.confidence === "verified" ? "" : `<em>${kpi.confidence === "partial" ? "Partial" : "Needs current data"}</em>`}
+          </button>
+        `;
+      }).join("")}
     </section>
 
-    <div class="dashboard-overview-layout">
-      <section class="dashboard-overview-alerts" aria-labelledby="dashboard-alerts-title">
+    ${renderDashboardCompletedPrep()}
+
+    <section class="dashboard-overview-alerts" aria-labelledby="dashboard-alerts-title">
         <div class="dashboard-section-heading">
-          <div><p class="eyebrow">Prioritized for you</p><h2 id="dashboard-alerts-title">Alerts &amp; follow-ups</h2></div>
+          <h2 id="dashboard-alerts-title">Alerts &amp; follow-ups</h2>
           <span>${formatNumber(overview.alerts.length)} total</span>
         </div>
         <div class="dashboard-alert-list">
-          ${leadingAlerts.length ? leadingAlerts.map(renderDashboardAlert).join("") : '<div class="dashboard-overview-empty"><strong>No current alerts</strong><span>Your checked operating inputs are ready.</span></div>'}
+          ${leadingAlerts.length ? leadingAlerts.map(renderDashboardAlert).join("") : '<div class="dashboard-overview-empty"><strong>No current alerts</strong></div>'}
         </div>
         ${overview.alerts.length > leadingAlerts.length ? `<p class="dashboard-alert-more">${formatNumber(overview.alerts.length - leadingAlerts.length)} additional informational notice${overview.alerts.length - leadingAlerts.length === 1 ? "" : "s"} are available in the linked workspaces.</p>` : ""}
-      </section>
+    </section>
 
-      <aside class="dashboard-quick-actions" aria-labelledby="dashboard-quick-actions-title">
-        <div class="dashboard-section-heading">
-          <div><p class="eyebrow">Keep moving</p><h2 id="dashboard-quick-actions-title">Quick actions</h2></div>
-        </div>
-        <div class="dashboard-quick-action-list">
-          ${overview.quickActions.map((action, index) => `
-            <button class="dashboard-quick-action dashboard-quick-action--${escapeHtml(action.tone)}" type="button" data-dashboard-target="${escapeHtml(action.target)}">
-              <span><b>${String(index + 1).padStart(2, "0")}</b>${escapeHtml(action.label)}</span>
-              <i aria-hidden="true">↗</i>
-            </button>
-          `).join("")}
-        </div>
-        <div class="dashboard-trust-note">
-          <strong>Numbers stay honest</strong>
-          <p>When PMB coverage, shared saves, or weekly inputs are incomplete, operational quantities are hidden instead of guessed.</p>
-        </div>
-      </aside>
-    </div>
-
-    <section class="onpar-insights" id="onpar-insights" aria-labelledby="onpar-insights-title"></section>
+    <section class="dashboard-beverage-pulse" id="dashboard-beverage-pulse" aria-labelledby="dashboard-beverage-pulse-title"></section>
   `;
-  renderOnParInsights();
+  renderDashboardBeveragePulse();
+}
+
+function getWeeklyUsageLivePrice(item) {
+  const tapNumber = toNumber(item?.tapNumber);
+  const plu = toNumber(item?.plu);
+  if (!tapNumber || !plu) return null;
+
+  const matches = liveTapPriceItems.filter((livePrice) => {
+    if (livePrice?.isCurrentTap !== true || clean(livePrice?.tapMatchSource) !== "pmb-tap-config") return false;
+    if (toNumber(livePrice?.plu) !== plu) return false;
+    const assignments = Array.isArray(livePrice.assignments) ? livePrice.assignments : [];
+    return assignments.some((assignment) => toNumber(assignment?.tapNumber) === tapNumber);
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function getWeeklyUsageItemSellingRate(item) {
+  const livePrice = getWeeklyUsageLivePrice(item);
+  if (!livePrice) {
+    return { sellingPricePerOz: null, reason: "Refresh PMB prices to verify this exact physical tap." };
+  }
+  const category = getWeeklyUsagePerformanceCategory(item);
+  const sellingPricePerOz = category === "liquor"
+    ? getPricingAdvisorCurrentPrice(livePrice)
+    : toNumber(livePrice.chargePerOz);
+  return sellingPricePerOz > 0
+    ? { sellingPricePerOz }
+    : { sellingPricePerOz: null, reason: "A current PMB selling price is unavailable." };
 }
 
 function getWeeklyUsageItemProfitRate(item) {
@@ -4835,17 +5495,10 @@ function getWeeklyUsageItemProfitRate(item) {
   if (!tapNumber || !plu) {
     return { grossProfitPerOz: null, reason: "Exact PMB tap and PLU identity are required." };
   }
-
-  const matches = liveTapPriceItems.filter((livePrice) => {
-    if (livePrice?.isCurrentTap !== true || clean(livePrice?.tapMatchSource) !== "pmb-tap-config") return false;
-    if (toNumber(livePrice?.plu) !== plu) return false;
-    const assignments = Array.isArray(livePrice.assignments) ? livePrice.assignments : [];
-    return assignments.some((assignment) => toNumber(assignment?.tapNumber) === tapNumber);
-  });
-  if (matches.length !== 1) {
+  const livePrice = getWeeklyUsageLivePrice(item);
+  if (!livePrice) {
     return { grossProfitPerOz: null, reason: "Refresh PMB prices to verify this exact physical tap." };
   }
-  const livePrice = matches[0];
   const category = getWeeklyUsagePerformanceCategory(item);
 
   if (category === "beer") {
@@ -4900,24 +5553,17 @@ function getWeeklyUsageItemProfitRate(item) {
   return sellingRates[0] - costPerOz;
 }
 
-function renderSellerRankingList(rows, metric, emptyMessage) {
-  if (!rows.length) return `<p class="onpar-ranking-empty">${escapeHtml(emptyMessage)}</p>`;
-  return `<ol class="onpar-ranking-list">${rows.map((row, index) => {
-    const value = metric === "profit"
-      ? money(row.averageWeeklyGrossProfit)
-      : `${formatNumber(row.averageWeeklyOz)} oz`;
-    const categoryLabel = getWeeklyUsagePerformanceCategoryLabel(row.category);
-    const wallLabel = row.walls?.join(", ") || "Unassigned";
-    const wallDetail = /wall$/i.test(wallLabel) ? wallLabel : `${wallLabel} wall`;
-    const tapLabel = row.tapNumbers?.length ? `${row.tapNumbers.length === 1 ? "Tap" : "Taps"} ${row.tapNumbers.join(", ")}` : "Saved PMB history";
+function renderSellerRankingList(rows, emptyMessage = "There is not enough saved PMB history for a visual pour list yet.") {
+  if (!rows.length) {
+    return `<p class="dashboard-pulse-empty">${escapeHtml(emptyMessage)}</p>`;
+  }
+  const highestAverage = Math.max(...rows.map((row) => toNumber(row.averageWeeklyOz)), 1);
+  return `<ol class="dashboard-pulse-bars">${rows.map((row, index) => {
+    const width = Math.max(12, Math.round((toNumber(row.averageWeeklyOz) / highestAverage) * 100));
     return `
       <li>
-        <span class="onpar-ranking-list__rank">${index + 1}</span>
-        <div class="onpar-ranking-list__product">
-          <strong>${escapeHtml(row.name)}</strong>
-          <small>${escapeHtml(categoryLabel)} · ${escapeHtml(wallDetail)} · ${escapeHtml(tapLabel)} · ${formatNumber(row.sampleWeekCount)} recorded week${row.sampleWeekCount === 1 ? "" : "s"}</small>
-        </div>
-        <span class="onpar-ranking-list__value">${escapeHtml(value)}<small>/ week</small></span>
+        <div><span>${String(index + 1).padStart(2, "0")}</span><strong>${escapeHtml(row.name)}</strong></div>
+        <span class="dashboard-pulse-bar" aria-hidden="true"><i style="--pulse-width: ${width}%"></i></span>
       </li>`;
   }).join("")}</ol>`;
 }
@@ -5054,6 +5700,218 @@ function renderOnParInsights() {
     </footer>`;
 }
 
+function getDashboardPulseWall(item) {
+  const tapNumber = toNumber(item?.tapNumber);
+  if (tapNumber >= 1 && tapNumber <= 20) return "patio";
+  if (tapNumber >= 21 && tapNumber <= 72) return "main";
+  if (tapNumber >= 73 && tapNumber <= 102) return "karaoke";
+  const wall = clean(item?.wall).toLowerCase();
+  return wall === "main bar" ? "main" : wall;
+}
+
+function getDashboardPulseMovementCopy(item, direction) {
+  if (!item) return "Waiting for another complete PMB week.";
+  const magnitude = Math.abs(toNumber(item.changePercent));
+  const strength = magnitude >= 30 ? "a lot" : magnitude >= 12 ? "noticeably" : "a little";
+  return direction === "up"
+    ? `Picked up ${strength} from last week.`
+    : `Slowed ${strength} from last week.`;
+}
+
+function renderDashboardPulseStory({ tone, symbol, eyebrow, item, copy, emptyCopy }) {
+  return `
+    <article class="dashboard-pulse-story dashboard-pulse-story--${escapeHtml(tone)}">
+      <span class="dashboard-pulse-story__symbol" aria-hidden="true">${escapeHtml(symbol)}</span>
+      <p>${escapeHtml(eyebrow)}</p>
+      <h3>${escapeHtml(item?.name || emptyCopy)}</h3>
+      <small>${escapeHtml(item ? copy : "This insight will appear when enough PMB history is saved.")}</small>
+    </article>
+  `;
+}
+
+function renderDashboardPulseLeaderList(rows, metric, emptyMessage) {
+  if (!rows.length) return `<p class="dashboard-pulse-empty">${escapeHtml(emptyMessage)}</p>`;
+  const highestValue = Math.max(...rows.map((row) => toNumber(row.value)), 1);
+  return `<ol class="dashboard-pulse-bars dashboard-pulse-bars--valued">${rows.map((row, index) => {
+    const width = Math.max(12, Math.round((toNumber(row.value) / highestValue) * 100));
+    const value = metric === "sales" ? money(row.value) : `${formatNumber(row.value)} oz`;
+    return `
+      <li style="grid-template-columns: 1fr; gap: 6px;">
+        <div><span>${String(index + 1).padStart(2, "0")}</span><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(value)}</small></div>
+        <span class="dashboard-pulse-bar" aria-hidden="true"><i style="--pulse-width: ${width}%"></i></span>
+      </li>`;
+  }).join("")}</ol>`;
+}
+
+function renderDashboardPulseCategoryLeaders({ pourLeaders, wallLabel }) {
+  const metric = pourLeaders.metric;
+  const metricLabel = metric === "sales" ? "$" : "Oz";
+  return `
+    <div class="dashboard-pulse-category-leaders">
+      <section aria-labelledby="dashboard-pulse-beer-leaders-title">
+        <div class="dashboard-pulse-leader-heading"><h3 id="dashboard-pulse-beer-leaders-title">Top beers</h3><small>${metricLabel}</small></div>
+        ${renderDashboardPulseLeaderList(pourLeaders.sections.beer.rows, metric, `No beer pours were saved for the ${wallLabel.toLowerCase()} last week.`)}
+      </section>
+      <section aria-labelledby="dashboard-pulse-cocktail-leaders-title">
+        <div class="dashboard-pulse-leader-heading"><h3 id="dashboard-pulse-cocktail-leaders-title">Top cocktails</h3><small>${metricLabel}</small></div>
+        ${renderDashboardPulseLeaderList(pourLeaders.sections.cocktail.rows, metric, `No cocktail pours were saved for the ${wallLabel.toLowerCase()} last week.`)}
+      </section>
+      <section aria-labelledby="dashboard-pulse-liquor-leaders-title">
+        <div class="dashboard-pulse-leader-heading"><h3 id="dashboard-pulse-liquor-leaders-title">Top liquor</h3><small>${metricLabel}</small></div>
+        ${renderDashboardPulseLeaderList(pourLeaders.sections.liquor.rows, metric, metric === "sales"
+          ? "Current PMB prices are needed to rank the Patio and Karaoke liquor taps by projected sales."
+          : "No liquor pours were saved for the Patio or Karaoke wall last week.")}
+      </section>
+    </div>
+  `;
+}
+
+function renderDashboardProjectedSalesMix(mix) {
+  if (!mix.available) {
+    return `
+      <aside class="dashboard-pulse-sales-mix">
+        <div class="dashboard-pulse-sales-mix__header">
+          <h3>Projected sales mix</h3>
+          <small>${escapeHtml(mix.weekLabel || "Last week")}</small>
+        </div>
+        <p class="dashboard-pulse-empty">Current PMB prices are needed to project last week’s category mix.</p>
+      </aside>
+    `;
+  }
+  const coverageCopy = mix.unpricedTapCount
+    ? `${formatNumber(mix.unpricedTapCount)} poured tap${mix.unpricedTapCount === 1 ? " was" : "s were"} left out because a current price was unavailable.`
+    : "All captured taps on this wall had a current price.";
+  return `
+    <aside class="dashboard-pulse-sales-mix">
+      <div class="dashboard-pulse-sales-mix__header">
+        <h3>Projected sales mix</h3>
+        <small>${escapeHtml(mix.weekLabel || "Last week")}</small>
+      </div>
+      <div class="dashboard-pulse-mix-bar" aria-label="Projected sales mix for ${escapeHtml(mix.weekLabel || "last week")}">
+        ${mix.categories.filter((row) => row.sharePercent > 0).map((row) => `<i class="dashboard-pulse-mix-bar__${escapeHtml(row.category)}" style="--mix-share:${row.sharePercent}%"></i>`).join("")}
+      </div>
+      <div class="dashboard-pulse-mix-legend">
+        ${mix.categories.map((row) => `
+          <div class="dashboard-pulse-mix-legend__${escapeHtml(row.category)}">
+            <span aria-hidden="true"></span>
+            <strong>${formatNumber(row.sharePercent)}%</strong>
+            <small>${escapeHtml(row.label)}</small>
+          </div>
+        `).join("")}
+      </div>
+      <p>Exact PMB ounces × current prices. ${escapeHtml(coverageCopy)}</p>
+    </aside>
+  `;
+}
+
+function renderDashboardBeveragePulse() {
+  const container = document.querySelector("#dashboard-beverage-pulse");
+  if (!container || isEmployeeDashboard) return;
+  const wallItems = weeklyUsageItems.filter((item) => getDashboardPulseWall(item) === sellerRankingWall);
+  const trends = buildWeeklyPlanTrends(wallItems, { now: new Date(), limit: 3 });
+  const rankings = buildWeeklyUsageSellerRankings(
+    [...weeklyUsageItems, ...weeklyUsageArchivedItems],
+    {
+      category: "all",
+      wall: sellerRankingWall,
+      metric: "volume",
+      getFullOunces: getWeeklyUsageFullOunces,
+      recentWeekLimit: 6,
+      topLimit: 3,
+      bottomLimit: 3,
+    },
+  );
+  const leaders = rankings.recent.top || [];
+  const pourLeaders = buildLastWeekPourLeaders(
+    [...weeklyUsageItems, ...weeklyUsageArchivedItems],
+    {
+      wall: sellerRankingWall,
+      metric: dashboardPulseRankingMetric,
+      getFullOunces: getWeeklyUsageFullOunces,
+      getSellingPricePerOz: getWeeklyUsageItemSellingRate,
+      limit: 3,
+    },
+  );
+  const projectedSalesMix = buildLastWeekProjectedSalesMix(weeklyUsageItems, {
+    wall: sellerRankingWall,
+    getFullOunces: getWeeklyUsageFullOunces,
+    getSellingPricePerOz: getWeeklyUsageItemSellingRate,
+  });
+  const favorite = leaders[0] || null;
+  const favoriteName = clean(favorite?.name).toLowerCase();
+  const rising = [
+    ...(trends.sections.movers.risers || []),
+    ...(trends.sections.sustained.items || []),
+  ].find((item) => clean(item?.name).toLowerCase() !== favoriteName)
+    || null;
+  const lowSignal = trends.sections.emergingLow.items?.[0] || null;
+  const cooling = lowSignal || trends.sections.movers.fallers?.[0] || null;
+  const wallLabel = sellerRankingWall === "patio"
+    ? "Patio liquor wall"
+    : sellerRankingWall === "karaoke"
+      ? "Karaoke wall"
+      : "Main wall";
+  container.innerHTML = `
+    <header class="dashboard-pulse-header">
+      <div>
+        <h2 id="dashboard-beverage-pulse-title">What guests are pouring</h2>
+      </div>
+      <div class="dashboard-pulse-controls">
+        <label class="dashboard-pulse-wall"><span>Show me</span><select data-seller-ranking-wall>
+          <option value="main"${sellerRankingWall === "main" ? " selected" : ""}>Main wall</option>
+          <option value="karaoke"${sellerRankingWall === "karaoke" ? " selected" : ""}>Karaoke wall</option>
+          <option value="patio"${sellerRankingWall === "patio" ? " selected" : ""}>Patio liquor wall</option>
+        </select></label>
+        <label class="dashboard-pulse-wall dashboard-pulse-metric"><span>$ vs Oz</span><select data-dashboard-pulse-metric>
+          <option value="oz"${dashboardPulseRankingMetric === "oz" ? " selected" : ""}>Oz</option>
+          <option value="sales"${dashboardPulseRankingMetric === "sales" ? " selected" : ""}>$</option>
+        </select></label>
+      </div>
+    </header>
+    ${renderOhioComplianceAlert()}
+    <div class="dashboard-pulse-stories">
+      ${renderDashboardPulseStory({
+        tone: "favorite",
+        symbol: "★",
+        eyebrow: "Crowd favorite",
+        item: favorite,
+        copy: `Most poured on the ${wallLabel.toLowerCase()} across recent saved weeks.`,
+        emptyCopy: "A favorite will show up here",
+      })}
+      ${renderDashboardPulseStory({
+        tone: "rising",
+        symbol: "↗",
+        eyebrow: "Gaining attention",
+        item: rising,
+        copy: trends.sections.movers.risers?.[0]
+          ? getDashboardPulseMovementCopy(rising, "up")
+          : "Staying popular week after week.",
+        emptyCopy: "Nothing is clearly rising yet",
+      })}
+      ${renderDashboardPulseStory({
+        tone: "watch",
+        symbol: "◌",
+        eyebrow: "Worth a glance",
+        item: cooling,
+        copy: lowSignal
+          ? "Recently fell below its usual pace."
+          : getDashboardPulseMovementCopy(cooling, "down"),
+        emptyCopy: "Nothing needs special attention",
+      })}
+    </div>
+    <div class="dashboard-pulse-detail">
+      ${renderDashboardPulseCategoryLeaders({ pourLeaders, wallLabel })}
+      ${renderDashboardProjectedSalesMix(projectedSalesMix)}
+    </div>
+  `;
+  // The detailed renderer is intentionally retained as a fallback for future
+  // drill-down work, but it is no longer mounted on the owner Dashboard.
+  void renderOnParInsights;
+  void renderSellerRankingPeriod;
+  void getWeeklyUsageItemProfitRate;
+  void renderWeeklyPlanTrends;
+}
+
 async function loadBeverageNews({ force = false } = {}) {
   if (beverageNewsLoading || isEmployeeDashboard) return;
   beverageNewsLoading = true;
@@ -5125,112 +5983,98 @@ function renderWeeklyPlanReadiness(readiness) {
   const reasons = [...readiness.blockers, ...readiness.staleReasons, ...readiness.reviewReasons];
   return `
     <section class="weekly-plan-readiness weekly-plan-readiness--${escapeHtml(readiness.status)}" aria-labelledby="weekly-plan-readiness-title">
-      <div>
-        <p class="eyebrow">Order readiness</p>
-        <h3 id="weekly-plan-readiness-title">${escapeHtml(readiness.label)}</h3>
-      </div>
-      ${reasons.length ? `<ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : '<p>All required shared inputs are current and no review warnings remain.</p>'}
+      <h3 id="weekly-plan-readiness-title">${escapeHtml(readiness.label)}</h3>
+      ${reasons.length ? `<ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
     </section>
   `;
 }
 
 function renderWeeklyPlanProvenance({ latestCompletedWeek, latestCompletedUsageSaved, latestCompletedUsageRowCount }) {
   const recommendations = parAgentState?.recommendations;
-  const recommendationSourceCurrent = hasCurrentParAgentRecommendations();
+  const planLocked = hasPublishedWeeklyPlanRecommendations();
   const priceTime = getLatestPriceTimestamp();
   const missingCounts = getWeeklyPlanMissingInventoryCount();
   return `
     <section class="weekly-plan-provenance" aria-label="Weekly plan source freshness">
       <div>
-        <span>Recommendations</span>
-        <strong>${recommendations?.generatedAt ? escapeHtml(formatUpdatedAt(recommendations.generatedAt)) : "Not generated"}</strong>
-        <small>${recommendations?.generatedAt && !recommendationSourceCurrent ? "Stale after a Keg Levels change · old quantities hidden" : recommendations?.summary?.tapCount ? `${formatNumber(recommendations.summary.tapCount)} PMB taps evaluated` : "Run the update from the service computer"}</small>
+        <span>Plan</span>
+        <strong>${planLocked ? "Locked · " : ""}${recommendations?.generatedAt ? escapeHtml(formatUpdatedAt(recommendations.generatedAt)) : "Not generated"}</strong>
       </div>
       <div>
         <span>Weekly Usage</span>
         <strong>${weeklyUsageSharedSaveError ? "Recovery review needed" : weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites || weeklyUsageSharedSaveTimer || weeklyUsageSharedOutbox ? "Saving changes" : latestCompletedWeek ? `Week of ${escapeHtml(formatIsoDate(latestCompletedWeek))}` : "No completed week"}</strong>
-        <small>${weeklyUsageSharedSaveError ? escapeHtml(weeklyUsageSharedSaveError) : `${latestCompletedUsageSaved ? "Latest completed week saved" : "Latest completed week incomplete"} · ${formatNumber(latestCompletedUsageRowCount)}/${formatNumber(weeklyUsageItems.length)} active rows${weeklyUsageLastSyncAt ? ` · checked ${escapeHtml(formatUpdatedAt(weeklyUsageLastSyncAt))}` : ""}`}</small>
+        ${weeklyUsageSharedSaveError ? `<small>${escapeHtml(weeklyUsageSharedSaveError)}</small>` : !latestCompletedUsageSaved ? `<small>${formatNumber(latestCompletedUsageRowCount)}/${formatNumber(weeklyUsageItems.length)} taps saved</small>` : ""}
       </div>
       <div>
-        <span>Inventory counts</span>
+        <span>Inventory</span>
         <strong>${inventorySharedSaveError ? "Recovery review needed" : inventorySharedSaving || inventoryFieldSyncPendingCount || inventoryFieldSyncTimers.size || Object.keys(inventoryFieldOutbox).length || inventoryActionOutbox.length ? "Saving changes" : inventorySharedInitialized ? (inventorySharedUpdatedAt ? escapeHtml(formatUpdatedAt(inventorySharedUpdatedAt)) : "Shared inventory") : "Local / baseline only"}</strong>
-        <small>${inventorySharedSaveError ? escapeHtml(inventorySharedSaveError) : missingCounts ? `${formatNumber(missingCounts)} par item${missingCounts === 1 ? "" : "s"} still use the ${escapeHtml(formatUpdatedAt(INVENTORY_BASELINE_DATE))} baseline` : "All par items have a saved count"}</small>
+        ${inventorySharedSaveError ? `<small>${escapeHtml(inventorySharedSaveError)}</small>` : missingCounts ? `<small>${formatNumber(missingCounts)} missing count${missingCounts === 1 ? "" : "s"}</small>` : ""}
       </div>
       <div>
         <span>Prices</span>
         <strong>${priceTime ? escapeHtml(formatUpdatedAt(priceTime)) : "Bundled defaults"}</strong>
-        <small>${escapeHtml(vendorSyncMessage)}</small>
+        ${vendorSyncRunning ? "<small>Syncing…</small>" : ""}
       </div>
     </section>
   `;
 }
 
 function getWeeklyPlanVendorLines(plan) {
-  const lines = [
-    ...plan.orders.beerKegs.map((item) => ({ ...item, lineType: "Beer keg", quantityLabel: `${formatNumber(item.quantity)} keg${item.quantity === 1 ? "" : "s"}` })),
-    ...[...plan.orders.liquor, ...plan.orders.mixers, ...plan.orders.supplies].map((item) => ({
+  return groupWeeklyPlanOrdersByVendor(plan).map((group) => ({
+    ...group,
+    items: group.items.map((item) => ({
       ...item,
-      lineType: item.category === "liquor" ? "Liquor bottle" : item.category === "mixers" ? "Mixer" : "Supply",
-      quantityLabel: item.casePackaged
-        ? `${formatNumber(item.caseCount)} case${item.caseCount === 1 ? "" : "s"} · ${formatNumber(item.quantity)} units`
-        : `${formatNumber(item.quantity)} unit${item.quantity === 1 ? "" : "s"}`,
+      quantityLabel: item.lineType === "Beer keg"
+        ? `${formatNumber(item.quantity)} keg${item.quantity === 1 ? "" : "s"}`
+        : item.lineType === "Liquor tap bottle"
+          ? `${formatNumber(item.quantity)} bottle${item.quantity === 1 ? "" : "s"}`
+        : item.casePackaged
+          ? `${formatNumber(item.caseCount)} case${item.caseCount === 1 ? "" : "s"} · ${formatNumber(item.quantity)} units`
+          : `${formatNumber(item.quantity)} unit${item.quantity === 1 ? "" : "s"}`,
     })),
-  ];
-  const grouped = new Map();
-  lines.forEach((item) => {
-    const vendor = clean(item.vendor) || "Needs vendor";
-    if (!grouped.has(vendor)) grouped.set(vendor, []);
-    grouped.get(vendor).push(item);
-  });
-  return [...grouped.entries()].sort(([left], [right]) => left.localeCompare(right));
+  }));
 }
 
 function renderWeeklyPlanByVendor(plan) {
   const groups = getWeeklyPlanVendorLines(plan);
   if (!groups.length) return '<p class="weekly-plan-empty">No active purchasing lines. Review held and excluded items below before concluding no order is needed.</p>';
-  return groups.map(([vendor, items]) => renderWeeklyPlanGroup(
-    vendor,
-    items.length,
-    `<div class="weekly-plan-list">${items.map((item) => `
-      <div class="weekly-plan-item">
-        <div>
-          <strong>${escapeHtml(item.name)}</strong>
-          <span>${escapeHtml(item.lineType)}${item.tapNumbers?.length ? ` · Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.map(formatNumber).join(", ")}` : ""}${item.hasKnownPrice === false ? " · Price needed" : ""}</span>
+  return groups.map((group) => renderWeeklyPlanGroup(
+    `${group.vendor} Order`,
+    group.items.length,
+    `<div class="weekly-plan-vendor-summary"><strong>${group.hasCompletePricing ? money(group.estimatedCost) : `${money(group.estimatedCost)} subtotal`}</strong></div><div class="weekly-plan-list">${group.items.map((item) => {
+      const details = [
+        item.tapNumbers?.length ? `Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.map(formatNumber).join(", ")}` : "",
+        item.hasKnownPrice === false ? "Price needed" : "",
+      ].filter(Boolean).join(" · ");
+      return `
+        <div class="weekly-plan-item">
+          <div>
+            <strong>${escapeHtml(item.name)}</strong>
+            ${details ? `<span>${escapeHtml(details)}</span>` : ""}
+          </div>
+          <b>${escapeHtml(item.quantityLabel)}</b>
         </div>
-        <b>${escapeHtml(item.quantityLabel)}</b>
-      </div>
-    `).join("")}</div>`,
+      `;
+    }).join("")}</div>`,
   )).join("");
 }
 
 function renderWeeklyPlanReview(plan) {
-  if (!plan.review.heldRecommendations.length && !plan.review.deferredLiquorRefills.length && !plan.review.excludedInventory.length) return "";
+  if (!plan.review.heldRecommendations.length && !plan.review.excludedInventory.length) return "";
   return `
     <section class="weekly-plan-review" aria-labelledby="weekly-plan-review-title">
       <div class="weekly-plan-column__header">
-        <p class="eyebrow">Do not skip</p>
-        <h2 id="weekly-plan-review-title">Held &amp; Excluded — Review Before Ordering</h2>
+        <h2 id="weekly-plan-review-title">Review Before Ordering</h2>
       </div>
       ${plan.review.heldRecommendations.length ? renderWeeklyPlanGroup(
         "Held recommendations",
         plan.review.heldRecommendations.length,
         `<div class="weekly-plan-list">${plan.review.heldRecommendations.map((item) => `
           <div class="weekly-plan-item weekly-plan-item--held">
-            <div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(getWeeklyPlanTapContext(item, item.category === "held-liquor-refills" ? "oz" : "kegs"))} · ${escapeHtml(item.reasons.join(" ") || "Held for review")}</span></div>
+            <div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(getWeeklyPlanTapContext(item, item.category === "held-liquor-bottles" ? "oz" : "kegs"))} · ${escapeHtml(item.reasons.join(" ") || "Held for review")}</span></div>
             <b>Held ${formatNumber(item.quantity)}</b>
           </div>
         `).join("")}</div>`,
-      ) : ""}
-      ${plan.review.deferredLiquorRefills.length ? renderWeeklyPlanGroup(
-        "Deferred liquor-tap refills",
-        plan.review.deferredLiquorRefills.length,
-        `<div class="weekly-plan-list">${plan.review.deferredLiquorRefills.map((item) => `
-          <div class="weekly-plan-item weekly-plan-item--held">
-            <div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(getWeeklyPlanTapContext(item, "oz"))} · Refill/cabinet netting is deferred, so this PMB recommendation is manual review only.</span></div>
-            <b>${formatNumber(item.quantity)} refill${item.quantity === 1 ? "" : "s"} — deferred</b>
-          </div>
-        `).join("")}</div>`,
-        "liquor",
       ) : ""}
       ${plan.review.excludedInventory.length ? renderWeeklyPlanGroup(
         "Inventory ordering rules",
@@ -5244,6 +6088,175 @@ function renderWeeklyPlanReview(plan) {
       ) : ""}
     </section>
   `;
+}
+
+function getVendorOrderDraftModel(plan, freshness) {
+  const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
+  return buildVendorOrderDrafts(plan, {
+    generatedAt: snapshot?.generatedAt || "",
+    sourceDate: snapshot?.publishedAt || "",
+    freshness: freshness.readiness,
+    budgetLimit: null,
+    proofMinimum: 350,
+    now: new Date(),
+    confirmationRecipient: "samantha@onparbar.com",
+  });
+}
+
+function renderVendorOrderDraftWorkspace(plan, freshness) {
+  const model = getVendorOrderDraftModel(plan, freshness);
+  const savedById = new Map((weeklyOrderTracking.drafts || []).map((draft) => [draft.id, draft]));
+  if (!model.drafts.length) return "";
+  return `
+    <section class="vendor-order-drafts" aria-labelledby="vendor-order-drafts-title">
+      <header class="vendor-order-drafts__header">
+        <div><p class="eyebrow">Approval required</p><h2 id="vendor-order-drafts-title">Vendor Order Drafts</h2><p>Prepare Monday; all vendor orders are due Tuesday by 4:00 PM. Substitutions are not allowed.</p></div>
+        <div><strong>${escapeHtml(model.schedule.label)}</strong><span>${money(model.weeklyTotal)} known total</span></div>
+      </header>
+      <p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage || "Drafts are shared after creation. Real vendor submission is disabled.")}</p>
+      <div class="vendor-order-drafts__grid">
+        ${model.drafts.map((draft) => {
+          const saved = savedById.get(draft.id) || {};
+          const approved = Boolean(saved.approvedAt);
+          return `
+            <form class="vendor-order-draft-card vendor-order-draft-card--${approved ? "approved" : draft.status}" data-vendor-order-draft="${escapeHtml(draft.vendor)}">
+              <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(draft.lineCount)} line${draft.lineCount === 1 ? "" : "s"} · ${money(draft.estimatedTotal)}</p></div><span>${approved ? "Approved" : draft.status === "blocked" ? "Blocked" : "Review"}</span></header>
+              <div class="vendor-order-draft-lines">
+                ${draft.lines.map((line) => `<div><strong>${escapeHtml(line.productName)}</strong><span>${escapeHtml(line.vendorSku ? `SKU ${line.vendorSku}` : "SKU needed")} · ${line.requestedCases ? `${formatNumber(line.requestedCases)} case${line.requestedCases === 1 ? "" : "s"} / ` : ""}${formatNumber(line.requestedUnits)} unit${line.requestedUnits === 1 ? "" : "s"} · ${line.extendedCost ? money(line.extendedCost) : "Price needed"}</span><small>${escapeHtml(line.reason)}</small></div>`).join("")}
+              </div>
+              ${draft.blockers.length ? `<div class="vendor-order-draft-issues vendor-order-draft-issues--blocked"><strong>Approval blockers</strong>${draft.blockers.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
+              ${draft.warnings.length ? `<div class="vendor-order-draft-issues"><strong>Review notes</strong>${draft.warnings.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
+              <div class="vendor-order-draft-fields">
+                <label><span>Manager</span><input type="text" maxlength="80" autocomplete="name" data-order-draft-manager value="${escapeHtml(saved.approvedBy || saved.createdBy || "")}" placeholder="Manager name"${approved ? " disabled" : ""}></label>
+              </div>
+              <label class="vendor-order-draft-confirm"><input type="checkbox" data-order-draft-confirm${approved ? " checked disabled" : ""}><span>I confirm ${escapeHtml(draft.vendor)}, ${money(draft.estimatedTotal)}, and ${formatNumber(draft.lineCount)} order lines.</span></label>
+              <div class="vendor-order-draft-actions">
+                <button class="ghost-button" type="button" data-order-draft-create${approved ? " disabled" : ""}>${saved.createdAt ? "Refresh draft" : "Create draft"}</button>
+                <button class="ghost-button" type="button" data-order-draft-export>Export CSV</button>
+                <button class="primary-button" type="submit"${approved || draft.blockers.length ? " disabled" : ""}>${approved ? `Approved by ${escapeHtml(saved.approvedBy)}` : "Approve draft"}</button>
+              </div>
+              <p class="vendor-order-draft-adapter">Submission adapter: disabled · Confirmation: ${escapeHtml(draft.confirmationRecipient)}</p>
+            </form>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderOwnerWeeklyOrderTracking() {
+  if (!weeklyOrderTracking.available) {
+    return `
+      <section class="weekly-order-tracking" aria-labelledby="weekly-order-tracking-title">
+        <div class="weekly-plan-column__header">
+          <h2 id="weekly-order-tracking-title">Order &amp; Delivery Tracking</h2>
+        </div>
+        <p class="weekly-plan-empty">${escapeHtml(weeklyOrderTrackingMessage || "Order tracking will be available after the Monday plan is published.")}</p>
+      </section>
+    `;
+  }
+  const vendorCards = weeklyOrderTracking.vendors.map((vendor) => `
+    <article class="weekly-order-vendor-card">
+      <form class="weekly-order-placed-form" data-weekly-order-vendor-id="${escapeHtml(vendor.id)}">
+        <div>
+          <h3>${escapeHtml(vendor.vendor)} Order</h3>
+          <p>${formatNumber(vendor.items?.length || 0)} delivery line${vendor.items?.length === 1 ? "" : "s"}</p>
+        </div>
+        <label class="weekly-order-check"><input type="checkbox" data-weekly-order-placed${vendor.ordered ? " checked" : ""}><span>Order placed</span></label>
+        <label><span>Ordered by</span><input type="text" maxlength="80" autocomplete="name" data-weekly-ordered-by value="${escapeHtml(vendor.orderedBy)}" placeholder="Manager name"></label>
+        <button class="ghost-button" type="submit">Save</button>
+      </form>
+      ${vendor.ordered ? `<p class="weekly-order-placed-meta">Ordered by ${escapeHtml(vendor.orderedBy)}${vendor.orderedAt ? ` · ${escapeHtml(formatUpdatedAt(vendor.orderedAt))}` : ""}</p>` : ""}
+      <div class="weekly-order-receipt-list">
+        ${(vendor.items || []).map((item) => `
+          <div class="weekly-order-receipt weekly-order-receipt--${escapeHtml(item.status || "pending")}">
+            <div><strong>${escapeHtml(item.name)}</strong><span>${formatNumber(item.quantity)} ${escapeHtml(item.unit)}</span></div>
+            <b>${item.status === "received"
+              ? `All received by ${escapeHtml(item.handledBy)}`
+              : item.status === "partial"
+                ? `${formatNumber(item.receivedQuantity)} of ${formatNumber(item.quantity)} received · ${escapeHtml(item.handledBy)}`
+                : item.status === "not-received"
+                  ? `0 of ${formatNumber(item.quantity)} received · ${escapeHtml(item.handledBy)}`
+                  : "Awaiting delivery check"}</b>
+          </div>
+        `).join("")}
+      </div>
+    </article>
+  `).join("");
+  return `
+    <section class="weekly-order-tracking" aria-labelledby="weekly-order-tracking-title">
+      <div class="weekly-plan-column__header">
+        <h2 id="weekly-order-tracking-title">Order &amp; Delivery Tracking</h2>
+      </div>
+      ${weeklyOrderTracking.notReceivedCount ? `<p class="weekly-order-tracking__summary">${formatNumber(weeklyOrderTracking.notReceivedCount)} line${weeklyOrderTracking.notReceivedCount === 1 ? "" : "s"} short or missing</p>` : ""}
+      ${weeklyOrderTrackingMessage ? `<p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage)}</p>` : ""}
+      <div class="weekly-order-vendor-grid">${vendorCards || '<p class="weekly-plan-empty">There are no active vendor orders in this plan.</p>'}</div>
+    </section>
+  `;
+}
+
+function bindOwnerWeeklyOrderTrackingEvents() {
+  document.querySelectorAll(".weekly-order-placed-form").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const ordered = Boolean(form.querySelector("[data-weekly-order-placed]")?.checked);
+      const orderedByInput = form.querySelector("[data-weekly-ordered-by]");
+      const orderedBy = clean(orderedByInput?.value);
+      if (ordered && !orderedBy) {
+        weeklyOrderTrackingMessage = "Enter who placed the order before checking it off.";
+        orderedByInput?.setCustomValidity("Enter who placed the order.");
+        orderedByInput?.reportValidity();
+        orderedByInput?.focus();
+        return;
+      }
+      orderedByInput?.setCustomValidity("");
+      form.querySelectorAll("input, button").forEach((control) => { control.disabled = true; });
+      await saveWeeklyOrderPlaced(form.dataset.weeklyOrderVendorId, ordered, orderedBy);
+    });
+  });
+  document.querySelectorAll("[data-vendor-order-draft]").forEach((form) => {
+    const vendor = form.dataset.vendorOrderDraft;
+    const managerInput = form.querySelector("[data-order-draft-manager]");
+    form.querySelector("[data-order-draft-create]")?.addEventListener("click", async () => {
+      const createdBy = clean(managerInput?.value);
+      if (!createdBy) {
+        managerInput?.setCustomValidity("Enter the manager creating this draft.");
+        managerInput?.reportValidity();
+        return;
+      }
+      managerInput?.setCustomValidity("");
+      await saveVendorOrderDraftAction({ action: "create-draft", vendor, createdBy });
+    });
+    form.querySelector("[data-order-draft-export]")?.addEventListener("click", () => {
+      const plan = getWeeklyPlanModel();
+      const freshness = getWeeklyPlanFreshness(plan);
+      const model = buildVendorOrderDrafts(plan, {
+        generatedAt: weeklyOrderTracking.generatedAt,
+        sourceDate: getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date())?.publishedAt || "",
+        freshness: freshness.readiness,
+        now: new Date(),
+      });
+      const draft = model.drafts.find((item) => item.vendor === vendor);
+      if (draft) exportVendorOrderDraftCsv(draft);
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const approvedBy = clean(managerInput?.value);
+      const confirmed = Boolean(form.querySelector("[data-order-draft-confirm]")?.checked);
+      if (!approvedBy) {
+        managerInput?.setCustomValidity("Enter the approving manager.");
+        managerInput?.reportValidity();
+        return;
+      }
+      managerInput?.setCustomValidity("");
+      if (!confirmed) {
+        weeklyOrderTrackingMessage = "Confirm the vendor, total, and line count before approval.";
+        renderWeeklyPlan();
+        return;
+      }
+      await saveVendorOrderDraftAction({ action: "approve-draft", vendor, approvedBy, confirmed: true });
+    });
+  });
 }
 
 function renderWeeklyPlanTrendRows(items, { kind }) {
@@ -5357,64 +6370,58 @@ function renderWeeklyPlanTrends() {
 function renderWeeklyPlan() {
   if (!weeklyPlan) return;
   const recommendations = parAgentState?.recommendations;
-  const plan = buildWeeklyActionPlan({
-    inventoryItems: getWeeklyPlanInventoryItems(),
-    recommendations: getWeeklyPlanRecommendations(),
-  });
+  const plan = getWeeklyPlanModel();
   const summary = plan.summary;
   const freshness = getWeeklyPlanFreshness(plan);
-  const handoffAllowed = isWeeklyPlanHandoffAllowed(freshness.readiness.status);
+  const planLocked = Boolean(getCurrentWeeklyPlanSnapshot(recommendations, new Date()));
   const updatedText = recommendations?.generatedAt
-    ? `This week's plan was calculated ${formatUpdatedAt(recommendations.generatedAt)} from the Monday inputs. It remains the operating plan through Sunday unless saved keg, inventory, par, or On Deck inputs change.`
-    : "Update the plan on Monday after counts are entered to publish the operating plan through Sunday.";
+    ? "Thursday delivery · locked through Sunday"
+    : "Publish Monday for Thursday delivery.";
   const priceNote = summary.estimatedPurchaseCostComplete
-    ? "All active purchase lines are priced."
+    ? ""
     : `${summary.missingPriceCount ? `${formatNumber(summary.missingPriceCount)} active line${summary.missingPriceCount === 1 ? " is" : "s are"} missing a price. ` : ""}The total shown is the known-price subtotal, not a complete spend total.`;
 
   weeklyPlan.innerHTML = `
     <header class="weekly-plan-header">
       <div>
-        <p class="eyebrow">One weekly checklist</p>
         <h2>Order &amp; Prep Plan</h2>
         <p>${escapeHtml(updatedText)}</p>
       </div>
       <div class="weekly-plan-actions">
-        <button class="primary-button" id="run-weekly-plan-agent" type="button"${parAgentRunning || weeklyPlanUpdating ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Updating..." : "Update weekly plan"}</button>
+        <button class="primary-button" id="run-weekly-plan-agent" type="button"${parAgentRunning || weeklyPlanUpdating || planLocked ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Locking..." : planLocked ? "Plan locked through Sunday" : "Lock Monday Plan"}</button>
         <label><span>Group purchases</span><select id="weekly-plan-group-mode"><option value="category"${weeklyPlanGroupMode === "category" ? " selected" : ""}>By category</option><option value="vendor"${weeklyPlanGroupMode === "vendor" ? " selected" : ""}>By vendor</option></select></label>
-        <button class="ghost-button" id="export-weekly-plan" type="button"${handoffAllowed ? "" : ' disabled aria-describedby="weekly-plan-handoff-note"'}>Export CSV</button>
-        <button class="ghost-button" id="print-weekly-plan" type="button"${handoffAllowed ? "" : ' disabled aria-describedby="weekly-plan-handoff-note"'}>Print</button>
       </div>
     </header>
-    ${handoffAllowed ? "" : '<p class="weekly-plan-handoff-note" id="weekly-plan-handoff-note">Export and print are locked until the plan is refreshed and no readiness blocker remains.</p>'}
-    <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(weeklyPlanRefreshMessage || parAgentMessage)}</p>
+    <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : ""))}</p>
     ${renderWeeklyPlanReadiness(freshness.readiness)}
     ${renderWeeklyPlanProvenance(freshness)}
     <div class="weekly-plan-stats">
       <div><span>Order lines</span><strong>${formatNumber(summary.orderLineCount)}</strong></div>
       <div><span>Beer kegs</span><strong>${formatNumber(summary.beerKegTotal)}</strong></div>
-      <div><span>Deferred tap refills</span><strong>${formatNumber(summary.liquorRefillTotal)}</strong></div>
+      <div><span>Liquor tap bottles</span><strong>${formatNumber(summary.liquorTapBottleTotal)}</strong></div>
       <div><span>Cocktail kegs to make</span><strong>${formatNumber(summary.cocktailBatchTotal)}</strong></div>
       <div><span>Held for review</span><strong>${formatNumber(summary.heldLineCount + summary.excludedLineCount)}</strong></div>
-      <div class="${summary.estimatedPurchaseCostComplete ? "" : "weekly-plan-stat--warning"}"><span>Known purchase estimate</span><strong>${money(summary.estimatedKnownPurchaseCost)}</strong><small>${summary.missingPriceCount ? `${formatNumber(summary.missingPriceCount)} missing price${summary.missingPriceCount === 1 ? "" : "s"}` : "Complete for active purchases"}</small></div>
+      <div class="${summary.estimatedPurchaseCostComplete ? "" : "weekly-plan-stat--warning"}"><span>Purchase estimate</span><strong>${money(summary.estimatedKnownPurchaseCost)}</strong>${summary.missingPriceCount ? `<small>${formatNumber(summary.missingPriceCount)} missing price${summary.missingPriceCount === 1 ? "" : "s"}</small>` : ""}</div>
     </div>
-    <p class="weekly-plan-cost-note">${escapeHtml(priceNote)}</p>
-    <p class="weekly-plan-scope-note"><strong>Deferred calculation scope:</strong> cocktail ingredient consumption is not netted against ingredient inventory, and liquor-tap refills are not netted against cabinet bottle orders. Cocktail batches remain visible for production; PMB liquor-refill recommendations are held for manual review and are not active purchases.</p>
-    ${renderWeeklyPlanTrends()}
+    ${priceNote ? `<p class="weekly-plan-cost-note">${escapeHtml(priceNote)}</p>` : ""}
     <div class="weekly-plan-columns">
       <section class="weekly-plan-column">
-        <div class="weekly-plan-column__header"><p class="eyebrow">Purchasing</p><h2>Order This Week</h2></div>
+        <div class="weekly-plan-column__header"><h2>Order This Week</h2></div>
         ${weeklyPlanGroupMode === "vendor" ? renderWeeklyPlanByVendor(plan) : `
           ${renderWeeklyPlanGroup("Beer Kegs", plan.orders.beerKegs.length, renderWeeklyPlanTapRows(plan.orders.beerKegs, { action: "Order", unit: "kegs" }), "beer")}
+          ${renderWeeklyPlanGroup("Liquor Tap Bottles", plan.orders.liquorTapBottles.length, renderWeeklyPlanLiquorTapRows(plan.orders.liquorTapBottles), "liquor")}
           ${renderWeeklyPlanGroup("Liquor Bottles", plan.orders.liquor.length, renderWeeklyPlanInventoryRows(plan.orders.liquor), "liquor")}
           ${renderWeeklyPlanGroup("Mixers", plan.orders.mixers.length, renderWeeklyPlanInventoryRows(plan.orders.mixers), "mixers")}
           ${renderWeeklyPlanGroup("Other Supplies", plan.orders.supplies.length, renderWeeklyPlanInventoryRows(plan.orders.supplies))}
         `}
       </section>
       <section class="weekly-plan-column weekly-plan-column--prep">
-        <div class="weekly-plan-column__header"><p class="eyebrow">Production</p><h2>Cocktails To Make</h2></div>
-        ${renderWeeklyPlanGroup("Cocktail Kegs", plan.prep.cocktails.length, renderWeeklyPlanTapRows(plan.prep.cocktails, { action: "Make", unit: "kegs" }), "cocktails")}
+        <div class="weekly-plan-column__header"><h2>Cocktails To Make</h2></div>
+        ${renderWeeklyPlanCocktailRows(plan.prep.cocktails)}
       </section>
     </div>
+    ${renderOwnerWeeklyOrderTracking()}
+    ${renderVendorOrderDraftWorkspace(plan, freshness)}
     ${renderWeeklyPlanReview(plan)}
   `;
 
@@ -5423,72 +6430,7 @@ function renderWeeklyPlan() {
     weeklyPlanGroupMode = event.currentTarget.value === "vendor" ? "vendor" : "category";
     renderWeeklyPlan();
   });
-  document.querySelector("#export-weekly-plan")?.addEventListener("click", () => exportWeeklyPlanCsv(plan, freshness));
-  document.querySelector("#print-weekly-plan")?.addEventListener("click", () => {
-    if (isWeeklyPlanHandoffAllowed(freshness.readiness.status)) window.print();
-  });
-}
-
-function getWeeklyPlanCsvRows(plan, freshness) {
-  const rows = [["Status", "Section", "Vendor", "Item", "Quantity", "Unit", "Known estimate", "Details"]];
-  rows.push(["Plan", "Readiness", "", freshness.readiness.label, "", "", "", [...freshness.readiness.blockers, ...freshness.readiness.staleReasons, ...freshness.readiness.reviewReasons].join(" ")]);
-
-  plan.orders.beerKegs.forEach((item) => rows.push([
-    "Active", "Beer Kegs", item.vendor, item.name, item.quantity, "kegs", item.hasKnownPrice ? item.estimatedCost : "", getWeeklyPlanTapContext(item, "kegs"),
-  ]));
-  [...plan.orders.liquor, ...plan.orders.mixers, ...plan.orders.supplies].forEach((item) => rows.push([
-    "Active",
-    item.category === "liquor" ? "Liquor Bottles" : item.category === "mixers" ? "Mixers" : "Other Supplies",
-    item.vendor,
-    item.name,
-    item.quantity,
-    item.casePackaged ? `units (${item.caseCount} cases)` : "units",
-    item.hasKnownPrice ? item.estimatedCost : "",
-    `${item.onHand} on hand / ${item.par} par`,
-  ]));
-  plan.prep.cocktails.forEach((item) => rows.push([
-    "Active", "Cocktails To Make", "Internal", item.name, item.quantity, "kegs", "", getWeeklyPlanTapContext(item, "kegs"),
-  ]));
-  plan.review.heldRecommendations.forEach((item) => rows.push([
-    "Held", "Recommendation Review", item.vendor, item.name, item.quantity, item.category === "held-liquor-refills" ? "refills" : "kegs", "", item.reasons.join(" "),
-  ]));
-  plan.review.deferredLiquorRefills.forEach((item) => rows.push([
-    "Held", "Deferred Liquor Tap Refills", item.vendor, item.name, item.quantity, "refills", "", `${getWeeklyPlanTapContext(item, "oz")} · Refill/cabinet netting deferred; manual review only.`,
-  ]));
-  plan.review.excludedInventory.forEach((item) => rows.push([
-    "Held", item.group, item.vendor, item.name, item.quantity, "units", "", item.reason,
-  ]));
-  return rows;
-}
-
-function escapeCsvValue(value) {
-  const text = String(value ?? "");
-  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
-
-function exportWeeklyPlanCsv(plan, freshness) {
-  if (!isWeeklyPlanHandoffAllowed(freshness.readiness.status)) {
-    weeklyPlanRefreshMessage = "Export is locked until the Weekly Plan is refreshed and ready for review.";
-    const status = document.querySelector("#weekly-plan-live-status");
-    if (status) status.textContent = weeklyPlanRefreshMessage;
-    return;
-  }
-  const csv = `${getWeeklyPlanCsvRows(plan, freshness)
-    .map((row) => row.map(escapeCsvValue).join(","))
-    .join("\n")}\n`;
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `on-par-weekly-plan-${formatIsoDate(new Date())}.csv`;
-  link.hidden = true;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  weeklyPlanRefreshMessage = "Weekly Plan CSV exported with active, prep, held, and excluded lines.";
-  const status = document.querySelector("#weekly-plan-live-status");
-  if (status) status.textContent = weeklyPlanRefreshMessage;
+  bindOwnerWeeklyOrderTrackingEvents();
 }
 
 function renderKegLevels() {
@@ -5496,8 +6438,6 @@ function renderKegLevels() {
 
   const wallNames = ["Patio", "Main", "Karaoke"];
   const totalTaps = kegWallItems.length;
-  const cocktailCount = kegWallItems.filter((item) => normalizeTitle(item.type) === "cocktail").length;
-  const shotCount = kegWallItems.filter((item) => normalizeTitle(item.type) === "shots").length;
   const liveCount = kegWallItems.filter((item) => getKegLiveRow(item)).length;
   const reorderCount = kegWallItems.filter((item) => getKegNeed(item) > 0).length;
   const currentInventoryValue = sum(kegWallItems.map((item) => getKegCurrentValue(item, getKegLiveRow(item))));
@@ -5507,24 +6447,19 @@ function renderKegLevels() {
     <h2>Keg Levels</h2>
     <div class="sync-panel sync-panel--keg-actions">
       <div class="sync-actions sync-actions--keg-primary">
-        <button class="primary-button" id="run-keg-vendor-sync" type="button"${vendorSyncRunning ? " disabled" : ""}>${vendorSyncRunning ? "Syncing..." : "Sync Prices"}</button>
         <button class="primary-button" id="refresh-keg-levels" type="button"${kegSyncLoading || kegConfigUpdateRunning ? " disabled" : ""}>${kegSyncLoading ? "Refreshing..." : "Refresh keg levels"}</button>
         <button class="ghost-button" id="send-keg-config-update" type="button"${kegSyncLoading || kegConfigUpdateRunning ? " disabled" : ""}>${kegConfigUpdateRunning ? "Sending..." : "Send config update"}</button>
         <button class="ghost-button" id="run-pmb-reconciliation" type="button"${pmbReconciliationRunning ? " disabled" : ""}>${pmbReconciliationRunning ? "Checking..." : "PMB reconciliation"}</button>
         <button class="ghost-button keg-clear-on-hand-button" id="clear-keg-on-hand" type="button">Clear all on hand</button>
       </div>
       <p class="sync-status">${escapeHtml(kegSyncMessage)}${kegUpdatedAt ? ` Last updated ${escapeHtml(formatUpdatedAt(kegUpdatedAt))}.` : ""}</p>
-      <p class="sync-status">${escapeHtml(vendorSyncMessage)}</p>
       ${renderPmbReconciliationReport()}
     </div>
     <div class="keg-summary-stats">
       <div class="summary-line"><span>Total taps</span><strong>${totalTaps}</strong></div>
-      <div class="summary-line"><span>Walls tracked</span><strong>${wallNames.length}</strong></div>
-      <div class="summary-line"><span>Cocktail taps</span><strong>${cocktailCount}</strong></div>
-      <div class="summary-line"><span>Shot lines</span><strong>${shotCount}</strong></div>
       <div class="summary-line"><span>Live levels found</span><strong>${liveCount}</strong></div>
       <div class="summary-line"><span>Kegs below par</span><strong>${reorderCount}</strong></div>
-      <div class="summary-line"><span>Missing recipe cards</span><strong>${recipeCoverage.missing.length}</strong></div>
+      ${recipeCoverage.missing.length ? `<div class="summary-line"><span>Missing recipes</span><strong>${recipeCoverage.missing.length}</strong></div>` : ""}
       <div class="summary-line"><span>Current line value</span><strong>${money(currentInventoryValue)}</strong></div>
     </div>
     ${recipeCoverage.missing.length ? `
@@ -5550,7 +6485,7 @@ function getPmbReconciliationKey(value) {
 
 function renderPmbReconciliationReport() {
   const report = pmbReconciliationReport;
-  if (!report) return `<p class="sync-status">${escapeHtml(pmbReconciliationMessage)}</p>`;
+  if (!report) return pmbReconciliationMessage ? `<p class="sync-status">${escapeHtml(pmbReconciliationMessage)}</p>` : "";
   return `
     <div class="pmb-reconciliation" role="status">
       <p><strong>Read-only PMB report</strong> · ${escapeHtml(report.checkedAt ? formatUpdatedAt(report.checkedAt) : "just now")}</p>
@@ -5625,7 +6560,6 @@ function renderComingSoonBlock() {
     <section class="keg-wall-card coming-soon-card">
       <div class="keg-wall-card__header">
         <div>
-          <p class="eyebrow">Next up</p>
           <h2>Coming Soon</h2>
         </div>
         <div class="keg-wall-card__meta">
@@ -5645,6 +6579,7 @@ function renderComingSoonBlock() {
 function renderComingSoonItem(item) {
   const isBeer = item.kind === "beer";
   const isRecipe = item.kind === "recipe";
+  const isLiquor = item.kind === "liquor";
   const currentMargin = toNumber(item.targetMargin) || DEFAULT_BEER_TARGET_MARGIN;
   const currentPrice = getGeneratedBeerChargePerOz(item.kegCost, currentMargin);
   const replacement = item.replaceTapKey ? tapReplacementOverrides[item.replaceTapKey] : null;
@@ -5654,10 +6589,11 @@ function renderComingSoonItem(item) {
       <div class="coming-soon-item__body">
         <div class="coming-soon-item__title">
           <strong>${escapeHtml(item.name)}</strong>
-          <span>${isBeer ? "Beer keg" : "Cocktail recipe"}</span>
+          <span>${escapeHtml(getComingSoonKindLabel(item.kind))}</span>
         </div>
-        ${item.description ? `<p>${escapeHtml(item.description)}</p>` : ""}
+        ${item.description ? `<p>${escapeHtml(getComingSoonCardDescription(item.description))}</p>` : ""}
         ${isRecipe ? renderComingSoonRecipeStats(item) : ""}
+        ${isLiquor ? renderComingSoonLiquorDetails(item) : ""}
         ${isBeer ? `
           <div class="coming-soon-controls">
             <label>
@@ -5690,6 +6626,14 @@ function renderComingSoonItem(item) {
   `;
 }
 
+function getComingSoonCardDescription(value) {
+  const description = clean(value);
+  if (description.length <= 260) return description;
+  const firstSentence = description.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim();
+  if (firstSentence && firstSentence.length >= 80) return firstSentence;
+  return `${description.slice(0, 257).trim()}…`;
+}
+
 function renderComingSoonRecipeStats(item) {
   return `
     <div class="coming-soon-stats">
@@ -5701,6 +6645,16 @@ function renderComingSoonRecipeStats(item) {
       <span><b>${item.chargePerPour ? money(item.chargePerPour) : "-"}</b> / pour</span>
     </div>
   `;
+}
+
+function renderComingSoonLiquorDetails(item) {
+  const details = [
+    item.producer ? `<span><b>${escapeHtml(item.producer)}</b> maker</span>` : "",
+    item.style ? `<span><b>${escapeHtml(item.style)}</b></span>` : "",
+    toNumber(item.abvPercent) ? `<span><b>${formatNumber(item.abvPercent)}%</b> ABV</span>` : "",
+    item.untappdId ? `<span><b>Untappd</b> #${escapeHtml(item.untappdId)}</span>` : "",
+  ].filter(Boolean);
+  return details.length ? `<div class="coming-soon-stats">${details.join("")}</div>` : "";
 }
 
 function getReplaceableTapOptions(selectedKey = "") {
@@ -6162,63 +7116,6 @@ function getWeeklyUsagePerformanceCategoryLabel(category) {
   }[category] || "Drink";
 }
 
-function getWeeklyUsageTrendDirectionCopy(direction) {
-  return {
-    up: "Rising",
-    down: "Falling",
-    flat: "Holding steady",
-    unavailable: "More history needed",
-  }[direction] || "More history needed";
-}
-
-function renderWeeklyUsageTrend(item, historyHeaders) {
-  const trend = buildWeeklyUsageTrend(item.history, historyHeaders);
-  if (!trend.recordedCount) {
-    return '<span class="weekly-usage-trend weekly-usage-trend--empty">No history</span>';
-  }
-
-  const unit = clean(item.displayUnit) || "units";
-  const directionCopy = getWeeklyUsageTrendDirectionCopy(trend.direction);
-  const valueCopy = trend.points.map((point) => (
-    `${point.label}: ${point.hasValue ? formatUsageDisplay(point.value, unit) : "No reading"}`
-  )).join("; ");
-  const accessibleCopy = `${directionCopy}. ${valueCopy}${trend.missingCount ? `. ${trend.missingCount} missing ${trend.missingCount === 1 ? "week is" : "weeks are"} shown as a gap, not zero.` : "."}`;
-  const segments = trend.segments.map((segment) => {
-    if (segment.length === 1) return "";
-    const points = segment.map((point) => `${point.x},${point.y}`).join(" ");
-    return `<polyline class="weekly-usage-trend__line" points="${points}"></polyline>`;
-  }).join("");
-  const points = trend.points.filter((point) => point.hasValue).map((point) => `
-    <circle class="weekly-usage-trend__point" cx="${point.x}" cy="${point.y}" r="2.7">
-      <title>${escapeHtml(`${point.label}: ${formatUsageDisplay(point.value, unit)}`)}</title>
-    </circle>
-  `).join("");
-  const directionSymbol = trend.direction === "up"
-    ? "↑"
-    : trend.direction === "down"
-      ? "↓"
-      : trend.direction === "flat"
-        ? "→"
-        : "·";
-
-  return `
-    <span
-      class="weekly-usage-trend weekly-usage-trend--${trend.direction}"
-      role="img"
-      tabindex="0"
-      aria-label="${escapeHtml(accessibleCopy)}"
-      title="${escapeHtml(accessibleCopy)}"
-    >
-      <svg viewBox="0 0 ${trend.width} ${trend.height}" aria-hidden="true" focusable="false">
-        <line class="weekly-usage-trend__baseline" x1="${trend.padding}" y1="${trend.height - trend.padding}" x2="${trend.width - trend.padding}" y2="${trend.height - trend.padding}"></line>
-        ${segments}
-        ${points}
-      </svg>
-      <span class="weekly-usage-trend__direction" aria-hidden="true">${directionSymbol}</span>
-    </span>
-  `;
-}
-
 function renderWeeklyUsage() {
   if (!weeklyUsageSummary || !weeklyUsageTable || !weeklyUsageHead) return;
 
@@ -6240,18 +7137,16 @@ function renderWeeklyUsage() {
     ));
 
   const latestLabel = weeklyUsageItems[0]?.history?.[0]?.label || "Latest week";
-  const trackedWeeks = visibleItems.map((item) => item.history.length).filter(Boolean);
   const activeRows = visibleItems.filter((item) => !item.isArchivedSearchResult).length;
   const searchArchiveRows = visibleItems.filter((item) => item.isArchivedSearchResult).length;
-  const averageWeeks = trackedWeeks.length ? sum(trackedWeeks) / trackedWeeks.length : 0;
   const allHistoryHeaders = getWeeklyUsageHistoryHeaders(visibleItems);
   const historyHeaders = weeklyUsageHistoryLimit
     ? allHistoryHeaders.slice(0, weeklyUsageHistoryLimit)
     : allHistoryHeaders;
   const compactUsageTable = window.matchMedia("(max-width: 720px)").matches;
   const usageColumnWidths = compactUsageTable
-    ? { tap: 46, product: 150, average: 154, week: 90 }
-    : { tap: 70, product: 340, average: 194, week: 112 };
+    ? { tap: 46, product: 150, average: 132, week: 90 }
+    : { tap: 70, product: 340, average: 156, week: 112 };
   const weeklyUsageTableElement = weeklyUsageHead.closest("table");
   if (weeklyUsageTableElement) {
     const tableWidth = `${usageColumnWidths.tap + usageColumnWidths.product + usageColumnWidths.average + (historyHeaders.length * usageColumnWidths.week)}px`;
@@ -6277,8 +7172,6 @@ function renderWeeklyUsage() {
     pullPmbWeeklyUsageButton.disabled = weeklyUsageSyncLoading;
   }
 
-  const archivedCount = weeklyUsageArchivedItems.filter((item) => (item.history || []).length).length;
-
   weeklyUsageSummary.innerHTML = `
     <h2>Weekly Usage</h2>
     <div class="weekly-usage-summary__hero">
@@ -6286,20 +7179,15 @@ function renderWeeklyUsage() {
       <strong>${escapeHtml(latestLabel)}</strong>
     </div>
     <div class="weekly-usage-summary__grid">
-      <div><strong>${visibleItems.length}</strong><span>Rows</span></div>
       <div><strong>${activeRows}</strong><span>Current taps</span></div>
-      <div><strong>${searchArchiveRows}</strong><span>Search history</span></div>
+      ${searchArchiveRows ? `<div><strong>${searchArchiveRows}</strong><span>Archived matches</span></div>` : ""}
     </div>
-    <div class="summary-line"><span>Avg weeks tracked</span><strong>${trackedWeeks.length ? formatNumber(averageWeeks) : "0"}</strong></div>
     <div class="summary-line"><span>Weeks displayed</span><strong>${historyHeaders.length}${historyHeaders.length !== allHistoryHeaders.length ? ` of ${allHistoryHeaders.length}` : ""}</strong></div>
-    <div class="summary-line"><span>Replaced histories</span><strong>${formatNumber(archivedCount)}</strong></div>
-    <div class="summary-line"><span>Last successful PMB sync</span><strong>${weeklyUsageLastSyncAt ? escapeHtml(formatUpdatedAt(weeklyUsageLastSyncAt)) : "Not yet"}</strong></div>
+    <div class="summary-line"><span>Last PMB sync</span><strong>${weeklyUsageLastSyncAt ? escapeHtml(formatUpdatedAt(weeklyUsageLastSyncAt)) : "Not yet"}</strong></div>
     <div class="sync-panel sync-panel--weekly-usage">
-      <p class="sync-copy">Automatically checks PMB for missing completed Monday-Sunday reports when a manager opens Weekly Usage. The current week is never included.</p>
       <p class="sync-status">${escapeHtml(weeklyUsageSyncMessage)}</p>
-      <p class="sync-copy">${weeklyUsageSharedInitialized ? "Saved PMB reports, current tap assignments, and replaced-product history are shared across signed-in manager devices." : "Weekly Usage stays on this device until the service computer performs the one-time shared import."}</p>
       ${weeklyUsageSharedProvisioned && !weeklyUsageSharedInitialized ? '<button class="ghost-button" id="initialize-shared-weekly-usage" type="button">Import from service computer</button>' : ""}
-      <p class="sync-status">${escapeHtml(weeklyUsageSharedMessage)}</p>
+      ${!weeklyUsageSharedInitialized || weeklyUsageSharedSaveError ? `<p class="sync-status">${escapeHtml(weeklyUsageSharedMessage)}</p>` : ""}
     </div>
     ${renderWeeklyUsageArchiveSummary()}
   `;
@@ -6308,7 +7196,7 @@ function renderWeeklyUsage() {
     <tr>
       <th>Tap #</th>
       <th>Product</th>
-      <th class="weekly-usage-average">Avg weekly + trend</th>
+      <th class="weekly-usage-average">Avg weekly</th>
       ${historyHeaders.map((label) => `<th class="weekly-usage-week">${formatWeeklyUsageHeader(label)}</th>`).join("")}
     </tr>
   `;
@@ -6338,7 +7226,6 @@ function renderWeeklyUsage() {
           </td>
           <td class="weekly-usage-average">
             <strong>${escapeHtml(averageDisplay)}</strong>
-            ${renderWeeklyUsageTrend(item, historyHeaders)}
           </td>
           ${historyCells}
         </tr>
@@ -6404,7 +7291,7 @@ function getPmbConnectionErrorMessage(error, fallback, { writeAttempted = false 
   if (/fetch failed|failed to fetch|networkerror|econnrefused|econnreset|enotfound|etimedout|timed? ?out|socket hang up|aborted|pmb .+ failed \(0\)|pmb .+ unavailable/i.test(message)) {
     return writeAttempted
       ? "Pour My Beer is reachable only from the work network. The dashboard could not confirm whether that change completed, so check PMB at work before retrying."
-      : "Pour My Beer is reachable only from the work network. Showing saved dashboard data; no live values were changed.";
+      : "PMB unavailable. Showing saved data.";
   }
   return message || fallback;
 }
@@ -7207,6 +8094,8 @@ function normalizeWeeklyUsageHistoryForDisplayUnit(history, item) {
 }
 
 function getWeeklyUsageFullOunces(item) {
+  const historicalFullKegOunces = toNumber(item?.historicalFullKegOunces);
+  if (Number.isFinite(historicalFullKegOunces) && historicalFullKegOunces > 0) return historicalFullKegOunces;
   const kegItem = kegWallItems.find((entry) => toNumber(entry.tapNumber) === toNumber(item.tapNumber));
   if (!kegItem) return item.displayUnit === "kegs" ? STANDARD_BEER_KEG_OZ : 0;
   if (normalizeTitle(kegItem.type) === "cocktail") {
@@ -7241,7 +8130,6 @@ function renderKegWallBlock(wallName, items) {
     <section class="keg-wall-card">
       <div class="keg-wall-card__header">
         <div>
-          <p class="eyebrow">Tap wall</p>
           <h2>${escapeHtml(wallName)}</h2>
         </div>
         <div class="keg-wall-card__meta">
@@ -7575,7 +8463,7 @@ function getComingSoonReplacementOptions() {
     .filter((item) => !item.replacedAt)
     .map((item) => ({
       value: `coming-soon:${item.id}`,
-      label: `${item.name} (${item.kind === "beer" ? "beer" : "cocktail"})`,
+      label: `${item.name} (${getComingSoonKindLabel(item.kind, { compact: true })})`,
       name: item.name,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -7716,10 +8604,7 @@ function renderKegProductCostEditor(item, displayBrand = item?.brand) {
   if (context.kind === "cocktail") {
     return `
       <div class="keg-cost-editor__header">
-        <div>
-          <p class="eyebrow">Product costs</p>
-          <h3>${escapeHtml(context.title)}</h3>
-        </div>
+        <h3>${escapeHtml(context.title)}</h3>
         <span>${escapeHtml(status)}</span>
       </div>
       ${context.recipe ? renderCocktailCostEditor(context.recipe) : renderKegCostEmptyState("No matching cocktail recipe was found for this tap yet.")}
@@ -7729,10 +8614,7 @@ function renderKegProductCostEditor(item, displayBrand = item?.brand) {
   if (context.kind === "liquor") {
     return `
       <div class="keg-cost-editor__header">
-        <div>
-          <p class="eyebrow">Product costs</p>
-          <h3>${escapeHtml(context.title)}</h3>
-        </div>
+        <h3>${escapeHtml(context.title)}</h3>
         <span>${escapeHtml(status)}</span>
       </div>
       ${context.ingredient ? renderIngredientCostEditor([context.ingredient]) : renderKegCostEmptyState("No mapped bottle cost was found for this liquor tap yet.")}
@@ -7741,10 +8623,7 @@ function renderKegProductCostEditor(item, displayBrand = item?.brand) {
 
   return `
     <div class="keg-cost-editor__header">
-      <div>
-        <p class="eyebrow">Product costs</p>
-        <h3>${escapeHtml(context.title)}</h3>
-      </div>
+      <h3>${escapeHtml(context.title)}</h3>
       <span>${escapeHtml(status)}</span>
     </div>
     ${context.kegItem ? renderBeerKegCostEditor(context.kegItem) : renderKegCostEmptyState("No keg pricing record was found for this product yet.")}
@@ -7808,8 +8687,8 @@ function renderIngredientCostEditor(costIngredients) {
           <tr>
             <th>Product</th>
             <th>Current $/oz</th>
-            <th>Bottle oz</th>
-            <th>Bottle price</th>
+            <th>Package size</th>
+            <th>Package price</th>
             <th>Last updated</th>
             <th></th>
           </tr>
@@ -7826,17 +8705,19 @@ function renderIngredientCostEditorRow(ingredient) {
   const override = priceOverrides[ingredient.id] || {};
   const currentUnitCost = getCatalogUnitCost(ingredient);
   const mappedBottleOz = ingredient.vendorProduct?.bottleOz ? formatNumber(ingredient.vendorProduct.bottleOz) : "";
+  const preparedPurchase = getPreparedIngredientPurchase(ingredient.id);
   const previousPriceNote = getPreviousPriceNote(override);
   return `
     <tr>
       <td>
         <strong>${escapeHtml(ingredient.name)}</strong>
         ${ingredient.recipeOz ? `<span class="table-note">${formatNumber(ingredient.recipeOz)} oz in recipe</span>` : ""}
-        ${ingredient.vendorProduct ? `<span class="table-note table-note--accent">${escapeHtml(ingredient.vendorProduct.vendor)} mapped</span><span class="table-note">${escapeHtml(ingredient.vendorProduct.productName)}</span>` : ""}
       </td>
       <td>${currentUnitCost ? money(currentUnitCost) : '<span class="inventory-order-zero">-</span>'}</td>
-      <td><input class="inventory-input keg-cost-bottle-oz" data-ingredient-id="${escapeHtml(ingredient.id)}" type="text" inputmode="decimal" value="${escapeHtml(override.bottleOz ?? "")}" placeholder="${escapeHtml(mappedBottleOz)}" aria-label="Bottle ounces for ${escapeHtml(ingredient.name)}"></td>
-      <td><input class="inventory-input keg-cost-bottle-price" data-ingredient-id="${escapeHtml(ingredient.id)}" type="text" inputmode="decimal" value="${escapeHtml(override.bottlePrice ?? "")}" aria-label="Bottle price for ${escapeHtml(ingredient.name)}"></td>
+      <td>${preparedPurchase
+        ? `<span class="table-note">${escapeHtml(getPreparedIngredientYieldNote(ingredient.id))}</span><input class="keg-cost-bottle-oz" data-ingredient-id="${escapeHtml(ingredient.id)}" type="hidden" value="${escapeHtml(preparedPurchase.purchaseUnitStorageValue)}">`
+        : `<input class="inventory-input keg-cost-bottle-oz" data-ingredient-id="${escapeHtml(ingredient.id)}" type="text" inputmode="decimal" value="${escapeHtml(override.bottleOz ?? "")}" placeholder="${escapeHtml(mappedBottleOz)}" aria-label="Package size in ounces for ${escapeHtml(ingredient.name)}">`}</td>
+      <td><input class="inventory-input keg-cost-bottle-price" data-ingredient-id="${escapeHtml(ingredient.id)}" type="text" inputmode="decimal" value="${escapeHtml(override.bottlePrice ?? "")}" aria-label="${escapeHtml(preparedPurchase?.priceInputLabel || `Package price for ${ingredient.name}`)}"></td>
       <td class="muted">${formatUpdatedAt(override.updatedAt)}${previousPriceNote ? `<span class="table-note">${escapeHtml(previousPriceNote)}</span>` : ""}</td>
       <td><button class="mini-button save-keg-ingredient-cost" data-ingredient-id="${escapeHtml(ingredient.id)}" type="button">Save</button></td>
     </tr>
@@ -7869,7 +8750,6 @@ function renderBeerKegCostEditor(kegItem) {
             <td>
               <strong>${escapeHtml(kegItem.name)}</strong>
               <span class="table-note table-note--accent">${escapeHtml(kegItem.tapSummary || kegItem.sourceTaps?.join(", ") || "Keg pricing")}</span>
-              ${kegItem.vendorProduct ? `<span class="table-note table-note--accent">Provi mapped</span><span class="table-note">${escapeHtml(kegItem.vendorProduct.productName)}</span>` : ""}
             </td>
             <td>${currentUnitCost ? money(currentUnitCost) : '<span class="inventory-order-zero">-</span>'}</td>
             <td><input class="inventory-input keg-cost-keg-oz" data-keg-price-id="${escapeHtml(kegItem.id)}" type="text" inputmode="decimal" value="${escapeHtml(kegOzValue)}" placeholder="${escapeHtml(kegOzPlaceholder)}" aria-label="Keg ounces for ${escapeHtml(kegItem.name)}"></td>
@@ -7928,11 +8808,10 @@ function renderKegOnDeckControl(item) {
         <option value="">No On Deck product</option>
         ${options.map((entry) => `
           <option value="${escapeHtml(entry.id)}"${entry.id === selectedId ? " selected" : ""}>
-            ${escapeHtml(entry.name)} (${escapeHtml(entry.kind === "beer" ? "beer" : "cocktail")})
+            ${escapeHtml(entry.name)} (${escapeHtml(getComingSoonKindLabel(entry.kind, { compact: true }))})
           </option>
         `).join("")}
       </select>
-      ${onDeck ? `<small>If this tap needs an order, the par agent will say to order ${escapeHtml(onDeck.name)} instead.</small>` : ""}
     </label>
   `;
 }
@@ -8464,6 +9343,7 @@ async function sendComingSoonItemToPmb(id) {
 }
 
 function buildPmbPayloadFromComingSoonItem(item) {
+  const imageUrl = clean(item.imageUrl);
   return {
     productKind: item.kind === "beer" ? "beer" : "cocktail",
     plu: toNumber(item.plu) || "",
@@ -8478,7 +9358,7 @@ function buildPmbPayloadFromComingSoonItem(item) {
     kegCost: toNumber(item.kegCost || item.batchCost),
     targetMargin: toNumber(item.targetMargin),
     notes: item.description,
-    imageUrl: item.imageUrl,
+    imageUrl: imageUrl.startsWith("/") ? new URL(imageUrl, window.location.origin).href : imageUrl,
   };
 }
 
@@ -8888,22 +9768,17 @@ function getParAgentStatusMessage() {
   }
   const recommendations = parAgentState?.recommendations;
   if (!recommendations?.generatedAt) {
-    return "Weekly par agent has not run yet.";
+    return "Needs have not been calculated yet.";
   }
   if (!hasCurrentParAgentRecommendations()) {
-    return `The ${formatUpdatedAt(recommendations.generatedAt)} recommendations are stale because Keg Levels inputs changed afterward. Old order and prep quantities are hidden; run the par agent again.`;
+    return "Counts changed. Update needs again.";
   }
 
   const summary = recommendations.summary || {};
   if (summary.inventoryStateMissing) {
-    return `Last run ${formatUpdatedAt(recommendations.generatedAt)} was held: backup/on-hand counts have not synced to the server yet. Open Keg Levels once with the current counts, then run the agent again.`;
+    return "On-hand counts are still syncing.";
   }
-  const cocktailMakeText = summary.cocktailMakeCount ? ` ${formatNumber(summary.cocktailMakeCount)} cocktail${toNumber(summary.cocktailMakeCount) === 1 ? "" : "s"} to make.` : "";
-  const deferredLiquorRefillCount = toNumber(summary.deferredLiquorRefillCount ?? summary.liquorOrderCount);
-  const liquorOrderText = deferredLiquorRefillCount ? ` ${formatNumber(deferredLiquorRefillCount)} liquor tap refill recommendation${deferredLiquorRefillCount === 1 ? "" : "s"} deferred for manual review; none are included in active orders.` : "";
-  const kegOrderTotal = summary.kegOrderTotal ?? Math.max(0, toNumber(summary.orderTotal) - toNumber(summary.cocktailMakeTotal));
-  const orderText = `${formatNumber(kegOrderTotal)} beer keg${kegOrderTotal === 1 ? "" : "s"}`;
-  return `Last run ${formatUpdatedAt(recommendations.generatedAt)}. Agent recommends ${orderText}.${cocktailMakeText}${liquorOrderText}`;
+  return `Updated ${formatUpdatedAt(recommendations.generatedAt)}`;
 }
 
 function getParAgentSettings() {
@@ -8915,9 +9790,8 @@ function renderParAgentPanel() {
   return `
     <div class="sync-panel sync-panel--par-agent">
       <div class="sync-actions par-agent-actions">
-        <button class="primary-button" id="run-par-agent" type="button"${parAgentRunning ? " disabled" : ""}>${parAgentRunning ? "Running..." : "Run par agent"}</button>
+        <button class="primary-button" id="run-par-agent" type="button"${parAgentRunning ? " disabled" : ""}>${parAgentRunning ? "Updating..." : "Update needs"}</button>
       </div>
-      <p class="sync-copy">Uses the same saved averages shown in Weekly Usage. Blank On hand fields count as zero. Beer orders use average weekly kegs + 0.5; cocktail makes use average weekly kegs + 0.25. Patio and karaoke liquor gaps use average weekly ounces + 100, but remain deferred manual-review items with no active order quantity until refill/cabinet netting is added.</p>
       ${parAgentState?.initialized === false ? '<button class="ghost-button" id="initialize-shared-keg-levels" type="button">Import from service computer</button>' : ""}
       <p class="sync-status">${escapeHtml(parAgentMessage)}</p>
     </div>
@@ -8928,7 +9802,7 @@ function getCocktailsToMake() {
   if (!hasCurrentParAgentRecommendations()) return [];
   return (parAgentState?.recommendations?.items || [])
     .filter((item) => item.actionType === "make" && toNumber(item.orderQty) > 0)
-    .sort((a, b) => b.priority - a.priority || a.tapNumber - b.tapNumber);
+    .sort((a, b) => toNumber(a.tapNumber) - toNumber(b.tapNumber) || clean(a.name).localeCompare(clean(b.name)));
 }
 
 function renderCocktailsToMakePanel() {
@@ -8944,8 +9818,8 @@ function renderCocktailsToMakePanel() {
         <div class="cocktails-to-make-list">
           ${items.map((item) => `
             <div class="cocktails-to-make-item">
-              <strong>${escapeHtml(item.orderProductName || item.name)}</strong>
-              <span>Tap ${formatNumber(item.tapNumber)} | ${formatNumber(item.currentStockKegs)} in stock | ${formatNumber(item.avgWeeklyKegs)} avg/week</span>
+              <strong>${escapeHtml(getCocktailPrepDisplayName(getCanonicalProductDisplayName(item.orderProductName || item.name), item.wall))}</strong>
+              <span>Tap ${formatNumber(item.tapNumber)} · Make ${formatNumber(item.orderQty)}</span>
             </div>
           `).join("")}
         </div>
@@ -9127,46 +10001,40 @@ async function runKegParAgent() {
 
 async function runWeeklyPlanUpdate() {
   if (weeklyPlanUpdating || parAgentRunning) return;
+  if (getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date())) {
+    weeklyPlanRefreshMessage = "This Monday order is locked through Sunday for Thursday delivery. Live keg levels can still refresh without changing the published plan.";
+    renderWeeklyPlan();
+    return;
+  }
   if (!parAgentState?.initialized || !weeklyUsageSharedInitialized || !inventorySharedInitialized) {
     parAgentError = "Complete the shared Keg Levels, Weekly Usage, and Inventory setup before updating the Weekly Plan.";
     weeklyPlanRefreshMessage = parAgentError;
     renderWeeklyPlan();
     return;
   }
+  if (!getCurrentMondayInventorySnapshot(inventoryHistory, new Date())) {
+    weeklyPlanRefreshMessage = "Save this week's Monday Inventory Snapshot before locking the plan.";
+    renderWeeklyPlan();
+    return;
+  }
+  const frozenKegPlan = getCurrentMondayKegPlanSnapshot();
+  if (!frozenKegPlan) {
+    weeklyPlanRefreshMessage = "Resave this week's Monday Snapshot so it includes PMB keg levels, backup/on-hand kegs, and cocktail prep needs.";
+    renderWeeklyPlan();
+    return;
+  }
 
   weeklyPlanUpdating = true;
   parAgentError = "";
-  weeklyPlanRefreshMessage = "Step 1 of 3: checking the latest completed Monday-Sunday PMB usage report...";
+  weeklyPlanRefreshMessage = "Locking the order and cocktail plan from the saved Monday snapshot...";
   renderWeeklyPlan();
 
   try {
-    const usageResult = await runPmbWeeklyUsageSync();
-    if (!usageResult?.ok) {
-      throw new Error(usageResult?.error || "The latest completed Weekly Usage report could not be checked.");
-    }
-
-    weeklyPlanRefreshMessage = usageResult.checkedWeeks
-      ? `Step 2 of 3: checked ${formatNumber(usageResult.checkedWeeks)} completed week${usageResult.checkedWeeks === 1 ? "" : "s"} and applied ${formatNumber(usageResult.matched || 0)} PMB row${usageResult.matched === 1 ? "" : "s"}; saving shared inputs...`
-      : "Step 2 of 3: completed Weekly Usage was already current; saving pending shared inputs...";
-    renderWeeklyPlan();
-
-    const usageSaved = await flushPendingSharedWeeklyUsageSave();
-    if (!usageSaved) throw new Error("Weekly Usage was checked but could not be saved to shared state.");
-    const inventorySaved = await flushPendingInventoryFieldSyncs();
-    if (!inventorySaved) throw new Error(inventorySharedSaveError || "Pending Inventory changes could not be saved before the recommendation run.");
-    const parInputsSaved = await flushPendingParAgentStateSync();
-    if (!parInputsSaved) throw new Error("Pending Keg Levels inputs could not be saved before the recommendation run.");
-
-    weeklyPlanRefreshMessage = "Step 3 of 3: shared usage, inventory, and keg inputs are saved; refreshing PMB levels and recommendations...";
-    renderWeeklyPlan();
-    const ran = await runKegParAgent();
-    if (!ran) throw new Error(parAgentMessage || "The keg and prep recommendation refresh failed.");
+    const published = await publishCurrentWeeklyPlanSnapshot();
+    if (!published) throw new Error("The saved Monday snapshot could not be locked for the week.");
 
     const summary = parAgentState?.recommendations?.summary || {};
-    const usageText = usageResult.checkedWeeks
-      ? `checked ${formatNumber(usageResult.checkedWeeks)} completed usage week${usageResult.checkedWeeks === 1 ? "" : "s"} and applied ${formatNumber(usageResult.matched || 0)} PMB row${usageResult.matched === 1 ? "" : "s"}`
-      : "confirmed completed Weekly Usage was already current";
-    weeklyPlanRefreshMessage = `Weekly Plan updated: ${usageText}, saved pending Weekly Usage, Inventory, and Keg Levels inputs, and recalculated ${formatNumber(summary.tapCount || 0)} tap recommendation${toNumber(summary.tapCount) === 1 ? "" : "s"}.`;
+    weeklyPlanRefreshMessage = `Monday plan locked for Thursday delivery from the saved snapshot: ${formatNumber(summary.tapCount || 0)} tap recommendation${toNumber(summary.tapCount) === 1 ? "" : "s"}, including saved keg levels, on-hand kegs, and cocktail prep, will stay fixed through Sunday.`;
     parAgentError = "";
   } catch (error) {
     parAgentError = error.message || "Weekly Plan update failed.";
@@ -9435,6 +10303,14 @@ function setKegOnDeckItem(key, comingSoonId) {
 function getKegNeed(item) {
   if (parAgentState?.recommendations?.generatedAt && !hasCurrentParAgentRecommendations()) return 0;
   const recommendation = getParAgentRecommendation(item);
+  if (recommendation?.isLiquorTap) {
+    const activeBottleQty = toNumber(recommendation.orderQty);
+    const legacyDeferredQty = Math.max(
+      toNumber(recommendation.deferredQty),
+      toNumber(recommendation.suggestedRefillQty),
+    );
+    return Math.max(0, Math.round(activeBottleQty || legacyDeferredQty * 2));
+  }
   if (recommendation && Number.isFinite(toNumber(recommendation.orderQty))) {
     return Math.max(0, Math.round(toNumber(recommendation.orderQty)));
   }
@@ -9448,13 +10324,8 @@ function getKegNeed(item) {
 
 function renderKegNeedCell(item, need) {
   const recommendation = getParAgentRecommendation(item);
-  const deferredQty = recommendation?.isLiquorTap
-    ? Math.max(toNumber(recommendation.deferredQty), toNumber(recommendation.suggestedRefillQty))
-    : 0;
-  const valueHtml = deferredQty > 0
-    ? `<span class="table-note table-note--accent">Review ${formatNumber(deferredQty)} refill${deferredQty === 1 ? "" : "s"}</span>`
-    : need > 0
-      ? `<span class="inventory-order-value">${formatNumber(need)}</span>`
+  const valueHtml = need > 0
+      ? `<span class="inventory-order-value">${formatNumber(need)}${recommendation?.isLiquorTap ? ` bottle${need === 1 ? "" : "s"}` : ""}</span>`
       : `<span class="inventory-order-zero">0</span>`;
   if (!recommendation) {
     const onDeck = getKegOnDeckItem(item);
@@ -9467,24 +10338,16 @@ function renderKegNeedCell(item, need) {
     `;
   }
 
-  const reason = clean(recommendation.reason);
-  const orderProductName = clean(recommendation.orderProductName);
+  const orderProductName = getCanonicalProductDisplayName(recommendation.orderProductName);
   const actionLabel = recommendation.isLiquorTap
-    ? "Review refill"
+    ? "Order"
     : recommendation.actionType === "make"
       ? "Make"
       : "Order";
-  const stockText = recommendation.isLiquorTap
-    ? `${formatNumber(recommendation.currentStockOunces)} oz in keg | ${formatNumber(recommendation.avgWeeklyOunces)} oz avg/week`
-    : recommendation.isKegTap
-      ? `${formatNumber(recommendation.currentStockKegs)} in stock | ${formatNumber(recommendation.avgWeeklyKegs)} avg`
-      : "Bottle inventory";
   return `
     <div class="keg-need-agent">
       ${valueHtml}
-      ${orderProductName && (need > 0 || deferredQty > 0) ? `<span class="table-note table-note--accent">${escapeHtml(actionLabel)} ${escapeHtml(orderProductName)}</span>` : ""}
-      <span class="table-note">${escapeHtml(stockText)}</span>
-      ${reason ? `<span class="table-note">${escapeHtml(reason)}</span>` : ""}
+      ${orderProductName && need > 0 ? `<span class="table-note table-note--accent">${escapeHtml(actionLabel)} ${escapeHtml(orderProductName)}</span>` : ""}
     </div>
   `;
 }
@@ -10372,22 +11235,19 @@ async function flushPendingInventorySyncs() {
 function renderInventorySummary(visibleItems, reorderItems) {
   const totalValue = sum(visibleItems.filter((item) => !item.excludeFromInventoryValue).map((item) => item.totalValue));
   const reorderCost = sum(reorderItems.filter((item) => !item.excludeFromInventoryValue).map((item) => getInventoryRoundedOrderQuantity(item) * item.unitCost));
-  const reorderUnits = sum(reorderItems.map((item) => getInventoryRoundedOrderQuantity(item)));
   const latestSnapshot = inventoryHistory[0];
 
   inventorySummary.innerHTML = `
-    <h2>Inventory Snapshot</h2>
+    <h2>Inventory</h2>
     <div class="summary-line"><span>Tracked items</span><strong>${visibleItems.length}</strong></div>
-    <div class="summary-line"><span>Current bottle inventory $</span><strong>${money(totalValue)}</strong></div>
+    <div class="summary-line"><span>Current value</span><strong>${money(totalValue)}</strong></div>
     <div class="summary-line"><span>Items to reorder</span><strong>${reorderItems.length}</strong></div>
-    <div class="summary-line"><span>Total units to order</span><strong>${formatNumber(reorderUnits)}</strong></div>
-    <div class="summary-line"><span>Estimated reorder cost</span><strong>${money(reorderCost)}</strong></div>
+    <div class="summary-line"><span>Reorder cost</span><strong>${money(reorderCost)}</strong></div>
     <div class="sync-panel inventory-actions-panel">
       <button class="primary-button" id="save-inventory-snapshot" type="button"${inventorySharedSaving || !inventorySharedInitialized ? " disabled" : ""}>${inventorySharedSaving ? "Saving..." : inventorySharedInitialized ? "Save Monday Snapshot" : "Shared setup required"}</button>
       ${inventorySharedProvisioned && !inventorySharedInitialized ? '<button class="ghost-button" id="initialize-shared-inventory" type="button">Import from service computer</button>' : ""}
-      <p class="sync-copy">${inventorySharedInitialized ? "Counts, pars, custom items, and Monday snapshots are shared across signed-in manager devices." : "Inventory stays on this device until the service computer performs the one-time shared import."}</p>
-      <p class="sync-status">${escapeHtml(inventorySharedMessage)}${inventorySharedUpdatedAt ? ` Last synced ${escapeHtml(formatUpdatedAt(inventorySharedUpdatedAt))}.` : ""}</p>
-      <p class="sync-status">${latestSnapshot ? `Latest Monday snapshot: ${escapeHtml(formatInventorySnapshotLabel(getInventorySnapshotDate(latestSnapshot)))}` : "No Monday snapshots saved yet."}</p>
+      ${inventorySharedSaveError || !inventorySharedInitialized ? `<p class="sync-status">${escapeHtml(inventorySharedMessage)}</p>` : ""}
+      <p class="sync-status">${latestSnapshot ? `Last snapshot: ${escapeHtml(formatInventorySnapshotLabel(getInventorySnapshotDate(latestSnapshot)))}` : "No snapshots yet"}</p>
     </div>
   `;
 
@@ -10429,7 +11289,7 @@ async function addCustomInventoryItem(event) {
   const casePackaged = packSize > 1;
   const caseCost = toNumber(customInventoryUnitCostInput?.value);
   const unitCost = getInventoryUnitCost(caseCost, packSize);
-  const vendorProduct = getCustomInventoryVendorProduct(name, group);
+  const vendorProduct = getVendorMapping(id) || getCustomInventoryVendorProduct(name, group);
 
   if (existing && !existing.isCustomInventory && !editingCustomInventoryId) {
     if (onHandDisplay) inventoryOnHandOverrides[id] = onHandDisplay;
@@ -10502,7 +11362,9 @@ function normalizeCustomInventoryItem(item) {
   if (!name) return null;
   const id = item.id || slugify(name);
   const group = clean(item.group) || getInventoryGroup(name, "Custom Inventory");
-  const onHandDisplay = inventoryOnHandOverrides[id] ?? clean(item.onHandDisplay);
+  const onHandDisplay = Object.prototype.hasOwnProperty.call(inventoryOnHandOverrides, id)
+    ? inventoryOnHandOverrides[id]
+    : inventorySharedInitialized ? "" : clean(item.onHandDisplay);
   const parDisplay = inventoryParOverrides[id] ?? clean(item.parDisplay);
   const packSize = normalizePackSize(item.packSize || 1);
   const casePackaged = Boolean(item.casePackaged) || packSize > 1;
@@ -10521,7 +11383,7 @@ function normalizeCustomInventoryItem(item) {
     caseCost,
     baseUnitCost: unitCost,
     unitCost,
-    vendorProduct: item.vendorProduct || getCustomInventoryVendorProduct(name, group),
+    vendorProduct: getVendorMapping(id) || item.vendorProduct || getCustomInventoryVendorProduct(name, group),
     parDisplay,
     note: unitCost > 0
       ? `${item.priceUpdatedAt ? item.vendorProduct?.vendor || "Vendor" : "Manual"} price`
@@ -10582,7 +11444,7 @@ function getBottleOzFromInventoryName(name) {
 async function syncCustomInventoryPrice(id, { automatic = false } = {}) {
   const item = customInventoryItems.find((entry) => entry.id === id);
   if (!item) return;
-  const vendorProduct = item.vendorProduct || getCustomInventoryVendorProduct(item.name, item.group);
+  const vendorProduct = getVendorMapping(id) || item.vendorProduct || getCustomInventoryVendorProduct(item.name, item.group);
   if (!vendorProduct?.bottleOz) {
     customInventoryPriceStatus.set(id, "Add the bottle size to the item name before finding a price.");
     renderInventory();
@@ -10746,18 +11608,20 @@ function createInventoryRow(item, mode) {
   const packLabel = item.casePackaged ? `${formatNumber(item.packSize)} / case` : "Each";
   row.className = mode === "order" && item.orderQuantity > 0 ? "inventory-row--order" : "";
   const inputMode = item.allowsDecimal ? "decimal" : "numeric";
-  const isParEditable = Boolean(inventoryParEditState[item.id]);
+  const isRowEditing = Boolean(inventoryRowEditState[item.id]);
   const linkedNotes = [];
   if (mode === "stock") {
     linkedNotes.push(`
       <div class="inventory-row-controls">
-        <span class="inventory-drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag ${escapeHtml(item.name)} to reorder">::</span>
-        <button class="icon-button inventory-move-up" type="button" title="Move up" aria-label="Move ${escapeHtml(item.name)} up">&uarr;</button>
-        <button class="icon-button inventory-move-down" type="button" title="Move down" aria-label="Move ${escapeHtml(item.name)} down">&darr;</button>
-        ${item.isCustomInventory ? `
-          <button class="mini-button custom-inventory-edit" type="button">Edit</button>
-          <button class="mini-button custom-inventory-price" type="button">Find price</button>
-          <button class="mini-button mini-button--danger custom-inventory-delete" data-custom-inventory-id="${escapeHtml(item.id)}" type="button">Remove</button>
+        <button class="mini-button inventory-row-edit-toggle" type="button">${isRowEditing ? "Done" : "Edit"}</button>
+        ${isRowEditing ? `
+          <span class="inventory-drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag ${escapeHtml(item.name)} to reorder">::</span>
+          <button class="icon-button inventory-move-up" type="button" title="Move up" aria-label="Move ${escapeHtml(item.name)} up">&uarr;</button>
+          <button class="icon-button inventory-move-down" type="button" title="Move down" aria-label="Move ${escapeHtml(item.name)} down">&darr;</button>
+          ${item.isCustomInventory ? `
+            <button class="mini-button custom-inventory-edit" type="button">Edit item</button>
+            <button class="mini-button mini-button--danger custom-inventory-delete" data-custom-inventory-id="${escapeHtml(item.id)}" type="button">Remove</button>
+          ` : ""}
         ` : ""}
       </div>
       ${customInventoryPriceStatus.has(item.id) ? `<span class="table-note">${escapeHtml(customInventoryPriceStatus.get(item.id))}</span>` : ""}
@@ -10769,7 +11633,7 @@ function createInventoryRow(item, mode) {
   row.innerHTML = `
     <td><strong>${escapeHtml(item.name)}</strong>${item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${item.orderHoldReason ? `<span class="table-note table-note--warning">Ordering hold: ${escapeHtml(item.orderHoldReason)}</span>` : ""}${linkedNotes.join("")}</td>
     <td>${mode === "stock" ? `<input class="inventory-input" data-field="onHand" type="text" inputmode="${inputMode}" value="${escapeHtml(item.onHandDisplay)}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>
-    <td>${mode === "stock" ? `<div class="inventory-par-cell"><input class="inventory-input inventory-input--par ${isParEditable ? "is-editing" : "is-locked"}" data-field="par" type="text" inputmode="${inputMode}" value="${escapeHtml(item.parDisplay)}" aria-label="Par for ${escapeHtml(item.name)}" ${isParEditable ? "" : "readonly"}><button class="mini-button inventory-par-toggle" data-par-toggle="${escapeHtml(item.id)}" type="button">${isParEditable ? "Done" : "Edit"}</button></div>` : formatInventoryQuantity(item.parDisplay)}</td>
+    <td>${mode === "stock" ? `<div class="inventory-par-cell"><input class="inventory-input inventory-input--par ${isRowEditing ? "is-editing" : "is-locked"}" data-field="par" type="text" inputmode="${inputMode}" value="${escapeHtml(item.parDisplay)}" aria-label="Par for ${escapeHtml(item.name)}" ${isRowEditing ? "" : "readonly"}></div>` : formatInventoryQuantity(item.parDisplay)}</td>
     <td data-cell="order" class="${item.orderQuantity > 0 ? "inventory-order-flag" : "muted"}">${orderCell}</td>
     <td>${escapeHtml(packLabel)}</td>
     <td>${unitCostCell}</td>
@@ -10788,9 +11652,8 @@ function createInventoryRow(item, mode) {
         renderInventoryPanels();
       });
     });
-    row.querySelector('[data-par-toggle]')?.addEventListener("click", () => toggleInventoryParEdit(item.id));
+    row.querySelector(".inventory-row-edit-toggle")?.addEventListener("click", () => toggleInventoryRowEdit(item.id));
     row.querySelector(".custom-inventory-edit")?.addEventListener("click", () => editCustomInventoryItem(item.id));
-    row.querySelector(".custom-inventory-price")?.addEventListener("click", () => syncCustomInventoryPrice(item.id));
     row.querySelector(".custom-inventory-delete")?.addEventListener("click", () => deleteCustomInventoryItem(item.id));
     row.querySelector(".inventory-move-up")?.addEventListener("click", () => moveInventoryItem(item.id, -1));
     row.querySelector(".inventory-move-down")?.addEventListener("click", () => moveInventoryItem(item.id, 1));
@@ -10857,7 +11720,7 @@ function reorderInventoryItemBefore(sourceId, targetId) {
 }
 
 function getCompleteInventoryItemOrder() {
-  return ["Liquor Cabinet", "Mixer Cabinet", "Other", "Bottle Service", "Bubbly"]
+  return ["Liquor Cabinet", "Mixer Cabinet", "Other"]
     .flatMap((group) => getSortedInventoryGroupItems(group).map((item) => item.id));
 }
 
@@ -11016,8 +11879,8 @@ function recalculateInventoryItem(item) {
   item.orderDisplay = item.orderQuantity > 0 ? String(item.orderQuantity) : "0";
 }
 
-function toggleInventoryParEdit(id) {
-  inventoryParEditState[id] = !inventoryParEditState[id];
+function toggleInventoryRowEdit(id) {
+  inventoryRowEditState[id] = !inventoryRowEditState[id];
   renderInventory();
 }
 
@@ -11031,7 +11894,20 @@ async function saveInventorySnapshot() {
     return;
   }
 
-  setInventorySharedStatus("Refreshing PMB keg levels before saving the Monday snapshot...", true);
+  setInventorySharedStatus("Checking Weekly Usage and PMB keg levels for the Monday snapshot...", true);
+  const usageResult = await runPmbWeeklyUsageSync();
+  if (!usageResult?.ok || !await flushPendingSharedWeeklyUsageSave()) {
+    inventorySharedSaving = false;
+    inventorySharedMessage = `Monday snapshot not saved: ${usageResult?.error || weeklyUsageSharedSaveError || "Weekly Usage could not be saved."}`;
+    renderInventoryPanels();
+    return;
+  }
+  if (!await flushPendingParAgentStateSync()) {
+    inventorySharedSaving = false;
+    inventorySharedMessage = "Monday snapshot not saved: backup/on-hand keg counts could not be saved.";
+    renderInventoryPanels();
+    return;
+  }
   const levelsLoaded = await runKegLevelSync();
   const summary = getInventorySnapshotSummary();
   if (!levelsLoaded || summary.liveTapCount !== summary.tapCount) {
@@ -11043,11 +11919,52 @@ async function saveInventorySnapshot() {
     return;
   }
 
+  setInventorySharedStatus("Calculating and freezing Monday keg orders and cocktail prep...", true);
+  const recommendationsSaved = await runKegParAgent();
+  const kegPlanSnapshot = recommendationsSaved && parAgentState?.recommendations?.generatedAt
+    ? {
+        generatedAt: parAgentState.recommendations.generatedAt,
+        items: parAgentState.recommendations.items,
+        tapInputs: (parAgentState.recommendations.items || []).map((item) => ({
+          key: item.key,
+          tapNumber: item.tapNumber,
+          wall: item.wall,
+          name: item.name,
+          liveFraction: item.liveFraction,
+          backupKegs: item.backupKegs,
+          currentStockKegs: item.currentStockKegs,
+          currentStockOunces: item.currentStockOunces,
+          avgWeeklyKegs: item.avgWeeklyKegs,
+          avgWeeklyOunces: item.avgWeeklyOunces,
+        })),
+        summary: parAgentState.recommendations.summary,
+      }
+    : null;
+  if (!kegPlanSnapshot) {
+    inventorySharedSaving = false;
+    inventorySharedMessage = `Monday snapshot not saved: ${parAgentMessage || "keg and cocktail recommendations could not be calculated."}`;
+    renderInventoryPanels();
+    return;
+  }
+
   const state = await runSharedInventoryAction(
-    { action: "save-snapshot", items: getInventorySnapshotItems(), summary },
-    { successMessage: "This week's Monday snapshot, including PMB line value, is saved for all managers." },
+    { action: "save-snapshot", items: getInventorySnapshotItems(), summary, kegPlanSnapshot },
+    {
+      successMessage: "Monday snapshot saved with bottle counts, keg levels, on-hand kegs, orders, and cocktail prep.",
+      rebuild: true,
+    },
   );
-  if (state) renderInventoryHistory();
+  if (state) {
+    kegOnHandOverrides = createClearedKegOnHandOverrides(kegWallItems, getKegItemKey);
+    saveKegOnHandOverrides();
+    scheduleParAgentStateSync({ immediate: true });
+    const clearedCountsSaved = await flushPendingParAgentStateSync();
+    inventorySharedMessage = clearedCountsSaved
+      ? "Monday snapshot saved. Bottle and backup/on-hand keg fields are cleared for the next count; the locked inputs remain in the snapshot."
+      : "Monday snapshot saved, but the cleared backup/on-hand keg fields still need to finish syncing.";
+    renderInventoryHistory();
+    renderInventoryPanels();
+  }
 }
 
 function getInventorySnapshotSummary() {
@@ -11113,6 +12030,7 @@ function renderInventoryHistory() {
             <span>Saved ${escapeHtml(formatUpdatedAt(snapshot.savedAt))}</span>
             <span>Shared manager snapshot</span>
             <span>${snapshot.items.length} items saved</span>
+            ${snapshot.kegPlanSnapshot?.tapInputs?.length ? `<span>${formatNumber(snapshot.kegPlanSnapshot.tapInputs.length)} tap inputs saved</span>` : '<span>Legacy snapshot · resave to include tap inputs</span>'}
           </div>
           <div class="inventory-history-stats">
             <span>${money(totalValue)} on hand</span>
@@ -11230,7 +12148,7 @@ async function restoreInventorySnapshot(snapshotId) {
   if (!snapshot) return;
   if (!confirmDashboardAction(
     `Restore inventory from ${formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot))}?`,
-    [`${snapshot.items.length} saved item counts and pars will replace the current shared values.`],
+    [`${snapshot.items.length} saved item counts and pars will replace the current shared values.`, "Saved backup/on-hand keg counts will also be restored when this snapshot includes them."],
     "Current inventory values will change for every signed-in manager.",
   )) return;
 
@@ -11241,7 +12159,17 @@ async function restoreInventorySnapshot(snapshotId) {
       rebuild: true,
     },
   );
-  if (state) renderInventory();
+  if (state) {
+    const savedTapInputs = snapshot.kegPlanSnapshot?.tapInputs || [];
+    if (savedTapInputs.length) {
+      kegOnHandOverrides = Object.fromEntries(savedTapInputs.map((item) => [item.key, String(toNumber(item.backupKegs))]));
+      saveKegOnHandOverrides();
+      scheduleParAgentStateSync({ immediate: true });
+      await flushPendingParAgentStateSync();
+    }
+    renderInventory();
+    renderKegLevels();
+  }
 }
 
 function saveIngredientOverride(id, bottleOz, bottlePrice) {
@@ -11467,14 +12395,16 @@ async function addLiquorProduct(event) {
     name,
     pricePerOz,
     servingOz,
-    brewery: "On Par Entertainment",
-    style: "Liquor",
+    brewery: clean(selectedUntappdLiquor?.producer || selectedUntappdLiquor?.brewery) || "On Par Entertainment",
+    style: clean(selectedUntappdLiquor?.style) || "Liquor",
     abvPercent,
     ibu: 0,
     kegOz: bottleOz,
     bottleCost,
     bottleOz,
     notes,
+    imageUrl: clean(selectedUntappdLiquor?.imageUrl),
+    untappdId: toNumber(selectedUntappdLiquor?.untappdId),
   };
 
   liquorProductSaving = true;
@@ -11542,10 +12472,12 @@ function renderPmbPublishQueue() {
     ? `${pendingCount} waiting for PMB review · ${counts.published} published record${counts.published === 1 ? "" : "s"}`
     : counts.published
       ? `No products waiting · ${counts.published} published record${counts.published === 1 ? "" : "s"}`
-      : "No products are waiting. Save a beer or liquor tap above to prepare it for the service computer.";
+      : "";
+  pmbQueueConnection.hidden = pendingCount === 0;
   pmbQueueConnection.dataset.state = pmbQueueConnectionState;
   pmbQueueConnection.textContent = pmbQueueConnectionMessage;
   if (checkPmbQueueConnectionButton) {
+    checkPmbQueueConnectionButton.hidden = pendingCount === 0;
     checkPmbQueueConnectionButton.disabled = pmbQueueConnectionState === "checking";
     checkPmbQueueConnectionButton.textContent = pmbQueueConnectionState === "checking"
       ? "Checking..."
@@ -11558,7 +12490,7 @@ function renderPmbPublishQueue() {
     return String(right.updatedAt || "").localeCompare(String(left.updatedAt || ""));
   });
   if (!sortedItems.length) {
-    pmbPublishQueueList.innerHTML = '<div class="pmb-queue-empty">The publishing queue is empty.</div>';
+    pmbPublishQueueList.innerHTML = '<div class="pmb-queue-empty">Queue is empty.</div>';
     return;
   }
 
@@ -11823,6 +12755,10 @@ function saveCustomLiquorTapFromPmbProduct(payload, product = null) {
     servingOz: toNumber(payload.servingOz) || 1.5,
     abvPercent: toNumber(payload.abvPercent) || 40,
     notes: clean(payload.notes),
+    imageUrl: clean(payload.imageUrl),
+    producer: clean(payload.brewery),
+    style: clean(payload.style),
+    untappdId: toNumber(payload.untappdId),
     plu: toNumber(product?.plu || payload.plu),
     createdAt: existing?.createdAt || new Date().toISOString(),
   };
@@ -11836,15 +12772,15 @@ function saveCustomLiquorTapFromPmbProduct(payload, product = null) {
   saveCustomLiquorTaps();
 }
 
-function addComingSoonItemFromRecipe(recipe) {
+function buildComingSoonItemFromRecipe(recipe, { createdAt = "" } = {}) {
   const totals = getRecipeTotals(recipe);
   const pricing = getRecipePricing(recipe);
-  upsertComingSoonItem({
+  return {
     id: `recipe:${recipe.id}`,
     kind: "recipe",
     recipeId: recipe.id,
     name: recipe.title,
-    description: clean(recipe.description),
+    description: clean(recipe.description) || buildRecipeDescription(recipe.title, recipe.category, recipe.ingredients),
     imageUrl: clean(recipe.imageUrl),
     chargePerOz: toNumber(pricing.chargePerOz),
     costPerOz: toNumber(totals.costPerOz),
@@ -11861,8 +12797,76 @@ function addComingSoonItemFromRecipe(recipe) {
       manualCost: Boolean(ingredient.manualCost),
       manualAbvPercent: ingredient.manualAbvPercent === "" || ingredient.manualAbvPercent == null ? "" : toNumber(ingredient.manualAbvPercent),
     })),
-    createdAt: new Date().toISOString(),
+    ...(createdAt ? { createdAt } : {}),
+  };
+}
+
+function hydrateComingSoonRecipeItems() {
+  comingSoonItems = comingSoonItems.map((item) => {
+    if (item.kind !== "recipe" || !item.recipeId) return item;
+    const recipe = recipes.find((entry) => entry.id === item.recipeId);
+    if (!recipe) return item;
+    return {
+      ...item,
+      ...buildComingSoonItemFromRecipe(recipe, { createdAt: item.createdAt }),
+    };
   });
+}
+
+function getComingSoonUntappdFields(item) {
+  return {
+    description: clean(item.description),
+    imageUrl: clean(item.imageUrl),
+    producer: clean(item.producer || item.brewery),
+    style: clean(item.style || item.category),
+    abvPercent: toNumber(item.abv),
+    untappdId: toNumber(item.untappdId),
+    untappdName: clean(item.name),
+    untappdSource: clean(item.sourceName),
+  };
+}
+
+async function hydrateComingSoonLiquorItemsFromUntappd() {
+  const targets = comingSoonItems.filter((item) => item.kind === "liquor" && clean(item.untappdQuery));
+  if (!targets.length) return;
+
+  const results = await Promise.all(targets.map(async (item) => {
+    try {
+      const response = await fetch(`/api/untappd-search?q=${encodeURIComponent(item.untappdQuery)}&kind=liquor`, {
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      const payload = await parseJsonResponse(response);
+      if (!response.ok || !payload?.items?.length) return null;
+      return { id: item.id, fields: getComingSoonUntappdFields(payload.items[0]) };
+    } catch {
+      return null;
+    }
+  }));
+
+  const fieldsById = new Map(results.filter(Boolean).map((result) => [result.id, result.fields]));
+  if (!fieldsById.size) return;
+  let changed = false;
+  comingSoonItems = comingSoonItems.map((item) => {
+    const fields = fieldsById.get(item.id);
+    if (!fields) return item;
+    const populatedFields = Object.fromEntries(
+      Object.entries(fields).filter(([, value]) => value !== "" && value !== 0 && value != null),
+    );
+    const nextItem = { ...item, ...populatedFields };
+    if (JSON.stringify(nextItem) !== JSON.stringify(item)) changed = true;
+    return nextItem;
+  });
+  if (!changed) return;
+  saveComingSoonItems();
+  renderKegLevels();
+}
+
+function addComingSoonItemFromRecipe(recipe) {
+  upsertComingSoonItem(buildComingSoonItemFromRecipe(recipe, {
+    createdAt: new Date().toISOString(),
+  }));
 }
 
 function addComingSoonItemFromPmbProduct(payload, product = null) {
@@ -12563,7 +13567,6 @@ function addIngredientRow(ingredient = null) {
   const abvValue = ingredient?.manualAbvPercent === "" || ingredient?.manualAbvPercent == null ? "" : ingredient.manualAbvPercent;
   row.innerHTML = `
     <td>
-      ${isFirstRow ? '<span class="row-badge">Liquor row</span>' : ""}
       <input data-field="ingredient-name" type="text" value="${escapeHtml(ingredient?.name || "")}" placeholder="${isFirstRow ? "Liquor / primary alcohol" : "Ingredient name"}" aria-label="${isFirstRow ? "New recipe primary liquor" : "New recipe ingredient"}">
     </td>
     <td>
@@ -12657,18 +13660,18 @@ function syncRecipeBuilderRow(row, options = {}) {
   }
   if (costNote) {
     costNote.textContent = clean(costInput?.value)
-      ? "Manual cost"
+      ? ""
       : estimatedCost
-        ? `Estimate ${money(estimatedCost)}`
-        : "Manual cost";
+        ? `${money(estimatedCost)} est.`
+        : "";
   }
   if (abvNote) {
     const inferredAbv = getIngredientAbvPercent({ name, manualAbvPercent: clean(abvInput?.value) });
     abvNote.textContent = clean(abvInput?.value)
-      ? "Manual ABV"
+      ? ""
       : inferredAbv
-        ? `Auto ${formatNumber(inferredAbv)}%`
-        : "No alcohol";
+        ? `${formatNumber(inferredAbv)}% auto`
+        : "";
   }
 }
 
@@ -12792,13 +13795,13 @@ function calculateRecipeBuilderOunces(quantityValue, packageConfig) {
 }
 
 function getRecipeBuilderPackageNote(packageConfig) {
-  if (!packageConfig) return "Enter ounces manually if this ingredient is not mapped yet.";
-  return `${formatNumber(packageConfig.sizeOz)} oz per ${packageConfig.unitSingle}`;
+  if (!packageConfig) return "";
+  return `${formatNumber(packageConfig.sizeOz)} oz each`;
 }
 
 function getRecipeBuilderOzNote(packageConfig) {
-  if (!packageConfig) return "Manual ounces";
-  return `Auto from ${packageConfig.unitLabel}`;
+  if (!packageConfig) return "";
+  return "Auto";
 }
 
 function buildRecipeIngredientRaw(name, packageCount, packageConfig) {
@@ -12819,6 +13822,8 @@ function getRecipeBuilderUnitCost(name) {
   const override = priceOverrides[id];
   const overrideBottleOz = toNumber(override?.bottleOz);
   const overrideBottlePrice = toNumber(override?.bottlePrice);
+  const preparedUnitCost = getPreparedIngredientFinishedUnitCost(id, overrideBottlePrice);
+  if (preparedUnitCost) return preparedUnitCost;
   if (overrideBottleOz && overrideBottlePrice) {
     return overrideBottlePrice / overrideBottleOz;
   }
@@ -12965,16 +13970,25 @@ function applyRecipeOrder(sourceRecipes, order) {
 }
 
 function applyRecipeEdits(recipe) {
+  const presentation = STATIC_RECIPE_PRESENTATION[recipe.id] || {};
+  const { canonicalTitle = "", ...presentationFields } = presentation;
+  const presentedRecipe = {
+    ...recipe,
+    ...presentationFields,
+    title: clean(canonicalTitle) || recipe.title,
+    description: clean(recipe.description) || clean(presentationFields.description),
+    imageUrl: clean(recipe.imageUrl) || clean(presentationFields.imageUrl),
+  };
   const edits = editedRecipes[recipe.id];
-  if (!edits) return recipe;
+  if (!edits) return presentedRecipe;
   const repairedGallons = repairLegacyGallonRecipeIngredients(
     edits.ingredients || [],
-    recipe.ingredients || [],
+    presentedRecipe.ingredients || [],
   );
   const repairedFormula = repairKnownRecipeFormulaEdits(
-    recipe.id,
+    presentedRecipe.id,
     repairedGallons.ingredients,
-    recipe.ingredients || [],
+    presentedRecipe.ingredients || [],
   );
   if (repairedGallons.repaired || repairedFormula.repaired) {
     edits.ingredients = repairedFormula.ingredients;
@@ -12983,8 +13997,9 @@ function applyRecipeEdits(recipe) {
   }
 
   return {
-    ...recipe,
+    ...presentedRecipe,
     ...edits,
+    title: clean(canonicalTitle) || clean(edits.title) || presentedRecipe.title,
     ingredients: (edits.ingredients || []).map((ingredient) => ({
       ...ingredient,
       id: slugify(ingredient.name),
@@ -13046,6 +14061,8 @@ function parseRecipes(rows) {
         metrics.push({ label, value: costCell || ozCell });
         return;
       }
+
+      if (isPreparedIngredientRecipeNote({ raw: label, cost: costCell, ounces: ozCell })) return;
 
       ingredientsForRecipe.push({
         id: slugify(getIngredientName(label, group.title)),
@@ -13347,6 +14364,14 @@ function getIngredientCost(ingredient) {
   const override = priceOverrides[resolvedId];
   const bottleOz = toNumber(override?.bottleOz);
   const bottlePrice = toNumber(override?.bottlePrice);
+  const preparedCost = getPreparedIngredientCost(resolvedId, ingredient.oz, bottlePrice);
+
+  if (preparedCost) {
+    return {
+      cost: preparedCost,
+      source: "override",
+    };
+  }
 
   if (bottleOz && bottlePrice && ingredient.oz) {
     return {
@@ -13429,6 +14454,8 @@ function getCatalogUnitCost(ingredient) {
   const override = priceOverrides[ingredient.id];
   const bottleOz = toNumber(override?.bottleOz);
   const bottlePrice = toNumber(override?.bottlePrice);
+  const preparedUnitCost = getPreparedIngredientFinishedUnitCost(ingredient.id, bottlePrice);
+  if (preparedUnitCost) return preparedUnitCost;
   if (bottleOz && bottlePrice) return bottlePrice / bottleOz;
   return ingredient.totalOz ? ingredient.totalCost / ingredient.totalOz : 0;
 }
@@ -13440,6 +14467,7 @@ function getCatalogCost(ingredient) {
 function getCurrentKegPricingTapItems() {
   return buildVerifiedCurrentBeerTapItems({
     wallItems: kegWallItems,
+    weeklyUsageItems,
     liveLevelItems: [...kegLiveLevels.values()],
     tapPriceItems: liveTapPriceItems,
     isBeerTapPosition,
@@ -13453,41 +14481,6 @@ function buildKegPricingCatalog(sourceKegWallItems, currentTapItems = []) {
       .filter((item) => isBeerTapPosition(item) && toNumber(item.tapPosition))
       .map((item) => [toNumber(item.tapPosition), item]),
   );
-
-  sourceKegWallItems
-    .filter((item) => isBeerPricingTap(item))
-    .filter(() => currentBeerByTap.size === 0)
-    .forEach((item) => {
-      const id = getKegPricingKey(item.brand);
-      const existing = byId.get(id);
-      const tapLabel = `${item.wall} ${item.tapNumber}`;
-
-      if (!existing) {
-        const vendor = getKegVendorLabel(item);
-        byId.set(id, {
-          id,
-          name: getKegDisplayName(item.brand),
-          tapNumber: item.tapNumber,
-          wall: item.wall,
-          type: item.type,
-          kegOz: getDefaultKegSizeOz(item),
-          vendor,
-          vendorProduct: getKegVendorProduct(getKegDisplayName(item.brand), vendor, getDefaultKegSizeOz(item)),
-          sourceNames: [item.brand],
-          sourceTaps: [tapLabel],
-          sourceTypes: [item.type],
-        });
-        return;
-      }
-
-      if (!existing.sourceNames.includes(item.brand)) existing.sourceNames.push(item.brand);
-      if (!existing.sourceTaps.includes(tapLabel)) existing.sourceTaps.push(tapLabel);
-      if (!existing.sourceTypes.includes(item.type)) existing.sourceTypes.push(item.type);
-      if (!existing.tapNumber || item.tapNumber < existing.tapNumber) {
-        existing.tapNumber = item.tapNumber;
-        existing.wall = item.wall;
-      }
-    });
 
   currentBeerByTap.forEach((item, tapNumber) => {
     const name = clean(item.name || item.matchedBrand);
@@ -13523,11 +14516,14 @@ function buildKegPricingCatalog(sourceKegWallItems, currentTapItems = []) {
     });
   });
 
-  buildAssignedOnDeckBeerItems({
-    wallItems: sourceKegWallItems,
-    isBeerTapPosition,
-    resolveOnDeck: getKegOnDeckItem,
-  }).forEach((item) => {
+  [
+    ...buildActiveComingSoonBeerItems({ comingSoonItems }),
+    ...buildAssignedOnDeckBeerItems({
+      wallItems: sourceKegWallItems,
+      isBeerTapPosition,
+      resolveOnDeck: getKegOnDeckItem,
+    }),
+  ].forEach((item) => {
     const id = getKegPricingKey(item.name);
     const existing = byId.get(id);
     if (existing) {
@@ -13593,13 +14589,19 @@ function getKegVendorProduct(name, vendor, kegOz) {
   if (!KEG_PROVI_DISTRIBUTOR_HINTS[vendor]) return null;
   const key = getKegPricingKey(name);
   const aliases = BONBRIGHT_KEG_ALIASES[key] || [];
+  const mappedProduct = KEG_PROVI_PRODUCT_MAPPINGS[key] || {};
   return {
     vendor,
     syncVendor: "Provi",
-    productName: aliases[0] || name,
+    productName: mappedProduct.productName || aliases[0] || name,
     bottleOz: kegOz,
+    preferredSku: mappedProduct.preferredSku || "",
     distributorHints: KEG_PROVI_DISTRIBUTOR_HINTS[vendor],
-    searchAliases: [...new Set([name.replace(/\s+[12]$/, "").trim(), ...aliases].filter(Boolean))],
+    searchAliases: [...new Set([
+      name.replace(/\s+[12]$/, "").trim(),
+      ...(mappedProduct.searchAliases || []),
+      ...aliases,
+    ].filter(Boolean))],
   };
 }
 
@@ -13678,28 +14680,8 @@ function getIngredientBottleCost(ingredient) {
   return 0;
 }
 
-function countOverrides() {
-  return Object.keys(priceOverrides).filter((key) => {
-    const override = priceOverrides[key];
-    return toNumber(override?.bottleOz) && toNumber(override?.bottlePrice);
-  }).length;
-}
-
-function countKegPriceOverrides() {
-  return Object.keys(kegPriceOverrides).filter((key) => {
-    const override = kegPriceOverrides[key];
-    const pricingItem = getKegPricingItem(key);
-    if (pricingItem && isStaleSmallBeerKegOverride(pricingItem, override)) return false;
-    return toNumber(override?.kegOz) && toNumber(override?.kegPrice);
-  }).length;
-}
-
 function countVendorMappings(sourceIngredients = ingredients) {
   return sourceIngredients.filter((ingredient) => ingredient.vendorProduct).length;
-}
-
-function countVendorMappingsByName(sourceIngredients, vendorName) {
-  return sourceIngredients.filter((ingredient) => ingredient.vendorProduct?.vendor === vendorName).length;
 }
 
 function groupKegPricingItemsForDisplay(sourceItems) {
@@ -13744,10 +14726,6 @@ function groupIngredientsForDisplay(sourceIngredients) {
 function isHiddenPricingIngredient(ingredient) {
   const normalized = clean(ingredient?.name).toLowerCase();
   return getIngredientGroup(ingredient?.name) === "Other";
-}
-
-function countChargeOverrides() {
-  return Object.keys(chargeOverrides).filter((key) => toNumber(chargeOverrides[key])).length;
 }
 
 function getActiveRecipes() {
@@ -13812,6 +14790,7 @@ function parseInventory(rows) {
     }
 
     if (isInventoryHeaderRow(first)) return;
+    if (currentSection === "Bubbly in patio cooler") return;
 
     const normalizedName = normalizeInventoryName(first);
     const casePackaged = currentSection === "Juices and Mixers";
@@ -13821,16 +14800,16 @@ function parseInventory(rows) {
     const note = clean(row[10]);
     const group = getInventoryGroup(normalizedName, currentSection);
     const baseId = getInventoryItemId(normalizedName);
-    const id = ["Bottle Service", "Bubbly"].includes(group)
-      ? `${baseId}-${slugify(group)}`
-      : baseId;
+    const id = baseId;
     const sourceOnHandUnits = getInventoryOnHandUnits({
       caseEquivalent: row[1],
       individualUnits: row[2],
       packSize,
       casePackaged,
     });
-    const onHandDisplay = inventoryOnHandOverrides[id] ?? String(sourceOnHandUnits);
+    const onHandDisplay = Object.prototype.hasOwnProperty.call(inventoryOnHandOverrides, id)
+      ? inventoryOnHandOverrides[id]
+      : inventorySharedInitialized ? "" : String(sourceOnHandUnits);
     const parDisplay = inventoryParOverrides[id] ?? clean(row[7]);
 
     const item = {
@@ -13852,7 +14831,9 @@ function parseInventory(rows) {
       excludeFromInventoryValue: normalizedName === "Non Alcoholic Beer",
     };
 
-    item.excludeFromOrderList = Boolean(item.orderHoldReason);
+    item.excludeFromOrderList = Boolean(
+      item.orderHoldReason || isFoodDepartmentOrderedInventoryItem(item.name),
+    );
 
     recalculateInventoryItem(item);
     items.push(item);
@@ -13957,6 +14938,7 @@ function parseWeeklyUsage(rows) {
       const rawOz = toNumber(row[3]);
       const currentEquivalentRaw = clean(row[4]);
       const currentEquivalent = toNumber(row[4]);
+      const historicalFullKegOunces = toNumber(rawOz / currentEquivalent);
       const averageRaw = clean(row[5]);
       const average = toNumber(row[5]);
       const displayUnit = getWeeklyUsageDisplayUnitForTap({
@@ -13985,6 +14967,7 @@ function parseWeeklyUsage(rows) {
         type: kegInfo?.type || "",
         rawOz,
         currentEquivalent,
+        historicalFullKegOunces,
         average: averageRaw !== "" ? average : calculateAverage(history.map((entry) => entry.value)),
         history: [...(weeklyUsageHistoryOverrides[slugify(`${tapNumber}-${name}`)] || []), ...history],
         isLiquorShot: displayUnit === "oz",
@@ -14075,6 +15058,10 @@ function mergeWeeklyUsageDuplicates(items) {
     existing.rawOz = pickWeeklyUsageValue(existing.rawOz, item.rawOz);
     existing.currentEquivalent = pickWeeklyUsageValue(existing.currentEquivalent, item.currentEquivalent);
     existing.currentDisplayValue = pickWeeklyUsageValue(existing.currentDisplayValue, item.currentDisplayValue);
+    existing.historicalFullKegOunces = pickWeeklyUsageValue(
+      existing.historicalFullKegOunces,
+      item.historicalFullKegOunces,
+    );
     existing.history = mergeWeeklyUsageHistory([...existing.history, ...item.history]);
     existing.average = calculateAverage(existing.history.map((entry) => entry.value));
   });
@@ -14216,7 +15203,9 @@ function ensureInventoryPlaceholder(items, config) {
     group: config.group,
     allowsDecimal: false,
     sourceSection: config.group,
-    onHandDisplay: inventoryOnHandOverrides[id] ?? "0",
+    onHandDisplay: Object.prototype.hasOwnProperty.call(inventoryOnHandOverrides, id)
+      ? inventoryOnHandOverrides[id]
+      : inventorySharedInitialized ? "" : "0",
     casePackaged: false,
     packSize: 1,
     legacyPackSize: 1,
@@ -14235,7 +15224,7 @@ function ensureInventoryPlaceholder(items, config) {
 
 function isInventorySectionRow(first, last) {
   if (first === last && first) return true;
-  return ["Juices and Mixers", "Bottle Service Karaoke Cooler", "Bubbly in patio cooler"].includes(first);
+  return ["Juices and Mixers", "Bubbly in patio cooler"].includes(first);
 }
 
 function isInventoryHeaderRow(first) {
@@ -14258,7 +15247,7 @@ function groupInventoryForDisplay(sourceItems) {
     grouped.get(item.group).push(item);
   });
 
-  return ["Liquor Cabinet", "Mixer Cabinet", "Other", "Bottle Service", "Bubbly"]
+  return ["Liquor Cabinet", "Mixer Cabinet", "Other"]
     .map((groupName) => [
       groupName,
       (grouped.get(groupName) || []).sort((a, b) => getInventorySortKey(a).localeCompare(getInventorySortKey(b))),
@@ -14268,8 +15257,7 @@ function groupInventoryForDisplay(sourceItems) {
 
 function getInventoryGroup(name, sourceSection) {
   const normalized = clean(name).toLowerCase();
-  if (sourceSection === "Bottle Service Karaoke Cooler") return "Bottle Service";
-  if (sourceSection === "Bubbly in patio cooler") return "Bubbly";
+  if (sourceSection === "Bubbly in patio cooler") return "Other";
   if (normalized === "kahlua") return "Mixer Cabinet";
   if (normalized === "sweet and sour" || normalized === "non alcoholic beer") return "Other";
 
@@ -14279,24 +15267,15 @@ function getInventoryGroup(name, sourceSection) {
 }
 
 function getInventoryOrderHoldReason(name, group, note = "") {
-  const normalizedName = clean(name);
   const sourceNote = clean(note);
   if (/do not order|hold|paused?/i.test(sourceNote)) {
     return `Source note: ${sourceNote}`;
   }
-  if (group === "Bottle Service") {
-    return "Bottle-service stock is counted here but held outside automatic cabinet ordering.";
-  }
-  if (group === "Bubbly") {
-    return "Bubbly stock is counted here but held outside automatic cabinet ordering.";
-  }
-  if (["Jameson", "Patron", "Patron Silver", "Pink Whitney", "Screwball"].includes(normalizedName)) {
-    return "Straight-liquor tap stock is visible, but automatic bottle ordering is held until refill netting is added.";
-  }
-  if (normalizedName === "Sour Mix") {
-    return "Automatic ordering is intentionally held; review this mixer manually.";
-  }
   return "";
+}
+
+function isFoodDepartmentOrderedInventoryItem(name) {
+  return normalizeIngredientAlias(name) === "Sour Mix";
 }
 
 function inferCategory(title) {
@@ -14342,6 +15321,8 @@ function getVendorMapping(ingredientId) {
 
 function normalizeIngredientAlias(name) {
   const normalized = clean(name).toLowerCase();
+  const preparedName = getPreparedIngredientCanonicalName(normalized);
+  if (preparedName) return preparedName;
 
   if (/^tito'?s(\s+vodka)?$/.test(normalized)) return "Tito's";
   if (/^hennessy(\s+cognac)?$/.test(normalized)) return "Hennessy";
@@ -14381,7 +15362,7 @@ function normalizeIngredientAlias(name) {
   if (/^cranberry juice$/.test(normalized) || /^cranberry$/.test(normalized)) return "Cranberry Juice";
   if (/^simple syrup$/.test(normalized)) return "Simple Syrup";
   if (/^sour mix$/.test(normalized) || /^sweet and sour$/.test(normalized)) return "Sour Mix";
-  if (/^blue dot juice$/.test(normalized) || /^blue dot$/.test(normalized)) return "Blue Dot Juice";
+  if (/^blue dot$/.test(normalized)) return "Blue Dot Juice";
   if (/^lime juice$/.test(normalized)) return "Lime Juice";
   if (/^lemon juice$/.test(normalized)) return "Lemon Juice";
   if (/^creme de cocao$/.test(normalized)) return "Creme de Cacao";
@@ -14393,6 +15374,7 @@ function normalizeIngredientAlias(name) {
 function getIngredientGroup(name) {
   const normalized = clean(name).toLowerCase();
 
+  if (STRAIGHT_LIQUOR_TAP_INGREDIENTS.some((item) => item.toLowerCase() === normalized)) return "Liquor";
   if (["lemonade", "pink lemonade", "cranberry juice", "sweet tea", "strawberry lemonade"].includes(normalized)) return "Buckeye Beverage";
   if (normalized === "cold brew coffee" || normalized === "sour mix" || normalized === "vanilla") return "Food Vendors";
   if (
@@ -14494,9 +15476,18 @@ function getVendorMappedItems(scope = "all") {
       vendorProduct: item.vendorProduct,
     }));
 
+  const inventoryPriceItems = inventoryItems
+    .filter((item) => item.vendorProduct)
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      priceType: "ingredient",
+      vendorProduct: item.vendorProduct,
+    }));
+
   const currentWallLiquorItems = getCurrentWallLiquorVendorItems();
   const byItemKey = new Map();
-  [...ingredientItems, ...currentWallLiquorItems, ...kegItems].forEach((item) => {
+  [...ingredientItems, ...inventoryPriceItems, ...currentWallLiquorItems, ...kegItems].forEach((item) => {
     byItemKey.set(`${item.priceType}:${item.id}`, item);
   });
 
@@ -14524,17 +15515,20 @@ function getVendorSyncName(vendorProduct) {
   return vendorProduct?.syncVendor || vendorProduct?.vendor || "";
 }
 
-async function runVendorSync() {
-  const candidates = getVendorMappedItems(vendorSyncScope);
+async function runVendorSync({ automatic = false } = {}) {
+  const syncScope = automatic ? "all" : vendorSyncScope;
+  const candidates = getVendorMappedItems(syncScope);
   if (!candidates.length) {
     vendorSyncMessage = "No mapped pricing items match that vendor scope yet.";
     renderIngredientSummary();
     renderKegLevels();
-    return;
+    return { ok: false, skipped: true };
   }
 
   vendorSyncRunning = true;
-  vendorSyncMessage = `Checking ${vendorSyncScope === "all" ? "all mapped vendors" : vendorSyncScope}...`;
+  vendorSyncMessage = automatic
+    ? "Automatically checking all mapped vendor prices..."
+    : `Checking ${syncScope === "all" ? "all mapped vendors" : syncScope}...`;
   renderIngredientSummary();
   renderKegLevels();
 
@@ -14545,7 +15539,7 @@ async function runVendorSync() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        scope: vendorSyncScope,
+        scope: syncScope,
         items: candidates.map((item) => ({
           id: item.id,
           name: item.name,
@@ -14615,22 +15609,27 @@ async function runVendorSync() {
     }
 
     const vendorStatuses = result.vendorStatuses || [];
-    const statusNotes = vendorStatuses
+    const blockedStatuses = vendorStatuses.filter((status) => ["blocked", "pending"].includes(status.status));
+    const blockedNotes = blockedStatuses
       .map((status) => `${status.vendor}: ${status.message}`)
       .join(" ");
-    const blockedStatuses = vendorStatuses.filter((status) => ["blocked", "pending"].includes(status.status));
 
     const rejectionNote = rejected
-      ? ` Rejected ${rejected} price${rejected === 1 ? "" : "s"} because the bottle size did not match the mapped product.`
+      ? ` ${rejected} size mismatch${rejected === 1 ? "" : "es"}.`
       : "";
-    vendorSyncMessage = applied || !blockedStatuses.length
-      ? `Applied ${applied} price${applied === 1 ? "" : "s"}.${rejectionNote}${statusNotes ? ` ${statusNotes}` : ""}`
-      : statusNotes || "No prices were applied because the selected vendor connection is not ready.";
+    vendorSyncMessage = blockedStatuses.length
+      ? `${applied} price${applied === 1 ? "" : "s"} synced.${rejectionNote} ${blockedNotes}`
+      : `${applied} price${applied === 1 ? "" : "s"} synced.${rejectionNote}`;
     render();
+    return { ok: true, applied, rejected };
   } catch (error) {
-    vendorSyncMessage = error.message || "Vendor sync failed.";
+    const errorMessage = error.message || "Vendor sync failed.";
+    vendorSyncMessage = automatic
+      ? `Automatic price sync could not finish: ${errorMessage} Use Sync Prices to retry.`
+      : errorMessage;
     renderIngredientSummary();
     renderKegLevels();
+    return { ok: false, error: errorMessage };
   } finally {
     vendorSyncRunning = false;
     renderIngredientSummary();
@@ -14669,6 +15668,8 @@ function getIngredientAddAmount(rawValue) {
 function getRecipeCardAddAmount(ingredient) {
   const normalizedName = normalizeIngredientAlias(ingredient?.name || "");
   const rawValue = clean(ingredient?.raw);
+  const preparedAmount = getPreparedIngredientRecipeAmount(slugify(normalizedName), ingredient?.oz);
+  if (preparedAmount) return preparedAmount;
   const gallonDisplayName = getRecipeCardGallonDisplayName(normalizedName, rawValue);
 
   const explicitGallonMatch = rawValue.match(/(\d+(?:\.\d+)?)\s*gallons?/i);
@@ -14769,10 +15770,10 @@ function loadOverrides() {
     }
     localStorage.setItem(PRICE_OVERRIDE_MODEL_STORAGE_KEY, PRICE_OVERRIDE_MODEL_VERSION);
 
-    return {
+    return normalizePreparedIngredientPriceOverrides({
       ...DEFAULT_PRICE_OVERRIDES,
       ...savedOverrides,
-    };
+    });
   } catch {
     return { ...DEFAULT_PRICE_OVERRIDES };
   }
@@ -15098,6 +16099,18 @@ function clean(value) {
 
 function normalizeTitle(value) {
   return clean(value).toLowerCase();
+}
+
+function getCanonicalProductDisplayName(value) {
+  const original = clean(value);
+  const key = original
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\s+[123]\s*$/, "")
+    .replace(/[^a-z0-9]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  return CANONICAL_PRODUCT_DISPLAY_NAMES[key] || original;
 }
 
 function toNumber(value) {

@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   normalizeGlobalSearchText,
+  parseDashboardDataQuery,
+  searchDashboardData,
   searchDashboardItems,
 } from "../public/global-dashboard-search.mjs";
 
@@ -69,4 +71,46 @@ test("global search de-duplicates IDs, honors limits, and does not mutate inputs
   assert.equal(results.length, 1);
   assert.equal(new Set(searchDashboardItems(source, "lemon").map((item) => item.id)).size, 2);
   assert.deepEqual(source, snapshot);
+});
+
+test("dashboard data search parses natural-language filters and comparisons", () => {
+  const parsed = parseDashboardDataQuery("show me cocktails on main wall under 10 ounces");
+
+  assert.equal(parsed.status, "ready");
+  assert.deepEqual(parsed.intent, {
+    category: "cocktail",
+    wall: "main",
+    visibility: "active",
+    metric: "ounces",
+    comparison: { operator: "lt", threshold: 10 },
+    period: "recent",
+    sort: null,
+    nameTerms: [],
+  });
+});
+
+test("dashboard data search follows a parsed ranking path", () => {
+  const items = [
+    {
+      id: "beer:one",
+      name: "First Beer",
+      wall: "main",
+      category: "beer",
+      hidden: false,
+      periods: { "last-week": { label: "Last week", ounces: 42, dollars: 84 } },
+    },
+    {
+      id: "beer:two",
+      name: "Second Beer",
+      wall: "patio",
+      category: "beer",
+      hidden: false,
+      periods: { "last-week": { label: "Last week", ounces: 75, dollars: 150 } },
+    },
+  ];
+
+  const search = searchDashboardData(items, "which beer had highest pour last week");
+  assert.equal(search.status, "ready");
+  assert.deepEqual(search.results.map((item) => item.id), ["beer:two"]);
+  assert.equal(search.results[0].value, 75);
 });

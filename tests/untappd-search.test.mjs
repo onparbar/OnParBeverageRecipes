@@ -117,6 +117,30 @@ test("liquor search excludes misleading beer-database matches", () => {
   assert.equal(results[0].name, "Tito's Handmade Vodka");
 });
 
+test("recognizes Untappd catalog spirits that are encoded as beer records", () => {
+  const results = buildUntappdSearchResults({
+    query: "Captain Morgan Original Spiced Rum",
+    kind: "liquor",
+    globalItems: [{
+      untappd_id: 6479245,
+      name: "Original Spiced Rum",
+      type: "beer",
+      brewery: "Captain Morgan",
+      description: "Caribbean rum with vanilla and spice.",
+      style: "Spirit - Rum - Spiced",
+      abv: "35.0",
+      label_image_hd: "https://labels.untappd.com/6479245?size=hd",
+    }],
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].untappdId, 6479245);
+  assert.equal(results[0].producer, "Captain Morgan");
+  assert.equal(results[0].abv, 35);
+  assert.equal(isUntappdItemKind(results[0], "liquor"), true);
+  assert.equal(isUntappdItemKind(results[0], "beer"), false);
+});
+
 test("carried records rank ahead of global beer matches and duplicate menu copies merge", () => {
   const results = buildUntappdSearchResults({
     query: "Garage Beer",

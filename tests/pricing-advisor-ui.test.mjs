@@ -9,10 +9,8 @@ test("pricing advisor exposes a confirmed Owner-only PMB update flow", async () 
     readFile("app/globals.css", "utf8"),
   ]);
 
-  assert.match(page, /Owner review required/);
+  assert.match(page, /82% Price Suggestions/);
   assert.match(page, /<th>Owner approval<\/th>/);
-  assert.match(page, /Current-wall reference list/);
-  assert.match(page, /Nothing is sent until you confirm the live change/);
   assert.doesNotMatch(page, /cannot publish a live change/);
   assert.match(dashboard, /data-pmb-price-update/);
   assert.match(dashboard, /Approve & update PMB/);

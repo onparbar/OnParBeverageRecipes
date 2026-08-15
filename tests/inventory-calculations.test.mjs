@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   convertLegacyCaseCountToUnits,
   getInventoryItemId,
+  getCurrentMondayInventorySnapshot,
   getInventoryOnHandUnits,
   getInventoryUnitCost,
   getOrderCaseCount,
@@ -49,4 +50,17 @@ test("converts legacy case-equivalent browser counts to individual units", () =>
   assert.equal(convertLegacyCaseCountToUnits("1.5", 12), 18);
   assert.equal(convertLegacyCaseCountToUnits("6.0", 4), 24);
   assert.equal(convertLegacyCaseCountToUnits("4.0", 1), 4);
+});
+
+test("selects only the saved inventory snapshot for the current Monday week", () => {
+  const snapshots = [
+    { id: "inventory-2026-08-10", weekOf: "2026-08-10" },
+    { id: "inventory-2026-08-03", weekOf: "2026-08-03" },
+  ];
+
+  assert.equal(
+    getCurrentMondayInventorySnapshot(snapshots, new Date(2026, 7, 14, 12))?.id,
+    "inventory-2026-08-10",
+  );
+  assert.equal(getCurrentMondayInventorySnapshot(snapshots, new Date(2026, 7, 17, 12)), null);
 });

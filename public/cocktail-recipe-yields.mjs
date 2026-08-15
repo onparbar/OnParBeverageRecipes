@@ -15,6 +15,11 @@ const recipeYieldDefinitions = [
     aliases: [],
   },
   {
+    sourceTitle: "Bacardi Sunset",
+    yieldOz: 1379.05,
+    aliases: [],
+  },
+  {
     sourceTitle: "Crown Apple 'rita(Whiskey)",
     yieldOz: 1471,
     aliases: ["CROWN APPLE 'RITA"],

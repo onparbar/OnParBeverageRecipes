@@ -101,7 +101,7 @@ async function getAccountCatalog(config) {
   return items;
 }
 
-async function searchGlobalBeerCatalog(query, config) {
+async function searchGlobalCatalog(query, config) {
   const payload = await fetchUntappd(`/items/search?q=${encodeURIComponent(query)}`, config);
   return payload.items || [];
 }
@@ -124,7 +124,7 @@ export async function GET(request) {
 
     const config = getUntappdConfig();
     const [globalItems, catalogItems] = await Promise.all([
-      kind === "beer" ? searchGlobalBeerCatalog(query, config) : Promise.resolve([]),
+      searchGlobalCatalog(query, config),
       kind === "liquor" ? getAccountCatalog(config) : Promise.resolve([]),
     ]);
     const items = buildUntappdSearchResults({
@@ -138,7 +138,7 @@ export async function GET(request) {
     return NextResponse.json({
       query,
       kind,
-      source: kind === "beer" ? "Untappd beer database" : "On Par Untappd menus",
+      source: kind === "beer" ? "Untappd beer database" : "On Par menus and Untappd spirit catalog",
       items,
     });
   } catch (error) {

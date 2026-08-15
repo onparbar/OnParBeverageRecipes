@@ -3,7 +3,6 @@ import { requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
 import { readParAgentState, writeParAgentState } from "../../../lib/par-agent.mjs";
 import {
   isRecommendationForOperatingWeek,
-  isRecommendationSourceRevisionCurrent,
 } from "../../../public/weekly-action-plan.mjs";
 import {
   applyStaffPrepPlanUpdate,
@@ -34,11 +33,6 @@ function getCurrentRecommendations(state) {
   const recommendations = state?.recommendations;
   if (!recommendations?.generatedAt) return null;
   if (!isRecommendationForOperatingWeek(recommendations.generatedAt, new Date())) return null;
-  if (!isRecommendationSourceRevisionCurrent(
-    state?.revision,
-    recommendations.sourceStateRevision,
-    recommendations.publishedStateRevision,
-  )) return null;
   return recommendations;
 }
 
