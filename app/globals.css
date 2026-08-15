@@ -7388,6 +7388,8 @@ td {
   .topbar-actions {
     width: 100%;
     align-items: stretch;
+    flex-wrap: wrap;
+    overflow-x: visible;
   }
 
   .global-search-trigger {
