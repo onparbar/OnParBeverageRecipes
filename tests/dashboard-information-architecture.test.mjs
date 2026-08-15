@@ -12,17 +12,27 @@ const [pageSource, dashboardSource, inventorySource, staffDashboardSource] = awa
 test("the owner dashboard is the initial page and recipes appear later in navigation", () => {
   const dashboardTab = pageSource.indexOf('data-tab="dashboard"');
   const operationsTab = pageSource.indexOf('data-tab="operations"');
-  const usageTab = pageSource.indexOf('data-tab="weekly-usage"');
-  const recipesTab = pageSource.indexOf('data-tab="recipes"');
-  const addTab = pageSource.indexOf('data-tab="add"');
+  const searchTab = pageSource.indexOf('data-tab="search"');
 
   assert.ok(dashboardTab >= 0);
   assert.ok(dashboardTab < operationsTab);
-  assert.ok(operationsTab < usageTab);
-  assert.ok(usageTab < recipesTab);
-  assert.ok(recipesTab < addTab);
+  assert.ok(operationsTab < searchTab);
+  assert.match(pageSource, /className="dashboard-menu dashboard-owner-only"/);
+  assert.match(pageSource, /data-menu-tab="weekly-usage"/);
+  assert.match(pageSource, /data-menu-tab="performance"/);
+  assert.match(pageSource, /data-menu-tab="recipes"/);
+  assert.match(pageSource, /data-menu-tab="add"/);
+  assert.match(pageSource, /data-menu-tab="pricing"/);
+  assert.match(pageSource, /data-menu-tab="ingredients"/);
+  assert.match(pageSource, /\["keg-levels", "Keg Levels"\],[\s\S]*\["inventory", "Inventory"\],[\s\S]*\["weekly-plan", "Weekly Plan"\]/);
   assert.match(pageSource, /className="panel is-active" id="dashboard-panel"/);
   assert.doesNotMatch(pageSource, /className="panel is-active" id="recipes-panel"/);
+  assert.match(pageSource, /id="performance-panel"/);
+  assert.match(pageSource, /id="onpar-insights"/);
+  assert.match(dashboardSource, /option value="sales"/);
+  assert.match(dashboardSource, /option value="profit"/);
+  assert.match(dashboardSource, /option value="twelve-weeks"/);
+  assert.doesNotMatch(dashboardSource, /data-order-draft-export/);
 });
 
 test("current and old recipes share one Recipes workspace", () => {

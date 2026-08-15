@@ -3,11 +3,9 @@
 import { useEffect, useState } from "react";
 
 const operationSections = [
-  ["weekly-plan", "Weekly Plan"],
   ["keg-levels", "Keg Levels"],
-  ["pricing", "Tap Pricing"],
-  ["ingredients", "Ingredient & Keg Costs"],
   ["inventory", "Inventory"],
+  ["weekly-plan", "Weekly Plan"],
 ];
 
 function OperationsBar({ context }) {
@@ -16,14 +14,14 @@ function OperationsBar({ context }) {
       <div className="operation-tabs" role="tablist" aria-label="Beverage operations sections">
         {operationSections.map(([id, label]) => (
           <button
-            className={`operation-tab${id === "weekly-plan" ? " is-active" : ""}`}
+            className={`operation-tab${id === "keg-levels" ? " is-active" : ""}`}
             id={`${context}-${id}-tab`}
             data-operation-tab={id}
             type="button"
             role="tab"
             aria-controls={`${id}-panel`}
-            aria-selected={id === "weekly-plan" ? "true" : "false"}
-            tabIndex={id === "weekly-plan" ? 0 : -1}
+            aria-selected={id === "keg-levels" ? "true" : "false"}
+            tabIndex={id === "keg-levels" ? 0 : -1}
             key={id}
           >
             {label}
@@ -104,19 +102,30 @@ export default function DashboardPage() {
   return (
     <div className="shell" data-dashboard-role={sessionRole}>
       <header className="topbar">
-        <div>
+        <div className="topbar-title-row">
           <h1>Beverage Dashboard</h1>
+          <a className="logout-link" href="/api/logout" aria-label={`Log out of the ${sessionRole} dashboard`}>Log out</a>
         </div>
         <div className="topbar-actions">
           <div className="top-actions dashboard-owner-only" aria-label="Dashboard sections">
             <button className="tab-button is-active" id="dashboard-tab" data-tab="dashboard" type="button">Dashboard</button>
             <button className="tab-button" id="operations-tab" data-tab="operations" type="button">Beverage Ops</button>
-            <button className="tab-button" id="weekly-usage-tab" data-tab="weekly-usage" type="button">Weekly Usage</button>
-            <button className="tab-button" id="recipes-tab" data-tab="recipes" data-recipe-view="current" type="button">Recipes</button>
-            <button className="tab-button" id="add-tab" data-tab="add" type="button">Add Product</button>
             <button className="tab-button" id="search-tab" data-tab="search" type="button">Search</button>
           </div>
-          <a className="logout-link" href="/api/logout" aria-label={`Log out of the ${sessionRole} dashboard`}>Log out</a>
+          <details className="dashboard-menu dashboard-owner-only">
+            <summary className="dashboard-menu-trigger" aria-label="Menu">
+              <span className="sr-only">Menu</span>
+              <span className="dashboard-menu-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+            </summary>
+            <div className="dashboard-menu-popover">
+              <button className="dashboard-menu-item" id="weekly-usage-tab" data-menu-tab="weekly-usage" type="button">Weekly Usage</button>
+              <button className="dashboard-menu-item" data-menu-tab="pricing" type="button">Tap Pricing</button>
+              <button className="dashboard-menu-item" data-menu-tab="ingredients" type="button">Ingredient &amp; Keg Costs</button>
+              <button className="dashboard-menu-item" id="recipes-tab" data-menu-tab="recipes" data-recipe-view="current" type="button">Recipes</button>
+              <button className="dashboard-menu-item" id="add-tab" data-menu-tab="add" type="button">Add Product</button>
+              <button className="dashboard-menu-item" data-menu-tab="performance" type="button">Performance</button>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -160,6 +169,12 @@ export default function DashboardPage() {
             </form>
             <p className="dashboard-data-search__feedback" id="dashboard-data-search-feedback" aria-live="polite"></p>
             <div className="dashboard-data-search__results" id="dashboard-data-search-results"></div>
+          </div>
+        </section>
+
+        <section className="panel" id="performance-panel" role="tabpanel" aria-label="Performance">
+          <div id="search-performance-view">
+            <section className="onpar-insights" id="onpar-insights" aria-labelledby="onpar-insights-title"></section>
           </div>
         </section>
 
@@ -226,7 +241,6 @@ export default function DashboardPage() {
         </section>
 
         <section className="panel" id="pricing-panel" role="tabpanel" aria-label="Tap Pricing">
-          <OperationsBar context="pricing" />
           <div className="toolbar">
             <label className="search-field">
               <span>Find recipe</span>
@@ -594,7 +608,6 @@ export default function DashboardPage() {
         </section>
 
         <section className="panel" id="ingredients-panel" role="tabpanel" aria-label="Ingredient and Keg Costs">
-          <OperationsBar context="ingredients" />
           <div className="toolbar">
             <label className="search-field">
               <span>Find pricing item</span>

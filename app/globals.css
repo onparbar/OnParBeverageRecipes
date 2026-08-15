@@ -158,6 +158,8 @@ select:disabled {
 }
 
 .topbar {
+  position: relative;
+  z-index: 100;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -171,6 +173,7 @@ select:disabled {
     rgba(255, 253, 247, 0.88);
   box-shadow: var(--shadow);
   backdrop-filter: blur(18px);
+  overflow: visible;
 }
 
 .topbar-actions {
@@ -180,6 +183,22 @@ select:disabled {
   gap: 10px;
   min-width: 0;
   overflow-x: auto;
+}
+
+.topbar-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.topbar-title-row .logout-link {
+  flex: 0 0 auto;
+}
+
+.topbar .topbar-actions {
+  width: 100%;
+  overflow: visible;
 }
 
 .global-search-trigger {
@@ -462,6 +481,88 @@ h1 {
   background: rgba(255, 253, 247, 0.72);
 }
 
+.dashboard-menu {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.dashboard-menu-trigger {
+  display: grid;
+  min-height: 42px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0 16px;
+  color: var(--ink);
+  background: rgba(255, 253, 247, 0.9);
+  cursor: pointer;
+  font-weight: 800;
+  list-style: none;
+}
+
+.dashboard-menu-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.dashboard-menu-trigger.is-active,
+.dashboard-menu[open] .dashboard-menu-trigger {
+  color: #fff;
+  background: var(--juniper);
+}
+
+.dashboard-menu-icon {
+  display: grid;
+  width: 22px;
+  gap: 4px;
+}
+
+.dashboard-menu-icon i {
+  display: block;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.dashboard-menu-popover {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  width: max-content;
+  min-width: 220px;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 7px;
+  background: var(--paper-strong);
+  box-shadow: var(--shadow);
+}
+
+.dashboard-menu-item {
+  min-height: 40px;
+  border: 0;
+  border-radius: 9px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 750;
+  text-align: left;
+}
+
+.dashboard-menu-item:hover,
+.dashboard-menu-item.is-active {
+  color: var(--juniper-dark);
+  background: rgba(31, 95, 84, 0.1);
+}
+
+#search-performance-view .onpar-insights {
+  border-radius: 18px;
+}
+
 .operations-bar {
   display: flex;
   align-items: flex-end;
@@ -556,35 +657,6 @@ h1 {
 
 .dashboard-activity__list span {
   color: var(--muted);
-}
-
-.pmb-reconciliation {
-  display: grid;
-  gap: 8px;
-  margin-top: 12px;
-  padding: 12px;
-  border: 1px solid rgba(31, 95, 84, 0.2);
-  background: rgba(241, 248, 244, 0.78);
-}
-
-.pmb-reconciliation p {
-  margin: 0;
-}
-
-.pmb-reconciliation__stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.pmb-reconciliation__stats span {
-  border: 1px solid rgba(31, 95, 84, 0.2);
-  border-radius: 999px;
-  padding: 4px 8px;
-  background: var(--paper-strong);
-  color: var(--juniper-dark);
-  font-size: 0.76rem;
-  font-weight: 750;
 }
 
 .dashboard-restore-preview {
@@ -7469,11 +7541,6 @@ td {
     flex-direction: column;
   }
 
-  .pmb-reconciliation__stats {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
-
   .form-header {
     align-items: stretch;
     flex-direction: column;
@@ -8002,24 +8069,12 @@ textarea:focus {
 .weekly-plan-provenance > div,
 .weekly-plan-stats > div,
 .weekly-plan-group,
-.pmb-reconciliation,
 .empty-state,
 .pmb-queue-item,
 .coming-soon-item {
   border-color: rgba(47, 107, 95, 0.12);
   border-radius: var(--friendly-radius);
   box-shadow: var(--soft-shadow);
-}
-
-.pmb-reconciliation {
-  padding: 16px;
-  background: linear-gradient(135deg, rgba(238, 248, 243, 0.92), rgba(255, 253, 248, 0.95));
-}
-
-.pmb-reconciliation__stats span {
-  border-color: rgba(47, 107, 95, 0.14);
-  padding: 6px 10px;
-  background: rgba(255, 253, 248, 0.92);
 }
 
 .empty-state,
@@ -8124,7 +8179,6 @@ tbody tr:hover {
   .weekly-plan-header,
   .weekly-plan-readiness,
   .weekly-plan-group,
-  .pmb-reconciliation,
   .empty-state,
   .pmb-queue-item,
   .coming-soon-item {

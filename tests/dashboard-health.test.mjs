@@ -118,7 +118,7 @@ test("deep health checks integrations in parallel without returning URLs", async
     now: new Date("2026-08-12T14:00:00Z"),
   });
 
-  assert.equal(requestedUrls.length, 6);
+  assert.equal(requestedUrls.length, 7);
   assert.equal(health.reachability.supabase.reachable, true);
   assert.equal(health.reachability.supabase.provisioned, true);
   assert.equal(health.reachability.pmb.reachable, false);

@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import {
+  readPmbLevelSnapshot,
+  savePmbLevelSnapshot,
+} from "../../../lib/pmb-level-snapshot-store.mjs";
 import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
 import {
   buildVerifiedKegSlotMap,
@@ -216,12 +220,33 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({
+    const snapshot = {
       updatedAt: new Date().toISOString(),
       items,
       deviceLevels,
-    });
+    };
+    let sharedSnapshotSaved = true;
+    try {
+      await savePmbLevelSnapshot(snapshot);
+    } catch {
+      sharedSnapshotSaved = false;
+    }
+
+    return NextResponse.json({ ...snapshot, stale: false, sharedSnapshotSaved });
   } catch (error) {
+    try {
+      const snapshot = await readPmbLevelSnapshot();
+      if (snapshot) {
+        return NextResponse.json({
+          ...snapshot,
+          stale: true,
+          degraded: true,
+          liveError: error.message || "Could not load live keg levels.",
+        });
+      }
+    } catch {
+      // The browser retains its local fallback when shared storage is unavailable.
+    }
     const status = Number(error?.status)
       || (/^Missing PMB_API_BASE_URL/.test(error?.message || "") ? 500 : 503);
     return NextResponse.json(

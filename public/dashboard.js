@@ -735,7 +735,8 @@ const MENU_ORDER = [
   ["WASHINGTON APPLE (CROWN ROYAL APPLE)", "Washington Apple (Whiskey)"],
   ["WHISKEY SOUR (JACK DANIELS)", "Whiskey Sour (Whiskey)"],
 ];
-const OPERATION_TAB_NAMES = ["weekly-plan", "keg-levels", "pricing", "ingredients", "inventory"];
+const OPERATION_TAB_NAMES = ["keg-levels", "inventory", "weekly-plan"];
+const MENU_TAB_NAMES = ["performance", "weekly-usage", "recipes", "add", "pricing", "ingredients"];
 const NEW_RECIPE_ORDER = [
   ["Bacardi Sunset", "Bacardi Sunset"],
   ["Whiskey Smash", "Whiskey Smash"],
@@ -1024,10 +1025,8 @@ let kegSyncMessage = "Refresh keg levels to pull current percentages from Pour M
 let kegSyncLoading = false;
 let kegSyncAttempted = false;
 let kegUpdatedAt = "";
+let kegLiveLevelsStale = false;
 let kegConfigUpdateRunning = false;
-let pmbReconciliationRunning = false;
-let pmbReconciliationReport = null;
-let pmbReconciliationMessage = "";
 let kegDeviceLevels = new Map();
 let kegTemplateAssignments = new Map();
 let parAgentState = null;
@@ -1105,7 +1104,7 @@ let sellerRankingCategory = "all";
 let sellerRankingMetric = "volume";
 let sellerRankingPeriod = "six-weeks";
 let sellerRankingListSize = 5;
-let activeOperationsTab = "weekly-plan";
+let activeOperationsTab = "keg-levels";
 let activeRecipeView = "current";
 let activeAddProductType = "cocktail";
 let globalSearchItems = [];
@@ -2826,6 +2825,29 @@ function bindEvents() {
       switchTab(button.dataset.tab);
     });
   });
+  document.querySelectorAll(".dashboard-menu-item").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.recipeView) switchRecipeView(button.dataset.recipeView);
+      switchTab(button.dataset.menuTab);
+      button.closest("details")?.removeAttribute("open");
+    });
+  });
+  document.querySelector("#onpar-insights")?.addEventListener("change", (event) => {
+    const category = event.target.closest("[data-seller-ranking-category]");
+    const wall = event.target.closest("[data-seller-ranking-wall]");
+    const listSize = event.target.closest("[data-seller-ranking-list-size]");
+    const period = event.target.closest("[data-seller-ranking-period]");
+    const metric = event.target.closest("[data-seller-ranking-metric]");
+    if (category) sellerRankingCategory = clean(category.value).toLowerCase() || "all";
+    if (wall) sellerRankingWall = clean(wall.value).toLowerCase() || "main";
+    if (listSize) sellerRankingListSize = Math.max(3, Math.min(25, Math.floor(toNumber(listSize.value) || 5)));
+    if (period) sellerRankingPeriod = clean(period.value).toLowerCase() || "six-weeks";
+    if (metric) {
+      const selectedMetric = clean(metric.value).toLowerCase();
+      sellerRankingMetric = ["sales", "profit"].includes(selectedMetric) ? selectedMetric : "volume";
+    }
+    renderOnParInsights();
+  });
   recipeViewButtons.forEach((button) => {
     button.addEventListener("click", () => switchRecipeView(button.dataset.recipeView));
     button.addEventListener("keydown", (event) => {
@@ -3068,6 +3090,7 @@ function confirmDashboardAction(title, details = [], warning = "") {
 function switchTab(tabName) {
   const requestedTab = tabName === "operations" ? activeOperationsTab : tabName;
   const isOperationTab = OPERATION_TAB_NAMES.includes(requestedTab);
+  const isMenuTab = MENU_TAB_NAMES.includes(requestedTab);
   if (isOperationTab) {
     activeOperationsTab = requestedTab;
   }
@@ -3075,6 +3098,14 @@ function switchTab(tabName) {
   document.querySelectorAll(".tab-button").forEach((button) => {
     const isActive = isOperationTab ? button.dataset.tab === "operations" : button.dataset.tab === requestedTab;
     button.classList.toggle("is-active", isActive);
+  });
+
+  document.querySelector(".dashboard-menu-trigger")?.classList.toggle("is-active", isMenuTab);
+  document.querySelectorAll(".dashboard-menu-item").forEach((button) => {
+    const isActive = button.dataset.menuTab === requestedTab;
+    button.classList.toggle("is-active", isActive);
+    if (isActive) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
   });
 
   document.querySelectorAll(".panel").forEach((panel) => {
@@ -3088,7 +3119,7 @@ function switchTab(tabName) {
     button.tabIndex = isActive ? 0 : -1;
   });
 
-  if (!isEmployeeDashboard && requestedTab === "weekly-usage" && !weeklyUsageSyncAttempted) {
+  if (!isEmployeeDashboard && ["weekly-usage", "performance"].includes(requestedTab) && !weeklyUsageSyncAttempted) {
     runPmbWeeklyUsageSync({ automatic: true });
   }
   if (!isEmployeeDashboard && ["weekly-plan", "keg-levels", "ingredients", "inventory"].includes(requestedTab) && !kegSyncAttempted) {
@@ -3114,6 +3145,7 @@ function render() {
   renderPmbPublishQueue();
   renderDashboardOverview();
   renderDashboardDataSearch();
+  renderOnParInsights();
   refreshGlobalSearchIndex();
 }
 
@@ -5006,41 +5038,6 @@ async function saveVendorOrderDraftAction(payload) {
   renderDashboardOverview();
 }
 
-function escapeCsvValue(value) {
-  const text = String(value ?? "");
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-function exportVendorOrderDraftCsv(draft) {
-  const headers = ["Vendor", "SKU", "Product", "Internal ID", "Line type", "Units", "Cases", "Pack size", "Unit cost", "Extended cost", "Reason", "Source date", "Substitutions"];
-  const rows = draft.lines.map((line) => [
-    draft.vendor,
-    line.vendorSku,
-    line.productName,
-    line.internalId,
-    line.lineType,
-    line.requestedUnits,
-    line.requestedCases ?? "",
-    line.packSize,
-    line.unitCost ?? "",
-    line.extendedCost ?? "",
-    line.reason,
-    line.sourceDate,
-    "Not allowed",
-  ]);
-  const csv = [headers, ...rows].map((row) => row.map(escapeCsvValue).join(",")).join("\n");
-  const blob = new Blob([`${csv}\n`], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${slugify(draft.vendor)}-order-draft-${clean(draft.generatedAt).slice(0, 10) || "current"}.csv`;
-  link.hidden = true;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
 function getWeeklyPlanTapContext(item, unit, { compact = false } = {}) {
   const taps = item.tapNumbers.length
     ? `Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.map(formatNumber).join(", ")}`
@@ -5273,6 +5270,8 @@ function getPmbKegLevelOverviewFeed() {
   const capturedCount = kegWallItems.filter((item) => getKegLiveRow(item)).length;
   const status = kegSyncLoading
     ? "loading"
+    : kegLiveLevelsStale
+      ? "offline"
     : kegUpdatedAt
       ? capturedCount < expectedCount
         ? "partial"
@@ -5557,17 +5556,19 @@ function getWeeklyUsageItemProfitRate(item) {
   return sellingRates[0] - costPerOz;
 }
 
-function renderSellerRankingList(rows, emptyMessage = "There is not enough saved PMB history for a visual pour list yet.") {
+function renderSellerRankingList(rows, metric, emptyMessage = "There is not enough saved PMB history for a seller list yet.") {
   if (!rows.length) {
-    return `<p class="dashboard-pulse-empty">${escapeHtml(emptyMessage)}</p>`;
+    return `<p class="onpar-ranking-empty">${escapeHtml(emptyMessage)}</p>`;
   }
-  const highestAverage = Math.max(...rows.map((row) => toNumber(row.averageWeeklyOz)), 1);
-  return `<ol class="dashboard-pulse-bars">${rows.map((row, index) => {
-    const width = Math.max(12, Math.round((toNumber(row.averageWeeklyOz) / highestAverage) * 100));
+  return `<ol class="onpar-ranking-list">${rows.map((row, index) => {
+    const average = metric === "volume" ? toNumber(row.averageWeeklyOz) : toNumber(row.averageWeeklyValue);
+    const value = metric === "volume" ? `${formatNumber(average)} oz` : money(average);
+    const location = [...(row.walls || []), ...(row.tapNumbers?.length ? [`Tap${row.tapNumbers.length === 1 ? "" : "s"} ${row.tapNumbers.join(", ")}`] : [])].join(" · ");
     return `
       <li>
-        <div><span>${String(index + 1).padStart(2, "0")}</span><strong>${escapeHtml(row.name)}</strong></div>
-        <span class="dashboard-pulse-bar" aria-hidden="true"><i style="--pulse-width: ${width}%"></i></span>
+        <span class="onpar-ranking-list__rank">${index + 1}</span>
+        <span class="onpar-ranking-list__product"><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(location || `${row.sampleWeekCount} recorded weeks`)}</small></span>
+        <span class="onpar-ranking-list__value">${escapeHtml(value)}</span>
       </li>`;
   }).join("")}</ol>`;
 }
@@ -5584,11 +5585,11 @@ function renderSellerRankingPeriod(period, { title, allTime, metric, emptyMessag
       </header>
       <div class="onpar-insights-period__body">
         <section class="onpar-ranking" aria-label="Top ${formatNumber(listSize)} sellers">
-          <div class="onpar-ranking__title"><h4>Top ${formatNumber(listSize)}</h4><span>${metric === "profit" ? "Avg est. profit" : "Avg poured volume"}</span></div>
+          <div class="onpar-ranking__title"><h4>Top ${formatNumber(listSize)}</h4><span>${metric === "sales" ? "Avg projected sales" : metric === "profit" ? "Avg projected profit" : "Avg poured volume"}</span></div>
           ${renderSellerRankingList(period.top, metric, emptyMessage)}
         </section>
         <section class="onpar-ranking" aria-label="Bottom ${formatNumber(listSize)} sellers">
-          <div class="onpar-ranking__title"><h4>Bottom ${formatNumber(listSize)}</h4><span>${metric === "profit" ? "Avg est. profit" : "Avg poured volume"}</span></div>
+          <div class="onpar-ranking__title"><h4>Bottom ${formatNumber(listSize)}</h4><span>${metric === "sales" ? "Avg projected sales" : metric === "profit" ? "Avg projected profit" : "Avg poured volume"}</span></div>
           ${renderSellerRankingList(period.bottom, metric, emptyMessage)}
         </section>
       </div>
@@ -5618,22 +5619,31 @@ function renderOhioComplianceAlert() {
 function renderOnParInsights() {
   const container = document.querySelector("#onpar-insights");
   if (!container || isEmployeeDashboard) return;
-  const recentWeekLimit = sellerRankingPeriod === "one-week" ? 1 : 6;
+  const recentWeekLimit = {
+    "one-week": 1,
+    "four-weeks": 4,
+    "six-weeks": 6,
+    "eight-weeks": 8,
+    "twelve-weeks": 12,
+  }[sellerRankingPeriod] || 6;
+  const isSalesRanking = sellerRankingMetric === "sales";
+  const isProfitRanking = sellerRankingMetric === "profit";
+  const isDollarRanking = isSalesRanking || isProfitRanking;
   const rankings = buildWeeklyUsageSellerRankings(
     [...weeklyUsageItems, ...weeklyUsageArchivedItems],
     {
       category: sellerRankingCategory,
       wall: sellerRankingWall,
-      metric: sellerRankingMetric,
+      metric: isDollarRanking ? "profit" : "volume",
       getFullOunces: getWeeklyUsageFullOunces,
-      getGrossProfitPerOz: getWeeklyUsageItemProfitRate,
+      getGrossProfitPerOz: isSalesRanking ? getWeeklyUsageItemSellingRate : getWeeklyUsageItemProfitRate,
       recentWeekLimit,
       topLimit: sellerRankingListSize,
       bottomLimit: sellerRankingListSize,
     },
   );
   const unavailableExactVolumeSamples = rankings.metricMetadata.unavailableExactVolumeSampleCount;
-  const profitCoverage = sellerRankingMetric === "profit"
+  const dollarCoverage = isDollarRanking
     ? [
         rankings.metricMetadata.unavailableItemCount
           ? `${formatNumber(rankings.metricMetadata.unavailableItemCount)} product${rankings.metricMetadata.unavailableItemCount === 1 ? "" : "s"} excluded because price, cost, or liquor portion economics could not be verified.`
@@ -5642,31 +5652,33 @@ function renderOnParInsights() {
           ? `${formatNumber(unavailableExactVolumeSamples)} saved sample${unavailableExactVolumeSamples === 1 ? "" : "s"} excluded because exact PMB ounces were unavailable.`
           : "",
         !rankings.metricMetadata.unavailableItemCount && !unavailableExactVolumeSamples
-          ? "All ranked products have verified current price, cost, and exact PMB ounces."
+          ? isProfitRanking
+            ? "All ranked products have verified current prices, costs, and exact PMB ounces."
+            : "All ranked products have verified current prices and exact PMB ounces."
           : "",
       ].filter(Boolean).join(" ")
     : "Exact PMB poured ounces; corporate-party pours remain included.";
   const identityCoverage = rankings.quality.unverifiedIdentityItemCount
     ? `${formatNumber(rankings.quality.unverifiedIdentityItemCount)} saved historical ${rankings.quality.unverifiedIdentityItemCount === 1 ? "product was" : "products were"} excluded because ${rankings.quality.unverifiedIdentityItemCount === 1 ? "its" : "their"} wall or drink type could not be verified.`
     : "";
-  const emptyMessage = sellerRankingMetric === "profit"
-    ? "No products in this filter have enough exact PMB usage plus verified current price and cost data."
+  const emptyMessage = isDollarRanking
+    ? isProfitRanking
+      ? "No products in this filter have enough exact PMB usage plus verified current pricing and costs."
+      : "No products in this filter have enough exact PMB usage and verified current pricing."
     : "No positive PMB poured usage is saved for this filter.";
   const periodRankings = sellerRankingPeriod === "all-time"
       ? rankings.allTime
       : rankings.recent;
-  const periodTitle = sellerRankingPeriod === "one-week"
-    ? "Latest saved week"
-    : sellerRankingPeriod === "all-time"
-      ? "All saved PMB weeks"
-      : "Last 6 saved weeks";
+  const periodTitle = sellerRankingPeriod === "all-time"
+    ? "All saved PMB weeks"
+    : recentWeekLimit === 1
+      ? "Latest saved week"
+      : `Last ${recentWeekLimit} saved weeks`;
 
   container.innerHTML = `
     <header class="onpar-insights__header">
       <div>
-        <p class="eyebrow">On Par insights</p>
-        <h2 id="onpar-insights-title">On Par performance</h2>
-        <p>Rankings use average weekly PMB usage, not GoTab sales. One wall is shown at a time, and missing weeks are never assumed to be zero.</p>
+        <h2 id="onpar-insights-title">Performance</h2>
       </div>
       <div class="onpar-insights__controls">
         <label class="select-field"><span>Drinks</span><select data-seller-ranking-category>
@@ -5685,22 +5697,25 @@ function renderOnParInsights() {
         </select></label>
         <label class="select-field"><span>Period</span><select data-seller-ranking-period>
           <option value="one-week"${sellerRankingPeriod === "one-week" ? " selected" : ""}>1 week</option>
+          <option value="four-weeks"${sellerRankingPeriod === "four-weeks" ? " selected" : ""}>4 weeks</option>
           <option value="six-weeks"${sellerRankingPeriod === "six-weeks" ? " selected" : ""}>6 weeks</option>
+          <option value="eight-weeks"${sellerRankingPeriod === "eight-weeks" ? " selected" : ""}>8 weeks</option>
+          <option value="twelve-weeks"${sellerRankingPeriod === "twelve-weeks" ? " selected" : ""}>12 weeks</option>
           <option value="all-time"${sellerRankingPeriod === "all-time" ? " selected" : ""}>All time</option>
         </select></label>
         <label class="select-field"><span>Rank by</span><select data-seller-ranking-metric>
           <option value="volume"${sellerRankingMetric === "volume" ? " selected" : ""}>Poured volume</option>
-          <option value="profit"${sellerRankingMetric === "profit" ? " selected" : ""}>Est. profit (today's rates)</option>
+          <option value="sales"${sellerRankingMetric === "sales" ? " selected" : ""}>Projected sales</option>
+          <option value="profit"${sellerRankingMetric === "profit" ? " selected" : ""}>Projected profit</option>
         </select></label>
       </div>
     </header>
-    ${renderOhioComplianceAlert()}
     <div class="onpar-insights__periods">
       ${renderSellerRankingPeriod(periodRankings, { title: periodTitle, allTime: sellerRankingPeriod === "all-time", metric: sellerRankingMetric, emptyMessage, listSize: sellerRankingListSize })}
     </div>
     <footer class="onpar-insights__footer">
-      <span>${escapeHtml([profitCoverage, identityCoverage].filter(Boolean).join(" "))}</span>
-      <span>${sellerRankingMetric === "profit" ? "Estimate uses today’s verified PMB price and current dashboard cost—not historical realized profit." : "Averages use only the weeks recorded for each product."}</span>
+      <span>${escapeHtml([dollarCoverage, identityCoverage].filter(Boolean).join(" "))}</span>
+      <span>${isProfitRanking ? "Projected profit uses today’s verified prices and current costs." : isSalesRanking ? "Projected sales use today’s verified PMB prices." : "Averages use only the weeks recorded for each product."}</span>
     </footer>`;
 }
 
@@ -6144,7 +6159,6 @@ function renderVendorOrderDraftWorkspace(plan, freshness) {
               <label class="vendor-order-draft-confirm"><input type="checkbox" data-order-draft-confirm${approved ? " checked disabled" : ""}><span>I confirm ${escapeHtml(draft.vendor)}, ${money(draft.estimatedTotal)}, and ${formatNumber(draft.lineCount)} order lines.</span></label>
               <div class="vendor-order-draft-actions">
                 <button class="ghost-button" type="button" data-order-draft-create${approved ? " disabled" : ""}>${saved.createdAt ? "Refresh draft" : "Create draft"}</button>
-                <button class="ghost-button" type="button" data-order-draft-export>Export CSV</button>
                 <button class="primary-button" type="submit"${approved || draft.blockers.length ? " disabled" : ""}>${approved ? `Approved by ${escapeHtml(saved.approvedBy)}` : "Approve draft"}</button>
               </div>
               <p class="vendor-order-draft-adapter">Submission adapter: disabled · Confirmation: ${escapeHtml(draft.confirmationRecipient)}</p>
@@ -6238,18 +6252,6 @@ function bindOwnerWeeklyOrderTrackingEvents() {
       }
       managerInput?.setCustomValidity("");
       await saveVendorOrderDraftAction({ action: "create-draft", vendor, createdBy });
-    });
-    form.querySelector("[data-order-draft-export]")?.addEventListener("click", () => {
-      const plan = getWeeklyPlanModel();
-      const freshness = getWeeklyPlanFreshness(plan);
-      const model = buildVendorOrderDrafts(plan, {
-        generatedAt: weeklyOrderTracking.generatedAt,
-        sourceDate: getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date())?.publishedAt || "",
-        freshness: freshness.readiness,
-        now: new Date(),
-      });
-      const draft = model.drafts.find((item) => item.vendor === vendor);
-      if (draft) exportVendorOrderDraftCsv(draft);
     });
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -6461,11 +6463,9 @@ function renderKegLevels() {
       <div class="sync-actions sync-actions--keg-primary">
         <button class="primary-button" id="refresh-keg-levels" type="button"${kegSyncLoading || kegConfigUpdateRunning ? " disabled" : ""}>${kegSyncLoading ? "Refreshing..." : "Refresh keg levels"}</button>
         <button class="ghost-button" id="send-keg-config-update" type="button"${kegSyncLoading || kegConfigUpdateRunning ? " disabled" : ""}>${kegConfigUpdateRunning ? "Sending..." : "Send config update"}</button>
-        <button class="ghost-button" id="run-pmb-reconciliation" type="button"${pmbReconciliationRunning ? " disabled" : ""}>${pmbReconciliationRunning ? "Checking..." : "PMB reconciliation"}</button>
         <button class="ghost-button keg-clear-on-hand-button" id="clear-keg-on-hand" type="button">Clear all on hand</button>
       </div>
       <p class="sync-status">${escapeHtml(kegSyncMessage)}${kegUpdatedAt ? ` Last updated ${escapeHtml(formatUpdatedAt(kegUpdatedAt))}.` : ""}</p>
-      ${renderPmbReconciliationReport()}
     </div>
     <div class="keg-summary-stats">
       <div class="summary-line"><span>Total taps</span><strong>${totalTaps}</strong></div>
@@ -6489,78 +6489,6 @@ function renderKegLevels() {
     .join("") + renderComingSoonBlock();
 
   bindKegLevelEvents();
-}
-
-function getPmbReconciliationKey(value) {
-  return normalizeTitle(value).replace(/[^a-z0-9]/g, "");
-}
-
-function renderPmbReconciliationReport() {
-  const report = pmbReconciliationReport;
-  if (!report) return pmbReconciliationMessage ? `<p class="sync-status">${escapeHtml(pmbReconciliationMessage)}</p>` : "";
-  return `
-    <div class="pmb-reconciliation" role="status">
-      <p><strong>Read-only PMB report</strong> · ${escapeHtml(report.checkedAt ? formatUpdatedAt(report.checkedAt) : "just now")}</p>
-      <div class="pmb-reconciliation__stats">
-        <span>${report.remoteCount} live PMB taps</span>
-        <span>${report.matchedCount} matched saved taps</span>
-        <span>${report.unmatchedSaved.length} saved tap${report.unmatchedSaved.length === 1 ? "" : "s"} not found</span>
-        <span>${report.unmatchedRemote.length} PMB tap${report.unmatchedRemote.length === 1 ? "" : "s"} not in saved list</span>
-        <span>${report.queueCount} queued product change${report.queueCount === 1 ? "" : "s"}</span>
-      </div>
-      ${report.unmatchedSaved.length || report.unmatchedRemote.length ? `<p class="sync-status">${escapeHtml([
-        report.unmatchedSaved.length ? `Saved only: ${report.unmatchedSaved.join(", ")}` : "",
-        report.unmatchedRemote.length ? `PMB only: ${report.unmatchedRemote.join(", ")}` : "",
-      ].filter(Boolean).join(" · "))}</p>` : `<p class="sync-status">Saved tap names match the current PMB tap list. No changes were made.</p>`}
-    </div>
-  `;
-}
-
-async function runPmbReconciliation() {
-  if (pmbReconciliationRunning) return;
-  pmbReconciliationRunning = true;
-  pmbReconciliationReport = null;
-  pmbReconciliationMessage = "Checking the current PMB tap list (read-only)...";
-  renderKegLevels();
-
-  try {
-    const response = await fetch("/api/keg-levels", {
-      cache: "no-store",
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-    });
-    const result = await parseJsonResponse(response);
-    if (!response.ok) throw new Error(result?.error || "Could not load the current PMB tap list.");
-    const remoteItems = Array.isArray(result.items) ? result.items : [];
-    const remoteKeys = new Set(remoteItems.map((item) => getPmbReconciliationKey(item.tapProduct || item.name)).filter(Boolean));
-    const savedItems = kegWallItems.filter((item) => clean(item.type).toLowerCase() !== "empty");
-    const savedKeys = new Set(savedItems.map((item) => getPmbReconciliationKey(item.brand || item.name)).filter(Boolean));
-    const unmatchedSaved = savedItems
-      .filter((item) => !remoteKeys.has(getPmbReconciliationKey(item.brand || item.name)))
-      .map((item) => clean(item.brand || item.name || item.tap))
-      .filter(Boolean);
-    const unmatchedRemote = remoteItems
-      .filter((item) => !savedKeys.has(getPmbReconciliationKey(item.tapProduct || item.name)))
-      .map((item) => clean(item.tapProduct || item.name || `PLU ${item.plu || "unknown"}`))
-      .filter(Boolean);
-    pmbReconciliationReport = {
-      checkedAt: result.updatedAt || new Date().toISOString(),
-      remoteCount: remoteItems.length,
-      matchedCount: Math.max(0, savedItems.length - unmatchedSaved.length),
-      unmatchedSaved,
-      unmatchedRemote,
-      queueCount: (() => {
-        const counts = getPmbPublishQueueCounts(pmbPublishQueue);
-        return counts.ready + counts.failed;
-      })(),
-    };
-    pmbReconciliationMessage = "";
-  } catch (error) {
-    pmbReconciliationMessage = getPmbConnectionErrorMessage(error, "Could not run the PMB reconciliation.");
-  } finally {
-    pmbReconciliationRunning = false;
-    renderKegLevels();
-  }
 }
 
 function renderComingSoonBlock() {
@@ -8156,7 +8084,7 @@ function renderKegWallBlock(wallName, items) {
               <th>Tap #</th>
               <th>Product</th>
               <th>Current level</th>
-              <th>Current value</th>
+              <th>Inventory value</th>
               <th>Tap price</th>
               <th>Avg weekly</th>
               <th>On hand</th>
@@ -9003,9 +8931,6 @@ function bindKegLevelEvents() {
   });
   document.querySelector("#refresh-keg-levels")?.addEventListener("click", () => {
     runKegLevelSync();
-  });
-  document.querySelector("#run-pmb-reconciliation")?.addEventListener("click", () => {
-    runPmbReconciliation();
   });
   document.querySelector("#send-keg-config-update")?.addEventListener("click", () => {
     runKegConfigUpdate();
@@ -10119,21 +10044,27 @@ async function runKegLevelSync() {
     }
 
     pmbCurrentTapSnapshot = selection.snapshot;
-    savePmbCurrentTapSnapshot();
     applyPmbCurrentTapSnapshot(pmbCurrentTapSnapshot);
-    const installedOnDeckItems = reconcileInstalledKegOnDeckProducts();
-    kegSyncMessage = installedOnDeckItems.length
-      ? `Found live levels for ${result.items?.length || 0} products. Removed ${installedOnDeckItems.map((entry) => `${entry.name} from On Deck on tap ${entry.tapNumber}`).join(", ")} because ${installedOnDeckItems.length === 1 ? "it is" : "they are"} now connected.`
-      : `Found live levels for ${result.items?.length || 0} products.`;
+    kegLiveLevelsStale = Boolean(result.stale);
+    const installedOnDeckItems = kegLiveLevelsStale ? [] : reconcileInstalledKegOnDeckProducts();
+    if (!kegLiveLevelsStale) savePmbCurrentTapSnapshot();
+    kegSyncMessage = kegLiveLevelsStale
+      ? `Last known taps and levels from ${formatUpdatedAt(kegUpdatedAt)}.`
+      : installedOnDeckItems.length
+        ? `Found live levels for ${result.items?.length || 0} products. Removed ${installedOnDeckItems.map((entry) => `${entry.name} from On Deck on tap ${entry.tapNumber}`).join(", ")} because ${installedOnDeckItems.length === 1 ? "it is" : "they are"} now connected.`
+        : `Found live levels for ${result.items?.length || 0} products.`;
     renderIngredients();
     renderPricing();
-    succeeded = true;
+    succeeded = !kegLiveLevelsStale;
   } catch (error) {
     const fallback = selectPmbCurrentTapSnapshot({
       fallback: pmbCurrentTapSnapshot,
       expectedTapNumbers: kegWallItems.map((item) => item.tapNumber),
     });
-    if (fallback.snapshot) applyPmbCurrentTapSnapshot(fallback.snapshot);
+    if (fallback.snapshot) {
+      applyPmbCurrentTapSnapshot(fallback.snapshot);
+      kegLiveLevelsStale = true;
+    }
     kegSyncMessage = fallback.snapshot
       ? "PMB unavailable. Showing last complete sync."
       : getPmbConnectionErrorMessage(error, "Could not load live keg levels.");
