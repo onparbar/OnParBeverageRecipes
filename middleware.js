@@ -5,6 +5,7 @@ import {
   getDashboardSessionRole,
 } from "./lib/dashboard-auth.mjs";
 import { isEmployeeAllowedDashboardRequest } from "./lib/dashboard-access.mjs";
+import { buildPublicUrl } from "./lib/public-request-url.mjs";
 
 async function getSessionRole(request) {
   const session = request.cookies.get(DASHBOARD_SESSION_COOKIE)?.value;
@@ -26,11 +27,11 @@ function isApiPath(pathname) {
 }
 
 function getPublicUrl(request, pathname) {
-  const url = request.nextUrl.clone();
-  url.pathname = pathname;
-  url.search = "";
-  url.hash = "";
-  return url;
+  return buildPublicUrl({
+    headers: request.headers,
+    fallbackUrl: request.nextUrl,
+    pathname,
+  });
 }
 
 function nextPrivateResponse() {
