@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import http from "node:http";
 import { POST as savePmbProduct } from "../pmb-products/route.js";
+import { requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
 import { getTapConfigRows as getVerifiedTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
 import {
   requireKegTargetIdentity,
@@ -435,13 +436,16 @@ function buildTapProductPayload(input, slot, sourceProduct) {
   };
 }
 
-async function saveProductOnTapPlu(productPayload) {
+async function saveProductOnTapPlu(productPayload, sourceRequest) {
+  const headers = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  const cookie = sourceRequest?.headers?.get("cookie");
+  if (cookie) headers.Cookie = cookie;
   const response = await savePmbProduct(new Request("http://localhost/api/pmb-products", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
+    headers,
     body: JSON.stringify(productPayload),
   }));
 
@@ -481,6 +485,7 @@ async function sendTargetedConfigUpdate(config, deviceId) {
 
 export async function POST(request) {
   try {
+    await requireDashboardRequestRole(request, { owner: true });
     const input = await request.json();
     const requestedTarget = requireKegTargetIdentity({
       plu: input.currentPlu || input.tap?.plu,
@@ -518,7 +523,7 @@ export async function POST(request) {
       });
     }
 
-    const productResult = await saveProductOnTapPlu(productPayload);
+    const productResult = await saveProductOnTapPlu(productPayload, request);
     const configUpdate = input.sendConfigUpdate === false
       ? null
       : await sendTargetedConfigUpdate(config, slot.deviceId);

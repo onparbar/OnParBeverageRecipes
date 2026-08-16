@@ -44,6 +44,8 @@ const prepList = document.querySelector("#staff-prep-list");
 const orderStatusPanel = document.querySelector("#staff-order-status");
 const orderSummary = document.querySelector("#staff-order-summary");
 const orderList = document.querySelector("#staff-order-list");
+const tapSheetStatus = document.querySelector("#staff-tap-sheet-status");
+const tapPrintWorkspace = document.querySelector("#staff-tap-print-workspace");
 const recipeViewButtons = [...document.querySelectorAll("[data-staff-recipe-view]")];
 const currentRecipeCount = document.querySelector("#staff-current-recipe-count");
 const inactiveRecipeCount = document.querySelector("#staff-inactive-recipe-count");
@@ -62,6 +64,8 @@ let recipes = [];
 let activeRecipeView = "current";
 let prepPlan = { available: false, generatedAt: "", items: [], completedCount: 0, totalCount: 0 };
 let orderTracking = { available: false, generatedAt: "", vendors: [], itemCount: 0, receivedCount: 0, notReceivedCount: 0 };
+let tapSheets = { available: false, updatedAt: "", onDeckAvailable: false, walls: [] };
+let activeTapSheetWall = "main";
 
 initStaffRecipes();
 
@@ -90,20 +94,23 @@ async function initStaffRecipes() {
       return;
     }
 
-    const [activeCsv, newCsv, sharedResult, prepResult, orderResult] = await Promise.all([
+    const [activeCsv, newCsv, sharedResult, prepResult, orderResult, tapSheetResult] = await Promise.all([
       fetchStaffRecipeCsv("active"),
       fetchStaffRecipeCsv("new"),
       fetchSharedRecipeUpdates(),
       fetchStaffPrepPlan(),
       fetchWeeklyOrderTracking(),
+      fetchStaffTapSheets(),
     ]);
     recipes = buildRecipeCollection(activeCsv, newCsv, sharedResult.recipes);
     prepPlan = prepResult;
     orderTracking = orderResult;
+    tapSheets = tapSheetResult;
     populateCategoryFilter();
     bindStaffRecipeEvents();
     renderStaffPrepPlan();
     renderWeeklyOrderTracking();
+    renderStaffTapSheets();
     renderStaffRecipes();
     renderStaffOverview();
     statusPanel.textContent = sharedResult.available
@@ -118,6 +125,10 @@ async function initStaffRecipes() {
     prepList.replaceChildren(createEmptyState("Ask a manager to check the dashboard service."));
     orderStatusPanel.dataset.state = "error";
     orderStatusPanel.textContent = "The weekly delivery checklist could not be loaded.";
+    if (tapSheetStatus) {
+      tapSheetStatus.dataset.state = "error";
+      tapSheetStatus.textContent = "Tap sheets could not be loaded.";
+    }
     orderList.setAttribute("aria-busy", "false");
     orderList.replaceChildren(createEmptyState("Ask a manager to check the dashboard service."));
     recipeGrid.setAttribute("aria-busy", "false");
@@ -243,6 +254,82 @@ async function fetchWeeklyOrderTracking() {
       message: error?.message || "The delivery checklist is unavailable.",
     };
   }
+}
+
+async function fetchStaffTapSheets() {
+  try {
+    const response = await fetch("/api/staff-tap-sheets", {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) throw new Error(result?.error || "Tap sheets are unavailable.");
+    return {
+      available: result?.available === true,
+      updatedAt: clean(result?.updatedAt),
+      onDeckAvailable: result?.onDeckAvailable === true,
+      walls: Array.isArray(result?.walls) ? result.walls : [],
+      message: clean(result?.message),
+    };
+  } catch (error) {
+    return { available: false, updatedAt: "", onDeckAvailable: false, walls: [], message: error?.message || "Tap sheets are unavailable." };
+  }
+}
+
+function escapeTapSheetHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function renderStaffTapSheetPage(wall) {
+  return `
+    <article class="tap-sheet-page${wall.key === activeTapSheetWall ? " is-print-target" : ""}" data-staff-tap-sheet="${escapeTapSheetHtml(wall.key)}"${wall.key === activeTapSheetWall ? "" : " hidden"}>
+      <header class="tap-sheet-header">
+        <div><span>On Par</span><h2>${escapeTapSheetHtml(wall.label)} Wall Taps</h2></div>
+        <strong>${wall.items.length} taps</strong>
+      </header>
+      <div class="tap-sheet-column-headings" aria-hidden="true"><span>Tap</span><span>Current</span><span>On Deck</span><span>Tap</span><span>Current</span><span>On Deck</span></div>
+      <div class="tap-sheet-grid">
+        ${wall.items.map((item) => `<div class="tap-sheet-row"><strong>${item.tapNumber}</strong><span>${escapeTapSheetHtml(item.product)}</span><span>${item.onDeck === null ? "Unavailable" : (escapeTapSheetHtml(item.onDeck) || "—")}</span></div>`).join("")}
+      </div>
+      <footer>Current and On Deck tap list · ${escapeTapSheetHtml(new Date().toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" }))}</footer>
+    </article>
+  `;
+}
+
+function renderStaffTapSheets() {
+  if (!tapPrintWorkspace || !tapSheetStatus) return;
+  if (!tapSheets.available || !tapSheets.walls.length) {
+    tapSheetStatus.textContent = tapSheets.message || "Tap sheets are unavailable.";
+    tapPrintWorkspace.replaceChildren();
+    tapPrintWorkspace.setAttribute("aria-busy", "false");
+    return;
+  }
+  if (!tapSheets.walls.some((wall) => wall.key === activeTapSheetWall)) activeTapSheetWall = tapSheets.walls[0].key;
+  tapSheetStatus.textContent = tapSheets.updatedAt ? `Updated ${new Date(tapSheets.updatedAt).toLocaleString()}` : "Current tap sheets";
+  tapPrintWorkspace.innerHTML = `
+    <section class="tap-print-workspace">
+      <div class="tap-print-toolbar">
+        <div class="tap-print-wall-tabs" role="tablist" aria-label="Tap wall">
+          ${tapSheets.walls.map((wall) => `<button class="${wall.key === activeTapSheetWall ? "is-active" : ""}" type="button" data-staff-tap-wall="${escapeTapSheetHtml(wall.key)}">${escapeTapSheetHtml(wall.label)}</button>`).join("")}
+        </div>
+        <button class="primary-button" type="button" data-staff-print-taps>Print</button>
+      </div>
+      <div class="tap-sheet-preview">${tapSheets.walls.map(renderStaffTapSheetPage).join("")}</div>
+    </section>
+  `;
+  tapPrintWorkspace.setAttribute("aria-busy", "false");
+}
+
+function printStaffTapSheet() {
+  document.body.classList.add("tap-sheet-printing");
+  window.addEventListener("afterprint", () => document.body.classList.remove("tap-sheet-printing"), { once: true });
+  window.print();
 }
 
 function normalizeOrderTracking(result = {}) {
@@ -905,10 +992,19 @@ function bindStaffSectionEvents() {
   overviewTargets.forEach((button) => {
     button.addEventListener("click", () => switchStaffSection(button.dataset.staffSectionTarget));
   });
+  tapPrintWorkspace?.addEventListener("click", (event) => {
+    const wallButton = event.target.closest("[data-staff-tap-wall]");
+    if (wallButton) {
+      activeTapSheetWall = wallButton.dataset.staffTapWall;
+      renderStaffTapSheets();
+      return;
+    }
+    if (event.target.closest("[data-staff-print-taps]")) printStaffTapSheet();
+  });
 }
 
 function switchStaffSection(section) {
-  const nextSection = ["overview", "prep", "recipes", "orders"].includes(section) ? section : "overview";
+  const nextSection = ["overview", "prep", "recipes", "orders", "taps"].includes(section) ? section : "overview";
   sectionTabButtons.forEach((button) => {
     const selected = button.dataset.staffSectionTab === nextSection;
     button.classList.toggle("is-active", selected);

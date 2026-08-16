@@ -1,6 +1,7 @@
 import { groupWeeklyPlanOrdersByVendor } from "./weekly-action-plan.mjs";
 
 const CONFIGURED_VENDORS = new Set(["Bonbright", "Heidelberg", "Proof", "OHLQ"]);
+const RETIRED_PRODUCT_PATTERN = /\b(?:breakfast stout|apple pucker)\b/i;
 
 function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -92,6 +93,9 @@ function buildDraftLine(item, vendor, sourceDate) {
   if (!internalId) blockers.push(issue("INTERNAL_ID_REQUIRED", "Internal product identity is missing."));
   if (!vendorSku) blockers.push(issue("VENDOR_SKU_REQUIRED", "Vendor SKU is missing."));
   if (!productName) blockers.push(issue("PRODUCT_NAME_REQUIRED", "Vendor product name is missing."));
+  if (RETIRED_PRODUCT_PATTERN.test(`${productName} ${item.name || ""}`)) {
+    blockers.push(issue("RETIRED_PRODUCT", "Retired products cannot be included in an order draft."));
+  }
   if (!sourceDate) blockers.push(issue("SOURCE_DATE_REQUIRED", "The locked source-data date is missing."));
   if (!Number.isInteger(quantity) || quantity <= 0) blockers.push(issue("ORDER_QUANTITY_INVALID", "Order quantity must be a positive whole number."));
   if (casePackaged && (!Number.isInteger(caseCount) || caseCount <= 0 || quantity !== caseCount * packSize)) {
@@ -241,7 +245,10 @@ export function buildVendorOrderDrafts(plan = {}, {
     if (!clean(generatedAt)) blockers.push(issue("LOCKED_PLAN_REQUIRED", "A locked Monday Weekly Plan is required."));
     if (["blocked", "stale"].includes(clean(freshness?.status).toLowerCase())) blockers.push(issue("SOURCE_DATA_NOT_READY", "Weekly Plan source data is blocked or stale."));
     lines.forEach((line) => blockers.push(...line.blockers));
-    if (vendor === "Proof" && estimatedTotal < proofMinimum) warnings.push(issue("PROOF_DELIVERY_FEE", `Proof subtotal is below $${proofMinimum}; no shelf-stable projected prep replacement can safely close the gap, so a delivery fee may apply.`));
+    const proofFee = vendor === "Proof" && estimatedTotal < proofMinimum
+      ? { threshold: proofMinimum, amount: null, configured: false }
+      : null;
+    if (proofFee) warnings.push(issue("PROOF_DELIVERY_FEE", `Proof subtotal is below $${proofMinimum}; no shelf-stable projected prep replacement can safely close the gap. The delivery-fee amount is not configured.`));
     if (proofTopUps.length) warnings.push(issue("PROOF_MINIMUM_TOP_UP", `${proofTopUps.length} shelf-stable Proof product${proofTopUps.length === 1 ? " was" : "s were"} added to replace projected cocktail prep usage and meet the $${proofMinimum} minimum.`));
     lines.forEach((line) => warnings.push(...line.warnings));
     return {
@@ -264,6 +271,7 @@ export function buildVendorOrderDrafts(plan = {}, {
         const [code, ...message] = entry.split("|");
         return issue(code, message.join("|"));
       }),
+      proofFee,
     };
   });
 

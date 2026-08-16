@@ -58,9 +58,11 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  let body = {};
+  let role = "owner";
   try {
-    const role = await requireOwner(request);
-    const body = await getBody(request);
+    role = await requireOwner(request);
+    body = await getBody(request);
     let state;
 
     switch (String(body.action || "")) {
@@ -91,18 +93,29 @@ export async function POST(request) {
         );
     }
 
+    const snapshotCapture = String(body.action || "") === "save-snapshot";
     recordDashboardActivity({
       area: "Inventory",
-      action: String(body.action || "updated"),
+      action: snapshotCapture ? "captured Monday snapshot" : String(body.action || "updated"),
       role,
       revision: state.revision,
-      summary: String(body.action || "") === "initialize" ? "Imported the initial shared inventory." : "Updated shared inventory data.",
+      summary: snapshotCapture
+        ? "Monday Inventory Snapshot captured from current verified sources."
+        : String(body.action || "") === "initialize" ? "Imported the initial shared inventory." : "Updated shared inventory data.",
     }).catch(() => {});
 
     return NextResponse.json(state, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
+    if (String(body.action || "") === "save-snapshot") {
+      recordDashboardActivity({
+        area: "Inventory",
+        action: "Monday snapshot blocked",
+        role,
+        summary: `Monday Inventory Snapshot was not changed. ${String(error?.code || "SNAPSHOT_CAPTURE_FAILED").slice(0, 80)}.`,
+      }).catch(() => {});
+    }
     return errorResponse(error);
   }
 }

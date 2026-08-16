@@ -193,3 +193,72 @@ test("receipt tracking requires the current plan and the employee name", () => {
     (error) => error.code === "RECEIVED_BY_REQUIRED",
   );
 });
+
+test("persists an idempotent reviewed, opened, and manually completed handoff", () => {
+  const mondayClock = () => new Date("2026-08-10T15:00:00.000Z");
+  let state = recommendations({
+    items: [{
+      key: "main-42-bud-light",
+      id: "bud-light",
+      actionType: "order",
+      isKegTap: true,
+      orderQty: 1,
+      orderProductName: "Bud Light",
+      vendor: "Heidelberg",
+      vendorSku: "HD-BUD-1",
+      vendorProductName: "Bud Light Half Barrel",
+      unitCost: 120,
+      tapNumber: 42,
+      wall: "Main",
+    }],
+  });
+  state.weeklyPlanSnapshot = createWeeklyPlanSnapshot({
+    generatedAt,
+    recommendations: state.items,
+    publishedAt: generatedAt,
+  });
+  state = applyWeeklyOrderTrackingUpdate(state, {
+    action: "create-draft",
+    generatedAt,
+    vendor: "Heidelberg",
+    createdBy: "Samantha",
+  }, { role: "owner", now: mondayClock });
+  let draft = buildWeeklyOrderTracking(state, mondayClock()).drafts[0];
+  assert.equal(draft.status, "ready_for_review");
+  state = applyWeeklyOrderTrackingUpdate(state, {
+    action: "approve-draft",
+    generatedAt,
+    vendor: "Heidelberg",
+    approvedBy: "Samantha",
+    confirmed: true,
+  }, { role: "owner", now: mondayClock });
+  draft = buildWeeklyOrderTracking(state, mondayClock()).drafts[0];
+  assert.equal(draft.status, "reviewed");
+  state = applyWeeklyOrderTrackingUpdate(state, {
+    action: "record-handoff",
+    generatedAt,
+    vendor: "Heidelberg",
+    draftId: draft.id,
+    event: "opened_vendor",
+  }, { role: "owner", now: mondayClock });
+  draft = buildWeeklyOrderTracking(state, mondayClock()).drafts[0];
+  assert.equal(draft.status, "opened_vendor");
+  const vendor = buildWeeklyOrderTracking(state, mondayClock()).vendors[0];
+  state = applyWeeklyOrderTrackingUpdate(state, {
+    action: "set-ordered",
+    generatedAt,
+    vendorId: vendor.id,
+    ordered: true,
+    orderedBy: "Samantha",
+  }, { role: "owner", now: mondayClock });
+  const completed = buildWeeklyOrderTracking(state, mondayClock()).drafts[0];
+  const repeated = applyWeeklyOrderTrackingUpdate(state, {
+    action: "set-ordered",
+    generatedAt,
+    vendorId: vendor.id,
+    ordered: true,
+    orderedBy: "Samantha",
+  }, { role: "owner", now: mondayClock });
+  assert.equal(completed.status, "manually_completed");
+  assert.equal(buildWeeklyOrderTracking(repeated, mondayClock()).drafts[0].completedAt, completed.completedAt);
+});

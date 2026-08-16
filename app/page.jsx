@@ -124,6 +124,7 @@ export default function DashboardPage() {
               <button className="dashboard-menu-item" id="recipes-tab" data-menu-tab="recipes" data-recipe-view="current" type="button">Recipes</button>
               <button className="dashboard-menu-item" id="add-tab" data-menu-tab="add" type="button">Add Product</button>
               <button className="dashboard-menu-item" data-menu-tab="performance" type="button">Performance</button>
+              <button className="dashboard-menu-item" data-menu-tab="print" type="button">Print</button>
             </div>
           </details>
         </div>
@@ -176,6 +177,10 @@ export default function DashboardPage() {
           <div id="search-performance-view">
             <section className="onpar-insights" id="onpar-insights" aria-labelledby="onpar-insights-title"></section>
           </div>
+        </section>
+
+        <section className="panel" id="print-panel" role="tabpanel" aria-label="Print">
+          <div id="tap-print-workspace"></div>
         </section>
 
         <section className="panel" id="recipes-panel" role="tabpanel" aria-labelledby="recipes-tab">

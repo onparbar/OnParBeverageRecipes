@@ -24,6 +24,7 @@ export default function StaffRecipePage() {
         <button className="staff-section-tab" data-staff-section-tab="prep" type="button" role="tab" aria-controls="staff-prep-panel" aria-selected="false" tabIndex={-1}>Cocktails to Make</button>
         <button className="staff-section-tab" data-staff-section-tab="recipes" type="button" role="tab" aria-controls="staff-recipes-panel" aria-selected="false" tabIndex={-1}>Recipes</button>
         <button className="staff-section-tab" data-staff-section-tab="orders" type="button" role="tab" aria-controls="staff-orders-panel" aria-selected="false" tabIndex={-1}>Orders to Receive</button>
+        <button className="staff-section-tab" data-staff-section-tab="taps" type="button" role="tab" aria-controls="staff-taps-panel" aria-selected="false" tabIndex={-1}>Tap Sheets</button>
       </nav>
 
       <main>
@@ -82,6 +83,17 @@ export default function StaffRecipePage() {
           </div>
           <div id="staff-order-summary" className="staff-prep-summary" aria-live="polite"></div>
           <div id="staff-order-list" className="staff-order-list" aria-busy="true"></div>
+        </section>
+
+        <section className="panel" id="staff-taps-panel" role="tabpanel" aria-labelledby="staff-taps-title" hidden>
+          <div className="staff-recipe-intro">
+            <div>
+              <p className="eyebrow">Cooler lists</p>
+              <h2 id="staff-taps-title">Tap sheets</h2>
+            </div>
+          </div>
+          <div id="staff-tap-sheet-status" className="staff-recipe-status" role="status" aria-live="polite">Loading tap sheets...</div>
+          <div id="staff-tap-print-workspace" aria-busy="true"></div>
         </section>
 
         <section className="panel" id="staff-recipes-panel" role="tabpanel" aria-labelledby="staff-recipes-title" hidden>

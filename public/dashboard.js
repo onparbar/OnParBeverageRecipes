@@ -1,4 +1,14 @@
 import {
+  getCanonicalTapDisplayName,
+  isRetiredProduct,
+  resolveCanonicalTap,
+} from "./canonical-tap-resolution.mjs";
+import {
+  buildAssistedOrderView,
+  copyAssistedOrderText,
+} from "./assisted-order-direct-ui.mjs";
+import { buildOrderRehearsalModel } from "./order-rehearsal.mjs";
+import {
   convertLegacyCaseCountToUnits,
   getCurrentMondayInventorySnapshot,
   getInventoryItemId,
@@ -164,6 +174,7 @@ const DASHBOARD_STATE_OUTBOX_STORAGE_KEY = "cocktail-dashboard-shared-state-outb
 const EMPLOYEE_SHARED_RECIPE_CACHE_STORAGE_KEY = "cocktail-dashboard-employee-shared-recipes";
 const OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY = "cocktail-dashboard-owner-login-sync-lock";
 const OWNER_LOGIN_SYNC_LOCK_MAX_AGE_MS = 2 * 60 * 1000;
+const ORDER_REHEARSAL_AVAILABLE = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
 const DASHBOARD_STATE_REQUEST_TIMEOUT_MS = 6000;
 const OPERATIONAL_SHARED_REQUEST_TIMEOUT_MS = 8000;
 const PAR_AGENT_RUN_REQUEST_TIMEOUT_MS = 30000;
@@ -736,7 +747,7 @@ const MENU_ORDER = [
   ["WHISKEY SOUR (JACK DANIELS)", "Whiskey Sour (Whiskey)"],
 ];
 const OPERATION_TAB_NAMES = ["keg-levels", "inventory", "weekly-plan"];
-const MENU_TAB_NAMES = ["performance", "weekly-usage", "recipes", "add", "pricing", "ingredients"];
+const MENU_TAB_NAMES = ["performance", "weekly-usage", "recipes", "add", "pricing", "ingredients", "print"];
 const NEW_RECIPE_ORDER = [
   ["Bacardi Sunset", "Bacardi Sunset"],
   ["Whiskey Smash", "Whiskey Smash"],
@@ -752,12 +763,14 @@ const STATIC_RECIPE_PRESENTATION = Object.freeze({
   }),
   "whiskey-smash": Object.freeze({
     canonicalTitle: "Whiskey Smash (Jim Beam)",
-  }),
-  "apple-jack-whiskey": Object.freeze({
-    canonicalTitle: "Apple Jack (Jack Fire)",
+    imageUrl: "/images/products/whiskey-smash-pmb.png",
   }),
   "on-par-tee": Object.freeze({
     canonicalTitle: "On Par Tee (Crown Royal)",
+    imageUrl: "/images/products/on-par-tee-pmb.png",
+  }),
+  "apple-jack-whiskey": Object.freeze({
+    canonicalTitle: "Apple Jack (Jack Fire)",
   }),
 });
 const CANONICAL_PRODUCT_DISPLAY_NAMES = Object.freeze({
@@ -783,6 +796,7 @@ const dashboardShell = document.querySelector(".shell");
 const dashboardRole = dashboardShell?.dataset.dashboardRole || "owner";
 const isEmployeeDashboard = dashboardRole === "employee";
 const dashboardOverview = document.querySelector("#dashboard-overview");
+const tapPrintWorkspace = document.querySelector("#tap-print-workspace");
 const recipeGrid = document.querySelector("#recipe-grid");
 const oldRecipeGrid = document.querySelector("#old-recipe-grid");
 const currentRecipesView = document.querySelector("#current-recipes-view");
@@ -1045,6 +1059,8 @@ let weeklyPlanGroupMode = "vendor";
 let weeklyOrderTracking = { available: false, generatedAt: "", drafts: [], vendors: [], itemCount: 0, receivedCount: 0, notReceivedCount: 0, notReceivedItems: [] };
 let weeklyOrderTrackingMessage = "Loading shared order tracking...";
 let weeklyOrderTrackingRefreshRunning = false;
+let orderRehearsalMode = false;
+let currentVendorOrderDraftViews = new Map();
 let dashboardStaffPrepPlan = { available: false, generatedAt: "", items: [], completedCount: 0, totalCount: 0 };
 let dashboardStaffPrepRefreshRunning = false;
 let activeKegAdjustKey = "";
@@ -1096,6 +1112,8 @@ let pricingAdvisorInputsByKey = new Map();
 let beverageNewsPayload = null;
 let beverageNewsLoading = false;
 let ohioComplianceAcknowledgement = {};
+let tapWallPrintAcknowledgements = {};
+let activeTapPrintWall = "main";
 let sellerRankingWall = "main";
 let dashboardPulseRankingMetric = "oz";
 // Kept for the detailed ranking renderer that remains available as a code-level
@@ -1529,7 +1547,10 @@ function getSharedDashboardConfigSnapshot() {
     recipes: getSharedDashboardRecipeSnapshot(),
     products: getSharedDashboardProductSnapshot(),
     monitoring: {
-      ohioComplianceAcknowledgement: cloneDashboardStateValue(ohioComplianceAcknowledgement),
+      ohioComplianceAcknowledgement: {
+        ...cloneDashboardStateValue(ohioComplianceAcknowledgement),
+        tapWallPrints: cloneDashboardStateValue(tapWallPrintAcknowledgements),
+      },
     },
   };
 }
@@ -1884,6 +1905,9 @@ function applySharedDashboardState(rawState) {
   ohioComplianceAcknowledgement = cloneDashboardStateValue(
     effectiveState.monitoring?.ohioComplianceAcknowledgement || {},
   );
+  tapWallPrintAcknowledgements = isPlainDashboardRecord(ohioComplianceAcknowledgement.tapWallPrints)
+    ? cloneDashboardStateValue(ohioComplianceAcknowledgement.tapWallPrints)
+    : {};
   mirrorSharedDashboardState(effectiveState);
   return state;
 }
@@ -2848,6 +2872,16 @@ function bindEvents() {
     }
     renderOnParInsights();
   });
+  tapPrintWorkspace?.addEventListener("click", (event) => {
+    const wallButton = event.target.closest("[data-tap-print-wall]");
+    if (wallButton) {
+      activeTapPrintWall = clean(wallButton.dataset.tapPrintWall).toLowerCase() || "main";
+      renderTapPrintWorkspace();
+      return;
+    }
+    const printButton = event.target.closest("[data-print-tap-wall]");
+    if (printButton) printTapWallSheet(printButton.dataset.printTapWall);
+  });
   recipeViewButtons.forEach((button) => {
     button.addEventListener("click", () => switchRecipeView(button.dataset.recipeView));
     button.addEventListener("keydown", (event) => {
@@ -3128,6 +3162,8 @@ function switchTab(tabName) {
   if (!isEmployeeDashboard && ["keg-levels", "pricing", "ingredients"].includes(requestedTab) && !tapPricingSyncAttempted) {
     runTapPricingSync();
   }
+  if (requestedTab === "dashboard") renderDashboardOverview();
+  if (requestedTab === "print") renderTapPrintWorkspace();
 }
 
 function render() {
@@ -3144,6 +3180,7 @@ function render() {
   renderOldRecipes();
   renderPmbPublishQueue();
   renderDashboardOverview();
+  renderTapPrintWorkspace();
   renderDashboardDataSearch();
   renderOnParInsights();
   refreshGlobalSearchIndex();
@@ -3232,7 +3269,8 @@ function getDashboardDataSearchPeriod(item, label, entries, sellingPricePerOz) {
 }
 
 function buildDashboardDataSearchItems() {
-  const sourceItems = [...weeklyUsageItems, ...weeklyUsageArchivedItems];
+  const sourceItems = [...weeklyUsageItems, ...weeklyUsageArchivedItems]
+    .filter((item) => !isRetiredProduct(item));
   const recentLabels = getWeeklyUsageHistoryHeaders(sourceItems).slice(0, 6);
   const latestLabel = recentLabels[0] || "";
 
@@ -3298,12 +3336,13 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
   }
 
   dashboardDataSearchResults.innerHTML = search.results.map((item) => {
+    const dollarsAvailable = Number.isFinite(Number(item.dollars)) && Number(item.dollars) > 0;
     const primaryValue = search.intent.metric === "dollars"
-      ? money(item.value)
+      ? dollarsAvailable ? money(item.value) : "Sales unavailable"
       : `${formatNumber(item.value)} oz`;
     const secondaryValue = search.intent.metric === "dollars"
       ? item.ounces === null ? "Sales estimate" : `${formatNumber(item.ounces)} oz poured`
-      : item.dollars === null ? "Poured volume" : `${money(item.dollars)} estimated sales`;
+      : dollarsAvailable ? `${money(item.dollars)} estimated sales` : "Sales unavailable";
     const wallLabel = item.wall ? `${normalizeTitle(item.wall)} wall` : "Historical";
     return `
       <article class="dashboard-data-search-result">
@@ -3409,7 +3448,9 @@ function refreshGlobalSearchIndex() {
     highlightId: `keg-price:${item.id}`,
   }));
 
-  const inventorySearchItems = inventoryItems.map((item) => ({
+  const inventorySearchItems = inventoryItems
+    .filter((item) => !isRetiredProduct(item))
+    .map((item) => ({
     id: `inventory:${item.id}`,
     kind: "inventory",
     title: item.name,
@@ -3429,7 +3470,7 @@ function refreshGlobalSearchIndex() {
     return {
       id: `tap:${itemKey}`,
       kind: "tap",
-      title: name || item.brand,
+      title: name,
       subtitle: `${item.wall} · Tap ${formatNumber(item.tapNumber)}`,
       section: "Keg Levels",
       searchText: [item.type, item.wall, `tap ${item.tapNumber}`, liveRow?.plu, liveRow?.productId],
@@ -3439,6 +3480,7 @@ function refreshGlobalSearchIndex() {
   });
 
   const usageItems = [...weeklyUsageItems, ...weeklyUsageArchivedItems]
+    .filter((item) => !isRetiredProduct(item))
     .filter((item) => (item.history || []).length || weeklyUsageItems.includes(item))
     .map((item, index) => ({
       id: `usage:${item.tapNumber || "history"}:${slugify(item.name)}:${index}`,
@@ -5038,6 +5080,31 @@ async function saveVendorOrderDraftAction(payload) {
   renderDashboardOverview();
 }
 
+async function saveVendorHandoffEvent(view, event) {
+  try {
+    const response = await fetch("/api/weekly-order-tracking", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "record-handoff",
+        generatedAt: weeklyOrderTracking.generatedAt,
+        draftId: view.order.id,
+        vendor: view.order.vendor,
+        event,
+      }),
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) throw new Error(result?.error || "The assisted-order status could not be saved.");
+    weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
+    weeklyOrderTrackingMessage = event === "opened_vendor" ? "Vendor handoff opened." : "Order list copied.";
+    await loadParAgentState();
+  } catch (error) {
+    weeklyOrderTrackingMessage = error?.message || "The assisted-order status could not be saved.";
+  }
+  renderWeeklyPlan();
+}
+
 function getWeeklyPlanTapContext(item, unit, { compact = false } = {}) {
   const taps = item.tapNumbers.length
     ? `Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.map(formatNumber).join(", ")}`
@@ -5371,6 +5438,52 @@ function renderDashboardCompletedPrep() {
   `;
 }
 
+function getMissingPriceAlerts() {
+  const missingTapPrices = [];
+  const missingCosts = [];
+  const seenTapPrices = new Set();
+  const seenCosts = new Set();
+  kegWallItems.forEach((item) => {
+    const liveRow = getKegLiveRow(item);
+    const resolution = getKegCanonicalResolution(item, liveRow);
+    const product = String(resolution.product?.name || "").trim();
+    if (!product || !resolution.operationallyVerified) return;
+    const pricing = getKegWallPricing(item, product);
+    const location = `${item.wall || "Wall"} tap ${item.tapNumber || "?"}`;
+    const productKey = product.toLowerCase();
+    if (!(Number(pricing.costPerOz) > 0) && !seenCosts.has(productKey)) {
+      seenCosts.add(productKey);
+      missingCosts.push(`${product} · ${location}`);
+    }
+    if (liveTapPricingUpdatedAt && liveRow && pricing.chargeAvailable !== true && !seenTapPrices.has(productKey)) {
+      seenTapPrices.add(productKey);
+      missingTapPrices.push(`${product} · ${location}`);
+    }
+  });
+  const alerts = [];
+  if (missingTapPrices.length) {
+    alerts.push({
+      id: "missing-tap-prices",
+      severity: "warning",
+      title: "Tap prices missing",
+      message: `${formatNumber(missingTapPrices.length)} current product${missingTapPrices.length === 1 ? " needs" : "s need"} a sell price.`,
+      details: missingTapPrices.slice(0, 10),
+      action: { label: "Open Tap Pricing", target: "pricing" },
+    });
+  }
+  if (missingCosts.length) {
+    alerts.push({
+      id: "missing-product-costs",
+      severity: "warning",
+      title: "Product costs missing",
+      message: `${formatNumber(missingCosts.length)} current product${missingCosts.length === 1 ? " needs" : "s need"} a cost.`,
+      details: missingCosts.slice(0, 10),
+      action: { label: "Open Costs", target: "ingredients" },
+    });
+  }
+  return alerts;
+}
+
 function renderDashboardOverview() {
   if (!dashboardOverview || isEmployeeDashboard) return;
   const plan = getWeeklyPlanModel();
@@ -5415,6 +5528,13 @@ function renderDashboardOverview() {
     recipes: { missingRecipeCount: recipeCoverage.missing.length },
     deferred: { cocktailIngredientNetting: true },
   }, { now: new Date() });
+  const tapPrintAlerts = getTapWallPrintAlerts();
+  const missingPriceAlerts = getMissingPriceAlerts();
+  overview.alerts = [...tapPrintAlerts, ...missingPriceAlerts, ...overview.alerts];
+  overview.alertCounts = {
+    ...overview.alertCounts,
+    warning: overview.alertCounts.warning + tapPrintAlerts.length + missingPriceAlerts.length,
+  };
   const leadingAlerts = overview.alerts.slice(0, 6);
 
   dashboardOverview.innerHTML = `
@@ -5981,10 +6101,150 @@ function getOhioComplianceView() {
 
 function saveOhioComplianceAcknowledgement(fingerprint) {
   ohioComplianceAcknowledgement = {
+    ...ohioComplianceAcknowledgement,
     fingerprint: clean(fingerprint),
     acknowledgedAt: new Date().toISOString(),
   };
   scheduleSharedDashboardStateSync("monitoring.ohioComplianceAcknowledgement");
+}
+
+function getTapWallPrintKey(value) {
+  return clean(value).toLowerCase().replace(/\s+/g, "-");
+}
+
+function getTapWallPrintLabel(value) {
+  const key = getTapWallPrintKey(value);
+  return key === "main" ? "Main" : key === "patio" ? "Patio" : key === "karaoke" ? "Karaoke" : normalizeTitle(value);
+}
+
+function hashTapWallPrintValue(value) {
+  let hash = 2166136261;
+  for (const character of String(value || "")) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function buildTapWallPrintSheets() {
+  const grouped = new Map();
+  kegWallItems.forEach((item) => {
+    const wallKey = getTapWallPrintKey(item.wall);
+    if (!wallKey) return;
+    if (!grouped.has(wallKey)) grouped.set(wallKey, []);
+    const liveRow = getKegLiveRow(item);
+    const onDeck = getKegOnDeckItem(item);
+    grouped.get(wallKey).push({
+      tapNumber: toNumber(item.tapNumber),
+      product: getKegDisplayBrand(item, liveRow) || clean(item.brand) || "Unassigned",
+      onDeck: clean(onDeck?.name),
+    });
+  });
+
+  const wallOrder = ["main", "patio", "karaoke"];
+  return [...grouped.entries()]
+    .map(([key, items]) => {
+      items.sort((left, right) => left.tapNumber - right.tapNumber);
+      const fingerprint = hashTapWallPrintValue(JSON.stringify({ version: 1, key, items }));
+      const acknowledgement = isPlainDashboardRecord(tapWallPrintAcknowledgements[key])
+        ? tapWallPrintAcknowledgements[key]
+        : {};
+      return {
+        key,
+        label: getTapWallPrintLabel(key),
+        items,
+        fingerprint,
+        printedAt: clean(acknowledgement.printedAt),
+        isCurrent: clean(acknowledgement.fingerprint) === fingerprint,
+      };
+    })
+    .sort((left, right) => {
+      const leftIndex = wallOrder.indexOf(left.key);
+      const rightIndex = wallOrder.indexOf(right.key);
+      return (leftIndex < 0 ? wallOrder.length : leftIndex) - (rightIndex < 0 ? wallOrder.length : rightIndex);
+    });
+}
+
+function getTapWallPrintAlerts() {
+  const changedSheets = buildTapWallPrintSheets().filter((sheet) => !sheet.isCurrent);
+  if (!changedSheets.length) return [];
+  return [{
+    id: "tap-wall-sheets-outdated",
+    severity: "warning",
+    title: "Tap sheets need printing",
+    message: changedSheets.map((sheet) => sheet.label).join(", ") + (changedSheets.length === 1 ? " has" : " have") + " a current or On Deck change.",
+    details: changedSheets.map((sheet) => sheet.label + ": print the current " + formatNumber(sheet.items.length) + "-tap sheet."),
+    action: { label: "Open Print", target: "print" },
+  }];
+}
+
+function formatTapWallPrintedAt(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not printed";
+  return "Printed " + date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function renderTapWallSheet(sheet) {
+  return `
+    <article class="tap-sheet-page${sheet.key === activeTapPrintWall ? " is-print-target" : ""}" data-tap-sheet="${escapeHtml(sheet.key)}"${sheet.key === activeTapPrintWall ? "" : " hidden"}>
+      <header class="tap-sheet-header">
+        <div><span>On Par</span><h2>${escapeHtml(sheet.label)} Wall Taps</h2></div>
+        <strong>${formatNumber(sheet.items.length)} taps</strong>
+      </header>
+      <div class="tap-sheet-column-headings" aria-hidden="true"><span>Tap</span><span>Current</span><span>On Deck</span><span>Tap</span><span>Current</span><span>On Deck</span></div>
+      <div class="tap-sheet-grid">
+        ${sheet.items.map((item) => `<div class="tap-sheet-row"><strong>${formatNumber(item.tapNumber)}</strong><span>${escapeHtml(item.product)}</span><span>${item.onDeck ? escapeHtml(item.onDeck) : "—"}</span></div>`).join("")}
+      </div>
+      <footer>Current and On Deck tap list · ${escapeHtml(new Date().toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" }))}</footer>
+    </article>
+  `;
+}
+
+function renderTapPrintWorkspace() {
+  if (!tapPrintWorkspace || isEmployeeDashboard) return;
+  const sheets = buildTapWallPrintSheets();
+  if (!sheets.length) {
+    tapPrintWorkspace.innerHTML = '<div class="empty-state">Tap list unavailable.</div>';
+    return;
+  }
+  if (!sheets.some((sheet) => sheet.key === activeTapPrintWall)) activeTapPrintWall = sheets[0].key;
+  const activeSheet = sheets.find((sheet) => sheet.key === activeTapPrintWall) || sheets[0];
+  tapPrintWorkspace.innerHTML = `
+    <section class="tap-print-workspace">
+      <header class="tap-print-toolbar">
+        <div><h2>Tap sheets</h2><p>${activeSheet.isCurrent ? formatTapWallPrintedAt(activeSheet.printedAt) : "Needs printing"}</p></div>
+        <button class="primary-button" type="button" data-print-tap-wall="${escapeHtml(activeSheet.key)}">Print ${escapeHtml(activeSheet.label)}</button>
+      </header>
+      <div class="tap-print-wall-tabs" role="tablist" aria-label="Wall to print">
+        ${sheets.map((sheet) => `<button class="${sheet.key === activeTapPrintWall ? "is-active" : ""}" type="button" role="tab" data-tap-print-wall="${escapeHtml(sheet.key)}" aria-selected="${sheet.key === activeTapPrintWall}">${escapeHtml(sheet.label)}${sheet.isCurrent ? "" : '<span aria-label="Needs printing">!</span>'}</button>`).join("")}
+      </div>
+      <div class="tap-sheet-preview">${sheets.map(renderTapWallSheet).join("")}</div>
+    </section>
+  `;
+}
+
+function printTapWallSheet(wallKey) {
+  const sheet = buildTapWallPrintSheets().find((entry) => entry.key === getTapWallPrintKey(wallKey));
+  if (!sheet) return;
+  activeTapPrintWall = sheet.key;
+  renderTapPrintWorkspace();
+  document.body.classList.add("tap-sheet-printing");
+  let printed = false;
+  try {
+    window.print();
+    printed = window.confirm("Did the " + sheet.label + " wall tap sheet print successfully?");
+  } finally {
+    document.body.classList.remove("tap-sheet-printing");
+  }
+  if (printed) {
+    tapWallPrintAcknowledgements = {
+      ...tapWallPrintAcknowledgements,
+      [sheet.key]: { fingerprint: sheet.fingerprint, printedAt: new Date().toISOString() },
+    };
+    scheduleSharedDashboardStateSync("monitoring.ohioComplianceAcknowledgement");
+  }
+  renderTapPrintWorkspace();
+  renderDashboardOverview();
 }
 
 function establishOhioComplianceBaselineIfNeeded() {
@@ -6113,6 +6373,7 @@ function renderWeeklyPlanReview(plan) {
 }
 
 function getVendorOrderDraftModel(plan, freshness) {
+  if (orderRehearsalMode) return buildOrderRehearsalModel();
   const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
   return buildVendorOrderDrafts(plan, {
     proofMinimumCandidates: buildProofPrepReplacementCandidates({
@@ -6130,14 +6391,33 @@ function getVendorOrderDraftModel(plan, freshness) {
   });
 }
 
+function renderAssistedOrderPanel(draft, saved) {
+  const view = buildAssistedOrderView(draft, saved, { rehearsal: orderRehearsalMode });
+  currentVendorOrderDraftViews.set(view.order.id, view);
+  const disabled = !view.order.actionsEnabled;
+  return `
+    <section class="assisted-order-handoff${orderRehearsalMode ? " assisted-order-handoff--rehearsal" : ""}" data-assisted-order-id="${escapeHtml(view.order.id)}">
+      <div class="assisted-order-handoff__header"><strong>Assisted order</strong><span class="assisted-order-handoff__status assisted-order-handoff__status--${escapeHtml(view.order.status)}">${escapeHtml(view.statusLabel)}</span></div>
+      <span class="assisted-order-handoff__summary">${formatNumber(view.order.lineCount)} line${view.order.lineCount === 1 ? "" : "s"} · ${money(view.order.expectedTotal)}</span>
+      <div class="assisted-order-handoff__actions">
+        <button class="assisted-order-handoff__button" type="button" data-assisted-order-copy="${escapeHtml(view.order.id)}"${disabled ? " disabled" : ""}>${escapeHtml(view.copyLabel)}</button>
+        ${view.vendorActionLabel ? `<button class="assisted-order-handoff__button" type="button" data-assisted-order-open="${escapeHtml(view.order.id)}"${disabled ? " disabled" : ""}>${escapeHtml(view.vendorActionLabel)}</button>` : ""}
+      </div>
+      <small class="assisted-order-handoff__note">${escapeHtml(view.note)}</small>
+    </section>
+  `;
+}
+
 function renderVendorOrderDraftWorkspace(plan, freshness) {
   const model = getVendorOrderDraftModel(plan, freshness);
-  const savedById = new Map((weeklyOrderTracking.drafts || []).map((draft) => [draft.id, draft]));
+  currentVendorOrderDraftViews = new Map();
+  const savedDrafts = orderRehearsalMode ? model.savedDrafts : weeklyOrderTracking.drafts;
+  const savedById = new Map((savedDrafts || []).map((draft) => [draft.id, draft]));
   if (!model.drafts.length) return "";
   return `
-    <section class="vendor-order-drafts" aria-labelledby="vendor-order-drafts-title">
+    <section class="vendor-order-drafts${orderRehearsalMode ? " vendor-order-drafts--rehearsal" : ""}" aria-labelledby="vendor-order-drafts-title">
       <header class="vendor-order-drafts__header">
-        <div><p class="eyebrow">Approval required</p><h2 id="vendor-order-drafts-title">Vendor Order Drafts</h2><p>Due Tuesday by 4 PM · no substitutions.</p></div>
+        <div><p class="eyebrow">${orderRehearsalMode ? "Rehearsal · no live actions" : "Approval required"}</p><h2 id="vendor-order-drafts-title">${orderRehearsalMode ? "Order Rehearsal" : "Vendor Order Drafts"}</h2><p>${orderRehearsalMode ? "Fixture data only." : "Due Tuesday by 4 PM · no substitutions."}</p></div>
         <div><strong>${escapeHtml(model.schedule.label)}</strong><span>${money(model.weeklyTotal)} known total</span></div>
       </header>
       <p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage || "Draft only · vendor submission disabled.")}</p>
@@ -6146,7 +6426,7 @@ function renderVendorOrderDraftWorkspace(plan, freshness) {
           const saved = savedById.get(draft.id) || {};
           const approved = Boolean(saved.approvedAt);
           return `
-            <form class="vendor-order-draft-card vendor-order-draft-card--${approved ? "approved" : draft.status}" data-vendor-order-draft="${escapeHtml(draft.vendor)}">
+            <form class="vendor-order-draft-card vendor-order-draft-card--${approved ? "approved" : draft.status}" data-vendor-order-draft="${escapeHtml(draft.vendor)}" data-vendor-order-draft-id="${escapeHtml(draft.id)}" data-vendor-order-draft-status="${escapeHtml(saved.status || draft.status)}">
               <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(draft.lineCount)} line${draft.lineCount === 1 ? "" : "s"} · ${money(draft.estimatedTotal)}</p></div><span>${approved ? "Approved" : draft.status === "blocked" ? "Blocked" : "Review"}</span></header>
               <div class="vendor-order-draft-lines">
                 ${draft.lines.map((line) => `<div><strong>${escapeHtml(line.productName)}</strong><span>${escapeHtml(line.vendorSku ? `SKU ${line.vendorSku}` : "SKU needed")} · ${line.requestedCases ? `${formatNumber(line.requestedCases)} case${line.requestedCases === 1 ? "" : "s"} / ` : ""}${formatNumber(line.requestedUnits)} unit${line.requestedUnits === 1 ? "" : "s"} · ${line.extendedCost ? money(line.extendedCost) : "Price needed"}</span><small>${escapeHtml(line.reason)}</small></div>`).join("")}
@@ -6161,7 +6441,8 @@ function renderVendorOrderDraftWorkspace(plan, freshness) {
                 <button class="ghost-button" type="button" data-order-draft-create${approved ? " disabled" : ""}>${saved.createdAt ? "Refresh draft" : "Create draft"}</button>
                 <button class="primary-button" type="submit"${approved || draft.blockers.length ? " disabled" : ""}>${approved ? `Approved by ${escapeHtml(saved.approvedBy)}` : "Approve draft"}</button>
               </div>
-              <p class="vendor-order-draft-adapter">Submission adapter: disabled · Confirmation: ${escapeHtml(draft.confirmationRecipient)}</p>
+              <p class="vendor-order-draft-adapter">${orderRehearsalMode ? "Simulation only · no external actions" : `Submission adapter: disabled · Confirmation: ${escapeHtml(draft.confirmationRecipient)}`}</p>
+              ${renderAssistedOrderPanel(draft, saved)}
             </form>
           `;
         }).join("")}
@@ -6222,6 +6503,32 @@ function renderOwnerWeeklyOrderTracking() {
 }
 
 function bindOwnerWeeklyOrderTrackingEvents() {
+  document.querySelectorAll("[data-assisted-order-copy]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const view = currentVendorOrderDraftViews.get(button.dataset.assistedOrderCopy);
+      if (!view?.order.actionsEnabled) return;
+      if (view.order.rehearsal) {
+        button.textContent = "Simulated";
+        return;
+      }
+      await copyAssistedOrderText(view.copyText);
+      await saveVendorHandoffEvent(view, "copied");
+    });
+  });
+  document.querySelectorAll("[data-assisted-order-open]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const view = currentVendorOrderDraftViews.get(button.dataset.assistedOrderOpen);
+      if (!view?.order.actionsEnabled) return;
+      if (view.order.rehearsal) {
+        button.textContent = "Simulated";
+        return;
+      }
+      if (!view.vendorPath) return;
+      window.open(view.vendorPath, "_blank", "noopener,noreferrer");
+      await saveVendorHandoffEvent(view, "opened_vendor");
+    });
+  });
+  if (orderRehearsalMode) return;
   document.querySelectorAll(".weekly-order-placed-form").forEach((form) => {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -6402,6 +6709,7 @@ function renderWeeklyPlan() {
         <p>${escapeHtml(updatedText)}</p>
       </div>
       <div class="weekly-plan-actions">
+        ${ORDER_REHEARSAL_AVAILABLE ? `<button class="ghost-button" id="toggle-order-rehearsal" type="button">${orderRehearsalMode ? "Exit Rehearsal" : "Rehearsal"}</button>` : ""}
         <button class="primary-button" id="run-weekly-plan-agent" type="button"${parAgentRunning || weeklyPlanUpdating || planLocked ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Locking..." : planLocked ? "Plan locked through Sunday" : "Lock Monday Plan"}</button>
         <label><span>Group purchases</span><select id="weekly-plan-group-mode"><option value="category"${weeklyPlanGroupMode === "category" ? " selected" : ""}>By category</option><option value="vendor"${weeklyPlanGroupMode === "vendor" ? " selected" : ""}>By vendor</option></select></label>
       </div>
@@ -6434,12 +6742,19 @@ function renderWeeklyPlan() {
         ${renderWeeklyPlanCocktailRows(plan.prep.cocktails)}
       </section>
     </div>
-    ${renderOwnerWeeklyOrderTracking()}
+    ${orderRehearsalMode ? "" : renderOwnerWeeklyOrderTracking()}
     ${renderVendorOrderDraftWorkspace(plan, freshness)}
     ${renderWeeklyPlanReview(plan)}
   `;
 
   document.querySelector("#run-weekly-plan-agent")?.addEventListener("click", runWeeklyPlanUpdate);
+  document.querySelector("#toggle-order-rehearsal")?.addEventListener("click", () => {
+    orderRehearsalMode = !orderRehearsalMode;
+    weeklyOrderTrackingMessage = orderRehearsalMode
+      ? "Rehearsal uses isolated fixture data."
+      : "Live Weekly Plan restored.";
+    renderWeeklyPlan();
+  });
   document.querySelector("#weekly-plan-group-mode")?.addEventListener("change", (event) => {
     weeklyPlanGroupMode = event.currentTarget.value === "vendor" ? "vendor" : "category";
     renderWeeklyPlan();
@@ -6551,6 +6866,9 @@ function renderComingSoonItem(item) {
           </div>
         ` : ""}
         <div class="coming-soon-controls">
+          <button class="mini-button activate-coming-soon-pmb" type="button"${item.pmbActiveAt || item.replacedAt ? " disabled" : ""}>${item.pmbActiveAt ? "Active on PMB" : "Make active on PMB"}</button>
+        </div>
+        <div class="coming-soon-controls">
           <label>
             <span>Replace tap</span>
             <select class="coming-soon-replace-select"${item.replacedAt ? " disabled" : ""}>
@@ -6592,7 +6910,6 @@ function renderComingSoonLiquorDetails(item) {
     item.producer ? `<span><b>${escapeHtml(item.producer)}</b> maker</span>` : "",
     item.style ? `<span><b>${escapeHtml(item.style)}</b></span>` : "",
     toNumber(item.abvPercent) ? `<span><b>${formatNumber(item.abvPercent)}%</b> ABV</span>` : "",
-    item.untappdId ? `<span><b>Untappd</b> #${escapeHtml(item.untappdId)}</span>` : "",
   ].filter(Boolean);
   return details.length ? `<div class="coming-soon-stats">${details.join("")}</div>` : "";
 }
@@ -8138,11 +8455,53 @@ function renderKegWallBlock(wallName, items) {
   `;
 }
 
-function getKegDisplayBrand(item, liveRow = null) {
+function getKegCanonicalResolution(item, liveRow = null) {
   const replacement = tapReplacementOverrides[getKegItemKey(item)];
-  if (replacement?.newBrand) return replacement.newBrand;
   const livePrice = getLiveTapPriceForKegWallItem(item, item?.brand);
-  return clean(liveRow?.name || liveRow?.tapProduct || livePrice?.name || item?.brand);
+  return resolveCanonicalTap({
+    physicalTapId: getKegItemKey(item),
+    wall: item?.wall,
+    tapNumber: item?.tapNumber,
+    managerOverride: replacement?.newBrand
+      ? {
+          productName: replacement.newBrand,
+          internalProductId: replacement.comingSoonId || replacement.productId,
+          category: replacement.newKind || item?.type,
+          updatedAt: replacement.updatedAt,
+          expiresAt: replacement.expiresAt,
+        }
+      : null,
+    live: livePrice && liveTapPricingUpdatedAt
+      ? {
+          verified: true,
+          productName: livePrice.name,
+          internalProductId: livePrice.productId || livePrice.plu,
+          category: item?.type,
+          updatedAt: liveTapPricingUpdatedAt,
+          price: livePrice.chargePerOz,
+          priceVerified: Boolean(livePrice.chargePerOz || getLiveTapPortions(livePrice).length),
+        }
+      : null,
+    snapshot: liveRow
+      ? {
+          verified: true,
+          productName: liveRow.name || liveRow.tapProduct,
+          internalProductId: liveRow.productId || liveRow.plu,
+          category: item?.type,
+          updatedAt: liveRow.updatedAt,
+          level: liveRow.fillLevelPercent,
+        }
+      : null,
+    configured: {
+      productName: item?.brand,
+      internalProductId: item?.id,
+      category: item?.type,
+    },
+  });
+}
+
+function getKegDisplayBrand(item, liveRow = null) {
+  return getCanonicalTapDisplayName(getKegCanonicalResolution(item, liveRow));
 }
 
 function renderTapChangeControls(item, liveRow, displayBrand = item.brand) {
@@ -8190,6 +8549,7 @@ function getKegWallPricing(item, displayBrand = item?.brand) {
     return {
       livePrice,
       costPerOz,
+      chargeAvailable: portions.length > 0 || Boolean(livePrice?.chargePerOz),
       chargeHtml: portions.length ? renderPortionList(portions) : livePrice?.chargePerOz ? money(livePrice.chargePerOz) : '<span class="inventory-order-zero">-</span>',
       marginHtml: portions.length && costPerOz
         ? renderPortionMarginList(portions, costPerOz)
@@ -8209,6 +8569,7 @@ function getKegWallPricing(item, displayBrand = item?.brand) {
     return {
       livePrice,
       costPerOz: pricing.costPerOz,
+      chargeAvailable: chargePerOz > 0,
       chargeHtml: chargePerOz ? money(chargePerOz) : '<span class="inventory-order-zero">-</span>',
       marginHtml: chargePerOz ? `${formatNumber(pricing.margin)}%` : '<span class="inventory-order-zero">-</span>',
     };
@@ -8225,6 +8586,7 @@ function getKegWallPricing(item, displayBrand = item?.brand) {
   return {
     livePrice,
     costPerOz,
+    chargeAvailable: chargePerOz > 0,
     chargeHtml: chargePerOz ? money(chargePerOz) : '<span class="inventory-order-zero">-</span>',
     marginHtml: chargePerOz && costPerOz ? `${formatNumber(margin)}%` : '<span class="inventory-order-zero">-</span>',
   };
@@ -8235,6 +8597,7 @@ function getUnmappedKegWallPricing(livePrice) {
   return {
     livePrice,
     costPerOz: 0,
+    chargeAvailable: portions.length > 0 || Boolean(livePrice?.chargePerOz),
     chargeHtml: portions.length ? renderPortionList(portions) : livePrice?.chargePerOz ? money(livePrice.chargePerOz) : '<span class="inventory-order-zero">-</span>',
     marginHtml: '<span class="inventory-order-zero">-</span>',
   };
@@ -8403,7 +8766,7 @@ function getComingSoonReplacementOptions() {
     .filter((item) => !item.replacedAt)
     .map((item) => ({
       value: `coming-soon:${item.id}`,
-      label: `${item.name} (${getComingSoonKindLabel(item.kind, { compact: true })})`,
+      label: item.name,
       name: item.name,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -9125,6 +9488,9 @@ function bindKegLevelEvents() {
     card.querySelector(".send-coming-soon-pmb")?.addEventListener("click", () => {
       sendComingSoonItemToPmb(id);
     });
+    card.querySelector(".activate-coming-soon-pmb")?.addEventListener("click", () => {
+      sendComingSoonItemToPmb(id, { activate: true });
+    });
     card.querySelector(".replace-coming-soon")?.addEventListener("click", () => {
       const tapKey = card.querySelector(".coming-soon-replace-select")?.value;
       replaceTapWithComingSoonItem(id, tapKey);
@@ -9216,12 +9582,14 @@ async function updateComingSoonMargin(id, marginValue) {
   runTapPricingSync();
 }
 
-async function sendComingSoonItemToPmb(id) {
+async function sendComingSoonItemToPmb(id, { activate = false } = {}) {
   const item = comingSoonItems.find((entry) => entry.id === id);
   if (!item) return null;
-  if (item.kind === "beer") return item;
 
-  const payload = buildPmbPayloadFromComingSoonItem(item);
+  const payload = {
+    ...buildPmbPayloadFromComingSoonItem(item),
+    ...(activate ? { isActive: true, isInUse: true, sendConfigUpdate: true } : {}),
+  };
   if (!payload.pricePerOz) {
     kegSyncMessage = `${item.name} needs a tap wall price before PMB product creation.`;
     renderKegLevels();
@@ -9229,17 +9597,18 @@ async function sendComingSoonItemToPmb(id) {
   }
 
   if (!confirmDashboardAction(
-    `${item.plu ? "Update" : "Create"} ${item.name} in Pour My Beer?`,
+    activate ? `Make ${item.name} active in Pour My Beer?` : `${item.plu ? "Update" : "Create"} ${item.name} in Pour My Beer?`,
     [
       item.plu ? `Existing PMB PLU: ${item.plu}` : "A new PMB product will be created.",
       `Charge: ${money(payload.pricePerOz)} / oz`,
       `Serving size: ${formatNumber(payload.servingOz)} oz`,
       payload.abvPercent ? `ABV: ${formatNumber(payload.abvPercent)}%` : "",
+      activate ? "The PMB configuration update will be sent." : "",
     ],
     "Review the product and price before continuing.",
   )) return null;
 
-  kegSyncMessage = `${item.plu ? "Updating" : "Creating"} ${item.name} in Pour My Beer...`;
+  kegSyncMessage = activate ? `Making ${item.name} active in Pour My Beer...` : `${item.plu ? "Updating" : "Creating"} ${item.name} in Pour My Beer...`;
   renderKegLevels();
 
   try {
@@ -9261,10 +9630,13 @@ async function sendComingSoonItemToPmb(id) {
       plu: toNumber(result.product?.plu || item.plu),
       pmbProductName: result.product?.name || item.name,
       pmbUpdatedAt: new Date().toISOString(),
+      ...(activate ? { pmbActiveAt: new Date().toISOString() } : {}),
     };
     comingSoonItems = comingSoonItems.map((entry) => (entry.id === id ? updatedItem : entry));
     saveComingSoonItems();
-    kegSyncMessage = result.message || `${item.name} was saved in Pour My Beer.`;
+    kegSyncMessage = activate
+      ? `${item.name} is active in Pour My Beer${result.configUpdateSent ? " and the configuration update was sent" : ""}.`
+      : result.message || `${item.name} was saved in Pour My Beer.`;
     render();
     runTapPricingSync();
     return updatedItem;
@@ -9282,13 +9654,13 @@ async function sendComingSoonItemToPmb(id) {
 function buildPmbPayloadFromComingSoonItem(item) {
   const imageUrl = clean(item.imageUrl);
   return {
-    productKind: item.kind === "beer" ? "beer" : "cocktail",
+    productKind: item.kind === "recipe" ? "cocktail" : item.kind,
     plu: toNumber(item.plu) || "",
     name: item.name,
     pricePerOz: toNumber(item.chargePerOz || item.pricePerOz),
-    servingOz: toNumber(item.pourOz) || 5.8,
+    servingOz: toNumber(item.pourOz) || (item.kind === "liquor" ? 1.5 : item.kind === "beer" ? 16 : 5.8),
     brewery: "On Par Entertainment",
-    style: item.kind === "beer" ? "Beer" : "Draft Cocktail",
+    style: item.kind === "beer" ? "Beer" : item.kind === "liquor" ? "Liquor" : "Draft Cocktail",
     abvPercent: toNumber(item.abvPercent),
     ibu: "0",
     kegOz: item.kind === "beer" ? toNumber(item.kegOz) || STANDARD_BEER_KEG_OZ : STANDARD_COCKTAIL_KEG_OZ,
@@ -9309,6 +9681,12 @@ function saveCustomBeerMargin(comingSoonId, targetMargin, pricePerOz) {
 
 async function replaceTapWithComingSoonItem(id, tapKey) {
   return replaceTapWithProduct(`coming-soon:${id}`, tapKey);
+}
+
+function getWallTapProductName(name, wall) {
+  const suffix = { main: "1", karaoke: "2", patio: "3" }[clean(wall).toLowerCase()];
+  const baseName = clean(name).replace(/\s+[123]$/, "");
+  return suffix && baseName ? `${baseName} ${suffix}` : baseName;
 }
 
 function buildTapReplacementTarget(details, item, replacementValue) {
@@ -9366,6 +9744,7 @@ async function replaceTapWithProduct(replacementValue, tapKey) {
   }
   const tapLabel = `${tap.wall} ${tap.tapNumber}`;
   const target = buildTapReplacementTarget(details, item, replacementValue);
+  target.name = getWallTapProductName(target.name, tap.wall);
   if (!confirmDashboardAction(
     `Change ${tapLabel} in Pour My Beer?`,
     [
@@ -11851,6 +12230,34 @@ function toggleInventoryRowEdit(id) {
 }
 
 async function saveInventorySnapshot() {
+  const now = new Date();
+  const easternWeekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+  }).format(now);
+  const recordCaptureEvent = async (event, code = "") => {
+    await fetch("/api/dashboard-activity", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ event, code }),
+    }).catch(() => {});
+  };
+  const failCapture = async (message, code) => {
+    inventorySharedSaving = false;
+    inventorySharedMessage = `Monday snapshot not saved: ${message}`;
+    await recordCaptureEvent("monday_snapshot_failed", code);
+    renderInventoryPanels();
+  };
+  if (easternWeekday !== "Mon") {
+    await failCapture("capture is available at any time on Monday Eastern.", "MONDAY_SNAPSHOT_DAY_REQUIRED");
+    return;
+  }
+  if (getCurrentMondayInventorySnapshot(inventoryHistory, now)) {
+    inventorySharedMessage = "This Monday snapshot is already saved.";
+    renderInventoryPanels();
+    return;
+  }
   if (!inventorySharedInitialized) {
     setInventorySharedStatus("Monday snapshots cannot be shared until the service computer completes the one-time inventory import.");
     return;
@@ -11860,28 +12267,28 @@ async function saveInventorySnapshot() {
     return;
   }
 
+  await recordCaptureEvent("monday_snapshot_attempt");
+
   setInventorySharedStatus("Checking Weekly Usage and PMB keg levels for the Monday snapshot...", true);
   const usageResult = await runPmbWeeklyUsageSync();
   if (!usageResult?.ok || !await flushPendingSharedWeeklyUsageSave()) {
-    inventorySharedSaving = false;
-    inventorySharedMessage = `Monday snapshot not saved: ${usageResult?.error || weeklyUsageSharedSaveError || "Weekly Usage could not be saved."}`;
-    renderInventoryPanels();
+    await failCapture(usageResult?.error || weeklyUsageSharedSaveError || "Weekly Usage could not be saved.", "WEEKLY_USAGE_NOT_READY");
     return;
   }
   if (!await flushPendingParAgentStateSync()) {
-    inventorySharedSaving = false;
-    inventorySharedMessage = "Monday snapshot not saved: backup/on-hand keg counts could not be saved.";
-    renderInventoryPanels();
+    await failCapture("backup/on-hand keg counts could not be saved.", "KEG_COUNTS_NOT_READY");
     return;
   }
   const levelsLoaded = await runKegLevelSync();
   const summary = getInventorySnapshotSummary();
   if (!levelsLoaded || summary.liveTapCount !== summary.tapCount) {
-    inventorySharedSaving = false;
-    inventorySharedMessage = levelsLoaded
-      ? `Monday snapshot not saved: PMB returned ${summary.liveTapCount} of ${summary.tapCount} configured taps. Refresh Keg Levels and try again.`
-      : `Monday snapshot not saved: ${kegSyncMessage}`;
-    renderInventoryPanels();
+    await failCapture(levelsLoaded
+      ? `PMB returned ${summary.liveTapCount} of ${summary.tapCount} configured taps. Refresh Keg Levels and try again.`
+      : kegSyncMessage, "PMB_LEVELS_NOT_READY");
+    return;
+  }
+  if (!liveTapPricingUpdatedAt) {
+    await failCapture("current PMB pricing has not been verified.", "PRICING_NOT_READY");
     return;
   }
 
@@ -11907,14 +12314,41 @@ async function saveInventorySnapshot() {
       }
     : null;
   if (!kegPlanSnapshot) {
-    inventorySharedSaving = false;
-    inventorySharedMessage = `Monday snapshot not saved: ${parAgentMessage || "keg and cocktail recommendations could not be calculated."}`;
-    renderInventoryPanels();
+    await failCapture(parAgentMessage || "keg and cocktail recommendations could not be calculated.", "RECOMMENDATIONS_NOT_READY");
     return;
   }
 
   const state = await runSharedInventoryAction(
-    { action: "save-snapshot", items: getInventorySnapshotItems(), summary, kegPlanSnapshot },
+    {
+      action: "save-snapshot",
+      items: getInventorySnapshotItems(),
+      summary,
+      kegPlanSnapshot,
+      reliableCapture: true,
+      captureMetadata: {
+        sourceFreshness: {
+          inventory: "current",
+          weeklyUsage: "current",
+          pmb: "verified",
+          pricing: "current",
+          recommendations: "current",
+        },
+        sourceRevisions: {
+          inventory: inventorySharedRevision,
+          weeklyUsage: weeklyUsageSharedRevision,
+          pmb: toNumber(parAgentState?.revision),
+          pricing: toNumber(parAgentState?.revision),
+          recommendations: toNumber(parAgentState?.revision),
+        },
+        sourceTimestamps: {
+          inventory: inventorySharedUpdatedAt,
+          weeklyUsage: weeklyUsageLastSyncAt,
+          pmb: kegUpdatedAt,
+          pricing: liveTapPricingUpdatedAt,
+          recommendations: parAgentState?.recommendations?.generatedAt,
+        },
+      },
+    },
     {
       successMessage: "Monday snapshot saved with bottle counts, keg levels, on-hand kegs, orders, and cocktail prep.",
       rebuild: true,

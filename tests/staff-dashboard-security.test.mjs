@@ -66,7 +66,7 @@ test("staff bundle communicates only with session, sanitized recipes, prep, and 
   assert.ok(literalApiPaths.some((path) => path.startsWith("/api/recipe-data")));
   assert.deepEqual(
     [...new Set(literalApiPaths.map((path) => path.split("?")[0]))].sort(),
-    ["/api/recipe-data", "/api/session", "/api/staff-prep-plan", "/api/weekly-order-tracking"],
+    ["/api/recipe-data", "/api/session", "/api/staff-prep-plan", "/api/staff-tap-sheets", "/api/weekly-order-tracking"],
   );
 });
 

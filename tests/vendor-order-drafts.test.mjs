@@ -92,10 +92,20 @@ test("builds an approval-ready vendor draft but keeps real submission disabled",
   assert.equal(draft.canApprove, true);
   assert.equal(draft.blockers.some((item) => item.code === "DELIVERY_LOCATION_REQUIRED"), false);
   assert.ok(draft.warnings.some((item) => item.code === "PROOF_DELIVERY_FEE"));
+  assert.deepEqual(draft.proofFee, { threshold: 350, amount: null, configured: false });
+  assert.match(draft.warnings.find((item) => item.code === "PROOF_DELIVERY_FEE").message, /not configured/);
 
   const adapter = getDisabledVendorOrderAdapter("Proof");
   assert.equal(adapter.enabled, false);
   await assert.rejects(adapter.submit(), (error) => error.code === "VENDOR_ORDER_SUBMISSION_DISABLED");
+});
+
+test("blocks retired products from vendor drafts", () => {
+  const result = buildVendorOrderDrafts(inventoryPlan({
+    name: "Breakfast Stout",
+    vendorProductName: "Breakfast Stout",
+  }), options);
+  assert.ok(result.drafts[0].blockers.some((item) => item.code === "RETIRED_PRODUCT"));
 });
 
 test("tops up Proof only with shelf-stable products justified by projected cocktail prep usage", () => {

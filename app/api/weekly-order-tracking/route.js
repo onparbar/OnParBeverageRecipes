@@ -67,6 +67,7 @@ export async function POST(request) {
       return jsonResponse(unavailablePlan(state), 409);
     }
     const body = await getBody(request);
+    const priorTracking = buildWeeklyOrderTracking(state.recommendations);
     const updatedRecommendations = applyWeeklyOrderTrackingUpdate(
       state.recommendations,
       body,
@@ -83,13 +84,25 @@ export async function POST(request) {
       expectedRevision: state.revision,
       role,
     });
-    if (["create-draft", "approve-draft"].includes(body.action)) {
+    if (["create-draft", "approve-draft", "record-handoff", "set-ordered"].includes(body.action)) {
+      const trackedVendor = String(
+        body.vendor
+        || priorTracking?.vendors?.find((vendor) => vendor.id === body.vendorId)?.vendor
+        || "Vendor",
+      ).slice(0, 80);
+      const action = body.action === "approve-draft"
+        ? "approved vendor draft"
+        : body.action === "create-draft"
+          ? "created vendor draft"
+          : body.action === "record-handoff"
+            ? body.event === "opened_vendor" ? "opened vendor handoff" : "copied vendor handoff"
+            : body.ordered === true ? "completed vendor order" : "updated vendor order";
       recordDashboardActivity({
         area: "Orders",
-        action: body.action === "approve-draft" ? "approved vendor draft" : "created vendor draft",
+        action,
         role,
         revision: saved.revision,
-        summary: `${String(body.vendor || "Vendor").slice(0, 80)} order draft ${body.action === "approve-draft" ? "approved" : "created"}; real submission remains disabled.`,
+        summary: `${trackedVendor} assisted-order status updated; real submission remains manual.`,
       }).catch(() => {});
     }
     return jsonResponse({

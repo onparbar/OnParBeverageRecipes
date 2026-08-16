@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import http from "node:http";
 import sharp from "sharp";
+import { requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
 import { fetchRemoteBuffer } from "../../../lib/safe-remote-fetch.mjs";
 
 export const runtime = "nodejs";
@@ -713,6 +714,7 @@ export async function POST(request) {
   const attempts = [];
 
   try {
+    await requireDashboardRequestRole(request, { owner: true });
     const input = await request.json();
     const config = getConfig();
     const token = await getAuthtoken(config);
