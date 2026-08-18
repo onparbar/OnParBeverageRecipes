@@ -4,6 +4,7 @@ import path from "node:path";
 import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
 import {
   buildCurrentTapAssignments,
+  expandTapPricingAssignments,
   getTapPricingRepresentativeAssignment,
 } from "../../../lib/tap-pricing-assignments.mjs";
 import { filterCurrentTapPricingItems } from "../../../public/keg-pricing-scope.mjs";
@@ -370,7 +371,7 @@ export async function GET() {
     );
 
     const items = filterCurrentTapPricingItems(products.json.productlist
-      .map((product) => {
+      .flatMap((product) => {
         const chargePerOz = getChargePerOz(product);
         const name = normalizeProductName(product.name);
         if (!name || !chargePerOz || /coming soon/i.test(name)) return null;
@@ -379,32 +380,30 @@ export async function GET() {
         const currentTap = getTapPricingRepresentativeAssignment(assignments);
         const fallbackTap = currentTap ? null : getMatchedTap(name, tapLookup);
         const matchedTap = currentTap || (fallbackTap && !occupiedTapNumbers.has(toNumber(fallbackTap.tapNumber)) ? fallbackTap : null);
-        const portions = matchedTap?.tapNumber && isLiquorTap(matchedTap.tapNumber)
-          ? itemPricesByPlu.get(plu) || []
-          : [];
-
-        return {
-          tapPosition: matchedTap?.tapNumber ?? null,
-          wall: matchedTap?.wall || "",
-          type: matchedTap?.type || "",
-          matchedBrand: matchedTap?.matchedBrand || matchedTap?.brand || "",
-          templateBrand: matchedTap?.templateBrand || matchedTap?.brand || "",
-          deviceId: currentTap?.deviceId ?? null,
-          lineNum: currentTap?.lineNum ?? null,
+        const physicalAssignments = expandTapPricingAssignments(assignments);
+        const visibleAssignments = physicalAssignments.length ? physicalAssignments : matchedTap ? [matchedTap] : [];
+        return visibleAssignments.map((assignment) => ({
+          tapPosition: assignment?.tapNumber ?? null,
+          wall: assignment?.wall || "",
+          type: assignment?.type || "",
+          matchedBrand: assignment?.matchedBrand || assignment?.brand || "",
+          templateBrand: assignment?.templateBrand || assignment?.brand || "",
+          deviceId: assignment?.deviceId ?? null,
+          lineNum: assignment?.lineNum ?? null,
           assignments,
           plu,
           name,
           chargePerOz,
-          portions,
+          portions: assignment?.tapNumber && isLiquorTap(assignment.tapNumber) ? itemPricesByPlu.get(plu) || [] : [],
           pricePerUnitCents: Number(product.price_per_unit || 0),
           happyHour1PerOz: Number(product.price_per_unit_happyhour1 || 0) / 100 || null,
           happyHour2PerOz: Number(product.price_per_unit_happyhour2 || 0) / 100 || null,
           volumeUnit: String(product.volume_unit || ""),
           isActive: Number(product.is_active || 0) === 1,
           isInUse: Number(product.is_in_use || 0) === 1,
-          isCurrentTap: Boolean(currentTap),
-          tapMatchSource: currentTap ? "pmb-tap-config" : matchedTap ? "template-fallback" : "",
-        };
+          isCurrentTap: physicalAssignments.length > 0,
+          tapMatchSource: physicalAssignments.length ? "pmb-tap-config" : matchedTap ? "template-fallback" : "",
+        }));
       })
       .filter(Boolean));
 

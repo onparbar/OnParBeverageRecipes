@@ -8419,3 +8419,80 @@ tbody tr:hover {
   min-width: 0;
   max-width: 100%;
 }
+
+.inventory-speech {
+  margin: 0 0 1rem;
+  border: 1px solid rgba(78, 104, 82, 0.22);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(245, 249, 242, 0.96), rgba(255, 250, 240, 0.94));
+  overflow: hidden;
+}
+
+.inventory-speech > summary {
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  font-weight: 750;
+  color: var(--ink, #253229);
+}
+
+.inventory-speech__body {
+  display: grid;
+  gap: 0.8rem;
+  padding: 0 1rem 1rem;
+}
+
+.inventory-speech textarea {
+  width: 100%;
+  min-height: 5.5rem;
+  resize: vertical;
+  border: 1px solid rgba(78, 104, 82, 0.28);
+  border-radius: 14px;
+  padding: 0.8rem;
+  background: rgba(255, 255, 255, 0.9);
+  font: inherit;
+}
+
+.inventory-speech__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.inventory-speech__review {
+  max-height: 25rem;
+}
+
+.inventory-speech__review select,
+.inventory-speech__review input {
+  min-width: 7rem;
+  max-width: 15rem;
+}
+
+@media (max-width: 720px) {
+  .inventory-speech__review table,
+  .inventory-speech__review tbody,
+  .inventory-speech__review tr,
+  .inventory-speech__review td {
+    display: block;
+    width: 100%;
+  }
+
+  .inventory-speech__review thead {
+    display: none;
+  }
+
+  .inventory-speech__review tr {
+    padding: 0.7rem;
+    border-bottom: 1px solid rgba(78, 104, 82, 0.18);
+  }
+
+  .inventory-speech__review td {
+    padding: 0.3rem 0;
+  }
+
+  .inventory-speech__review select,
+  .inventory-speech__review input {
+    width: 100%;
+    max-width: none;
+  }
+}

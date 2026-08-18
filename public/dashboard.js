@@ -137,6 +137,14 @@ import {
 import { buildVendorOrderDrafts } from "./vendor-order-drafts.mjs";
 import { buildProofPrepReplacementCandidates } from "./proof-prep-replacements.mjs";
 import { selectPmbCurrentTapSnapshot } from "./pmb-current-tap-snapshot.mjs";
+import { applyMappedInventoryPackageRule } from "./inventory-product-rules.mjs";
+import { getProductPriceAliases, normalizeProductPriceKey } from "./product-price-matching.mjs";
+import { haveKegLevelInputsChanged } from "./keg-level-state.mjs";
+import {
+  buildSpeechInventoryCatalog,
+  buildSpeechInventoryChanges,
+  parseInventoryTranscript,
+} from "./speech-inventory.mjs";
 
 const CSV_PATH = "./data/cocktail-recipes.csv";
 const NEW_COCKTAILS_CSV_PATH = "./data/new-cocktails.csv";
@@ -557,7 +565,7 @@ function normalizeKegVendorCatalogKey(value) {
   return String(value ?? "")
     .toLowerCase()
     .replace(/\([^)]*\)/g, " ")
-    .replace(/\s+[12]$/, "")
+    .replace(/\s+[123]$/, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
@@ -955,6 +963,12 @@ let inventoryItemOrder = loadInventoryItemOrder();
 let inventoryOnHandOverrides = loadInventoryOnHandOverrides();
 let inventoryParOverrides = loadInventoryParOverrides();
 let inventoryHistory = loadInventoryHistory();
+let inventorySpeechTranscript = "";
+let inventorySpeechProposals = [];
+let inventorySpeechMessage = "";
+let inventorySpeechListening = false;
+let inventorySpeechApplying = false;
+let inventorySpeechRecognition = null;
 let inventorySourceRows = [];
 let inventorySharedUpdatedAt = "";
 let inventorySharedMessage = "Loading shared inventory...";
@@ -4747,6 +4761,7 @@ function renderInventory() {
   renderInventoryStockTable(groupedItems);
   renderInventoryOrderTable(reorderItems);
   renderInventoryHistory();
+  renderInventorySpeechAssistant();
 }
 
 function getWeeklyPlanInventoryItems() {
@@ -8442,7 +8457,7 @@ function renderKegWallBlock(wallName, items) {
                     <td class="keg-value-cell">${currentValue > 0 ? money(currentValue) : '<span class="inventory-order-zero">-</span>'}</td>
                     <td class="keg-pricing-cell">${pricing.chargeHtml}</td>
                     <td class="keg-usage-cell">${formatKegWeeklyUsageAverage(item, displayBrand)}</td>
-                    <td><input class="inventory-input keg-input keg-on-hand-input" data-keg-field="onHand" data-keg-key="${escapeHtml(itemKey)}" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${escapeHtml(getKegOnHandEditorValue(onHand))}" placeholder="0" aria-label="On hand kegs for ${escapeHtml(displayBrand)}"></td>
+                    <td><input class="inventory-input keg-input keg-on-hand-input" data-keg-field="onHand" data-keg-key="${escapeHtml(itemKey)}" name="keg-on-hand-${escapeHtml(itemKey)}" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getKegOnHandEditorValue(onHand))}" placeholder="0" aria-label="On hand kegs for ${escapeHtml(displayBrand)}"></td>
                     <td class="keg-need-cell">${renderKegNeedCell(item, need)}</td>
                   </tr>`;
                 return `${mainRow}${activeKegAdjustKey === itemKey ? renderKegLevelAdjustRow(item, liveRow, displayBrand) : ""}`;
@@ -10013,6 +10028,14 @@ function restoreKegLevelsOutbox(result = {}) {
 async function loadParAgentState() {
   try {
     const result = await requestParAgentState();
+    if (parAgentStateOutbox && !haveKegLevelInputsChanged(result, parAgentStateOutbox.payload)) {
+      parAgentStateOutbox = null;
+      parAgentInputsChangedAt = "";
+      saveKegLevelsOutbox();
+      parAgentError = "";
+      applyParAgentState(result, { hydrate: true });
+      return;
+    }
     if (parAgentStateOutbox) {
       restoreKegLevelsOutbox(result);
       if (canSafelyRetryOperationalOutbox(parAgentStateOutbox, result.revision)) {
@@ -10154,6 +10177,16 @@ function getParAgentRecommendation(item) {
 }
 
 function scheduleParAgentStateSync({ immediate = false } = {}) {
+  const candidate = {
+    onHandOverrides: kegOnHandOverrides,
+    parOverrides: kegParOverrides,
+    onDeckOverrides: kegOnDeckOverrides,
+    settings: getParAgentSettings(),
+  };
+  if (!parAgentStateOutbox && !haveKegLevelInputsChanged(parAgentState, candidate)) {
+    parAgentInputsChangedAt = "";
+    return;
+  }
   parAgentInputsChangedAt = new Date().toISOString();
   parAgentStateMutationVersion += 1;
   const mutationVersion = parAgentStateMutationVersion;
@@ -11068,6 +11101,16 @@ function applyPendingInventoryActionLocally(payload) {
     case "reorder-items":
       inventoryItemOrder = Array.isArray(payload.itemOrder) ? [...new Set(payload.itemOrder)] : inventoryItemOrder;
       break;
+    case "batch-update-fields": {
+      (Array.isArray(payload.changes) ? payload.changes : []).forEach((change) => {
+        const target = change.field === "par" ? inventoryParOverrides : inventoryOnHandOverrides;
+        if (!change.id || !["onHand", "par"].includes(change.field)) return;
+        const value = clean(change.value);
+        if (value === "") delete target[change.id];
+        else target[change.id] = value;
+      });
+      break;
+    }
     case "restore-snapshot": {
       const snapshot = inventoryHistory.find((entry) => entry.id === payload.id);
       if (!snapshot) return;
@@ -11590,6 +11633,7 @@ function renderInventorySummary(visibleItems, reorderItems) {
     <div class="summary-line"><span>Reorder cost</span><strong>${money(reorderCost)}</strong></div>
     <div class="sync-panel inventory-actions-panel">
       <button class="primary-button" id="save-inventory-snapshot" type="button"${inventorySharedSaving || !inventorySharedInitialized ? " disabled" : ""}>${inventorySharedSaving ? "Saving..." : inventorySharedInitialized ? "Save Monday Snapshot" : "Shared setup required"}</button>
+      <button class="ghost-button" id="clear-inventory-on-hand" type="button"${inventorySharedSaving ? " disabled" : ""}>Clear on hand</button>
       ${inventorySharedProvisioned && !inventorySharedInitialized ? '<button class="ghost-button" id="initialize-shared-inventory" type="button">Import from service computer</button>' : ""}
       ${inventorySharedSaveError || !inventorySharedInitialized ? `<p class="sync-status">${escapeHtml(inventorySharedMessage)}</p>` : ""}
       <p class="sync-status">${latestSnapshot ? `Last snapshot: ${escapeHtml(formatInventorySnapshotLabel(getInventorySnapshotDate(latestSnapshot)))}` : "No snapshots yet"}</p>
@@ -11601,10 +11645,278 @@ function renderInventorySummary(visibleItems, reorderItems) {
 
 function bindInventorySummaryEvents() {
   document.querySelector("#save-inventory-snapshot")?.addEventListener("click", saveInventorySnapshot);
+  document.querySelector("#clear-inventory-on-hand")?.addEventListener("click", clearAllInventoryOnHand);
   document.querySelector("#initialize-shared-inventory")?.addEventListener(
     "click",
     initializeSharedInventoryFromServiceComputer,
   );
+}
+
+async function clearAllInventoryOnHand() {
+  const changes = inventoryItems.map((item) => ({ id: item.id, field: "onHand", value: "" }));
+  const populatedCount = inventoryItems.filter((item) => clean(item.onHandDisplay) !== "").length;
+  if (!changes.length || !confirmDashboardAction(
+    "Clear every Inventory on-hand field?",
+    [
+      `${changes.length} on-hand field${changes.length === 1 ? "" : "s"} will be cleared.`,
+      `${populatedCount} currently contain a value. Pars, prices, and snapshots stay unchanged.`,
+    ],
+    "Cleared fields remain blank until a new count is entered.",
+  )) return;
+  await runSharedInventoryAction(
+    { action: "batch-update-fields", changes, source: "clear-on-hand" },
+    { successMessage: "All Inventory on-hand fields were cleared.", rebuild: true },
+  );
+}
+
+function getInventorySpeechSourceItems() {
+  const inventorySources = inventoryItems.map((item) => ({
+    id: item.id,
+    name: item.name,
+    target: "inventory",
+    group: item.group,
+    unit: "units",
+    packSize: item.packSize,
+    aliases: [
+      item.linkedIngredientName,
+      item.vendorProduct?.productName,
+      ...(item.vendorProduct?.searchAliases || []),
+      normalizeTitle(item.name).includes("tito") ? "Titos" : "",
+      normalizeTitle(item.name).includes("buffalo trace") ? "Buffalo Trace" : "",
+      normalizeTitle(item.name).includes("fireball") ? "Fireball" : "",
+    ].filter(Boolean),
+  }));
+  const kegSources = kegWallItems.map((item) => {
+    const key = getKegItemKey(item);
+    const liveRow = getKegLiveRow(item);
+    const name = getKegDisplayBrand(item, liveRow);
+    return {
+      id: `keg:${key}`,
+      name,
+      target: "keg",
+      group: `${item.wall} tap ${formatNumber(item.tapNumber)}`,
+      wall: item.wall,
+      unit: "kegs",
+      packSize: 1,
+      aliases: [
+        item.brand,
+        liveRow?.name,
+        liveRow?.tapProduct,
+        `${item.wall} wall ${name}`,
+        normalizeTitle(name).includes("michelob ultra") ? "Michelob" : "",
+        normalizeTitle(name).includes("garage beer lime") ? "Garage Lime" : "",
+      ].filter(Boolean),
+    };
+  });
+  return [...inventorySources, ...kegSources];
+}
+
+function renderInventorySpeechAssistant() {
+  const assistant = document.querySelector("#inventory-speech-assistant");
+  if (!assistant) return;
+  const wasOpen = assistant.open || inventorySpeechListening || inventorySpeechProposals.length > 0;
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const catalog = buildSpeechInventoryCatalog(getInventorySpeechSourceItems());
+  const reviewRows = inventorySpeechProposals.map((proposal) => {
+    const selected = catalog.find((item) => item.id === proposal.matchedId);
+    const candidateIds = new Set(proposal.candidateIds || []);
+    const options = catalog
+      .filter((item) => !candidateIds.size || candidateIds.has(item.id) || item.id === proposal.matchedId)
+      .map((item) => `<option value="${escapeHtml(item.id)}"${item.id === proposal.matchedId ? " selected" : ""}>${escapeHtml(item.name)} · ${escapeHtml(item.group)}</option>`)
+      .join("");
+    return `
+      <tr data-speech-proposal-id="${escapeHtml(proposal.id)}">
+        <td>${escapeHtml(proposal.phrase)}</td>
+        <td>
+          <select class="speech-match-select" aria-label="Matched product for ${escapeHtml(proposal.phrase)}">
+            <option value="">${proposal.status === "skipped" ? "Skipped" : "Choose item"}</option>
+            ${options}
+          </select>
+          ${proposal.warning ? `<span class="table-note table-note--warning">${escapeHtml(proposal.warning)}</span>` : ""}
+        </td>
+        <td>${escapeHtml(selected?.group || proposal.group || "-")}</td>
+        <td><input class="inventory-input speech-quantity-input" type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" autocomplete="off" data-1p-ignore="true" data-lpignore="true" value="${Number.isFinite(Number(proposal.quantity)) ? escapeHtml(String(proposal.quantity)) : ""}" aria-label="Proposed quantity for ${escapeHtml(selected?.name || proposal.phrase)}"></td>
+        <td>${escapeHtml(selected?.unit || proposal.unit || "-")}</td>
+        <td>${escapeHtml(proposal.confidence || "review")}</td>
+        <td><button class="mini-button speech-remove-proposal" type="button">Remove</button></td>
+      </tr>`;
+  }).join("");
+  const applicableCount = buildSpeechInventoryChanges(inventorySpeechProposals).length;
+  assistant.innerHTML = `
+    <summary>Count by voice</summary>
+    <div class="inventory-speech__body">
+      <label>
+        <span class="sr-only">Spoken inventory transcript</span>
+        <textarea id="inventory-speech-transcript" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" placeholder="Guinness one, Modelo two, Garage Lime three">${escapeHtml(inventorySpeechTranscript)}</textarea>
+      </label>
+      <div class="inventory-speech__actions">
+        <button class="ghost-button" id="inventory-speech-listen" type="button"${SpeechRecognition ? "" : " disabled"}>${inventorySpeechListening ? "Stop" : "Speak"}</button>
+        <button class="primary-button" id="inventory-speech-review" type="button">Review</button>
+        <button class="ghost-button" id="inventory-speech-clear" type="button">Clear</button>
+      </div>
+      <p class="sync-status">${escapeHtml(inventorySpeechMessage || (SpeechRecognition ? "Nothing changes until you review and apply." : "Voice input is unavailable here. Type or paste the count instead."))}</p>
+      ${inventorySpeechProposals.length ? `
+        <div class="inventory-table-wrap inventory-speech__review">
+          <table class="inventory-table">
+            <thead><tr><th>Heard</th><th>Item</th><th>Location</th><th>Count</th><th>Unit</th><th>Match</th><th></th></tr></thead>
+            <tbody>${reviewRows}</tbody>
+          </table>
+        </div>
+        <button class="primary-button" id="inventory-speech-apply" type="button"${inventorySpeechApplying || !applicableCount ? " disabled" : ""}>${inventorySpeechApplying ? "Applying..." : `Apply ${applicableCount}`}</button>
+      ` : ""}
+    </div>`;
+  assistant.open = wasOpen;
+  bindInventorySpeechEvents(catalog);
+}
+
+function bindInventorySpeechEvents(catalog) {
+  const transcriptInput = document.querySelector("#inventory-speech-transcript");
+  transcriptInput?.addEventListener("input", () => {
+    inventorySpeechTranscript = transcriptInput.value;
+  });
+  document.querySelector("#inventory-speech-listen")?.addEventListener("click", () => {
+    if (inventorySpeechListening) stopInventorySpeechRecognition();
+    else startInventorySpeechRecognition();
+  });
+  document.querySelector("#inventory-speech-review")?.addEventListener("click", () => {
+    inventorySpeechTranscript = transcriptInput?.value || inventorySpeechTranscript;
+    const parsed = parseInventoryTranscript(inventorySpeechTranscript, getInventorySpeechSourceItems());
+    inventorySpeechProposals = parsed.proposals;
+    const needsReview = parsed.proposals.filter((proposal) => !["matched", "skipped"].includes(proposal.status)).length;
+    inventorySpeechMessage = parsed.proposals.length
+      ? `${parsed.proposals.length} count${parsed.proposals.length === 1 ? "" : "s"} found${needsReview ? ` · ${needsReview} to review` : ""}.`
+      : "No inventory counts were recognized.";
+    renderInventorySpeechAssistant();
+  });
+  document.querySelector("#inventory-speech-clear")?.addEventListener("click", () => {
+    stopInventorySpeechRecognition();
+    inventorySpeechTranscript = "";
+    inventorySpeechProposals = [];
+    inventorySpeechMessage = "";
+    renderInventorySpeechAssistant();
+  });
+  document.querySelectorAll("[data-speech-proposal-id]").forEach((row) => {
+    const proposal = inventorySpeechProposals.find((entry) => entry.id === row.dataset.speechProposalId);
+    if (!proposal) return;
+    row.querySelector(".speech-match-select")?.addEventListener("change", (event) => {
+      const match = catalog.find((item) => item.id === event.currentTarget.value);
+      if (!match) {
+        proposal.status = "unmatched";
+        proposal.matchedId = "";
+        return;
+      }
+      Object.assign(proposal, {
+        status: "matched",
+        matchedId: match.id,
+        matchedName: match.name,
+        target: match.target,
+        group: match.group,
+        unit: match.unit,
+        confidence: "confirmed",
+        warning: "",
+      });
+      renderInventorySpeechAssistant();
+    });
+    row.querySelector(".speech-quantity-input")?.addEventListener("input", (event) => {
+      const value = Number(event.currentTarget.value);
+      proposal.quantity = Number.isFinite(value) && value >= 0 ? value : null;
+    });
+    row.querySelector(".speech-remove-proposal")?.addEventListener("click", () => {
+      inventorySpeechProposals = inventorySpeechProposals.filter((entry) => entry.id !== proposal.id);
+      renderInventorySpeechAssistant();
+    });
+  });
+  document.querySelector("#inventory-speech-apply")?.addEventListener("click", applyReviewedInventorySpeechChanges);
+}
+
+function startInventorySpeechRecognition() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition || inventorySpeechListening) return;
+  inventorySpeechRecognition = new SpeechRecognition();
+  inventorySpeechRecognition.lang = "en-US";
+  inventorySpeechRecognition.continuous = true;
+  inventorySpeechRecognition.interimResults = false;
+  inventorySpeechRecognition.onresult = (event) => {
+    const additions = [];
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      if (event.results[index].isFinal) additions.push(event.results[index][0].transcript);
+    }
+    if (additions.length) inventorySpeechTranscript = [inventorySpeechTranscript, ...additions].filter(Boolean).join(", ");
+    renderInventorySpeechAssistant();
+  };
+  inventorySpeechRecognition.onerror = (event) => {
+    inventorySpeechMessage = event.error === "not-allowed" ? "Microphone permission was not granted." : "Voice input stopped. You can continue in the text box.";
+  };
+  inventorySpeechRecognition.onend = () => {
+    inventorySpeechListening = false;
+    inventorySpeechRecognition = null;
+    renderInventorySpeechAssistant();
+  };
+  inventorySpeechListening = true;
+  inventorySpeechMessage = "Listening...";
+  inventorySpeechRecognition.start();
+  renderInventorySpeechAssistant();
+}
+
+function stopInventorySpeechRecognition() {
+  inventorySpeechRecognition?.stop();
+  inventorySpeechListening = false;
+}
+
+async function applyReviewedInventorySpeechChanges() {
+  const changes = buildSpeechInventoryChanges(inventorySpeechProposals);
+  const inventoryChanges = changes.filter((change) => change.target === "inventory");
+  const kegChanges = changes.filter((change) => change.target === "keg");
+  if (!changes.length || inventorySpeechApplying) return;
+  if (inventoryChanges.length && !inventorySharedInitialized) {
+    inventorySpeechMessage = "Shared Inventory must be available before applying these counts.";
+    renderInventorySpeechAssistant();
+    return;
+  }
+  if (kegChanges.length && !parAgentState?.initialized) {
+    inventorySpeechMessage = "Shared Keg Levels must be available before applying these counts.";
+    renderInventorySpeechAssistant();
+    return;
+  }
+  if (!confirmDashboardAction(
+    `Apply ${changes.length} reviewed count${changes.length === 1 ? "" : "s"}?`,
+    [
+      `${inventoryChanges.length} Inventory field${inventoryChanges.length === 1 ? "" : "s"}.`,
+      `${kegChanges.length} Keg Levels field${kegChanges.length === 1 ? "" : "s"}.`,
+    ],
+    "Only the reviewed on-hand values will change.",
+  )) return;
+  inventorySpeechApplying = true;
+  inventorySpeechMessage = "Applying reviewed counts...";
+  renderInventorySpeechAssistant();
+  try {
+    if (inventoryChanges.length) {
+      const saved = await runSharedInventoryAction({
+        action: "batch-update-fields",
+        source: "speech",
+        changes: inventoryChanges.map((change) => ({ id: change.id, field: "onHand", value: change.value })),
+      }, { successMessage: "Reviewed Inventory counts saved.", rebuild: true });
+      if (!saved) throw new Error("Inventory counts did not finish saving.");
+    }
+    if (kegChanges.length) {
+      kegChanges.forEach((change) => {
+        const key = change.id.replace(/^keg:/, "");
+        kegOnHandOverrides[key] = change.value;
+      });
+      saveKegOnHandOverrides();
+      scheduleParAgentStateSync({ immediate: true });
+      const saved = await flushPendingParAgentStateSync();
+      if (!saved) throw new Error("Keg Levels counts did not finish saving.");
+    }
+    inventorySpeechTranscript = "";
+    inventorySpeechProposals = [];
+    inventorySpeechMessage = `${changes.length} reviewed count${changes.length === 1 ? "" : "s"} applied.`;
+  } catch (error) {
+    inventorySpeechMessage = `${error.message} The reviewed list is still here for retry.`;
+  } finally {
+    inventorySpeechApplying = false;
+    renderInventory();
+  }
 }
 
 function renderInventoryStockTable(groupedItems) {
@@ -11977,8 +12289,8 @@ function createInventoryRow(item, mode) {
     : '<span class="inventory-order-zero">Price needed</span>';
   row.innerHTML = `
     <td><strong>${escapeHtml(item.name)}</strong>${item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${item.orderHoldReason ? `<span class="table-note table-note--warning">Ordering hold: ${escapeHtml(item.orderHoldReason)}</span>` : ""}${linkedNotes.join("")}</td>
-    <td>${mode === "stock" ? `<input class="inventory-input" data-field="onHand" type="text" inputmode="${inputMode}" value="${escapeHtml(item.onHandDisplay)}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>
-    <td>${mode === "stock" ? `<div class="inventory-par-cell"><input class="inventory-input inventory-input--par ${isRowEditing ? "is-editing" : "is-locked"}" data-field="par" type="text" inputmode="${inputMode}" value="${escapeHtml(item.parDisplay)}" aria-label="Par for ${escapeHtml(item.name)}" ${isRowEditing ? "" : "readonly"}></div>` : formatInventoryQuantity(item.parDisplay)}</td>
+    <td>${mode === "stock" ? `<input class="inventory-input" data-field="onHand" name="inventory-on-hand-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" pattern="${item.allowsDecimal ? "[0-9]*[.]?[0-9]*" : "[0-9]*"}" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(item.onHandDisplay)}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>
+    <td>${mode === "stock" ? `<div class="inventory-par-cell"><input class="inventory-input inventory-input--par ${isRowEditing ? "is-editing" : "is-locked"}" data-field="par" name="inventory-par-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" pattern="${item.allowsDecimal ? "[0-9]*[.]?[0-9]*" : "[0-9]*"}" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(item.parDisplay)}" aria-label="Par for ${escapeHtml(item.name)}" ${isRowEditing ? "" : "readonly"}></div>` : formatInventoryQuantity(item.parDisplay)}</td>
     <td data-cell="order" class="${item.orderQuantity > 0 ? "inventory-order-flag" : "muted"}">${orderCell}</td>
     <td>${escapeHtml(packLabel)}</td>
     <td>${unitCostCell}</td>
@@ -12143,6 +12455,7 @@ function syncInventoryItemCatalogLinks() {
     const ingredient = ingredientById.get(item.id) || null;
     item.linkedIngredientName = ingredient?.name || item.name;
     item.vendorProduct = ingredient?.vendorProduct || getVendorMapping(item.id) || null;
+    Object.assign(item, applyMappedInventoryPackageRule(item, item.vendorProduct));
     item.unitCost = getInventoryBottleCost(item, ingredient);
     recalculateInventoryItem(item);
   });
@@ -12152,6 +12465,10 @@ function getInventoryBottleCost(item, ingredient) {
   const override = priceOverrides[item.id];
   const overrideBottlePrice = toNumber(override?.bottlePrice);
   if (overrideBottlePrice > 0) return overrideBottlePrice;
+
+  const mappedUnitPrice = toNumber(item.vendorProduct?.unitPrice)
+    || (toNumber(item.vendorProduct?.casePrice) / normalizePackSize(item.vendorProduct?.packSize || 1));
+  if (mappedUnitPrice > 0) return mappedUnitPrice;
 
   if (ingredient) {
     const catalogBottleCost = getIngredientBottleCost(ingredient);
@@ -14713,25 +15030,11 @@ function getLiveTapWallNumber(name) {
 }
 
 function getTapPriceAliases(value) {
-  const text = String(value || "");
-  const withoutParenthetical = text.replace(/\([^)]*\)/g, " ");
-  return [...new Set([normalizeTapPriceKey(text), normalizeTapPriceKey(withoutParenthetical)].filter(Boolean))];
+  return getProductPriceAliases(value);
 }
 
 function normalizeTapPriceKey(value) {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/’/g, "'")
-    .replace(/&/g, " and ")
-    .replace(/\s*[123]\s*$/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\btito s\b/g, "titos")
-    .replace(/\bdaniel s\b/g, "daniels")
-    .replace(/\bvodka|whiskey|tequila|rum|gin|bourbon|cognac\b/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizeProductPriceKey(value);
 }
 
 function getPourOzForAlcoholTarget(recipe, totalOz) {
@@ -15001,7 +15304,7 @@ function getKegVendorProduct(name, vendor, kegOz) {
     preferredSku: mappedProduct.preferredSku || "",
     distributorHints: KEG_PROVI_DISTRIBUTOR_HINTS[vendor],
     searchAliases: [...new Set([
-      name.replace(/\s+[12]$/, "").trim(),
+      name.replace(/\s+[123]$/, "").trim(),
       ...(mappedProduct.searchAliases || []),
       ...aliases,
     ].filter(Boolean))],
@@ -15018,7 +15321,7 @@ function getKegPricingKey(value) {
 }
 
 function getKegDisplayName(value) {
-  return clean(value).replace(/\s+[12]$/, "").trim();
+  return clean(value).replace(/\s+[123]$/, "").trim();
 }
 
 function getKegCatalogUnitCost(item) {

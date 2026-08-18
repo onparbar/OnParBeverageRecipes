@@ -71,11 +71,23 @@ export default function DashboardPage() {
     const existingScript = document.querySelector('script[data-dashboard-script="true"]');
     if (existingScript) existingScript.remove();
 
+    const inputGuardScript = document.createElement("script");
+    inputGuardScript.src = `/noncredential-input-guard.js?v=${Date.now()}`;
+    document.body.appendChild(inputGuardScript);
+
     const script = document.createElement("script");
     script.type = "module";
     script.src = `/dashboard.js?v=${Date.now()}`;
     script.dataset.dashboardScript = "true";
     document.body.appendChild(script);
+
+    const liveSpeechScript = document.createElement("script");
+    liveSpeechScript.src = `/live-speech-inventory.js?v=${Date.now()}`;
+    document.body.appendChild(liveSpeechScript);
+
+    const coolerWalkScript = document.createElement("script");
+    coolerWalkScript.src = `/cooler-walk.js?v=${Date.now()}`;
+    document.body.appendChild(coolerWalkScript);
 
     return () => {
       script.remove();
@@ -692,10 +704,10 @@ export default function DashboardPage() {
                   <div>
                     <h2>Current Inventory</h2>
                   </div>
-                  <form className="custom-inventory-form" id="custom-inventory-form">
+                  <form className="custom-inventory-form" id="custom-inventory-form" autoComplete="off" data-form-type="other">
                     <label>
                       <span>Item</span>
-                      <input id="custom-inventory-name" type="text" placeholder="Patron Silver" required />
+                      <input id="custom-inventory-name" name="inventory-item-name" type="text" autoComplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="Patron Silver" required />
                     </label>
                     <label>
                       <span>Group</span>
@@ -707,19 +719,19 @@ export default function DashboardPage() {
                     </label>
                     <label>
                       <span>On hand (units)</span>
-                      <input id="custom-inventory-on-hand" type="number" min="0" step="1" inputMode="numeric" placeholder="1" />
+                      <input id="custom-inventory-on-hand" name="inventory-item-on-hand" type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="1" />
                     </label>
                     <label>
                       <span>Par (units)</span>
-                      <input id="custom-inventory-par" type="number" min="0" step="1" inputMode="numeric" placeholder="0" />
+                      <input id="custom-inventory-par" name="inventory-item-par" type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="0" />
                     </label>
                     <label>
                       <span>Pack size</span>
-                      <input id="custom-inventory-pack-size" type="number" min="1" step="1" inputMode="numeric" defaultValue="1" />
+                      <input id="custom-inventory-pack-size" name="inventory-item-pack-size" type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" data-1p-ignore="true" data-lpignore="true" defaultValue="1" />
                     </label>
                     <label>
                       <span>Case / unit cost (optional)</span>
-                      <input id="custom-inventory-unit-cost" type="text" inputMode="decimal" placeholder="0.00" />
+                      <input id="custom-inventory-unit-cost" name="inventory-item-case-cost" type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" autoComplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="0.00" />
                     </label>
                     <div className="custom-inventory-form__actions">
                       <button className="primary-button" id="custom-inventory-submit" type="submit">Add item</button>
@@ -727,6 +739,7 @@ export default function DashboardPage() {
                     </div>
                   </form>
                 </div>
+                <details className="inventory-speech" id="inventory-speech-assistant"></details>
                 <div className="inventory-table-wrap">
                   <table className="inventory-table inventory-table--stock">
                     <thead>

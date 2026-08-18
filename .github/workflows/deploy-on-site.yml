@@ -1,0 +1,81 @@
+name: Deploy on-site
+
+on:
+  workflow_run:
+    workflows:
+      - Quality checks
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Commit SHA to deploy (leave blank for the latest main)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: onpar-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on:
+      - self-hosted
+      - onpar-production
+    timeout-minutes: 45
+    environment: production
+    steps:
+      - name: Deploy the checked release
+        shell: bash
+        env:
+          CHECKED_SHA: ${{ github.event.workflow_run.head_sha }}
+          REQUESTED_SHA: ${{ inputs.commit }}
+        run: |
+          set -Eeuo pipefail
+
+          service_dir="/Users/onparmarketing/OnParBeverageRecipes-service"
+          if [ "$(id -un)" != "onparmarketing" ]; then
+            echo "The production runner must run as onparmarketing." >&2
+            exit 1
+          fi
+          if [ ! -d "${service_dir}/.git" ]; then
+            echo "The production checkout is missing at ${service_dir}." >&2
+            exit 1
+          fi
+          if [ ! -x "${service_dir}/.deploy/deploy-on-site.sh" ]; then
+            echo "Run the one-time deployment bootstrap in OPERATIONS.md first." >&2
+            exit 1
+          fi
+
+          cd "${service_dir}"
+          git fetch --prune origin main
+
+          target_ref="${CHECKED_SHA:-}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            target_ref="${REQUESTED_SHA:-origin/main}"
+          fi
+          if [ -z "${target_ref}" ]; then
+            echo "GitHub did not provide a commit to deploy." >&2
+            exit 1
+          fi
+
+          target_sha="$(git rev-parse --verify "${target_ref}^{commit}")"
+          if ! git merge-base --is-ancestor "${target_sha}" origin/main; then
+            echo "Refusing to deploy ${target_sha}; it is not part of origin/main." >&2
+            exit 1
+          fi
+          if [ "$(cat .deploy/deployed-sha 2>/dev/null || true)" = "${target_sha}" ]; then
+            echo "${target_sha} is already deployed."
+            exit 0
+          fi
+
+          ./.deploy/deploy-on-site.sh "${target_sha}"

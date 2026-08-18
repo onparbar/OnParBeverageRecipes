@@ -134,6 +134,40 @@ repository. Its checked-in route points to `http://127.0.0.1:3000`.
 
 ## Deploy a release
 
+### Automatic GitHub-to-site deployment
+
+`.github/workflows/deploy-on-site.yml` connects successful `main` releases to
+the existing guarded on-site deployment. After `Quality checks` passes for a
+push to `main`, GitHub asks the production runner on the service Mac to deploy
+that exact checked commit. The runner does not edit the service checkout. It
+fetches the commit and hands it to `.deploy/deploy-on-site.sh`, which repeats
+the local tests and build, activates the release atomically, checks the live
+service identity and health, and restores the prior release if validation
+fails.
+
+One-time requirements on the service Mac:
+
+1. Complete the deployment bootstrap below so
+   `/Users/onparmarketing/OnParBeverageRecipes-service/.deploy/deploy-on-site.sh`
+   exists.
+2. In the GitHub repository, open **Settings -> Actions -> Runners**, choose
+   **New self-hosted runner**, and follow GitHub's macOS commands while signed
+   in as `onparmarketing` on the service Mac.
+3. Name the runner `onpar-service-mac`, add the custom label
+   `onpar-production`, and install/start it as a background service using the
+   commands GitHub provides.
+4. Keep the one-time runner registration token on the service Mac only. Never
+   put it, PMB credentials, Cloudflare credentials, or `.env.local` in this
+   repository or a workflow secret.
+
+After that setup, the normal release instruction is simply to review and push
+the intended changes to `main`. GitHub first runs the quality workflow and then
+the on-site deployment. If the runner is temporarily offline, the job waits;
+the currently running site is not changed. A manager can also retry a failed
+or missed deployment from **Actions -> Deploy on-site -> Run workflow**. Leaving
+the commit field blank deploys the latest `main`; an entered commit must already
+belong to `main`.
+
 ### One-time bootstrap from the pre-deploy checkout
 
 The production checkout at commit `7e7f3c3` does not contain the guarded

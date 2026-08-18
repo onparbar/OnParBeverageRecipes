@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildCurrentTapAssignments,
+  expandTapPricingAssignments,
   getTapPricingRepresentativeAssignment,
 } from "../lib/tap-pricing-assignments.mjs";
 
@@ -43,6 +44,7 @@ test("keeps every physical assignment when a PLU is shared across walls", () => 
     { tapNumber: 73, deviceId: 9002, lineNum: 4 },
   ]);
   assert.equal(getTapPricingRepresentativeAssignment(assignments).tapPosition, 21);
+  assert.deepEqual(expandTapPricingAssignments(assignments).map((item) => item.tapNumber), [21, 73]);
 });
 
 test("ignores unused and incomplete assignments rather than exposing unsafe write targets", () => {

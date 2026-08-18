@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { getProviInventoryUnitPrice } from "../../../public/provi-package-pricing.mjs";
 
 import {
   getProductLineScore,
@@ -308,12 +309,10 @@ function getMatchedInventoryPrice(match, item) {
 
 function getInventoryPrice(inventory, item) {
   if (!inventory) return 0;
-  const unitPrice = toNumber(inventory.unit_price || inventory.price);
-  if (unitPrice > 0) return unitPrice;
-  if (isKegSyncItem(item)) {
-    return toNumber(inventory.case_price || inventory.keg_price || inventory.pack_price);
-  }
-  return 0;
+  return getProviInventoryUnitPrice(inventory, {
+    packSize: item?.vendorProduct?.packSize || 1,
+    isKeg: isKegSyncItem(item),
+  });
 }
 
 function getMatchedBottleOz(match) {

@@ -73,6 +73,7 @@ export async function POST(request) {
         );
         break;
       case "update-field":
+      case "batch-update-fields":
       case "upsert-custom":
       case "delete-custom":
       case "reorder-items":
@@ -94,14 +95,20 @@ export async function POST(request) {
     }
 
     const snapshotCapture = String(body.action || "") === "save-snapshot";
+    const batchUpdate = String(body.action || "") === "batch-update-fields";
+    const batchCount = batchUpdate && Array.isArray(body.changes) ? body.changes.length : 0;
     recordDashboardActivity({
       area: "Inventory",
-      action: snapshotCapture ? "captured Monday snapshot" : String(body.action || "updated"),
+      action: snapshotCapture
+        ? "captured Monday snapshot"
+        : batchUpdate && body.source === "speech" ? "applied reviewed speech counts" : String(body.action || "updated"),
       role,
       revision: state.revision,
       summary: snapshotCapture
         ? "Monday Inventory Snapshot captured from current verified sources."
-        : String(body.action || "") === "initialize" ? "Imported the initial shared inventory." : "Updated shared inventory data.",
+        : batchUpdate
+          ? `Applied ${batchCount} reviewed inventory field change${batchCount === 1 ? "" : "s"}.`
+          : String(body.action || "") === "initialize" ? "Imported the initial shared inventory." : "Updated shared inventory data.",
     }).catch(() => {});
 
     return NextResponse.json(state, {
