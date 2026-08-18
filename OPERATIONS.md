@@ -14,7 +14,7 @@ a Vercel preview.
 The canonical checkout is:
 
 ```text
-/Users/onparmarketing/OnParBeverageRecipes-service
+/Users/onpar/OnParBeverageRecipes-service
 ```
 
 Keep that checkout free of hand-edited or uncommitted files. Operational data,
@@ -125,8 +125,8 @@ does not start them, so `.env.local` can be completed first.
 Start the dashboard and weekly par agent:
 
 ```bash
-launchctl bootstrap gui/$(id -u) /Users/onparmarketing/Library/LaunchAgents/com.onpar.beverage-dashboard.plist
-launchctl bootstrap gui/$(id -u) /Users/onparmarketing/Library/LaunchAgents/com.onpar.par-agent.plist
+launchctl bootstrap gui/$(id -u) /Users/onpar/Library/LaunchAgents/com.onpar.beverage-dashboard.plist
+launchctl bootstrap gui/$(id -u) /Users/onpar/Library/LaunchAgents/com.onpar.par-agent.plist
 ```
 
 Install the Cloudflare tunnel separately using credentials held outside this
@@ -148,11 +148,11 @@ fails.
 One-time requirements on the service Mac:
 
 1. Complete the deployment bootstrap below so
-   `/Users/onparmarketing/OnParBeverageRecipes-service/.deploy/deploy-on-site.sh`
+   `/Users/onpar/OnParBeverageRecipes-service/.deploy/deploy-on-site.sh`
    exists.
 2. In the GitHub repository, open **Settings -> Actions -> Runners**, choose
    **New self-hosted runner**, and follow GitHub's macOS commands while signed
-   in as `onparmarketing` on the service Mac.
+   in as `onpar` on the service Mac.
 3. Name the runner `onpar-service-mac`, add the custom label
    `onpar-production`, and install/start it as a background service using the
    commands GitHub provides.
@@ -176,7 +176,7 @@ extracts the bootstrap script and its deployment helpers from the reviewed
 `origin/main` commit without changing the old checkout first:
 
 ```bash
-cd /Users/onparmarketing/OnParBeverageRecipes-service
+cd /Users/onpar/OnParBeverageRecipes-service
 git fetch --prune origin main
 BOOTSTRAP_DIR="$(mktemp -d /tmp/onpar-bootstrap.XXXXXX)"
 git archive origin/main -- scripts/bootstrap-deploy-on-site.sh | tar -x -C "${BOOTSTRAP_DIR}"
@@ -289,7 +289,7 @@ endpoint exposes only its state and timestamps, never its error text.
 
 ## Access needed before production deployment
 
-- shell access as the `onparmarketing` service account
+- shell access as the `onpar` service account
 - read access to the GitHub repository from the service Mac
 - a completed `.env.local` with a new session secret and current integration
   credentials

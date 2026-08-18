@@ -1,7 +1,7 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-PROJECT_DIR="${ONPAR_SERVICE_DIR:-/Users/onparmarketing/OnParBeverageRecipes-service}"
+PROJECT_DIR="${ONPAR_SERVICE_DIR:-/Users/onpar/OnParBeverageRecipes-service}"
 TARGET_REF="${1:-origin/main}"
 TEMP_ROOT="${TMPDIR:-/tmp}"
 TEMP_ROOT="${TEMP_ROOT%/}"

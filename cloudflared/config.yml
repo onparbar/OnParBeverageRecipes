@@ -1,5 +1,5 @@
 tunnel: 35a2d83d-aa45-4ad0-a1ad-b0735a66fa63
-credentials-file: /Users/onparmarketing/.cloudflared/35a2d83d-aa45-4ad0-a1ad-b0735a66fa63.json
+credentials-file: /Users/onpar/.cloudflared/35a2d83d-aa45-4ad0-a1ad-b0735a66fa63.json
 protocol: http2
 
 ingress:

@@ -21,7 +21,7 @@ After that, wait for my next instruction before making changes.
 
 ## Important local notes
 
-- Production service checkout: `/Users/onparmarketing/OnParBeverageRecipes-service`
+- Production service checkout: `/Users/onpar/OnParBeverageRecipes-service`
 - Main local site: `http://localhost:3000`
 - Run the complete check before proposing a production release:
 

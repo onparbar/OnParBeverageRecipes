@@ -4,7 +4,7 @@
 
 The production architecture and release procedure are documented in
 `OPERATIONS.md`. The production checkout is
-`/Users/onparmarketing/OnParBeverageRecipes-service`; Vercel is preview-only.
+`/Users/onpar/OnParBeverageRecipes-service`; Vercel is preview-only.
 
 ### 1. Install the basics
 

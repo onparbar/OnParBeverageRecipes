@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-PROJECT_DIR="${ONPAR_SERVICE_DIR:-/Users/onparmarketing/OnParBeverageRecipes-service}"
-LAUNCH_AGENTS_DIR="/Users/onparmarketing/Library/LaunchAgents"
+PROJECT_DIR="${ONPAR_SERVICE_DIR:-/Users/onpar/OnParBeverageRecipes-service}"
+LAUNCH_AGENTS_DIR="/Users/onpar/Library/LaunchAgents"
 ACTIVE_LINK="${PROJECT_DIR}/current"
 
 echo "On Par Beverage Recipes - Mac tool setup"

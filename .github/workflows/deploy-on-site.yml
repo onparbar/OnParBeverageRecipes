@@ -42,9 +42,9 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          service_dir="/Users/onparmarketing/OnParBeverageRecipes-service"
-          if [ "$(id -un)" != "onparmarketing" ]; then
-            echo "The production runner must run as onparmarketing." >&2
+          service_dir="/Users/onpar/OnParBeverageRecipes-service"
+          if [ "$(id -un)" != "onpar" ]; then
+            echo "The production runner must run as onpar." >&2
             exit 1
           fi
           if [ ! -d "${service_dir}/.git" ]; then

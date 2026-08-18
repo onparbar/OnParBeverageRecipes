@@ -1,7 +1,7 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-PROJECT_DIR="${ONPAR_SERVICE_DIR:-/Users/onparmarketing/OnParBeverageRecipes-service}"
+PROJECT_DIR="${ONPAR_SERVICE_DIR:-/Users/onpar/OnParBeverageRecipes-service}"
 SERVICE_LABEL="${ONPAR_LAUNCHD_LABEL:-com.onpar.beverage-dashboard}"
 ROLLBACK_FILE="${PROJECT_DIR}/.deploy/previous-sha"
 PREVIOUS_RELEASE_FILE="${PROJECT_DIR}/.deploy/previous-release"

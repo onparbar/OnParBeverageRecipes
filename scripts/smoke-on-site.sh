@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-PROJECT_DIR="${ONPAR_SERVICE_DIR:-/Users/onparmarketing/OnParBeverageRecipes-service}"
+PROJECT_DIR="${ONPAR_SERVICE_DIR:-/Users/onpar/OnParBeverageRecipes-service}"
 SOURCE_REPO="${ONPAR_SOURCE_REPO:-${PROJECT_DIR}}"
 SERVICE_URL="${ONPAR_SERVICE_URL:-http://127.0.0.1:3000}"
 EXPECTED_SHA="${1:-}"

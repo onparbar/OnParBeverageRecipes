@@ -1,13 +1,13 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-PROJECT_DIR="${ONPAR_SERVICE_DIR:-/Users/onparmarketing/OnParBeverageRecipes-service}"
+PROJECT_DIR="${ONPAR_SERVICE_DIR:-/Users/onpar/OnParBeverageRecipes-service}"
 TARGET_REF="${1:-origin/main}"
 SERVICE_LABEL="${ONPAR_LAUNCHD_LABEL:-com.onpar.beverage-dashboard}"
 PAR_AGENT_LABEL="${ONPAR_PAR_AGENT_LAUNCHD_LABEL:-com.onpar.par-agent}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEPLOY_HELPER_DIR="${ONPAR_DEPLOY_HELPER_DIR:-${SCRIPT_DIR}}"
-LAUNCH_AGENTS_DIR="${ONPAR_LAUNCH_AGENTS_DIR:-/Users/onparmarketing/Library/LaunchAgents}"
+LAUNCH_AGENTS_DIR="${ONPAR_LAUNCH_AGENTS_DIR:-/Users/onpar/Library/LaunchAgents}"
 RELEASES_DIR="${PROJECT_DIR}/releases"
 ACTIVE_LINK="${PROJECT_DIR}/current"
 ENV_FILE="${PROJECT_DIR}/.env.local"

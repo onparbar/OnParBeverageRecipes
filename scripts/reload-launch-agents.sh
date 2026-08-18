@@ -1,8 +1,8 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-PROJECT_DIR="${ONPAR_SERVICE_DIR:-/Users/onparmarketing/OnParBeverageRecipes-service}"
-LAUNCH_AGENTS_DIR="${ONPAR_LAUNCH_AGENTS_DIR:-/Users/onparmarketing/Library/LaunchAgents}"
+PROJECT_DIR="${ONPAR_SERVICE_DIR:-/Users/onpar/OnParBeverageRecipes-service}"
+LAUNCH_AGENTS_DIR="${ONPAR_LAUNCH_AGENTS_DIR:-/Users/onpar/Library/LaunchAgents}"
 SOURCE_DIR="${ONPAR_LAUNCH_AGENT_SOURCE_DIR:-${PROJECT_DIR}/current/scripts}"
 SERVICE_SELECTION="${1:-all}"
 DOMAIN="gui/${UID}"

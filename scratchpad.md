@@ -299,8 +299,8 @@ npm.cmd run provi:extract
 - macOS LaunchAgents installed:
   - `~/Library/LaunchAgents/com.onpar.beverage-dashboard.plist`
   - `~/Library/LaunchAgents/com.onpar.cloudflared.plist`
-- Runtime service folder is `/Users/onparmarketing/OnParBeverageRecipes-service` because macOS blocked launchd from executing reliably out of Desktop.
-- Service logs live in `/Users/onparmarketing/OnParBeverageRecipes-service/logs`.
+- Runtime service folder is `/Users/onpar/OnParBeverageRecipes-service` because macOS blocked launchd from executing reliably out of Desktop.
+- Service logs live in `/Users/onpar/OnParBeverageRecipes-service/logs`.
 - The Cloudflare cert and tunnel credentials are in `~/.cloudflared` and must stay secret.
 
 ## PMB Product Add Form - 2026-06-26
@@ -357,7 +357,7 @@ npm.cmd run provi:extract
 - Active retailer context captured as `402312`.
 - `.env.local` was updated with `PROVI_COOKIE_HEADER` and `PROVI_RETAILER_CONTEXT` in both:
   - Desktop working copy
-  - `/Users/onparmarketing/OnParBeverageRecipes-service`
+  - `/Users/onpar/OnParBeverageRecipes-service`
 - Always-on dashboard LaunchAgent was restarted after env update.
 - Public `https://onparbev.com/api/vendor-sync` verified for:
   - `Provi` scope
@@ -379,7 +379,7 @@ npm.cmd run provi:extract
 - Symptom: public `Keg Levels` tab stayed broken / stuck while PMB API was reachable.
 - Root causes found:
   - `public/dashboard.js` called `isRoughlyEqual()` in browser code, but the helper only existed in the server vendor-sync route.
-  - The always-on service copy at `/Users/onparmarketing/OnParBeverageRecipes-service` was missing its `.next` production build, causing Cloudflare 502s until rebuilt.
+  - The always-on service copy at `/Users/onpar/OnParBeverageRecipes-service` was missing its `.next` production build, causing Cloudflare 502s until rebuilt.
   - Cloudflare was serving `/dashboard.js` with a 4-hour browser cache header, so an already-open browser tab could keep the old broken script.
 - Fixes applied:
   - Added `isRoughlyEqual()` to `public/dashboard.js`.
@@ -398,8 +398,8 @@ npm.cmd run provi:extract
 ## Always-On Service Recovery Commands - Mac
 
 ```bash
-cd /Users/onparmarketing/OnParBeverageRecipes-service
-PATH=/Users/onparmarketing/OnParBeverageRecipes-service/.tools/node/bin:$PATH npm run build
+cd /Users/onpar/OnParBeverageRecipes-service
+PATH=/Users/onpar/OnParBeverageRecipes-service/.tools/node/bin:$PATH npm run build
 launchctl kickstart -k gui/$(id -u)/com.onpar.beverage-dashboard
 launchctl kickstart -k gui/$(id -u)/com.onpar.cloudflared
 curl -sS https://onparbev.com/api/keg-levels | head -c 500
