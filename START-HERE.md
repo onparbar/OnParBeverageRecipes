@@ -21,7 +21,10 @@ After that, wait for my next instruction before making changes.
 
 ## Important local notes
 
-- Production service checkout: `/Users/onpar/OnParBeverageRecipes-service`
+- Current production guide: `PRODUCTION-PM2.md`
+- Production source checkout: `/Users/onpar/OnParBeverageRecipes-source`
+- Persistent runtime directory: `/Users/onpar/OnParBeverageRecipes-service`
+- Dashboard supervisor: PM2 app `onpar-dashboard`
 - Main local site: `http://localhost:3000`
 - Run the complete check before proposing a production release:
 
@@ -31,5 +34,5 @@ npm run check
 
 - Production is the on-site Mac behind the Cloudflare tunnel. Vercel builds are
   previews only because they cannot reach the venue's PourMyBeer service.
-- Use the scripts and rollback procedure in `OPERATIONS.md`; do not deploy from
-  an arbitrary development checkout.
+- Follow `PRODUCTION-PM2.md`. Do not use the legacy LaunchAgent deployment
+  scripts on the current service Mac.

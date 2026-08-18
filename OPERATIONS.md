@@ -1,5 +1,10 @@
 # On-site service operations
 
+> **Current service Mac:** Read `PRODUCTION-PM2.md` first. The dashboard is
+> supervised by PM2 with separate source and runtime directories. The
+> LaunchAgent deployment procedures below are retained only for legacy hosts
+> and must not be run on the current production Mac.
+
 ## Production architecture
 
 The production dashboard runs on the on-site Mac at `127.0.0.1:3000`. A

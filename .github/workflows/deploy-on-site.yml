@@ -31,10 +31,10 @@ jobs:
     runs-on:
       - self-hosted
       - onpar-production
-    timeout-minutes: 45
+    timeout-minutes: 60
     environment: production
     steps:
-      - name: Deploy the checked release
+      - name: Deploy the checked release through PM2
         shell: bash
         env:
           CHECKED_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -42,23 +42,22 @@ jobs:
         run: |
           set -Eeuo pipefail
 
+          source_repo="/Users/onpar/OnParBeverageRecipes-source"
           service_dir="/Users/onpar/OnParBeverageRecipes-service"
           if [ "$(id -un)" != "onpar" ]; then
             echo "The production runner must run as onpar." >&2
             exit 1
           fi
-          if [ ! -d "${service_dir}/.git" ]; then
-            echo "The production checkout is missing at ${service_dir}." >&2
+          if [ ! -d "${source_repo}/.git" ]; then
+            echo "The clean production source checkout is missing at ${source_repo}." >&2
             exit 1
           fi
-          if [ ! -x "${service_dir}/.deploy/deploy-on-site.sh" ]; then
-            echo "Run the one-time deployment bootstrap in OPERATIONS.md first." >&2
+          if [ ! -d "${service_dir}" ] || [ -d "${service_dir}/.git" ]; then
+            echo "The persistent production runtime is invalid at ${service_dir}." >&2
             exit 1
           fi
 
-          cd "${service_dir}"
-          git fetch --prune origin main
-
+          git -C "${source_repo}" fetch --prune origin main
           target_ref="${CHECKED_SHA:-}"
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             target_ref="${REQUESTED_SHA:-origin/main}"
@@ -67,15 +66,31 @@ jobs:
             echo "GitHub did not provide a commit to deploy." >&2
             exit 1
           fi
-
-          target_sha="$(git rev-parse --verify "${target_ref}^{commit}")"
-          if ! git merge-base --is-ancestor "${target_sha}" origin/main; then
+          target_sha="$(git -C "${source_repo}" rev-parse --verify "${target_ref}^{commit}")"
+          if ! git -C "${source_repo}" merge-base --is-ancestor "${target_sha}" origin/main; then
             echo "Refusing to deploy ${target_sha}; it is not part of origin/main." >&2
             exit 1
           fi
-          if [ "$(cat .deploy/deployed-sha 2>/dev/null || true)" = "${target_sha}" ]; then
-            echo "${target_sha} is already deployed."
-            exit 0
-          fi
 
-          ./.deploy/deploy-on-site.sh "${target_sha}"
+          bootstrap_dir="$(mktemp -d /tmp/onpar-pm2-deploy.XXXXXX)"
+          cleanup() {
+            case "${bootstrap_dir}" in
+              /tmp/onpar-pm2-deploy.*) rm -rf -- "${bootstrap_dir}" ;;
+              *) echo "Refusing to remove unexpected bootstrap path ${bootstrap_dir}." >&2 ;;
+            esac
+          }
+          trap cleanup EXIT
+          git -C "${source_repo}" archive "${target_sha}" -- \
+            scripts/deploy-on-site-pm2.sh \
+            scripts/pm2-release-common.sh \
+            scripts/rollback-on-site-pm2.sh \
+            scripts/smoke-on-site.sh \
+            | tar -x -C "${bootstrap_dir}"
+          chmod 700 "${bootstrap_dir}"/scripts/*.sh
+
+          ONPAR_SOURCE_REPO="${source_repo}" \
+          ONPAR_SERVICE_DIR="${service_dir}" \
+          ONPAR_RELEASE_PARENT="/Users/onpar" \
+          ONPAR_PM2_APP_NAME="onpar-dashboard" \
+          ONPAR_DEPLOY_HELPER_DIR="${bootstrap_dir}/scripts" \
+            "${bootstrap_dir}/scripts/deploy-on-site-pm2.sh" "${target_sha}"
