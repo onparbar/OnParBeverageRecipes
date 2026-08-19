@@ -161,6 +161,7 @@ function issue(code, severity, message) {
 export function evaluatePricingRecommendation(input = {}, options = {}) {
   const settings = { ...PRICING_ADVISOR_DEFAULTS, ...options };
   const now = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
+  const normalizedKind = clean(input.kind).toLowerCase();
   const costPerOz = positiveNumber(input.costPerOz);
   const currentPricePerOz = positiveNumber(input.currentPricePerOz);
   const minimumPricePerOz = calculateTargetPricePerOz({
@@ -176,10 +177,16 @@ export function evaluatePricingRecommendation(input = {}, options = {}) {
     issues.push(issue("mapping-unverified", "blocker", "Tap-to-cost mapping needs review."));
   }
   if (!costPerOz) {
-    issues.push(issue("missing-cost", "blocker", "No usable product cost is available."));
+    issues.push(issue(
+      "missing-cost",
+      "blocker",
+      normalizedKind === "cocktail"
+        ? "One or more cocktail recipe ingredients has no usable package cost."
+        : "No usable keg or package cost is available.",
+    ));
   }
   if (!currentPricePerOz) {
-    issues.push(issue("missing-live-price", "blocker", "No current PMB price was loaded."));
+    issues.push(issue("missing-live-price", "blocker", "No current PMB selling price was loaded."));
   }
 
   const costAgeMs = getAgeMs(input.costUpdatedAt, now);
@@ -278,6 +285,8 @@ export function buildPricingAdvisor(inputs = [], options = {}) {
       onTargetCount: rows.filter((item) => item.action === "hold" && !item.hasBlocker).length,
       reviewCount: rows.filter((item) => item.needsReview).length,
       blockedCount: rows.filter((item) => item.hasBlocker).length,
+      missingCostCount: rows.filter((item) => item.issues.some((entry) => entry.code === "missing-cost")).length,
+      missingSellingPriceCount: rows.filter((item) => item.issues.some((entry) => entry.code === "missing-live-price")).length,
     },
     mode: "dry-run",
     targetMarginPercent: finiteNumber(options.targetMarginPercent || PRICING_ADVISOR_DEFAULTS.targetMarginPercent),

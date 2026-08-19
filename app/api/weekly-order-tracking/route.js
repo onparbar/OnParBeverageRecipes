@@ -105,6 +105,16 @@ export async function POST(request) {
         summary: `${trackedVendor} assisted-order status updated; real submission remains manual.`,
       }).catch(() => {});
     }
+    if (body.action === "set-receipts") {
+      const trackedVendor = priorTracking?.vendors?.find((vendor) => vendor.id === body.vendorId);
+      recordDashboardActivity({
+        area: "Orders",
+        action: "received vendor delivery",
+        role,
+        revision: saved.revision,
+        summary: `${String(trackedVendor?.vendor || "Vendor").slice(0, 80)} delivery reviewed; ${Array.isArray(body.receipts) ? body.receipts.length : 0} lines updated.`,
+      }).catch(() => {});
+    }
     return jsonResponse({
       available: true,
       message: "Weekly order tracking saved.",

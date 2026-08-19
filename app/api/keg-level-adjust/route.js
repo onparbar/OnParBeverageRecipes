@@ -6,6 +6,8 @@ import {
   requireSuccessfulKegLevelResponse,
   verifyExactKegTarget,
 } from "../../../lib/pmb-keg-safety.mjs";
+import { requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
+import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 
 export const runtime = "nodejs";
 
@@ -295,8 +297,11 @@ async function sendTargetedConfigUpdate(config, token, slot) {
 }
 
 export async function POST(request) {
+  let role = "";
+  let input = {};
   try {
-    const input = await request.json();
+    role = await requireDashboardRequestRole(request, { owner: true });
+    input = await request.json();
     if (!input || typeof input !== "object" || Array.isArray(input)) {
       throw new PmbKegSafetyError("A JSON object is required to adjust a keg level.", {
         code: "PMB_TAP_TARGET_REQUIRED",
@@ -342,9 +347,22 @@ export async function POST(request) {
 
     const adjustment = buildAdjustment(input, level);
     const setResult = await setKegLevel(config, token, slot, level, adjustment);
-    const configUpdateResult = input.sendConfigUpdate === false
-      ? null
-      : await sendTargetedConfigUpdate(config, setResult.token || token, slot);
+    if (input.sendConfigUpdate === true && input.acknowledgeTapInterruption !== true) {
+      throw new PmbKegSafetyError("Confirm that the affected guest taps are clear before sending a configuration update.", {
+        code: "PMB_CONFIG_UPDATE_CONFIRMATION_REQUIRED",
+        status: 409,
+      });
+    }
+    const configUpdateResult = input.sendConfigUpdate === true
+      ? await sendTargetedConfigUpdate(config, setResult.token || token, slot)
+      : null;
+
+    recordDashboardActivity({
+      area: "Keg Levels",
+      action: "adjusted PMB level",
+      role,
+      summary: `Tap ${slot.tapNumber || "?"} ${product.name || `PLU ${requestedTarget.plu}`}: ${adjustment.currentPercent}% to ${adjustment.targetPercent}%; config ${configUpdateResult ? "sent" : "not sent"}.`,
+    }).catch(() => {});
 
     return NextResponse.json({
       ok: true,
@@ -366,6 +384,14 @@ export async function POST(request) {
       configUpdateSent: Boolean(configUpdateResult),
     });
   } catch (error) {
+    if (role) {
+      recordDashboardActivity({
+        area: "Keg Levels",
+        action: "PMB level adjustment failed",
+        role,
+        summary: `PLU ${String(input?.plu || "unknown").slice(0, 20)} was not changed. ${String(error?.code || "PMB_KEG_ADJUSTMENT_FAILED").slice(0, 80)}.`,
+      }).catch(() => {});
+    }
     const status = Number(error?.status)
       || (error instanceof SyntaxError ? 400 : 500);
     return NextResponse.json(

@@ -89,7 +89,7 @@ const DASHBOARD_QUERY_RULE_WORDS = new Set([
   "dollar", "dollars", "equal", "exactly", "hidden", "highest", "karaoke", "least",
   "less", "liquor", "liquors", "lowest", "main", "most", "no", "ounce", "ounces",
   "over", "patio", "pour", "poured", "pours", "recent", "revenue", "sale", "sales",
-  "shot", "shots", "spirit", "spirits", "than", "top", "under", "usage", "volume",
+  "profit", "profits", "margin", "shot", "shots", "spirit", "spirits", "than", "top", "under", "usage", "volume",
 ]);
 
 function findDashboardQueryMatches(query, rules) {
@@ -158,16 +158,17 @@ export function parseDashboardDataQuery(rawQuery) {
 
   const hasDollarMetric = /\b(?:sales?|revenue|dollars?)\b/.test(query) || String(rawQuery ?? "").includes("$");
   const hasOunceMetric = /\b(?:ounces?|oz|pours?|poured|volume|usage)\b/.test(query);
-  if (hasDollarMetric && hasOunceMetric) {
+  const hasProfitMetric = /\b(?:profits?|margin)\b/.test(query);
+  if ([hasDollarMetric, hasOunceMetric, hasProfitMetric].filter(Boolean).length > 1) {
     return {
       status: "needs-clarification",
-      question: "Should I compare poured ounces or estimated sales dollars?",
+      question: "Should I compare poured ounces, estimated sales dollars, or projected profit?",
       intent: null,
     };
   }
 
   let comparison = getDashboardQueryComparison(query);
-  let metric = hasDollarMetric ? "dollars" : "ounces";
+  let metric = hasProfitMetric ? "profit" : hasDollarMetric ? "dollars" : "ounces";
   if (/\bno\s+(?:sales?|revenue)\b/.test(query)) {
     comparison = { operator: "eq", threshold: 0 };
     metric = "dollars";
@@ -184,10 +185,10 @@ export function parseDashboardDataQuery(rawQuery) {
       intent: null,
     };
   }
-  if (comparison && !hasDollarMetric && !hasOunceMetric) {
+  if (comparison && !hasDollarMetric && !hasOunceMetric && !hasProfitMetric) {
     return {
       status: "needs-clarification",
-      question: "Should I compare that threshold in poured ounces or sales dollars?",
+      question: "Should I compare that threshold in poured ounces, sales dollars, or projected profit?",
       intent: null,
     };
   }

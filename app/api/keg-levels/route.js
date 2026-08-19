@@ -9,6 +9,7 @@ import {
   PmbKegSafetyError,
   requireSuccessfulKegLevelResponse,
 } from "../../../lib/pmb-keg-safety.mjs";
+import { findExactLastKnownKegLevel } from "../../../public/keg-level-fallback.mjs";
 
 function parseJsonLoose(text) {
   try {
@@ -149,32 +150,65 @@ export async function GET() {
     }
 
     const verifiedSlots = [...buildVerifiedKegSlotMap(tapConfigRows).values()];
+    const lastCompleteSnapshot = await readPmbLevelSnapshot().catch(() => null);
 
     const levelBySlot = new Map();
+    const unreachableTaps = [];
     for (const slot of verifiedSlots) {
-      const response = await postJson(
-        config.baseUrl,
-        "/api/getkeglevels",
-        { device_id: slot.deviceId, line_num: slot.lineNum },
-        token,
-      );
-      // The dashboard can safely display a verified percentage even when a
-      // controller has not been configured with keg-size metadata. Keg writes
-      // keep the helper's stricter default and still require the complete
-      // response before calculating or sending an adjustment.
-      const levelJson = requireSuccessfulKegLevelResponse(response, slot, {
-        requireKegSize: false,
-      });
+      try {
+        const response = await postJson(
+          config.baseUrl,
+          "/api/getkeglevels",
+          { device_id: slot.deviceId, line_num: slot.lineNum },
+          token,
+        );
+        // The dashboard can safely display a verified percentage even when a
+        // controller has not been configured with keg-size metadata. Keg writes
+        // keep the helper's stricter default and still require the complete
+        // response before calculating or sending an adjustment.
+        const levelJson = requireSuccessfulKegLevelResponse(response, slot, {
+          requireKegSize: false,
+        });
 
-      const rawPercent = Number(levelJson.fill_level_perc);
-      const rawKegSize = Number(levelJson.fill_level_keg_size);
-      const rawKegSizeDp = Number(levelJson.fill_level_keg_size_dp);
-      levelBySlot.set(`${slot.deviceId}:${slot.lineNum}`, {
-        fillLevelPercent: Number.isFinite(rawPercent) ? Math.round((rawPercent / 100) * 10) / 10 : null,
-        rawPercent,
-        rawKegSize: Number.isFinite(rawKegSize) ? rawKegSize : null,
-        rawKegSizeDp: Number.isFinite(rawKegSizeDp) ? rawKegSizeDp : null,
-      });
+        const rawPercentText = String(levelJson.fill_level_perc ?? "").trim();
+        const rawPercent = rawPercentText === "" ? Number.NaN : Number(rawPercentText);
+        const rawKegSize = Number(levelJson.fill_level_keg_size);
+        const rawKegSizeDp = Number(levelJson.fill_level_keg_size_dp);
+        if (!Number.isFinite(rawPercent)) {
+          throw new PmbKegSafetyError("PMB did not report a keg percentage for this tap.", {
+            code: "PMB_KEG_LEVEL_UNAVAILABLE",
+            status: 503,
+          });
+        }
+        levelBySlot.set(`${slot.deviceId}:${slot.lineNum}`, {
+          fillLevelPercent: Math.round((rawPercent / 100) * 10) / 10,
+          rawPercent,
+          rawKegSize: Number.isFinite(rawKegSize) ? rawKegSize : null,
+          rawKegSizeDp: Number.isFinite(rawKegSizeDp) ? rawKegSizeDp : null,
+          levelAvailable: true,
+          lastKnownAt: "",
+          levelError: "",
+        });
+      } catch (error) {
+        const lastKnown = findExactLastKnownKegLevel(lastCompleteSnapshot, slot);
+        levelBySlot.set(`${slot.deviceId}:${slot.lineNum}`, {
+          fillLevelPercent: lastKnown?.fillLevelPercent ?? null,
+          rawPercent: lastKnown?.rawPercent ?? null,
+          rawKegSize: lastKnown?.rawKegSize ?? null,
+          rawKegSizeDp: lastKnown?.rawKegSizeDp ?? null,
+          levelAvailable: false,
+          lastKnownAt: lastKnown?.lastKnownAt || "",
+          levelError: error?.message || "Keg level unavailable.",
+        });
+        unreachableTaps.push({
+          tapNumber: slot.tapNumber || null,
+          product: normalizeProductName(slot.product),
+          deviceId: slot.deviceId,
+          lineNum: slot.lineNum,
+          reason: error?.message || "Keg level unavailable.",
+          lastKnownAt: lastKnown?.lastKnownAt || "",
+        });
+      }
     }
 
     const deviceLevels = {};
@@ -185,6 +219,9 @@ export async function GET() {
       deviceLevels[key].push({
         lineNum: slot.lineNum,
         fillLevelPercent: level.fillLevelPercent ?? null,
+        levelAvailable: level.levelAvailable === true,
+        lastKnownAt: level.lastKnownAt || "",
+        levelError: level.levelError || "",
         rawPercent: level.rawPercent ?? null,
         rawKegSize: level.rawKegSize ?? null,
         rawKegSizeDp: level.rawKegSizeDp ?? null,
@@ -212,6 +249,9 @@ export async function GET() {
         lineNum: slot.lineNum,
         tapNumber: slot.tapNumber || null,
         tapProduct: normalizeProductName(slot.product),
+        levelAvailable: level.levelAvailable === true,
+        lastKnownAt: level.lastKnownAt || "",
+        levelError: level.levelError || "",
         volumeUnit: String(product.volume_unit || ""),
         volumeUnitDp: Number(product.volume_unit_dp || 0),
         rawPercent: level.rawPercent ?? null,
@@ -225,14 +265,28 @@ export async function GET() {
       items,
       deviceLevels,
     };
-    let sharedSnapshotSaved = true;
-    try {
-      await savePmbLevelSnapshot(snapshot);
-    } catch {
-      sharedSnapshotSaved = false;
+    const partial = unreachableTaps.length > 0;
+    let sharedSnapshotSaved = false;
+    if (!partial) {
+      try {
+        await savePmbLevelSnapshot(snapshot);
+        sharedSnapshotSaved = true;
+      } catch {
+        sharedSnapshotSaved = false;
+      }
     }
 
-    return NextResponse.json({ ...snapshot, stale: false, sharedSnapshotSaved });
+    return NextResponse.json({
+      ...snapshot,
+      stale: false,
+      degraded: partial,
+      partial,
+      capturedCount: verifiedSlots.length - unreachableTaps.length,
+      expectedCount: verifiedSlots.length,
+      configUpdateRecommended: partial,
+      unreachableTaps,
+      sharedSnapshotSaved,
+    });
   } catch (error) {
     try {
       const snapshot = await readPmbLevelSnapshot();

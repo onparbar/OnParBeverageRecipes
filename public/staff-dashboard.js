@@ -1,3 +1,5 @@
+import { parseSmartReceivingTranscript } from "./smart-receiving.mjs";
+
 const DEFAULT_BATCH_LABEL = "12 gallon keg";
 const STAFF_MENU_ORDER = [
   ["GIN & JUICE (BOMBAY)", "Ginny from the Block (Gin)"],
@@ -44,6 +46,13 @@ const prepList = document.querySelector("#staff-prep-list");
 const orderStatusPanel = document.querySelector("#staff-order-status");
 const orderSummary = document.querySelector("#staff-order-summary");
 const orderList = document.querySelector("#staff-order-list");
+const smartReceivingTranscript = document.querySelector("#smart-receiving-transcript");
+const smartReceivingName = document.querySelector("#smart-receiving-name");
+const smartReceivingSpeak = document.querySelector("#smart-receiving-speak");
+const smartReceivingReview = document.querySelector("#smart-receiving-review");
+const smartReceivingApply = document.querySelector("#smart-receiving-apply");
+const smartReceivingStatus = document.querySelector("#smart-receiving-status");
+const smartReceivingReviewList = document.querySelector("#smart-receiving-review-list");
 const tapSheetStatus = document.querySelector("#staff-tap-sheet-status");
 const tapPrintWorkspace = document.querySelector("#staff-tap-print-workspace");
 const recipeViewButtons = [...document.querySelectorAll("[data-staff-recipe-view]")];
@@ -66,6 +75,8 @@ let prepPlan = { available: false, generatedAt: "", items: [], completedCount: 0
 let orderTracking = { available: false, generatedAt: "", vendors: [], itemCount: 0, receivedCount: 0, notReceivedCount: 0 };
 let tapSheets = { available: false, updatedAt: "", onDeckAvailable: false, walls: [] };
 let activeTapSheetWall = "main";
+let smartReceivingProposal = null;
+let smartReceivingRecognition = null;
 
 initStaffRecipes();
 
@@ -529,6 +540,155 @@ function createOrderReceiptItem(item) {
   return form;
 }
 
+function setSmartReceivingStatus(message, state = "") {
+  if (!smartReceivingStatus) return;
+  smartReceivingStatus.textContent = message;
+  if (state) smartReceivingStatus.dataset.state = state;
+  else delete smartReceivingStatus.dataset.state;
+}
+
+function clearSmartReceivingProposal() {
+  smartReceivingProposal = null;
+  if (smartReceivingApply) smartReceivingApply.disabled = true;
+  smartReceivingReviewList?.replaceChildren();
+}
+
+function renderSmartReceivingProposal(proposal) {
+  if (!smartReceivingReviewList) return;
+  smartReceivingReviewList.replaceChildren();
+  const list = document.createElement("ul");
+  proposal.lines.forEach((line) => {
+    const row = document.createElement("li");
+    if (line.status !== "received") row.dataset.state = "short";
+    const name = document.createElement("strong");
+    name.textContent = line.name;
+    const quantity = document.createElement("span");
+    quantity.textContent = `${formatNumber(line.receivedQuantity)} of ${formatNumber(line.quantity)} ${clean(line.unit)}`;
+    row.append(name, quantity);
+    list.append(row);
+  });
+  smartReceivingReviewList.append(list);
+}
+
+function reviewSmartReceivingTranscript() {
+  clearSmartReceivingProposal();
+  const result = parseSmartReceivingTranscript(smartReceivingTranscript?.value, orderTracking);
+  if (result.status !== "ready") {
+    setSmartReceivingStatus(result.question, "error");
+    return;
+  }
+  smartReceivingProposal = result.proposal;
+  renderSmartReceivingProposal(result.proposal);
+  smartReceivingApply.disabled = false;
+  const shortCount = result.proposal.lines.filter((line) => line.status !== "received").length;
+  setSmartReceivingStatus(`${result.proposal.vendor}: ${formatNumber(result.proposal.lines.length)} lines ready to review${shortCount ? `, ${formatNumber(shortCount)} short or missing` : ""}.`);
+}
+
+function updateSmartReceivingSpeakButton(listening) {
+  if (!smartReceivingSpeak) return;
+  smartReceivingSpeak.textContent = listening ? "Stop" : "Speak";
+  smartReceivingSpeak.setAttribute("aria-pressed", listening ? "true" : "false");
+}
+
+function startSmartReceivingSpeech() {
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition || !smartReceivingTranscript) return;
+  const recognition = new Recognition();
+  const startingText = clean(smartReceivingTranscript.value);
+  smartReceivingRecognition = recognition;
+  recognition.lang = "en-US";
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.onstart = () => updateSmartReceivingSpeakButton(true);
+  recognition.onresult = (event) => {
+    const finalPhrases = [];
+    const interimPhrases = [];
+    for (let index = 0; index < event.results.length; index += 1) {
+      const phrase = clean(event.results[index]?.[0]?.transcript);
+      if (!phrase) continue;
+      if (event.results[index].isFinal) finalPhrases.push(phrase);
+      else interimPhrases.push(phrase);
+    }
+    smartReceivingTranscript.value = [startingText, ...finalPhrases, ...interimPhrases].filter(Boolean).join(" ");
+    clearSmartReceivingProposal();
+  };
+  recognition.onerror = () => {
+    smartReceivingRecognition = null;
+    updateSmartReceivingSpeakButton(false);
+    setSmartReceivingStatus("Speech could not be captured. Type the delivery update instead.", "error");
+  };
+  recognition.onend = () => {
+    smartReceivingRecognition = null;
+    updateSmartReceivingSpeakButton(false);
+    if (clean(smartReceivingTranscript.value)) reviewSmartReceivingTranscript();
+  };
+  recognition.start();
+}
+
+async function applySmartReceivingProposal() {
+  if (!smartReceivingProposal || !smartReceivingApply) return;
+  const handledBy = clean(smartReceivingName?.value);
+  if (!handledBy) {
+    setSmartReceivingStatus("Enter your name before applying the delivery.", "error");
+    smartReceivingName?.focus();
+    return;
+  }
+  smartReceivingApply.disabled = true;
+  smartReceivingReview.disabled = true;
+  smartReceivingSpeak.disabled = true;
+  setSmartReceivingStatus("Saving reviewed delivery...");
+  try {
+    const response = await fetch("/api/weekly-order-tracking", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "set-receipts",
+        generatedAt: smartReceivingProposal.generatedAt,
+        vendorId: smartReceivingProposal.vendorId,
+        handledBy,
+        confirmed: true,
+        receipts: smartReceivingProposal.lines.map((line) => ({
+          itemId: line.itemId,
+          status: line.status,
+          receivedQuantity: line.receivedQuantity,
+        })),
+      }),
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) throw new Error(result?.error || "The reviewed delivery could not be saved.");
+    const savedLineCount = smartReceivingProposal.lines.length;
+    orderTracking = normalizeOrderTracking(result);
+    smartReceivingTranscript.value = "";
+    clearSmartReceivingProposal();
+    renderWeeklyOrderTracking();
+    renderStaffOverview();
+    setSmartReceivingStatus(`${formatNumber(savedLineCount)} delivery lines saved.`);
+  } catch (error) {
+    smartReceivingApply.disabled = false;
+    setSmartReceivingStatus(error?.message || "The reviewed delivery could not be saved.", "error");
+  } finally {
+    smartReceivingReview.disabled = false;
+    smartReceivingSpeak.disabled = false;
+  }
+}
+
+function bindSmartReceivingEvents() {
+  if (!smartReceivingTranscript) return;
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition && smartReceivingSpeak) {
+    smartReceivingSpeak.disabled = true;
+    smartReceivingSpeak.title = "Speech recognition is unavailable in this browser.";
+  }
+  smartReceivingTranscript.addEventListener("input", clearSmartReceivingProposal);
+  smartReceivingReview?.addEventListener("click", reviewSmartReceivingTranscript);
+  smartReceivingApply?.addEventListener("click", applySmartReceivingProposal);
+  smartReceivingSpeak?.addEventListener("click", () => {
+    if (smartReceivingRecognition) smartReceivingRecognition.stop();
+    else startSmartReceivingSpeech();
+  });
+}
+
 function renderStaffPrepPlan() {
   prepList.replaceChildren();
   prepList.setAttribute("aria-busy", "false");
@@ -986,6 +1146,7 @@ function bindStaffRecipeEvents() {
 }
 
 function bindStaffSectionEvents() {
+  bindSmartReceivingEvents();
   sectionTabButtons.forEach((button) => {
     button.addEventListener("click", () => switchStaffSection(button.dataset.staffSectionTab));
   });

@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
+import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 
 function parseJsonLoose(text) {
   try {
@@ -103,17 +105,32 @@ async function getAuthtoken(config) {
   return String(auth.json.authtoken);
 }
 
-export async function POST() {
+export async function POST(request) {
+  let role = "";
   try {
+    role = await requireDashboardRequestRole(request, { owner: true });
+    const body = await request.json().catch(() => ({}));
+    if (body?.acknowledgeTapInterruption !== true) {
+      return NextResponse.json(
+        { error: "Confirm that all guest tap walls are clear before sending a configuration update." },
+        { status: 409 },
+      );
+    }
     const config = getConfig();
     const token = await getAuthtoken(config);
 
     for (const path of ["/api/configupdate", "/m2m/api/configupdate"]) {
       const result = await postJson(config.baseUrl, path, { id: String(config.clientId) }, token);
       if (result.status === 200) {
+        recordDashboardActivity({
+          area: "Keg Levels",
+          action: "sent PMB config update",
+          role,
+          summary: "Sent a full tap-wall configuration update after guest-clear confirmation.",
+        }).catch(() => {});
         return NextResponse.json({
           ok: true,
-          message: "Configuration update sent to the pour wall.",
+          message: "Configuration update sent. Allow the tap walls a few minutes to reconnect.",
           path,
         });
       }
@@ -121,9 +138,17 @@ export async function POST() {
 
     throw new Error("PMB config update failed.");
   } catch (error) {
+    if (role) {
+      recordDashboardActivity({
+        area: "Keg Levels",
+        action: "PMB config update failed",
+        role,
+        summary: `No successful full-wall configuration update was confirmed. ${String(error?.message || "PMB error").slice(0, 120)}.`,
+      }).catch(() => {});
+    }
     return NextResponse.json(
       { error: error.message || "Could not send config update." },
-      { status: 500 },
+      { status: Number(error?.status) || 500 },
     );
   }
 }

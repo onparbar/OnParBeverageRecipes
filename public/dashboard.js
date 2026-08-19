@@ -145,6 +145,9 @@ import {
   buildSpeechInventoryChanges,
   parseInventoryTranscript,
 } from "./speech-inventory.mjs";
+import { buildInventoryRealityCheck } from "./inventory-reality-check.mjs";
+import { buildThirtySecondBriefing } from "./thirty-second-briefing.mjs";
+import { buildWhatIfPlan } from "./what-if-planning.mjs";
 
 const CSV_PATH = "./data/cocktail-recipes.csv";
 const NEW_COCKTAILS_CSV_PATH = "./data/new-cocktails.csv";
@@ -826,6 +829,10 @@ const dashboardDataSearchForm = document.querySelector("#dashboard-data-search-f
 const dashboardDataSearchInput = document.querySelector("#dashboard-data-search-input");
 const dashboardDataSearchFeedback = document.querySelector("#dashboard-data-search-feedback");
 const dashboardDataSearchResults = document.querySelector("#dashboard-data-search-results");
+const whatIfPlannerForm = document.querySelector("#what-if-planner-form");
+const whatIfPlannerInput = document.querySelector("#what-if-planner-input");
+const whatIfPlannerFeedback = document.querySelector("#what-if-planner-feedback");
+const whatIfPlannerResults = document.querySelector("#what-if-planner-results");
 const categoryFilter = document.querySelector("#category-filter");
 const recipeSearch = document.querySelector("#recipe-search");
 const oldSearch = document.querySelector("#old-search");
@@ -963,6 +970,7 @@ let inventoryItemOrder = loadInventoryItemOrder();
 let inventoryOnHandOverrides = loadInventoryOnHandOverrides();
 let inventoryParOverrides = loadInventoryParOverrides();
 let inventoryHistory = loadInventoryHistory();
+const inventoryRealityAcceptedIssueIds = new Set();
 let inventorySpeechTranscript = "";
 let inventorySpeechProposals = [];
 let inventorySpeechMessage = "";
@@ -1239,6 +1247,7 @@ async function runOwnerLoginSync() {
       lockToken
         ? runVendorSync({ automatic: true })
         : Promise.resolve({ ok: false, skipped: true }),
+      checkPmbQueueConnection(),
     ]);
     let kegResult = kegOutcome.status === "fulfilled" && kegOutcome.value;
     const usageResult = usageOutcome.status === "fulfilled" ? usageOutcome.value : null;
@@ -1269,6 +1278,46 @@ async function runOwnerLoginSync() {
     if (lockToken) releaseOwnerLoginSyncLock(lockToken);
   }
 }
+
+let unifiedPmbRefreshRunning = false;
+
+async function runUnifiedPmbRefresh() {
+  if (isEmployeeDashboard || unifiedPmbRefreshRunning) return;
+  const button = document.querySelector("#refresh-all-pmb");
+  const lockToken = acquireOwnerLoginSyncLock();
+  if (!lockToken) return;
+  unifiedPmbRefreshRunning = true;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Refreshing...";
+  }
+  try {
+    await Promise.allSettled([
+      runKegLevelSync(),
+      runTapPricingSync(),
+      runPmbWeeklyUsageSync({ automatic: true }),
+      runVendorSync({ automatic: true }),
+      checkPmbQueueConnection(),
+    ]);
+    await Promise.allSettled([
+      flushPendingSharedWeeklyUsageSave(),
+      flushPendingInventoryFieldSyncs(),
+      flushPendingParAgentStateSync(),
+    ]);
+    renderDashboardOverview();
+  } finally {
+    releaseOwnerLoginSyncLock(lockToken);
+    unifiedPmbRefreshRunning = false;
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Refresh PMB";
+    }
+  }
+}
+
+document.querySelector("#refresh-all-pmb")?.addEventListener("click", () => {
+  void runUnifiedPmbRefresh();
+});
 
 function acquireOwnerLoginSyncLock() {
   const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -3257,6 +3306,10 @@ function bindDashboardDataSearchEvents() {
     renderWeeklyUsage();
     switchTab("weekly-usage");
   });
+  whatIfPlannerForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    renderWhatIfPlan();
+  });
 }
 
 function getDashboardDataSearchEntryOunces(item, entry) {
@@ -3372,6 +3425,45 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
       </article>
     `;
   }).join("");
+}
+
+function renderWhatIfPlan() {
+  if (!whatIfPlannerInput || !whatIfPlannerFeedback || !whatIfPlannerResults) return;
+  const query = clean(whatIfPlannerInput.value);
+  const scenario = buildWhatIfPlan(buildDashboardDataSearchItems(), query);
+  if (scenario.status === "needs-clarification") {
+    whatIfPlannerFeedback.textContent = "One quick question";
+    whatIfPlannerResults.innerHTML = `<div class="dashboard-data-search-question">${escapeHtml(scenario.question)}</div>`;
+    return;
+  }
+  if (scenario.status === "no-data") {
+    whatIfPlannerFeedback.textContent = "Preview unavailable";
+    whatIfPlannerResults.innerHTML = `<div class="dashboard-data-search-empty">${escapeHtml(scenario.message)}</div>`;
+    return;
+  }
+
+  const direction = scenario.changeOz >= 0 ? "+" : "";
+  const scope = [
+    scenario.intent.wall === "all" ? "All walls" : `${normalizeTitle(scenario.intent.wall)} wall`,
+    scenario.intent.category === "all" ? "All drinks" : getWeeklyUsagePerformanceCategoryLabel(scenario.intent.category),
+  ].join(" · ");
+  whatIfPlannerFeedback.textContent = "Preview only · no dashboard data changed";
+  whatIfPlannerResults.innerHTML = `
+    <section class="what-if-planner__summary">
+      <span>${escapeHtml(scope)}</span>
+      <strong>${formatNumber(scenario.projectedOz)} oz</strong>
+      <small>${escapeHtml(scenario.periodLabel)} · ${direction}${formatNumber(scenario.changeOz)} oz</small>
+    </section>
+    <div class="what-if-planner__rows">
+      ${scenario.rows.slice(0, 6).map((item) => `
+        <article>
+          <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(normalizeTitle(item.wall))}${item.tapNumber ? ` · Tap ${formatNumber(item.tapNumber)}` : ""}</small></span>
+          <span><strong>${formatNumber(item.projectedOz)} oz</strong><small>${item.changeOz >= 0 ? "+" : ""}${formatNumber(item.changeOz)} oz</small></span>
+        </article>
+      `).join("")}
+    </div>
+    ${scenario.unavailableCount ? `<p class="what-if-planner__note">${formatNumber(scenario.unavailableCount)} item${scenario.unavailableCount === 1 ? "" : "s"} excluded because poured volume was unavailable.</p>` : ""}
+  `;
 }
 
 function openGlobalSearch() {
@@ -4621,7 +4713,6 @@ function renderPricingSummary(visibleTapRows = getLiveTapPricingRows(pricingSear
   pricingSummary.innerHTML = `
     <h2>Charge pricing</h2>
     <div class="sync-panel">
-      <button class="primary-button" id="refresh-tap-pricing" type="button"${tapPricingSyncLoading ? " disabled" : ""}>${tapPricingSyncLoading ? "Refreshing..." : "Refresh PMB prices"}</button>
       <p class="sync-status">${escapeHtml(liveTapPricingMessage)}${liveTapPricingUpdatedAt ? ` Last updated ${escapeHtml(formatUpdatedAt(liveTapPricingUpdatedAt))}.` : ""}</p>
     </div>
     <div class="summary-line"><span>Cocktail recipes</span><strong>${activeRecipes.length}</strong></div>
@@ -4738,7 +4829,6 @@ function renderIngredientSummary(visibleIngredientsInput = ingredients.filter((i
         </select>
       </label>
       <div class="sync-actions">
-        <button class="primary-button" id="run-vendor-sync" type="button"${vendorSyncRunning ? " disabled" : ""}>${vendorSyncRunning ? "Syncing..." : "Sync Prices"}</button>
       </div>
       <p class="sync-status">${escapeHtml(vendorSyncMessage)}</p>
     </div>
@@ -5349,7 +5439,12 @@ function getKegLevelsSharedOverviewSource() {
 
 function getPmbKegLevelOverviewFeed() {
   const expectedCount = kegWallItems.length;
-  const capturedCount = kegWallItems.filter((item) => getKegLiveRow(item)).length;
+  const capturedCount = kegWallItems.filter((item) => {
+    const row = getKegLiveRow(item);
+    return row?.levelAvailable !== false
+      && row?.fillLevelPercent != null
+      && Number.isFinite(Number(row.fillLevelPercent));
+  }).length;
   const status = kegSyncLoading
     ? "loading"
     : kegLiveLevelsStale
@@ -5475,6 +5570,13 @@ function getMissingPriceAlerts() {
       missingTapPrices.push(`${product} · ${location}`);
     }
   });
+  getWeeklyPlanInventoryItems().forEach((item) => {
+    const name = clean(item?.name);
+    const productKey = normalizeProductPriceKey(name);
+    if (!name || !productKey || toNumber(item?.par) <= 0 || toNumber(item?.unitCost) > 0 || seenCosts.has(productKey)) return;
+    seenCosts.add(productKey);
+    missingCosts.push(`${name} · ${clean(item?.group) || "Inventory"}`);
+  });
   const alerts = [];
   if (missingTapPrices.length) {
     alerts.push({
@@ -5497,6 +5599,153 @@ function getMissingPriceAlerts() {
     });
   }
   return alerts;
+}
+
+function getMondayRunModel(plan, freshness) {
+  const kegFeed = getPmbKegLevelOverviewFeed();
+  const pricingFeed = getPmbPricingOverviewFeed();
+  const inventoryMissingCount = getWeeklyPlanMissingInventoryCount();
+  const inventorySaving = inventorySharedSaving
+    || inventoryFieldSyncPendingCount > 0
+    || inventoryFieldSyncTimers.size > 0
+    || Object.keys(inventoryFieldOutbox).length > 0
+    || inventoryActionOutbox.length > 0;
+  const mondaySnapshotSaved = Boolean(getCurrentMondayInventorySnapshot(inventoryHistory, new Date()));
+  const planLocked = hasPublishedWeeklyPlanRecommendations();
+  const vendorOrders = Array.isArray(weeklyOrderTracking.vendors) ? weeklyOrderTracking.vendors : [];
+  const outstandingVendorCount = vendorOrders.filter((vendor) => vendor?.ordered !== true).length;
+  const orderLineCount = toNumber(plan?.summary?.orderLineCount);
+  const ordersPlaced = planLocked && (
+    orderLineCount <= 0
+    || (weeklyOrderTracking.available && vendorOrders.length > 0 && outstandingVendorCount === 0)
+  );
+  const cocktailBatchTotal = toNumber(plan?.summary?.cocktailBatchTotal);
+  const prepComplete = planLocked && (
+    cocktailBatchTotal <= 0
+    || (
+      dashboardStaffPrepPlan.available
+      && dashboardStaffPrepPlan.totalCount > 0
+      && dashboardStaffPrepPlan.completedCount >= dashboardStaffPrepPlan.totalCount
+    )
+  );
+  const tapSheets = buildTapWallPrintSheets();
+  const tapSheetsToPrint = tapSheets.filter((sheet) => !sheet.isCurrent).length;
+  const steps = [
+    {
+      id: "pmb",
+      label: "Check PMB",
+      target: "keg-levels",
+      complete: kegFeed.status === "online" && pricingFeed.status === "online",
+      status: kegFeed.status === "loading" || pricingFeed.status === "loading" ? "Checking" : "Ready",
+    },
+    {
+      id: "usage",
+      label: "Capture usage",
+      target: "weekly-usage",
+      complete: freshness.latestCompletedUsageSaved === true && !weeklyUsageSharedSaveError,
+      status: weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites || weeklyUsageSharedSaveTimer
+        ? "Saving"
+        : freshness.latestCompletedUsageSaved
+          ? "Saved"
+          : "Refresh",
+    },
+    {
+      id: "inventory",
+      label: "Count inventory",
+      target: "inventory",
+      complete: inventorySharedInitialized
+        && inventoryMissingCount === 0
+        && !inventorySaving
+        && !inventorySharedSaveError,
+      status: inventorySaving
+        ? "Saving"
+        : inventoryMissingCount > 0
+          ? `${formatNumber(inventoryMissingCount)} left`
+          : inventorySharedInitialized
+            ? "Counted"
+            : "Set up",
+    },
+    {
+      id: "snapshot",
+      label: "Save snapshot",
+      target: "inventory",
+      complete: mondaySnapshotSaved,
+      status: mondaySnapshotSaved ? "Saved" : "Save",
+    },
+    {
+      id: "plan",
+      label: "Lock plan",
+      target: "weekly-plan",
+      complete: planLocked,
+      status: planLocked ? "Locked" : freshness.readiness?.actionable ? "Ready" : "Waiting",
+    },
+    {
+      id: "orders",
+      label: "Place orders",
+      target: "weekly-plan",
+      complete: ordersPlaced,
+      status: ordersPlaced
+        ? orderLineCount > 0 ? "Placed" : "None needed"
+        : !planLocked
+          ? "After plan"
+          : weeklyOrderTracking.available && outstandingVendorCount > 0
+            ? `${formatNumber(outstandingVendorCount)} left`
+            : "Review",
+    },
+    {
+      id: "prep",
+      label: "Prep cocktails",
+      target: "weekly-plan",
+      complete: prepComplete,
+      status: prepComplete
+        ? cocktailBatchTotal > 0 ? "Prepped" : "None needed"
+        : !planLocked
+          ? "After plan"
+          : dashboardStaffPrepPlan.available
+            ? `${formatNumber(Math.max(0, dashboardStaffPrepPlan.totalCount - dashboardStaffPrepPlan.completedCount))} left`
+            : "Review",
+    },
+    {
+      id: "print",
+      label: "Print tap sheets",
+      target: "print",
+      complete: tapSheets.length > 0 && tapSheetsToPrint === 0,
+      status: tapSheetsToPrint > 0 ? `${formatNumber(tapSheetsToPrint)} left` : tapSheets.length ? "Current" : "Review",
+    },
+  ];
+  const completedCount = steps.filter((step) => step.complete).length;
+  const nextIndex = steps.findIndex((step) => !step.complete);
+  return {
+    steps,
+    completedCount,
+    nextIndex,
+    nextStep: steps[nextIndex < 0 ? 0 : nextIndex],
+    complete: nextIndex < 0,
+  };
+}
+
+function renderMondayRun(run) {
+  const progress = run.steps.length ? Math.round((run.completedCount / run.steps.length) * 100) : 0;
+  return `
+    <section class="monday-run" aria-labelledby="monday-run-title">
+      <header class="monday-run__header">
+        <div><h2 id="monday-run-title">Monday Run</h2><span>${formatNumber(run.completedCount)} / ${formatNumber(run.steps.length)}</span></div>
+        <button class="${run.complete ? "ghost-button" : "primary-button"}" type="button" data-dashboard-target="${escapeHtml(run.nextStep.target)}">${run.complete ? "Review" : "Continue"}</button>
+      </header>
+      <div class="monday-run__progress" role="progressbar" aria-label="Monday Run progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="--monday-run-progress: ${progress}%"></span></div>
+      <ol class="monday-run__steps">
+        ${run.steps.map((step, index) => `
+          <li class="monday-run__step${step.complete ? " monday-run__step--done" : index === run.nextIndex ? " monday-run__step--current" : ""}">
+            <button type="button" data-dashboard-target="${escapeHtml(step.target)}"${index === run.nextIndex ? ' aria-current="step"' : ""}>
+              <span>${formatNumber(index + 1)}</span>
+              <strong>${escapeHtml(step.label)}</strong>
+              <small>${escapeHtml(step.complete ? "Done" : step.status)}</small>
+            </button>
+          </li>
+        `).join("")}
+      </ol>
+    </section>
+  `;
 }
 
 function renderDashboardOverview() {
@@ -5551,6 +5800,8 @@ function renderDashboardOverview() {
     warning: overview.alertCounts.warning + tapPrintAlerts.length + missingPriceAlerts.length,
   };
   const leadingAlerts = overview.alerts.slice(0, 6);
+  const mondayRun = getMondayRunModel(plan, freshness);
+  const briefing = buildThirtySecondBriefing({ overview, plan, mondayRun });
 
   dashboardOverview.innerHTML = `
     <header class="dashboard-overview-hero dashboard-overview-hero--${escapeHtml(overview.status)}">
@@ -5566,6 +5817,23 @@ function renderDashboardOverview() {
         <button class="ghost-button" type="button" data-dashboard-target="keg-levels">Check Keg Levels</button>
       </div>
     </header>
+
+    <section class="thirty-second-briefing" aria-labelledby="thirty-second-briefing-title">
+      <header>
+        <h2 id="thirty-second-briefing-title">30-second briefing</h2>
+        <button class="ghost-button" type="button" data-read-dashboard-briefing>Listen</button>
+      </header>
+      <div class="thirty-second-briefing__lines">
+        ${briefing.lines.map((item) => `
+          <button class="thirty-second-briefing__line thirty-second-briefing__line--${escapeHtml(item.tone)}" type="button" data-dashboard-target="${escapeHtml(item.target || "dashboard")}">
+            <strong>${escapeHtml(item.text)}</strong>
+            ${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}
+          </button>
+        `).join("")}
+      </div>
+    </section>
+
+    ${renderMondayRun(mondayRun)}
 
     <section class="dashboard-kpi-grid" aria-label="Weekly operations summary">
       ${overview.kpis.map((kpi) => {
@@ -5596,6 +5864,11 @@ function renderDashboardOverview() {
 
     <section class="dashboard-beverage-pulse" id="dashboard-beverage-pulse" aria-labelledby="dashboard-beverage-pulse-title"></section>
   `;
+  dashboardOverview.querySelector("[data-read-dashboard-briefing]")?.addEventListener("click", () => {
+    if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance !== "function") return;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance(briefing.voiceText));
+  });
   renderDashboardBeveragePulse();
 }
 
@@ -6782,7 +7055,11 @@ function renderKegLevels() {
 
   const wallNames = ["Patio", "Main", "Karaoke"];
   const totalTaps = kegWallItems.length;
-  const liveCount = kegWallItems.filter((item) => getKegLiveRow(item)).length;
+  const liveCount = kegWallItems.filter((item) => {
+    const row = getKegLiveRow(item);
+    const level = row?.fillLevelPercent;
+    return row?.levelAvailable !== false && level != null && String(level).trim() !== "" && Number.isFinite(Number(level));
+  }).length;
   const reorderCount = kegWallItems.filter((item) => getKegNeed(item) > 0).length;
   const currentInventoryValue = sum(kegWallItems.map((item) => getKegCurrentValue(item, getKegLiveRow(item))));
   const recipeCoverage = getWallCocktailRecipeCoverage();
@@ -6791,11 +7068,11 @@ function renderKegLevels() {
     <h2>Keg Levels</h2>
     <div class="sync-panel sync-panel--keg-actions">
       <div class="sync-actions sync-actions--keg-primary">
-        <button class="primary-button" id="refresh-keg-levels" type="button"${kegSyncLoading || kegConfigUpdateRunning ? " disabled" : ""}>${kegSyncLoading ? "Refreshing..." : "Refresh keg levels"}</button>
-        <button class="ghost-button" id="send-keg-config-update" type="button"${kegSyncLoading || kegConfigUpdateRunning ? " disabled" : ""}>${kegConfigUpdateRunning ? "Sending..." : "Send config update"}</button>
+      <button class="ghost-button" id="send-keg-config-update" type="button"${kegSyncLoading || kegConfigUpdateRunning ? " disabled" : ""}>${kegConfigUpdateRunning ? "Updating..." : "Repair tap connection"}</button>
         <button class="ghost-button keg-clear-on-hand-button" id="clear-keg-on-hand" type="button">Clear all on hand</button>
       </div>
       <p class="sync-status">${escapeHtml(kegSyncMessage)}${kegUpdatedAt ? ` Last updated ${escapeHtml(formatUpdatedAt(kegUpdatedAt))}.` : ""}</p>
+      ${liveCount < totalTaps ? `<p class="sync-status sync-status--warning">${formatNumber(totalTaps - liveCount)} tap${totalTaps - liveCount === 1 ? " needs" : "s need"} update. Refresh the connection only when guest taps are clear.</p>` : ""}
     </div>
     <div class="keg-summary-stats">
       <div class="summary-line"><span>Total taps</span><strong>${totalTaps}</strong></div>
@@ -9253,7 +9530,7 @@ async function pushKegLevelAdjustment(key) {
         lineNum: toNumber(liveRow.lineNum),
         deltaOunces,
         targetPercent,
-        sendConfigUpdate: true,
+        sendConfigUpdate: false,
       }),
     });
     const result = await parseJsonResponse(response);
@@ -10458,16 +10735,19 @@ async function runKegLevelSync() {
     pmbCurrentTapSnapshot = selection.snapshot;
     applyPmbCurrentTapSnapshot(pmbCurrentTapSnapshot);
     kegLiveLevelsStale = Boolean(result.stale);
-    const installedOnDeckItems = kegLiveLevelsStale ? [] : reconcileInstalledKegOnDeckProducts();
-    if (!kegLiveLevelsStale) savePmbCurrentTapSnapshot();
+    const partial = Boolean(result.partial);
+    const installedOnDeckItems = kegLiveLevelsStale || partial ? [] : reconcileInstalledKegOnDeckProducts();
+    if (!kegLiveLevelsStale && !partial) savePmbCurrentTapSnapshot();
     kegSyncMessage = kegLiveLevelsStale
       ? `Last known taps and levels from ${formatUpdatedAt(kegUpdatedAt)}.`
+      : partial
+        ? `${formatNumber(result.capturedCount || 0)} live · ${formatNumber(result.unreachableTaps?.length || 0)} need update.`
       : installedOnDeckItems.length
         ? `Found live levels for ${result.items?.length || 0} products. Removed ${installedOnDeckItems.map((entry) => `${entry.name} from On Deck on tap ${entry.tapNumber}`).join(", ")} because ${installedOnDeckItems.length === 1 ? "it is" : "they are"} now connected.`
         : `Found live levels for ${result.items?.length || 0} products.`;
     renderIngredients();
     renderPricing();
-    succeeded = !kegLiveLevelsStale;
+    succeeded = !kegLiveLevelsStale && !partial;
   } catch (error) {
     const fallback = selectPmbCurrentTapSnapshot({
       fallback: pmbCurrentTapSnapshot,
@@ -10541,9 +10821,12 @@ async function runTapPricingSync() {
 
 async function runKegConfigUpdate() {
   if (!confirmDashboardAction(
-    "Send a configuration update to the Pour My Beer walls?",
-    ["The command targets the configured PMB tap devices."],
-    "Only continue while connected to the work network and after verifying the displayed tap assignments.",
+    "Update the Pour My Beer tap connections?",
+    [
+      "This can stop pouring on every wall for several minutes.",
+      "Confirm that no guests are using the tap walls.",
+    ],
+    "Only continue after all guest taps are clear.",
   )) return;
 
   kegConfigUpdateRunning = true;
@@ -10553,6 +10836,8 @@ async function runKegConfigUpdate() {
   try {
     const response = await fetch("/api/keg-config-update", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ acknowledgeTapInterruption: true }),
     });
     const result = await parseJsonResponse(response);
     if (!response.ok) {
@@ -10689,11 +10974,15 @@ function getKegNeed(item) {
   const par = toNumber(getKegParDisplay(item));
   if (!par) return 0;
   const liveFraction = isLiquorOunceTap(toNumber(item?.tapNumber)) ? 0 : getKegCurrentFraction(item, getKegLiveRow(item));
+  if (liveFraction === null) return null;
   return Math.max(0, Math.ceil(par - (onHand + liveFraction)));
 }
 
 function renderKegNeedCell(item, need) {
   const recommendation = getParAgentRecommendation(item);
+  if (need === null && !recommendation) {
+    return '<span class="inventory-order-zero">Unknown</span>';
+  }
   const valueHtml = need > 0
       ? `<span class="inventory-order-value">${formatNumber(need)}${recommendation?.isLiquorTap ? ` bottle${need === 1 ? "" : "s"}` : ""}</span>`
       : `<span class="inventory-order-zero">0</span>`;
@@ -10858,23 +11147,30 @@ function getKegCurrentLevelOz(liveRow, item = null) {
 }
 
 function formatKegCurrentLevel(item, liveRow) {
-  if (!liveRow) return "—";
+  if (!liveRow) return "Unknown";
+  const reportedPercent = liveRow.fillLevelPercent;
+  if (reportedPercent == null || String(reportedPercent).trim() === "" || !Number.isFinite(Number(reportedPercent))) {
+    return "Unknown";
+  }
   if (isLiquorOunceTap(toNumber(item?.tapNumber))) {
     const currentOunces = getKegCurrentLevelOz(liveRow, item);
-    return Number.isFinite(currentOunces) ? `${formatNumber(currentOunces)} oz` : "—";
+    if (!Number.isFinite(currentOunces)) return "Unknown";
+    return `${formatNumber(currentOunces)} oz${liveRow.levelAvailable === false ? " · Update" : ""}`;
   }
-  return formatKegLevelPercent(liveRow.fillLevelPercent);
+  return `${formatKegLevelPercent(liveRow.fillLevelPercent)}${liveRow.levelAvailable === false ? " · Update" : ""}`;
 }
 
 function getKegCurrentFraction(item, liveRow) {
-  if (!liveRow) return 0;
+  if (!liveRow) return null;
   if (isLiquorOunceTap(toNumber(item?.tapNumber))) {
     const currentOunces = getKegCurrentLevelOz(liveRow, item);
     const fullOunces = getKegFullOunces(liveRow, item);
-    return currentOunces && fullOunces ? currentOunces / fullOunces : 0;
+    return Number.isFinite(currentOunces) && fullOunces ? currentOunces / fullOunces : null;
   }
-  const percent = toNumber(liveRow.fillLevelPercent);
-  return percent > 0 ? percent / 100 : 0;
+  const rawPercent = liveRow.fillLevelPercent;
+  if (rawPercent == null || String(rawPercent).trim() === "") return null;
+  const percent = Number(rawPercent);
+  return Number.isFinite(percent) && percent >= 0 ? percent / 100 : null;
 }
 
 function getKegCurrentValueBreakdown(item, liveRow) {
@@ -12541,6 +12837,89 @@ function recalculateInventoryItem(item) {
   item.orderDisplay = item.orderQuantity > 0 ? String(item.orderQuantity) : "0";
 }
 
+function getInventoryRealityUsageItems() {
+  return weeklyUsageItems.map((item) => {
+    const latest = [...(item.history || [])]
+      .filter((entry) => Number.isFinite(getWeeklyUsageLabelTime(entry.label)))
+      .sort((left, right) => getWeeklyUsageLabelTime(right.label) - getWeeklyUsageLabelTime(left.label))[0];
+    const ounces = latest ? getWeeklyUsageEntryPouredOz(latest) : null;
+    return {
+      name: item.name,
+      ounces,
+      label: latest?.label || "",
+      verified: latest?.source === "pmb" && Number.isFinite(ounces),
+    };
+  });
+}
+
+function getInventoryRealityCheckModel() {
+  return buildInventoryRealityCheck({
+    currentItems: inventoryItems,
+    previousSnapshot: inventoryHistory[0] || null,
+    receipts: weeklyOrderTracking.available
+      ? weeklyOrderTracking.vendors.flatMap((vendor) => vendor.items || [])
+      : [],
+    usageItems: getInventoryRealityUsageItems(),
+    now: new Date(),
+  });
+}
+
+function focusInventoryRealityItem(itemName) {
+  const row = [...(inventoryTable?.querySelectorAll("tr") || [])]
+    .find((entry) => clean(entry.textContent).toLowerCase().includes(clean(itemName).toLowerCase()));
+  const input = row?.querySelector("input");
+  row?.scrollIntoView({ block: "center", behavior: "smooth" });
+  input?.focus();
+  input?.select?.();
+}
+
+function renderInventoryRealityCheck(model) {
+  let panel = document.querySelector("#inventory-reality-check");
+  if (!panel) {
+    panel = document.createElement("section");
+    panel.id = "inventory-reality-check";
+    panel.className = "inventory-reality-check";
+    const anchor = inventoryTable?.closest(".inventory-table-wrap") || inventoryTable;
+    anchor?.parentElement?.insertBefore(panel, anchor);
+  }
+  if (!panel) return;
+  const unresolvedReviews = model.reviews.filter((issue) => !inventoryRealityAcceptedIssueIds.has(issue.id));
+  panel.innerHTML = `
+    <div class="inventory-reality-check__header">
+      <div><h3>Inventory Reality Check</h3><p>${escapeHtml(model.sourceMessage)}</p></div>
+      <strong>${formatNumber(model.blockers.length)} blocked · ${formatNumber(unresolvedReviews.length)} to review</strong>
+    </div>
+    <div class="inventory-reality-check__list">
+      ${model.issues.map((issue) => {
+        const reviewed = inventoryRealityAcceptedIssueIds.has(issue.id);
+        return `
+          <article class="inventory-reality-check__item" data-severity="${escapeHtml(issue.severity)}" data-reviewed="${reviewed}">
+            <div><strong>${escapeHtml(issue.itemName)}</strong><p>${escapeHtml(issue.title)} · ${escapeHtml(issue.detail)}</p></div>
+            <div class="inventory-reality-check__actions">
+              ${issue.severity === "review" && !reviewed ? `<button class="ghost-button" type="button" data-inventory-reality-keep="${escapeHtml(issue.id)}">Keep count</button>` : reviewed ? "<span>Reviewed</span>" : ""}
+              <button class="ghost-button" type="button" data-inventory-reality-correct="${escapeHtml(issue.itemName)}">Correct count</button>
+            </div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+    <div class="inventory-reality-check__footer">
+      <button class="primary-button" type="button" data-inventory-reality-continue${model.blockers.length || unresolvedReviews.length ? " disabled" : ""}>Continue saving snapshot</button>
+    </div>
+  `;
+  panel.querySelectorAll("[data-inventory-reality-keep]").forEach((button) => {
+    button.addEventListener("click", () => {
+      inventoryRealityAcceptedIssueIds.add(button.dataset.inventoryRealityKeep);
+      renderInventoryRealityCheck(getInventoryRealityCheckModel());
+    });
+  });
+  panel.querySelectorAll("[data-inventory-reality-correct]").forEach((button) => {
+    button.addEventListener("click", () => focusInventoryRealityItem(button.dataset.inventoryRealityCorrect));
+  });
+  panel.querySelector("[data-inventory-reality-continue]")?.addEventListener("click", saveInventorySnapshot);
+  panel.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
 function toggleInventoryRowEdit(id) {
   inventoryRowEditState[id] = !inventoryRowEditState[id];
   renderInventory();
@@ -12583,6 +12962,18 @@ async function saveInventorySnapshot() {
     setInventorySharedStatus("PMB keg levels are still loading. Save the Monday snapshot after the refresh finishes.");
     return;
   }
+
+  const realityCheck = getInventoryRealityCheckModel();
+  const unreviewedRealityIssues = realityCheck.reviews.filter((issue) => !inventoryRealityAcceptedIssueIds.has(issue.id));
+  if (realityCheck.blockers.length || unreviewedRealityIssues.length) {
+    inventorySharedMessage = realityCheck.blockers.length
+      ? "Monday snapshot not saved: finish the required Inventory Reality Check items."
+      : "Review the unusual counts before saving the Monday snapshot.";
+    renderInventoryPanels();
+    renderInventoryRealityCheck(realityCheck);
+    return;
+  }
+  document.querySelector("#inventory-reality-check")?.remove();
 
   await recordCaptureEvent("monday_snapshot_attempt");
 

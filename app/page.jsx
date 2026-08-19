@@ -113,6 +113,7 @@ export default function DashboardPage() {
 
   return (
     <div className="shell" data-dashboard-role={sessionRole}>
+      <link rel="stylesheet" href="/inventory-reality-check.css" />
       <header className="topbar">
         <div className="topbar-title-row">
           <h1>Beverage Dashboard</h1>
@@ -130,7 +131,8 @@ export default function DashboardPage() {
               <span className="dashboard-menu-icon" aria-hidden="true"><i></i><i></i><i></i></span>
             </summary>
             <div className="dashboard-menu-popover">
-              <button className="dashboard-menu-item" id="weekly-usage-tab" data-menu-tab="weekly-usage" type="button">Weekly Usage</button>
+                      <button className="dashboard-menu-item" id="refresh-all-pmb" type="button">Refresh PMB</button>
+                      <button className="dashboard-menu-item" id="weekly-usage-tab" data-menu-tab="weekly-usage" type="button">Weekly Usage</button>
               <button className="dashboard-menu-item" data-menu-tab="pricing" type="button">Tap Pricing</button>
               <button className="dashboard-menu-item" data-menu-tab="ingredients" type="button">Ingredient &amp; Keg Costs</button>
               <button className="dashboard-menu-item" id="recipes-tab" data-menu-tab="recipes" data-recipe-view="current" type="button">Recipes</button>
@@ -182,6 +184,23 @@ export default function DashboardPage() {
             </form>
             <p className="dashboard-data-search__feedback" id="dashboard-data-search-feedback" aria-live="polite"></p>
             <div className="dashboard-data-search__results" id="dashboard-data-search-results"></div>
+            <details className="what-if-planner">
+              <summary>What-if planning</summary>
+              <form className="what-if-planner__form" id="what-if-planner-form">
+                <label htmlFor="what-if-planner-input">What should we preview?</label>
+                <div>
+                  <input
+                    id="what-if-planner-input"
+                    type="search"
+                    autoComplete="off"
+                    placeholder="What if pours are 20% higher next week?"
+                  />
+                  <button className="primary-button" type="submit">Preview</button>
+                </div>
+              </form>
+              <p className="what-if-planner__feedback" id="what-if-planner-feedback" aria-live="polite"></p>
+              <div className="what-if-planner__results" id="what-if-planner-results"></div>
+            </details>
           </div>
         </section>
 
@@ -613,7 +632,6 @@ export default function DashboardPage() {
               <div>
                 <h2 id="pmb-publish-queue-title">Pour My Beer publishing queue</h2>
               </div>
-              <button className="ghost-button" id="check-pmb-queue-connection" type="button">Check PMB connection</button>
             </div>
             <div className="pmb-queue-connection" id="pmb-queue-connection" data-state="idle" aria-live="polite">
               PMB connection not checked.
@@ -809,7 +827,6 @@ export default function DashboardPage() {
                 <option value="0">All history</option>
               </select>
             </label>
-            <button className="ghost-button" id="pull-pmb-weekly-usage" type="button">Pull PMB report</button>
           </div>
 
           <div className="inventory-layout">

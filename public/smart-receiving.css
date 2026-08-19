@@ -1,0 +1,113 @@
+.smart-receiving {
+  display: grid;
+  gap: 14px;
+  margin: 16px 0;
+  border: 1px solid rgba(47, 107, 95, 0.18);
+  border-radius: 18px;
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(239, 247, 241, 0.96), rgba(255, 249, 239, 0.94));
+}
+
+.smart-receiving__header,
+.smart-receiving__actions,
+.smart-receiving__review li {
+  display: flex;
+  align-items: center;
+}
+
+.smart-receiving__header {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.smart-receiving__header h3,
+.smart-receiving__status {
+  margin: 0;
+}
+
+.smart-receiving__fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.3fr);
+  gap: 10px;
+}
+
+.smart-receiving__fields label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.smart-receiving textarea,
+.smart-receiving input {
+  width: 100%;
+}
+
+.smart-receiving textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.smart-receiving__actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.smart-receiving__status {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.smart-receiving__status[data-state="error"] {
+  color: #9b3f2e;
+}
+
+.smart-receiving__review ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.smart-receiving__review li {
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(47, 107, 95, 0.13);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.smart-receiving__review li[data-state="short"] {
+  border-left: 4px solid var(--gold);
+}
+
+.smart-receiving__review strong,
+.smart-receiving__review span {
+  overflow-wrap: anywhere;
+}
+
+.smart-receiving__review span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-align: right;
+}
+
+@media (max-width: 720px) {
+  .smart-receiving__fields {
+    grid-template-columns: 1fr;
+  }
+
+  .smart-receiving__actions,
+  .smart-receiving__actions button {
+    width: 100%;
+  }
+}
+
+@media print {
+  .smart-receiving {
+    display: none !important;
+  }
+}

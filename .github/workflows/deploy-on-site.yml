@@ -1,6 +1,11 @@
 name: Deploy on-site
 
 on:
+  workflow_run:
+    workflows:
+      - Quality checks
+    types:
+      - completed
   workflow_dispatch:
     inputs:
       commit:
@@ -17,6 +22,9 @@ concurrency:
 
 jobs:
   deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on:
       - self-hosted
       - onpar-production
@@ -26,7 +34,7 @@ jobs:
       - name: Deploy the checked release through PM2
         shell: bash
         env:
-          REQUESTED_SHA: ${{ inputs.commit }}
+          REQUESTED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.event.workflow_run.head_sha }}
         run: |
           set -Eeuo pipefail
 

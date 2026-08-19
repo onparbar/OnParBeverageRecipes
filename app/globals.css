@@ -1120,6 +1120,140 @@ h1 {
   background: rgba(255, 253, 247, 0.08);
 }
 
+.monday-run {
+  display: grid;
+  gap: 14px;
+  border: 1px solid rgba(31, 95, 84, 0.18);
+  border-radius: 20px;
+  padding: 20px;
+  background: linear-gradient(135deg, rgba(247, 250, 241, 0.98), rgba(255, 250, 239, 0.94));
+  box-shadow: var(--soft-shadow);
+}
+
+.monday-run__header,
+.monday-run__header > div {
+  display: flex;
+  align-items: center;
+}
+
+.monday-run__header {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.monday-run__header > div {
+  gap: 10px;
+}
+
+.monday-run__header h2 {
+  margin: 0;
+  font-size: 1.65rem;
+}
+
+.monday-run__header span {
+  border: 1px solid rgba(31, 95, 84, 0.15);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--juniper-dark);
+  background: rgba(255, 255, 255, 0.65);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.monday-run__progress {
+  overflow: hidden;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(31, 95, 84, 0.11);
+}
+
+.monday-run__progress span {
+  display: block;
+  width: var(--monday-run-progress);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--juniper), #7b9a75);
+  transition: width 220ms ease;
+}
+
+.monday-run__steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.monday-run__step button {
+  display: grid;
+  width: 100%;
+  min-height: 82px;
+  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-content: center;
+  align-items: center;
+  gap: 3px 9px;
+  border: 1px solid rgba(24, 33, 31, 0.1);
+  border-radius: 14px;
+  padding: 11px;
+  color: var(--ink);
+  background: rgba(255, 253, 248, 0.86);
+  cursor: pointer;
+  text-align: left;
+}
+
+.monday-run__step button > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  grid-row: 1 / span 2;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--muted);
+  background: rgba(31, 95, 84, 0.08);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.monday-run__step strong,
+.monday-run__step small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.monday-run__step strong {
+  font-size: 0.8rem;
+}
+
+.monday-run__step small {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.monday-run__step--done button {
+  border-color: rgba(31, 95, 84, 0.16);
+  background: rgba(232, 243, 235, 0.82);
+}
+
+.monday-run__step--done button > span {
+  color: #fff;
+  background: var(--juniper);
+}
+
+.monday-run__step--current button {
+  border-color: rgba(183, 132, 35, 0.55);
+  background: rgba(255, 247, 219, 0.92);
+  box-shadow: 0 0 0 3px rgba(214, 166, 61, 0.12);
+}
+
+.monday-run__step button:hover,
+.monday-run__step button:focus-visible {
+  border-color: var(--juniper);
+  outline: 2px solid rgba(31, 95, 84, 0.14);
+  outline-offset: 2px;
+}
+
 .dashboard-kpi-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -7341,6 +7475,18 @@ td {
     flex-basis: auto;
   }
 
+  .monday-run {
+    padding: 14px;
+  }
+
+  .monday-run__header {
+    align-items: stretch;
+  }
+
+  .monday-run__steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .dashboard-overview-status {
     align-items: flex-start;
     flex-direction: column;
@@ -8494,5 +8640,154 @@ tbody tr:hover {
   .inventory-speech__review input {
     width: 100%;
     max-width: none;
+  }
+}
+
+.thirty-second-briefing,
+.what-if-planner {
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 22px;
+  background: color-mix(in srgb, #fff 88%, #edf4ec);
+  box-shadow: 0 16px 40px rgb(31 55 45 / 8%);
+}
+
+.thirty-second-briefing {
+  margin: 18px 0;
+  padding: clamp(16px, 2vw, 24px);
+}
+
+.thirty-second-briefing > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.thirty-second-briefing h2 {
+  margin: 0;
+}
+
+.thirty-second-briefing__lines {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 10px;
+}
+
+.thirty-second-briefing__line {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 16px;
+  background: rgb(255 255 255 / 72%);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thirty-second-briefing__line strong,
+.thirty-second-briefing__line small {
+  display: block;
+}
+
+.thirty-second-briefing__line small {
+  margin-top: 5px;
+  opacity: 0.68;
+}
+
+.thirty-second-briefing__line--critical {
+  background: #fff0ea;
+}
+
+.thirty-second-briefing__line--next {
+  background: #eaf4ef;
+}
+
+.what-if-planner {
+  margin-top: 20px;
+  overflow: hidden;
+}
+
+.what-if-planner > summary {
+  padding: 17px 20px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.what-if-planner[open] > summary {
+  border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.what-if-planner__form,
+.what-if-planner__feedback,
+.what-if-planner__results {
+  margin: 16px 20px;
+}
+
+.what-if-planner__form label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 800;
+}
+
+.what-if-planner__form > div {
+  display: flex;
+  gap: 10px;
+}
+
+.what-if-planner__form input {
+  min-width: 0;
+  flex: 1;
+}
+
+.what-if-planner__summary {
+  display: grid;
+  gap: 4px;
+  padding: 18px;
+  border-radius: 17px;
+  background: #eaf4ef;
+}
+
+.what-if-planner__summary strong {
+  font-size: clamp(1.8rem, 4vw, 3rem);
+}
+
+.what-if-planner__rows {
+  margin-top: 10px;
+}
+
+.what-if-planner__rows article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 4px;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 9%, transparent);
+}
+
+.what-if-planner__rows article > span:last-child {
+  text-align: right;
+}
+
+.what-if-planner__rows strong,
+.what-if-planner__rows small {
+  display: block;
+}
+
+.what-if-planner__rows small,
+.what-if-planner__note,
+.what-if-planner__feedback {
+  opacity: 0.68;
+}
+
+@media (max-width: 640px) {
+  .what-if-planner__form > div,
+  .what-if-planner__rows article {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .what-if-planner__rows article > span:last-child {
+    text-align: left;
   }
 }

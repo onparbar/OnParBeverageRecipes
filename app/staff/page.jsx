@@ -8,6 +8,7 @@ export const metadata = {
 export default function StaffRecipePage() {
   return (
     <div className="shell staff-recipe-shell" data-staff-dashboard="true">
+      <link rel="stylesheet" href="/smart-receiving.css" />
       <header className="topbar">
         <div>
           <p className="staff-view-mark">Staff View</p>
@@ -81,6 +82,28 @@ export default function StaffRecipePage() {
           <div id="staff-order-status" className="staff-recipe-status" role="status" aria-live="polite">
             Loading this week&apos;s order checklist...
           </div>
+          <section className="smart-receiving" aria-labelledby="smart-receiving-title">
+            <div className="smart-receiving__header">
+              <h3 id="smart-receiving-title">Smart receiving</h3>
+              <button className="ghost-button" id="smart-receiving-speak" type="button">Speak</button>
+            </div>
+            <div className="smart-receiving__fields">
+              <label>
+                <span>Delivery update</span>
+                <textarea id="smart-receiving-transcript" rows="3" autoComplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="Bonbright arrived; everything came except one Garage Lime"></textarea>
+              </label>
+              <label>
+                <span>Checked by</span>
+                <input id="smart-receiving-name" type="text" maxLength="80" autoComplete="name" placeholder="Employee name" />
+              </label>
+            </div>
+            <div className="smart-receiving__actions">
+              <button className="ghost-button" id="smart-receiving-review" type="button">Review</button>
+              <button className="primary-button" id="smart-receiving-apply" type="button" disabled>Apply reviewed delivery</button>
+            </div>
+            <p className="smart-receiving__status" id="smart-receiving-status" role="status" aria-live="polite"></p>
+            <div className="smart-receiving__review" id="smart-receiving-review-list"></div>
+          </section>
           <div id="staff-order-summary" className="staff-prep-summary" aria-live="polite"></div>
           <div id="staff-order-list" className="staff-order-list" aria-busy="true"></div>
         </section>
