@@ -29,12 +29,13 @@ git clone https://github.com/onparbar/OnParBeverageRecipes.git \
 The checkout must remain clean. Deployment fetches reviewed commits but does
 not check out, reset, or hand-edit the source tree.
 
-## Automatic deployment
+## Approved deployment
 
 Register the GitHub runner under the `onpar` account with the name
 `onpar-service-mac` and label `onpar-production`. After a push to `main` passes
-`Quality checks`, `.github/workflows/deploy-on-site.yml` extracts the PM2
-helpers from that exact commit and runs the guarded deployment.
+`Quality checks`, a manager starts `Deploy on-site` manually and enters the
+exact approved commit. The workflow extracts the PM2 helpers from that commit
+and runs the guarded deployment.
 
 The deployment:
 
@@ -42,9 +43,12 @@ The deployment:
 2. Builds and tests an immutable sibling release.
 3. Links the private runtime environment, data, and logs.
 4. Switches only the PM2 dashboard process.
-5. Verifies exact build identity and storage health locally and publicly.
-6. Restores the previous PM2 release if validation fails.
-7. Leaves Cloudflare and `com.onpar.par-agent` untouched.
+5. Verifies exact build identity and storage health locally.
+6. Verifies public root/login reachability while respecting authenticated API
+   boundaries; open public APIs also receive exact identity validation.
+7. Restores the previous PM2 release and its safe build identity if validation
+   fails.
+8. Leaves Cloudflare and `com.onpar.par-agent` untouched.
 
 The workflow intentionally does not run `pm2 save` or change PM2 startup
 services. Repair PM2 reboot persistence in a separate approved maintenance
@@ -75,7 +79,8 @@ Read-only checks:
 pm2 status onpar-dashboard
 curl -fsS http://127.0.0.1:3000/api/version
 curl -fsS 'http://127.0.0.1:3000/api/health?storage=1'
-curl -fsS https://onparbev.com/api/version
+curl -sS -o /dev/null -w '%{http_code}\n' https://onparbev.com/
+curl -sS -o /dev/null -w '%{http_code}\n' https://onparbev.com/login
 ```
 
 Never print `.env.local`, PM2 environment values, runner tokens, PMB

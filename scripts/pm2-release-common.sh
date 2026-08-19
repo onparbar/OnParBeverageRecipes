@@ -201,7 +201,11 @@ process.stdin.on("end", () => {
   const matches = JSON.parse(input).filter((entry) => entry?.name === name);
   if (matches.length !== 1) process.exit(3);
   const env = matches[0].pm2_env || {};
-  process.stdout.write(`${String(env.pm_cwd || "")}\t${String(env.status || "")}\n`);
+  const sha = /^[a-f0-9]{7,64}$/i.test(String(env.ONPAR_BUILD_SHA || ""))
+    ? String(env.ONPAR_BUILD_SHA).toLowerCase()
+    : "";
+  const builtAt = String(env.ONPAR_BUILD_TIMESTAMP || "").replace(/[|\r\n]/g, "");
+  process.stdout.write(`${String(env.pm_cwd || "")}|${String(env.status || "")}|${sha}|${builtAt}\n`);
 });
 ' "${app_name}"
 }
@@ -221,14 +225,33 @@ onpar_pm2_release_sha() {
   fi
 }
 
+onpar_pm2_release_identity() {
+  local release_dir="$1"
+  local environment_sha="${2:-}"
+  local candidate="$(sed -n '1p' "${release_dir}/.onpar-release-sha" 2>/dev/null || true)"
+  if ! [[ "${candidate}" =~ ^[a-fA-F0-9]{7,64}$ ]]; then
+    candidate="${environment_sha}"
+  fi
+  if ! [[ "${candidate}" =~ ^[a-fA-F0-9]{7,64}$ ]]; then
+    candidate="${release_dir##*/OnParBeverageRecipes-release-}"
+  fi
+  if [[ "${candidate}" =~ ^[a-fA-F0-9]{7,64}$ ]]; then
+    printf '%s\n' "$(printf '%s' "${candidate}" | tr '[:upper:]' '[:lower:]')"
+  fi
+}
+
 onpar_pm2_switch_release() {
   local pm2_bin="$1"
   local npm_bin="$2"
   local app_name="$3"
   local release_dir="$4"
-  local release_sha="$(sed -n '1p' "${release_dir}/.onpar-release-sha" 2>/dev/null || true)"
-  local release_time="$(sed -n '1p' "${release_dir}/.onpar-build-timestamp" 2>/dev/null || true)"
+  local release_sha="${5:-$(sed -n '1p' "${release_dir}/.onpar-release-sha" 2>/dev/null || true)}"
+  local release_time="${6:-$(sed -n '1p' "${release_dir}/.onpar-build-timestamp" 2>/dev/null || true)}"
   local pm2_home="${PM2_HOME:-${HOME}/.pm2}"
+
+  if ! [[ "${release_sha}" =~ ^[a-fA-F0-9]{7,64}$ ]]; then
+    release_sha="$(onpar_pm2_release_identity "${release_dir}" "" || true)"
+  fi
 
   if [ ! -f "${release_dir}/package.json" ] || [ ! -f "${release_dir}/.next/BUILD_ID" ]; then
     echo "Cannot start incomplete release ${release_dir}." >&2
@@ -261,7 +284,7 @@ onpar_pm2_wait_for_release() {
   local status=""
   for attempt in $(seq 1 15); do
     info="$(onpar_pm2_app_info "${pm2_bin}" "${node_bin}" "${app_name}" 2>/dev/null || true)"
-    IFS=$'\t' read -r running_dir status <<< "${info}"
+    IFS='|' read -r running_dir status _ _ <<< "${info}"
     if [ "${running_dir}" = "${expected_dir}" ] && [ "${status}" = "online" ]; then
       return 0
     fi
@@ -312,6 +335,69 @@ onpar_pm2_smoke_release() {
   else
     onpar_pm2_root_smoke "${service_url}"
   fi
+}
+
+onpar_pm2_public_smoke() {
+  local node_bin="$1"
+  local service_url="$2"
+  local expected_sha="$3"
+  local probe="${expected_sha:-reachability}"
+  local version_status=""
+  local health_status=""
+  local root_status=""
+  local login_status=""
+  local version_json=""
+  local health_json=""
+  local valid=0
+
+  for attempt in $(seq 1 15); do
+    version_status="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "${service_url}/api/version?deploy=${probe}" 2>/dev/null || true)"
+    health_status="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "${service_url}/api/health?storage=1&deploy=${probe}" 2>/dev/null || true)"
+    root_status="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "${service_url}/?deploy=${probe}" 2>/dev/null || true)"
+    login_status="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "${service_url}/login?deploy=${probe}" 2>/dev/null || true)"
+    valid=1
+    case "${version_status}" in 200|401|403) ;; *) valid=0 ;; esac
+    case "${health_status}" in 200|401|403) ;; *) valid=0 ;; esac
+    case "${root_status}" in 2??|3??) ;; *) valid=0 ;; esac
+    case "${login_status}" in 2??) ;; *) valid=0 ;; esac
+    if [ "${valid}" -eq 1 ]; then
+      break
+    fi
+    sleep 2
+  done
+
+  case "${version_status}" in
+    200)
+      version_json="$(curl --fail --silent --show-error --max-time 10 "${service_url}/api/version?deploy=${probe}")"
+      "${node_bin}" -e '
+const version = JSON.parse(process.argv[1]);
+const expected = String(process.argv[2] || "").toLowerCase();
+if (version.service !== "onpar-beverage-dashboard") throw new Error("Unexpected public service identity.");
+if (expected && !String(version.commit || "").toLowerCase().startsWith(expected)) {
+  throw new Error(`Public commit ${version.commit || "unknown"} does not match ${expected}.`);
+}
+' "${version_json}" "${expected_sha}"
+      ;;
+    401|403) ;;
+    *) echo "Public version boundary returned HTTP ${version_status:-none}." >&2; return 1 ;;
+  esac
+
+  case "${health_status}" in
+    200)
+      health_json="$(curl --fail --silent --show-error --max-time 10 "${service_url}/api/health?storage=1&deploy=${probe}")"
+      "${node_bin}" -e '
+const health = JSON.parse(process.argv[1]);
+if (health.ok !== true) throw new Error(`Public health failed with ${health.status || "unknown"}.`);
+' "${health_json}"
+      ;;
+    401|403) ;;
+    *) echo "Public health boundary returned HTTP ${health_status:-none}." >&2; return 1 ;;
+  esac
+  case "${root_status}" in 2??|3??) ;; *) echo "Public root returned HTTP ${root_status:-none}." >&2; return 1 ;; esac
+  case "${login_status}" in 2??) ;; *) echo "Public login returned HTTP ${login_status:-none}." >&2; return 1 ;; esac
+
+  printf '{"ok":true,"mode":"public-auth-boundary","versionStatus":%s,"healthStatus":%s,"rootStatus":%s,"loginStatus":%s}\n' \
+    "${version_status}" "${health_status}" "${root_status}" "${login_status}"
 }
 
 onpar_pm2_acquire_lock() {

@@ -49,7 +49,7 @@ NODE_BIN="$(onpar_pm2_select_node22 "${SOURCE_REPO}" "${SERVICE_DIR}")"
 NPM_BIN="$(onpar_pm2_find_npm "${NODE_BIN}")"
 PM2_BIN="$(onpar_pm2_find_binary)"
 CURRENT_INFO="$(onpar_pm2_app_info "${PM2_BIN}" "${NODE_BIN}" "${PM2_APP_NAME}" 2>/dev/null || true)"
-IFS=$'\t' read -r CURRENT_RELEASE CURRENT_STATUS <<< "${CURRENT_INFO}"
+IFS='|' read -r CURRENT_RELEASE CURRENT_STATUS CURRENT_ENV_SHA CURRENT_ENV_TIME <<< "${CURRENT_INFO}"
 if [ -z "${CURRENT_RELEASE}" ] || [ "${CURRENT_STATUS}" != "online" ] || [ ! -d "${CURRENT_RELEASE}" ]; then
   echo "Existing PM2 app ${PM2_APP_NAME} must be online before guarded deployment." >&2
   exit 1
@@ -62,6 +62,7 @@ case "${CURRENT_RELEASE}" in
     ;;
 esac
 CURRENT_SHA="$(onpar_pm2_release_sha "${SOURCE_REPO}" "${CURRENT_RELEASE}" || true)"
+CURRENT_IDENTITY="$(onpar_pm2_release_identity "${CURRENT_RELEASE}" "${CURRENT_ENV_SHA}" || true)"
 
 onpar_pm2_acquire_lock "${SERVICE_DIR}"
 cleanup_lock() {
@@ -74,9 +75,9 @@ onpar_pm2_prepare_release \
   "${TARGET_SHA}" "${NODE_BIN}" "${NPM_BIN}"
 NEW_RELEASE="${ONPAR_PM2_PREPARED_RELEASE}"
 
-if [ "${CURRENT_SHA}" = "${TARGET_SHA}" ]; then
+if [ "${CURRENT_IDENTITY}" = "${TARGET_SHA}" ]; then
   onpar_pm2_smoke_release "${SMOKE_HELPER}" "${SOURCE_REPO}" "${CURRENT_RELEASE}" "${LOCAL_URL}" "${TARGET_SHA}"
-  onpar_pm2_smoke_release "${SMOKE_HELPER}" "${SOURCE_REPO}" "${CURRENT_RELEASE}" "${PUBLIC_URL}" "${TARGET_SHA}"
+  onpar_pm2_public_smoke "${NODE_BIN}" "${PUBLIC_URL}" "${TARGET_SHA}"
   onpar_pm2_activate_link "${SERVICE_DIR}" "${CURRENT_RELEASE}"
   onpar_pm2_install_helpers "${HELPER_DIR}" "${SERVICE_DIR}"
   printf '%s\n' "${TARGET_SHA}" > "${DEPLOY_DIR}/deployed-sha"
@@ -91,9 +92,10 @@ restore_previous_release() {
   trap - ERR
   if [ "${SWITCHED}" -eq 1 ]; then
     echo "Deployment validation failed; restoring ${CURRENT_RELEASE}." >&2
-    onpar_pm2_switch_release "${PM2_BIN}" "${NPM_BIN}" "${PM2_APP_NAME}" "${CURRENT_RELEASE}" || true
+    onpar_pm2_switch_release "${PM2_BIN}" "${NPM_BIN}" "${PM2_APP_NAME}" "${CURRENT_RELEASE}" "${CURRENT_IDENTITY}" "${CURRENT_ENV_TIME}" || true
     onpar_pm2_wait_for_release "${PM2_BIN}" "${NODE_BIN}" "${PM2_APP_NAME}" "${CURRENT_RELEASE}" || true
     onpar_pm2_smoke_release "${SMOKE_HELPER}" "${SOURCE_REPO}" "${CURRENT_RELEASE}" "${LOCAL_URL}" "${CURRENT_SHA}" || true
+    onpar_pm2_public_smoke "${NODE_BIN}" "${PUBLIC_URL}" "${CURRENT_IDENTITY}" || true
   fi
   exit "${original_status}"
 }
@@ -103,11 +105,11 @@ SWITCHED=1
 onpar_pm2_switch_release "${PM2_BIN}" "${NPM_BIN}" "${PM2_APP_NAME}" "${NEW_RELEASE}"
 onpar_pm2_wait_for_release "${PM2_BIN}" "${NODE_BIN}" "${PM2_APP_NAME}" "${NEW_RELEASE}"
 onpar_pm2_smoke_release "${SMOKE_HELPER}" "${SOURCE_REPO}" "${NEW_RELEASE}" "${LOCAL_URL}" "${TARGET_SHA}"
-onpar_pm2_smoke_release "${SMOKE_HELPER}" "${SOURCE_REPO}" "${NEW_RELEASE}" "${PUBLIC_URL}" "${TARGET_SHA}"
+onpar_pm2_public_smoke "${NODE_BIN}" "${PUBLIC_URL}" "${TARGET_SHA}"
 onpar_pm2_activate_link "${SERVICE_DIR}" "${NEW_RELEASE}"
 onpar_pm2_install_helpers "${HELPER_DIR}" "${SERVICE_DIR}"
 
-printf '%s\n' "${CURRENT_SHA}" > "${DEPLOY_DIR}/previous-sha"
+printf '%s\n' "${CURRENT_IDENTITY}" > "${DEPLOY_DIR}/previous-sha"
 printf '%s\n' "${CURRENT_RELEASE}" > "${DEPLOY_DIR}/previous-release"
 printf '%s\n' "${TARGET_SHA}" > "${DEPLOY_DIR}/deployed-sha"
 chmod 600 "${DEPLOY_DIR}/previous-sha" "${DEPLOY_DIR}/previous-release" "${DEPLOY_DIR}/deployed-sha"

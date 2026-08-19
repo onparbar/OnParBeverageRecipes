@@ -1,16 +1,11 @@
 name: Deploy on-site
 
 on:
-  workflow_run:
-    workflows:
-      - Quality checks
-    types:
-      - completed
   workflow_dispatch:
     inputs:
       commit:
-        description: Commit SHA to deploy (leave blank for the latest main)
-        required: false
+        description: Exact reviewed commit SHA to deploy
+        required: true
         type: string
 
 permissions:
@@ -22,12 +17,6 @@ concurrency:
 
 jobs:
   deploy:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on:
       - self-hosted
       - onpar-production
@@ -37,7 +26,6 @@ jobs:
       - name: Deploy the checked release through PM2
         shell: bash
         env:
-          CHECKED_SHA: ${{ github.event.workflow_run.head_sha }}
           REQUESTED_SHA: ${{ inputs.commit }}
         run: |
           set -Eeuo pipefail
@@ -58,12 +46,9 @@ jobs:
           fi
 
           git -C "${source_repo}" fetch --prune origin main
-          target_ref="${CHECKED_SHA:-}"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            target_ref="${REQUESTED_SHA:-origin/main}"
-          fi
+          target_ref="${REQUESTED_SHA:-}"
           if [ -z "${target_ref}" ]; then
-            echo "GitHub did not provide a commit to deploy." >&2
+            echo "An exact reviewed commit is required for production deployment." >&2
             exit 1
           fi
           target_sha="$(git -C "${source_repo}" rev-parse --verify "${target_ref}^{commit}")"
