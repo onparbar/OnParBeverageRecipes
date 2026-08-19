@@ -165,11 +165,13 @@ test("owner login automatically attempts PMB and mapped vendor price refreshes",
   assert.doesNotMatch(ownerSyncSource, /if \(!lockToken\) return;/);
 });
 
-test("vendor price sync is automatic at owner login and still supports a manual retry", () => {
+test("vendor price sync is automatic at owner login and included in the unified PMB refresh", () => {
   assert.match(dashboardSource, /async function runVendorSync\(\{ automatic = false \} = \{\}\)/);
   assert.match(dashboardSource, /const syncScope = automatic \? "all" : vendorSyncScope/);
   assert.match(dashboardSource, /Prices sync automatically/);
-  assert.match(dashboardSource, /id="run-vendor-sync"/);
+  assert.match(pageSource, /id="refresh-all-pmb"/);
+  assert.match(dashboardSource, /async function runUnifiedPmbRefresh\(\)/);
+  assert.doesNotMatch(dashboardSource, /id="run-vendor-sync"/);
 });
 
 test("PMB refresh alerts distinguish attempted failures from unchecked feeds", () => {

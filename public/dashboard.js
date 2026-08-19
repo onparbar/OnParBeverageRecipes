@@ -1279,6 +1279,28 @@ async function runOwnerLoginSync() {
   }
 }
 
+function acquireOwnerLoginSyncLock() {
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  try {
+    const existing = JSON.parse(localStorage.getItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY) || "null");
+    if (existing?.token && Date.now() - Number(existing.startedAt) < OWNER_LOGIN_SYNC_LOCK_MAX_AGE_MS) return "";
+    localStorage.setItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY, JSON.stringify({ token, startedAt: Date.now() }));
+    const saved = JSON.parse(localStorage.getItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY) || "null");
+    return saved?.token === token ? token : "";
+  } catch {
+    return token;
+  }
+}
+
+function releaseOwnerLoginSyncLock(token) {
+  try {
+    const existing = JSON.parse(localStorage.getItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY) || "null");
+    if (existing?.token === token) localStorage.removeItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY);
+  } catch {
+    // The lock naturally expires even when browser storage is unavailable.
+  }
+}
+
 let unifiedPmbRefreshRunning = false;
 
 async function runUnifiedPmbRefresh() {
@@ -1318,28 +1340,6 @@ async function runUnifiedPmbRefresh() {
 document.querySelector("#refresh-all-pmb")?.addEventListener("click", () => {
   void runUnifiedPmbRefresh();
 });
-
-function acquireOwnerLoginSyncLock() {
-  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  try {
-    const existing = JSON.parse(localStorage.getItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY) || "null");
-    if (existing?.token && Date.now() - Number(existing.startedAt) < OWNER_LOGIN_SYNC_LOCK_MAX_AGE_MS) return "";
-    localStorage.setItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY, JSON.stringify({ token, startedAt: Date.now() }));
-    const saved = JSON.parse(localStorage.getItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY) || "null");
-    return saved?.token === token ? token : "";
-  } catch {
-    return token;
-  }
-}
-
-function releaseOwnerLoginSyncLock(token) {
-  try {
-    const existing = JSON.parse(localStorage.getItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY) || "null");
-    if (existing?.token === token) localStorage.removeItem(OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY);
-  } catch {
-    // The lock naturally expires even when browser storage is unavailable.
-  }
-}
 
 function cloneDashboardStateValue(value) {
   return JSON.parse(JSON.stringify(value));
