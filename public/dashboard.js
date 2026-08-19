@@ -1078,7 +1078,7 @@ let parAgentStateOutboxDurable = true;
 let weeklyPlanUpdating = false;
 let weeklyPlanRefreshMessage = "";
 let weeklyPlanGroupMode = "vendor";
-let weeklyOrderTracking = { available: false, generatedAt: "", drafts: [], vendors: [], itemCount: 0, receivedCount: 0, notReceivedCount: 0, notReceivedItems: [] };
+let weeklyOrderTracking = { available: false, generatedAt: "", drafts: [], adjustments: [], adjustmentCatalog: [], vendors: [], itemCount: 0, receivedCount: 0, notReceivedCount: 0, notReceivedItems: [] };
 let weeklyOrderTrackingMessage = "Loading shared order tracking...";
 let weeklyOrderTrackingRefreshRunning = false;
 let orderRehearsalMode = false;
@@ -5053,6 +5053,8 @@ function normalizeWeeklyOrderTracking(result = {}) {
     available: result?.available === true,
     generatedAt: clean(result?.generatedAt),
     drafts: Array.isArray(result?.drafts) ? result.drafts : [],
+    adjustments: Array.isArray(result?.adjustments) ? result.adjustments : [],
+    adjustmentCatalog: Array.isArray(result?.adjustmentCatalog) ? result.adjustmentCatalog : [],
     vendors: Array.isArray(result?.vendors) ? result.vendors : [],
     itemCount: toNumber(result?.itemCount),
     receivedCount: toNumber(result?.receivedCount),
@@ -5163,7 +5165,8 @@ async function saveWeeklyOrderPlaced(vendorId, ordered, orderedBy) {
 }
 
 async function saveVendorOrderDraftAction(payload) {
-  weeklyOrderTrackingMessage = payload.action === "approve-draft" ? "Approving vendor draft..." : "Saving vendor draft...";
+  const adjusting = ["set-order-adjustment", "remove-order-adjustment"].includes(payload.action);
+  weeklyOrderTrackingMessage = payload.action === "approve-draft" ? "Approving vendor draft..." : adjusting ? "Saving order adjustment..." : "Saving vendor draft...";
   try {
     const response = await fetch("/api/weekly-order-tracking", {
       method: "POST",
@@ -5176,7 +5179,7 @@ async function saveVendorOrderDraftAction(payload) {
     weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
     weeklyOrderTrackingMessage = payload.action === "approve-draft"
       ? "Vendor draft approved. Real vendor submission remains disabled."
-      : "Vendor draft saved for review.";
+      : adjusting ? "Order adjustment saved for this week." : "Vendor draft saved for review.";
     await loadParAgentState();
   } catch (error) {
     weeklyOrderTrackingMessage = error?.message || "The vendor draft could not be saved.";
@@ -6676,7 +6679,32 @@ function getVendorOrderDraftModel(plan, freshness) {
     proofMinimum: 350,
     now: new Date(),
     confirmationRecipient: "samantha@onparbar.com",
+    manualAdjustments: weeklyOrderTracking.adjustments,
+    manualCatalog: weeklyOrderTracking.adjustmentCatalog,
   });
+}
+
+function renderVendorOrderAdjustments() {
+  if (orderRehearsalMode) return "";
+  const catalog = weeklyOrderTracking.adjustmentCatalog.filter((item) => item.orderable);
+  if (!catalog.length) return "";
+  const savedByCatalogId = new Map(weeklyOrderTracking.adjustments.map((item) => [item.catalogId, item]));
+  return `
+    <details class="vendor-order-adjustments" data-order-adjustment-panel>
+      <summary>Adjust order</summary>
+      <div class="vendor-order-adjustments__fields">
+        <label><span>Product</span><select data-order-adjustment-product>${catalog.map((item) => {
+          const saved = savedByCatalogId.get(item.catalogId);
+          return `<option value="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}" data-order-adjustment-default-quantity="${formatNumber(saved?.quantity || item.currentPlanQuantity || 1)}" data-order-adjustment-default-reason="${escapeHtml(saved?.reason || "")}" data-order-adjustment-quantity-unit="${escapeHtml(item.quantityUnit)}">${escapeHtml(`${item.vendor} · ${item.name}`)}</option>`;
+        }).join("")}</select></label>
+        <label><span>Quantity</span><div class="vendor-order-adjustments__quantity"><input type="number" min="1" max="999" step="1" inputmode="numeric" data-order-adjustment-quantity-input><small data-order-adjustment-unit-label></small></div></label>
+        <label><span>Reason</span><input type="text" maxlength="240" data-order-adjustment-reason-input placeholder="St. Patrick's Day"></label>
+        <label><span>Manager</span><input type="text" maxlength="80" autocomplete="name" data-order-adjustment-manager placeholder="Manager name"></label>
+        <button class="primary-button" type="button" data-order-adjustment-save>Save</button>
+      </div>
+      ${weeklyOrderTracking.adjustments.length ? `<div class="vendor-order-adjustments__saved">${weeklyOrderTracking.adjustments.map((item) => `<div><span><strong>${escapeHtml(item.name)}</strong> · ${formatNumber(item.quantity)} ${escapeHtml(item.quantityUnit)}</span><small>${escapeHtml(item.reason)} · ${escapeHtml(item.adjustedBy)}</small><button class="mini-button" type="button" data-order-adjustment-remove="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}">Use plan</button></div>`).join("")}</div>` : ""}
+    </details>
+  `;
 }
 
 function renderAssistedOrderPanel(draft, saved) {
@@ -6709,6 +6737,7 @@ function renderVendorOrderDraftWorkspace(plan, freshness) {
         <div><strong>${escapeHtml(model.schedule.label)}</strong><span>${money(model.weeklyTotal)} known total</span></div>
       </header>
       <p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage || "Draft only · vendor submission disabled.")}</p>
+      ${renderVendorOrderAdjustments()}
       <div class="vendor-order-drafts__grid">
         ${model.drafts.map((draft) => {
           const saved = savedById.get(draft.id) || {};
@@ -6817,6 +6846,56 @@ function bindOwnerWeeklyOrderTrackingEvents() {
     });
   });
   if (orderRehearsalMode) return;
+  const adjustmentPanel = document.querySelector("[data-order-adjustment-panel]");
+  const adjustmentProduct = adjustmentPanel?.querySelector("[data-order-adjustment-product]");
+  const adjustmentQuantity = adjustmentPanel?.querySelector("[data-order-adjustment-quantity-input]");
+  const adjustmentReason = adjustmentPanel?.querySelector("[data-order-adjustment-reason-input]");
+  const adjustmentUnit = adjustmentPanel?.querySelector("[data-order-adjustment-unit-label]");
+  const adjustmentManager = adjustmentPanel?.querySelector("[data-order-adjustment-manager]");
+  const syncAdjustmentFields = () => {
+    const option = adjustmentProduct?.selectedOptions?.[0];
+    if (!option) return;
+    if (adjustmentQuantity) adjustmentQuantity.value = option.dataset.orderAdjustmentDefaultQuantity || "1";
+    if (adjustmentReason) adjustmentReason.value = option.dataset.orderAdjustmentDefaultReason || "";
+    if (adjustmentUnit) adjustmentUnit.textContent = option.dataset.orderAdjustmentQuantityUnit || "units";
+  };
+  adjustmentProduct?.addEventListener("change", syncAdjustmentFields);
+  syncAdjustmentFields();
+  adjustmentPanel?.querySelector("[data-order-adjustment-save]")?.addEventListener("click", async () => {
+    const option = adjustmentProduct?.selectedOptions?.[0];
+    const adjustedBy = clean(adjustmentManager?.value);
+    const reason = clean(adjustmentReason?.value);
+    const quantity = Number(adjustmentQuantity?.value);
+    if (!option || !Number.isInteger(quantity) || quantity <= 0 || !reason || !adjustedBy) {
+      weeklyOrderTrackingMessage = "Choose a product and enter its quantity, reason, and manager.";
+      renderWeeklyPlan();
+      return;
+    }
+    await saveVendorOrderDraftAction({
+      action: "set-order-adjustment",
+      catalogId: option.value,
+      vendor: option.dataset.orderAdjustmentVendor,
+      quantity,
+      reason,
+      adjustedBy,
+    });
+  });
+  adjustmentPanel?.querySelectorAll("[data-order-adjustment-remove]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const adjustedBy = clean(adjustmentManager?.value);
+      if (!adjustedBy) {
+        weeklyOrderTrackingMessage = "Enter the manager removing this adjustment.";
+        renderWeeklyPlan();
+        return;
+      }
+      await saveVendorOrderDraftAction({
+        action: "remove-order-adjustment",
+        catalogId: button.dataset.orderAdjustmentRemove,
+        vendor: button.dataset.orderAdjustmentVendor,
+        adjustedBy,
+      });
+    });
+  });
   document.querySelectorAll(".weekly-order-placed-form").forEach((form) => {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();

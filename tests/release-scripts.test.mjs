@@ -12,6 +12,7 @@ const shellScripts = [
   "scripts/rollback-on-site.sh",
   "scripts/run-dashboard.sh",
   "scripts/run-par-agent.sh",
+  "scripts/install-par-agent-daemon.sh",
   "scripts/setup-mac-tools.command",
   "scripts/smoke-on-site.sh",
 ];
@@ -24,6 +25,18 @@ test("release shell scripts pass bash syntax validation", () => {
     });
     assert.equal(result.status, 0, `${script}: ${result.stderr}`);
   });
+});
+
+test("the par agent follows the checked release through the Node 22 helper", async () => {
+  const workflow = await readFile(".github/workflows/deploy-on-site.yml", "utf8");
+  const common = await readFile("scripts/pm2-release-common.sh", "utf8");
+  const daemon = await readFile("scripts/com.onpar.par-agent.daemon.plist", "utf8");
+  assert.match(workflow, /scripts\/run-par-agent\.sh/);
+  assert.match(common, /run-par-agent\.sh/);
+  assert.match(daemon, /<string>onpar<\/string>/);
+  assert.match(daemon, /OnParBeverageRecipes-service\/.deploy\/run-par-agent\.sh/);
+  assert.match(daemon, /OnParBeverageRecipes-service\/current/);
+  assert.match(daemon, /<string>--dry-run<\/string>/);
 });
 
 test("smoke checks are legacy-compatible only when both modern endpoints are absent", async () => {

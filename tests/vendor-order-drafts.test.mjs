@@ -176,3 +176,57 @@ test("includes Proof minimum top-ups in the idempotency identity", () => {
 
   assert.notEqual(withTopUp.drafts[0].id, withoutTopUp.drafts[0].id);
 });
+
+test("applies a one-order manager quantity without changing the Weekly Plan", () => {
+  const plan = {
+    orders: {
+      beerKegs: [{
+        id: "guinness",
+        name: "Guinness",
+        lineType: "Beer keg",
+        quantity: 1,
+        vendor: "Bonbright",
+        vendorSku: "BB-GUINNESS",
+        vendorProductName: "Guinness",
+        casePackaged: false,
+        packSize: 1,
+        unitCost: 185,
+        estimatedCost: 185,
+        hasKnownPrice: true,
+      }],
+      liquorTapBottles: [],
+      liquor: [],
+      mixers: [],
+      supplies: [],
+    },
+  };
+  const result = buildVendorOrderDrafts(plan, {
+    ...options,
+    manualCatalog: [{
+      catalogId: "catalog-guinness",
+      internalId: "guinness",
+      name: "Guinness",
+      vendor: "Bonbright",
+      vendorSku: "BB-GUINNESS",
+      vendorProductName: "Guinness",
+      lineType: "Beer keg",
+      orderCategory: "beerKegs",
+      packSize: 1,
+      unitCost: 185,
+      currentPlanQuantity: 1,
+    }],
+    manualAdjustments: [{
+      catalogId: "catalog-guinness",
+      quantity: 3,
+      reason: "St. Patrick's Day",
+      adjustedBy: "Samantha",
+    }],
+  });
+  const line = result.drafts[0].lines[0];
+
+  assert.equal(line.requestedUnits, 3);
+  assert.equal(line.extendedCost, 555);
+  assert.match(line.reason, /St\. Patrick's Day/);
+  assert.ok(result.drafts[0].warnings.some((item) => item.code === "MANUAL_ORDER_ADJUSTMENT"));
+  assert.equal(plan.orders.beerKegs[0].quantity, 1);
+});

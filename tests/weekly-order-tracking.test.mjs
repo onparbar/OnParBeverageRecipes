@@ -262,3 +262,43 @@ test("persists an idempotent reviewed, opened, and manually completed handoff", 
   assert.equal(completed.status, "manually_completed");
   assert.equal(buildWeeklyOrderTracking(repeated, mondayClock()).drafts[0].completedAt, completed.completedAt);
 });
+
+test("stores a manager order adjustment, updates receiving, and invalidates approval", () => {
+  const mondayClock = () => new Date("2026-08-10T15:00:00.000Z");
+  let state = recommendations({
+    items: [{
+      key: "guinness",
+      id: "guinness",
+      actionType: "order",
+      isKegTap: true,
+      orderQty: 1,
+      orderProductName: "Guinness",
+      vendor: "Bonbright",
+      vendorSku: "BB-GUINNESS",
+      vendorProductName: "Guinness",
+      unitCost: 185,
+      tapNumber: 1,
+      wall: "Main",
+    }],
+  });
+  state.weeklyPlanSnapshot = createWeeklyPlanSnapshot({
+    generatedAt,
+    recommendations: state.items,
+    publishedAt: generatedAt,
+  });
+  const catalogItem = buildWeeklyOrderTracking(state, mondayClock()).adjustmentCatalog.find((item) => item.name === "Guinness");
+  state = applyWeeklyOrderTrackingUpdate(state, {
+    action: "set-order-adjustment",
+    generatedAt,
+    catalogId: catalogItem.catalogId,
+    vendor: "Bonbright",
+    quantity: 3,
+    reason: "St. Patrick's Day",
+    adjustedBy: "Samantha",
+  }, { role: "owner", now: mondayClock });
+  const tracking = buildWeeklyOrderTracking(state, mondayClock());
+
+  assert.equal(tracking.adjustments[0].quantity, 3);
+  assert.equal(tracking.vendors[0].items[0].quantity, 3);
+  assert.equal(tracking.drafts.length, 0);
+});

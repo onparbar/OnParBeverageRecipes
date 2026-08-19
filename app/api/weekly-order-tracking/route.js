@@ -84,7 +84,7 @@ export async function POST(request) {
       expectedRevision: state.revision,
       role,
     });
-    if (["create-draft", "approve-draft", "record-handoff", "set-ordered"].includes(body.action)) {
+    if (["create-draft", "approve-draft", "record-handoff", "set-ordered", "set-order-adjustment", "remove-order-adjustment"].includes(body.action)) {
       const trackedVendor = String(
         body.vendor
         || priorTracking?.vendors?.find((vendor) => vendor.id === body.vendorId)?.vendor
@@ -92,6 +92,10 @@ export async function POST(request) {
       ).slice(0, 80);
       const action = body.action === "approve-draft"
         ? "approved vendor draft"
+        : body.action === "set-order-adjustment"
+          ? "adjusted vendor order"
+          : body.action === "remove-order-adjustment"
+            ? "removed vendor order adjustment"
         : body.action === "create-draft"
           ? "created vendor draft"
           : body.action === "record-handoff"
@@ -102,7 +106,7 @@ export async function POST(request) {
         action,
         role,
         revision: saved.revision,
-        summary: `${trackedVendor} assisted-order status updated; real submission remains manual.`,
+        summary: `${trackedVendor} assisted-order record updated; real submission remains manual.`,
       }).catch(() => {});
     }
     if (body.action === "set-receipts") {

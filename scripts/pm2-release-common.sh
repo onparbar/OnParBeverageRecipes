@@ -427,7 +427,7 @@ onpar_pm2_install_helpers() {
   local helper=""
   mkdir -p "${deploy_dir}"
   chmod 700 "${deploy_dir}"
-  for helper in deploy-on-site-pm2.sh pm2-release-common.sh rollback-on-site-pm2.sh smoke-on-site.sh; do
+  for helper in deploy-on-site-pm2.sh pm2-release-common.sh rollback-on-site-pm2.sh run-par-agent.sh smoke-on-site.sh; do
     if [ ! -f "${helper_dir}/${helper}" ]; then
       echo "Required PM2 helper is missing: ${helper_dir}/${helper}." >&2
       return 1

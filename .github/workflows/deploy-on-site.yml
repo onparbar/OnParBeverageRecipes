@@ -77,6 +77,7 @@ jobs:
             scripts/deploy-on-site-pm2.sh \
             scripts/pm2-release-common.sh \
             scripts/rollback-on-site-pm2.sh \
+            scripts/run-par-agent.sh \
             scripts/smoke-on-site.sh \
             | tar -x -C "${bootstrap_dir}"
           chmod 700 "${bootstrap_dir}"/scripts/*.sh

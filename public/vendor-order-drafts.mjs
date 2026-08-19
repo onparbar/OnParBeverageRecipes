@@ -40,6 +40,93 @@ function issue(code, message) {
   return { code, message };
 }
 
+const ORDER_COLLECTIONS = ["beerKegs", "liquorTapBottles", "liquor", "mixers", "supplies"];
+
+function getOrderCollection(item = {}) {
+  const configured = clean(item.orderCategory);
+  if (ORDER_COLLECTIONS.includes(configured)) return configured;
+  if (item.lineType === "Beer keg") return "beerKegs";
+  if (item.lineType === "Liquor tap bottle") return "liquorTapBottles";
+  if (/supply/i.test(clean(item.lineType))) return "supplies";
+  if (/liquor|spirit|bottle/i.test(clean(item.lineType))) return "liquor";
+  return "mixers";
+}
+
+function applyManualOrderAdjustments(plan = {}, catalog = [], adjustments = []) {
+  const orders = { ...(plan?.orders || {}) };
+  ORDER_COLLECTIONS.forEach((collection) => {
+    orders[collection] = Array.isArray(orders[collection]) ? orders[collection].map((item) => ({ ...item })) : [];
+  });
+  const catalogById = new Map((Array.isArray(catalog) ? catalog : []).map((item) => [clean(item.catalogId), item]));
+
+  (Array.isArray(adjustments) ? adjustments : []).forEach((adjustment) => {
+    const source = catalogById.get(clean(adjustment.catalogId));
+    const quantity = Number(adjustment.quantity);
+    const reason = clean(adjustment.reason);
+    if (!source || !Number.isInteger(quantity) || quantity <= 0 || !reason) return;
+    const vendor = normalizeVendor(source.vendor);
+    const internalId = clean(source.internalId || source.id);
+    const vendorSku = clean(source.vendorSku || source.preferredSku);
+    const productName = clean(source.vendorProductName || source.productName || source.name);
+    const collection = getOrderCollection(source);
+    let existingCollection = "";
+    let existingIndex = -1;
+    ORDER_COLLECTIONS.some((name) => {
+      const index = orders[name].findIndex((item) => (
+        normalizeVendor(item.vendor) === vendor
+        && (
+          (internalId && clean(item.id || item.internalId) === internalId)
+          || (vendorSku && clean(item.vendorSku || item.preferredSku) === vendorSku)
+          || clean(item.vendorProductName || item.productName || item.name).toLowerCase() === productName.toLowerCase()
+        )
+      ));
+      if (index < 0) return false;
+      existingCollection = name;
+      existingIndex = index;
+      return true;
+    });
+    const existing = existingIndex >= 0 ? orders[existingCollection][existingIndex] : null;
+    const casePackaged = Boolean(source.casePackaged ?? existing?.casePackaged);
+    const packSize = Math.max(1, Number(source.packSize ?? existing?.packSize) || 1);
+    const requestedUnits = casePackaged ? quantity * packSize : quantity;
+    const unitCost = numberOrNull(source.unitCost ?? existing?.unitCost);
+    const originalQuantity = existing
+      ? casePackaged ? Number(existing.caseCount) || 0 : Number(existing.quantity) || 0
+      : Number(source.currentPlanQuantity) || 0;
+    const unitLabel = casePackaged ? "cases" : source.lineType === "Beer keg" ? "kegs" : source.lineType === "Liquor tap bottle" ? "bottles" : "units";
+    const adjusted = {
+      ...source,
+      ...(existing || {}),
+      id: internalId,
+      internalId,
+      name: clean(source.name || existing?.name || productName),
+      vendor,
+      vendorSku,
+      vendorProductName: productName,
+      lineType: clean(source.lineType || existing?.lineType),
+      orderCategory: collection,
+      quantity: requestedUnits,
+      casePackaged,
+      packSize,
+      caseCount: casePackaged ? quantity : null,
+      unitCost,
+      estimatedCost: unitCost === null ? null : requestedUnits * unitCost,
+      hasKnownPrice: unitCost !== null && unitCost > 0,
+      reasons: [
+        `Manager adjustment: ${reason}.`,
+        `Weekly Plan quantity: ${originalQuantity} ${unitLabel}.`,
+      ],
+      manualAdjustment: true,
+      manualAdjustmentReason: reason,
+      manualAdjustmentActor: clean(adjustment.adjustedBy),
+    };
+    if (existingIndex >= 0) orders[existingCollection][existingIndex] = adjusted;
+    else orders[collection].push(adjusted);
+  });
+
+  return { ...plan, orders };
+}
+
 export function createVendorOrderDraftId(generatedAt, vendor, items = []) {
   const identity = items
     .map((item) => `${clean(item.id || item.internalId)}:${clean(item.name)}:${Number(item.quantity ?? item.requestedUnits) || 0}`)
@@ -104,6 +191,7 @@ function buildDraftLine(item, vendor, sourceDate) {
   if (item.hasKnownPrice === false || unitCost === null || unitCost <= 0 || extendedCost === null || extendedCost <= 0) {
     blockers.push(issue("PRICE_REQUIRED", "A current unit and extended price are required."));
   }
+  if (item.manualAdjustment) warnings.push(issue("MANUAL_ORDER_ADJUSTMENT", "Manager-adjusted quantity; review the saved reason before approval."));
   const unusualLimit = item.lineType === "Beer keg" ? 4 : casePackaged ? 10 : 24;
   const comparisonQuantity = casePackaged ? caseCount : quantity;
   if (comparisonQuantity > unusualLimit) warnings.push(issue("UNUSUAL_QUANTITY", `Review the unusual quantity of ${comparisonQuantity}.`));
@@ -116,12 +204,17 @@ function buildDraftLine(item, vendor, sourceDate) {
     vendor,
     vendorSku,
     lineType: clean(item.lineType),
+    casePackaged,
     requestedUnits: quantity,
     requestedCases: caseCount,
     packSize,
     unitCost,
     extendedCost,
     reason: getLineReason(item),
+    manualAdjustment: Boolean(item.manualAdjustment),
+    manualAdjustmentReason: clean(item.manualAdjustmentReason),
+    manualAdjustmentActor: clean(item.manualAdjustmentActor),
+    tapNumbers: Array.isArray(item.tapNumbers) ? item.tapNumbers : [],
     sourceDate: clean(sourceDate),
     substitutionsAllowed: false,
     blockers,
@@ -210,13 +303,16 @@ export function buildVendorOrderDrafts(plan = {}, {
   budgetLimit = null,
   proofMinimum = 350,
   proofMinimumCandidates = [],
+  manualAdjustments = [],
+  manualCatalog = [],
   now = new Date(),
   confirmationRecipient = "samantha@onparbar.com",
 } = {}) {
   const schedule = getVendorOrderScheduleStatus(now);
   const normalizedBudget = numberOrNull(budgetLimit);
   const duplicateKeys = new Map();
-  const groups = groupWeeklyPlanOrdersByVendor(plan).map((group) => {
+  const adjustedPlan = applyManualOrderAdjustments(plan, manualCatalog, manualAdjustments);
+  const groups = groupWeeklyPlanOrdersByVendor(adjustedPlan).map((group) => {
     const vendor = normalizeVendor(group.vendor);
     const lines = group.items.map((item) => buildDraftLine(item, vendor, sourceDate));
     lines.forEach((line) => {
@@ -234,8 +330,9 @@ export function buildVendorOrderDrafts(plan = {}, {
         line.confidence = "blocked";
       }
     });
+    const preTopUpSubtotal = lines.reduce((total, line) => total + (numberOrNull(line.extendedCost) || 0), 0);
     const proofTopUps = vendor === "Proof"
-      ? applyProofMinimumTopUps(lines, proofMinimumCandidates, Number(group.estimatedCost) || 0, proofMinimum, sourceDate)
+      ? applyProofMinimumTopUps(lines, proofMinimumCandidates, preTopUpSubtotal, proofMinimum, sourceDate)
       : [];
     const estimatedTotal = lines.reduce((total, line) => total + (numberOrNull(line.extendedCost) || 0), 0);
     const deliveryLocation = clean(deliveryLocations[vendor] || deliveryLocations[group.vendor]);
@@ -260,7 +357,7 @@ export function buildVendorOrderDrafts(plan = {}, {
       confirmationRecipient: clean(confirmationRecipient),
       lineCount: lines.length,
       estimatedTotal,
-      hasCompletePricing: group.hasCompletePricing && lines.every((line) => line.unitCost > 0 && line.extendedCost > 0),
+      hasCompletePricing: group.hasCompletePricing !== false && lines.every((line) => line.unitCost > 0 && line.extendedCost > 0),
       substitutionsAllowed: false,
       lines,
       blockers: unique(blockers.map((entry) => `${entry.code}|${entry.message}`)).map((entry) => {
