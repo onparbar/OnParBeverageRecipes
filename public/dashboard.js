@@ -7153,6 +7153,7 @@ function renderKegLevels() {
       <p class="sync-status">${escapeHtml(kegSyncMessage)}${kegUpdatedAt ? ` Last updated ${escapeHtml(formatUpdatedAt(kegUpdatedAt))}.` : ""}</p>
       ${liveCount < totalTaps ? `<p class="sync-status sync-status--warning">${formatNumber(totalTaps - liveCount)} tap${totalTaps - liveCount === 1 ? " needs" : "s need"} update. Refresh the connection only when guest taps are clear.</p>` : ""}
     </div>
+    <details class="inventory-speech" id="keg-speech-assistant"></details>
     <div class="keg-summary-stats">
       <div class="summary-line"><span>Total taps</span><strong>${totalTaps}</strong></div>
       <div class="summary-line"><span>Live levels found</span><strong>${liveCount}</strong></div>
@@ -7174,6 +7175,7 @@ function renderKegLevels() {
     .map((wallName) => renderKegWallBlock(wallName, kegWallItems.filter((item) => item.wall === wallName)))
     .join("") + renderComingSoonBlock();
 
+  renderInventorySpeechAssistant();
   bindKegLevelEvents();
 }
 
@@ -9049,13 +9051,19 @@ function getIngredientForKegWallItem(name, livePrice = null) {
   const candidates = getTapPriceAliases(name)
     .map((alias) => normalizeIngredientAlias(alias))
     .filter(Boolean);
-  return ingredients.find((ingredient) => {
+  const exactIngredient = ingredients.find((ingredient) => {
     const ingredientAliases = [
       normalizeTapPriceKey(ingredient.name),
       normalizeTapPriceKey(normalizeIngredientAlias(ingredient.name)),
     ].filter(Boolean);
     return candidates.some((candidate) => ingredientAliases.includes(normalizeTapPriceKey(candidate)));
-  }) || null;
+  });
+  if (exactIngredient) return exactIngredient;
+
+  const productAliases = getProductPriceAliases(name);
+  return ingredients.find((ingredient) => (
+    getProductPriceAliases(ingredient.name).some((alias) => productAliases.includes(alias))
+  )) || null;
 }
 
 function getTapReplacementProductOptions(item, replacement = null) {
@@ -10641,7 +10649,37 @@ async function flushPendingParAgentStateSync() {
     enqueued = true;
   }
   if (parAgentStateOutbox && !enqueued) {
-    if (!canSafelyRetryOperationalOutbox(parAgentStateOutbox, parAgentState?.revision)) return false;
+    if (!canSafelyRetryOperationalOutbox(parAgentStateOutbox, parAgentState?.revision)) {
+      try {
+        const latestState = await requestParAgentState();
+        if (!haveKegLevelInputsChanged(latestState, parAgentStateOutbox.payload)) {
+          parAgentStateOutbox = null;
+          parAgentInputsChangedAt = "";
+          saveKegLevelsOutbox();
+          parAgentError = "";
+          applyParAgentState(latestState);
+          return true;
+        }
+        if (!haveKegLevelInputsChanged(parAgentState, latestState)) {
+          parAgentStateOutbox = rebaseOperationalOutboxAfterOwnCommit(parAgentStateOutbox, {
+            committedBaseRevision: parAgentStateOutbox.baseRevision,
+            nextRevision: latestState.revision,
+          });
+          saveKegLevelsOutbox();
+          parAgentState = {
+            ...(parAgentState || {}),
+            revision: latestState.revision,
+            initialized: latestState.initialized,
+            updatedAt: latestState.updatedAt,
+          };
+        } else {
+          return false;
+        }
+      } catch (error) {
+        parAgentError = error.message || "Could not check the latest shared Keg Levels.";
+        return false;
+      }
+    }
     const mutationVersion = parAgentStateMutationVersion;
     parAgentStateSyncQueue = parAgentStateSyncQueue
       .then(() => syncParAgentState({ silent: false, mutationVersion }))
@@ -10662,7 +10700,7 @@ async function runKegParAgent() {
   if (parAgentStateSyncTimer || parAgentStateOutbox) {
     const inputsSaved = await flushPendingParAgentStateSync();
     if (!inputsSaved) {
-      parAgentError = "Pending Keg Levels inputs could not be saved before the recommendation run.";
+      parAgentError = parAgentError || "Pending Keg Levels inputs could not be saved before the recommendation run.";
       parAgentMessage = parAgentError;
       renderKegLevels();
       renderWeeklyPlan();
@@ -11217,9 +11255,11 @@ function getKegFullOunces(liveRow, item = null) {
 
 function getKegCurrentLevelOz(liveRow, item = null) {
   if (!liveRow) return null;
-  const rawPercent = toNumber(liveRow.rawPercent);
+  const rawPercentValue = liveRow.rawPercent;
+  if (rawPercentValue == null || String(rawPercentValue).trim() === "") return null;
+  const rawPercent = Number(rawPercentValue);
   const fullOunces = getKegFullOunces(liveRow, item);
-  if (!rawPercent || !fullOunces) return null;
+  if (!Number.isFinite(rawPercent) || rawPercent < 0 || !fullOunces) return null;
 
   const currentOunces = (rawPercent / 10000) * fullOunces;
   return Number.isFinite(currentOunces) ? currentOunces : null;
@@ -12087,75 +12127,77 @@ function getInventorySpeechSourceItems() {
 }
 
 function renderInventorySpeechAssistant() {
-  const assistant = document.querySelector("#inventory-speech-assistant");
-  if (!assistant) return;
-  const wasOpen = assistant.open || inventorySpeechListening || inventorySpeechProposals.length > 0;
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const catalog = buildSpeechInventoryCatalog(getInventorySpeechSourceItems());
-  const reviewRows = inventorySpeechProposals.map((proposal) => {
-    const selected = catalog.find((item) => item.id === proposal.matchedId);
-    const candidateIds = new Set(proposal.candidateIds || []);
-    const options = catalog
-      .filter((item) => !candidateIds.size || candidateIds.has(item.id) || item.id === proposal.matchedId)
-      .map((item) => `<option value="${escapeHtml(item.id)}"${item.id === proposal.matchedId ? " selected" : ""}>${escapeHtml(item.name)} · ${escapeHtml(item.group)}</option>`)
-      .join("");
-    return `
-      <tr data-speech-proposal-id="${escapeHtml(proposal.id)}">
-        <td>${escapeHtml(proposal.phrase)}</td>
-        <td>
-          <select class="speech-match-select" aria-label="Matched product for ${escapeHtml(proposal.phrase)}">
-            <option value="">${proposal.status === "skipped" ? "Skipped" : "Choose item"}</option>
-            ${options}
-          </select>
-          ${proposal.warning ? `<span class="table-note table-note--warning">${escapeHtml(proposal.warning)}</span>` : ""}
-        </td>
-        <td>${escapeHtml(selected?.group || proposal.group || "-")}</td>
-        <td><input class="inventory-input speech-quantity-input" type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" autocomplete="off" data-1p-ignore="true" data-lpignore="true" value="${Number.isFinite(Number(proposal.quantity)) ? escapeHtml(String(proposal.quantity)) : ""}" aria-label="Proposed quantity for ${escapeHtml(selected?.name || proposal.phrase)}"></td>
-        <td>${escapeHtml(selected?.unit || proposal.unit || "-")}</td>
-        <td>${escapeHtml(proposal.confidence || "review")}</td>
-        <td><button class="mini-button speech-remove-proposal" type="button">Remove</button></td>
-      </tr>`;
-  }).join("");
-  const applicableCount = buildSpeechInventoryChanges(inventorySpeechProposals).length;
-  assistant.innerHTML = `
-    <summary>Count by voice</summary>
-    <div class="inventory-speech__body">
-      <label>
-        <span class="sr-only">Spoken inventory transcript</span>
-        <textarea id="inventory-speech-transcript" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" placeholder="Guinness one, Modelo two, Garage Lime three">${escapeHtml(inventorySpeechTranscript)}</textarea>
-      </label>
-      <div class="inventory-speech__actions">
-        <button class="ghost-button" id="inventory-speech-listen" type="button"${SpeechRecognition ? "" : " disabled"}>${inventorySpeechListening ? "Stop" : "Speak"}</button>
-        <button class="primary-button" id="inventory-speech-review" type="button">Review</button>
-        <button class="ghost-button" id="inventory-speech-clear" type="button">Clear</button>
-      </div>
-      <p class="sync-status">${escapeHtml(inventorySpeechMessage || (SpeechRecognition ? "Nothing changes until you review and apply." : "Voice input is unavailable here. Type or paste the count instead."))}</p>
-      ${inventorySpeechProposals.length ? `
-        <div class="inventory-table-wrap inventory-speech__review">
-          <table class="inventory-table">
-            <thead><tr><th>Heard</th><th>Item</th><th>Location</th><th>Count</th><th>Unit</th><th>Match</th><th></th></tr></thead>
-            <tbody>${reviewRows}</tbody>
-          </table>
+  document.querySelectorAll("#inventory-speech-assistant, #keg-speech-assistant").forEach((assistant) => {
+    const kegOnly = assistant.id === "keg-speech-assistant";
+    const sourceItems = getInventorySpeechSourceItems().filter((item) => !kegOnly || item.target === "keg");
+    const catalog = buildSpeechInventoryCatalog(sourceItems);
+    const wasOpen = assistant.open || inventorySpeechListening || inventorySpeechProposals.length > 0;
+    const reviewRows = inventorySpeechProposals.map((proposal) => {
+      const selected = catalog.find((item) => item.id === proposal.matchedId);
+      const candidateIds = new Set(proposal.candidateIds || []);
+      const options = catalog
+        .filter((item) => !candidateIds.size || candidateIds.has(item.id) || item.id === proposal.matchedId)
+        .map((item) => `<option value="${escapeHtml(item.id)}"${item.id === proposal.matchedId ? " selected" : ""}>${escapeHtml(item.name)} · ${escapeHtml(item.group)}</option>`)
+        .join("");
+      return `
+        <tr data-speech-proposal-id="${escapeHtml(proposal.id)}">
+          <td>${escapeHtml(proposal.phrase)}</td>
+          <td>
+            <select class="speech-match-select" aria-label="Matched product for ${escapeHtml(proposal.phrase)}">
+              <option value="">${proposal.status === "skipped" ? "Skipped" : "Choose item"}</option>
+              ${options}
+            </select>
+            ${proposal.warning ? `<span class="table-note table-note--warning">${escapeHtml(proposal.warning)}</span>` : ""}
+          </td>
+          <td>${escapeHtml(selected?.group || proposal.group || "-")}</td>
+          <td><input class="inventory-input speech-quantity-input" type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" autocomplete="off" data-1p-ignore="true" data-lpignore="true" value="${Number.isFinite(Number(proposal.quantity)) ? escapeHtml(String(proposal.quantity)) : ""}" aria-label="Proposed quantity for ${escapeHtml(selected?.name || proposal.phrase)}"></td>
+          <td>${escapeHtml(selected?.unit || proposal.unit || "-")}</td>
+          <td>${escapeHtml(proposal.confidence || "review")}</td>
+          <td><button class="mini-button speech-remove-proposal" type="button">Remove</button></td>
+        </tr>`;
+    }).join("");
+    const applicableCount = buildSpeechInventoryChanges(inventorySpeechProposals).length;
+    assistant.innerHTML = `
+      <summary>Count by voice</summary>
+      <div class="inventory-speech__body">
+        <label>
+          <span class="sr-only">Spoken inventory transcript</span>
+          <textarea class="inventory-speech-transcript" aria-label="Spoken inventory transcript" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" placeholder="${kegOnly ? "Main wall: one Guinness, two Modelo, add another Angry Orchard" : "Guinness one, Modelo two, Garage Lime three"}">${escapeHtml(inventorySpeechTranscript)}</textarea>
+        </label>
+        <div class="inventory-speech__actions">
+          <button class="ghost-button inventory-speech-listen" type="button"${SpeechRecognition ? "" : " disabled"}>${inventorySpeechListening ? "Stop" : "Speak"}</button>
+          <button class="primary-button inventory-speech-review" type="button">Review</button>
+          <button class="ghost-button inventory-speech-clear" type="button">Clear</button>
         </div>
-        <button class="primary-button" id="inventory-speech-apply" type="button"${inventorySpeechApplying || !applicableCount ? " disabled" : ""}>${inventorySpeechApplying ? "Applying..." : `Apply ${applicableCount}`}</button>
-      ` : ""}
-    </div>`;
-  assistant.open = wasOpen;
-  bindInventorySpeechEvents(catalog);
+        <p class="sync-status">${escapeHtml(inventorySpeechMessage || (SpeechRecognition ? "Nothing changes until you review and apply." : "Voice input is unavailable here. Type or paste the count instead."))}</p>
+        ${inventorySpeechProposals.length ? `
+          <div class="inventory-table-wrap inventory-speech__review">
+            <table class="inventory-table">
+              <thead><tr><th>Heard</th><th>Item</th><th>Location</th><th>Count</th><th>Unit</th><th>Match</th><th></th></tr></thead>
+              <tbody>${reviewRows}</tbody>
+            </table>
+          </div>
+          <button class="primary-button inventory-speech-apply" type="button"${inventorySpeechApplying || !applicableCount ? " disabled" : ""}>${inventorySpeechApplying ? "Applying..." : `Apply ${applicableCount}`}</button>
+        ` : ""}
+      </div>`;
+    assistant.open = wasOpen;
+    bindInventorySpeechEvents(catalog, sourceItems, assistant);
+  });
 }
 
-function bindInventorySpeechEvents(catalog) {
-  const transcriptInput = document.querySelector("#inventory-speech-transcript");
+function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
+  const transcriptInput = assistant.querySelector(".inventory-speech-transcript");
   transcriptInput?.addEventListener("input", () => {
     inventorySpeechTranscript = transcriptInput.value;
   });
-  document.querySelector("#inventory-speech-listen")?.addEventListener("click", () => {
+  assistant.querySelector(".inventory-speech-listen")?.addEventListener("click", () => {
     if (inventorySpeechListening) stopInventorySpeechRecognition();
     else startInventorySpeechRecognition();
   });
-  document.querySelector("#inventory-speech-review")?.addEventListener("click", () => {
+  assistant.querySelector(".inventory-speech-review")?.addEventListener("click", () => {
     inventorySpeechTranscript = transcriptInput?.value || inventorySpeechTranscript;
-    const parsed = parseInventoryTranscript(inventorySpeechTranscript, getInventorySpeechSourceItems());
+    const parsed = parseInventoryTranscript(inventorySpeechTranscript, sourceItems);
     inventorySpeechProposals = parsed.proposals;
     const needsReview = parsed.proposals.filter((proposal) => !["matched", "skipped"].includes(proposal.status)).length;
     inventorySpeechMessage = parsed.proposals.length
@@ -12163,14 +12205,14 @@ function bindInventorySpeechEvents(catalog) {
       : "No inventory counts were recognized.";
     renderInventorySpeechAssistant();
   });
-  document.querySelector("#inventory-speech-clear")?.addEventListener("click", () => {
+  assistant.querySelector(".inventory-speech-clear")?.addEventListener("click", () => {
     stopInventorySpeechRecognition();
     inventorySpeechTranscript = "";
     inventorySpeechProposals = [];
     inventorySpeechMessage = "";
     renderInventorySpeechAssistant();
   });
-  document.querySelectorAll("[data-speech-proposal-id]").forEach((row) => {
+  assistant.querySelectorAll("[data-speech-proposal-id]").forEach((row) => {
     const proposal = inventorySpeechProposals.find((entry) => entry.id === row.dataset.speechProposalId);
     if (!proposal) return;
     row.querySelector(".speech-match-select")?.addEventListener("change", (event) => {
@@ -12201,7 +12243,7 @@ function bindInventorySpeechEvents(catalog) {
       renderInventorySpeechAssistant();
     });
   });
-  document.querySelector("#inventory-speech-apply")?.addEventListener("click", applyReviewedInventorySpeechChanges);
+  assistant.querySelector(".inventory-speech-apply")?.addEventListener("click", applyReviewedInventorySpeechChanges);
 }
 
 function startInventorySpeechRecognition() {
@@ -12291,6 +12333,7 @@ async function applyReviewedInventorySpeechChanges() {
   } finally {
     inventorySpeechApplying = false;
     renderInventory();
+    renderKegLevels();
   }
 }
 

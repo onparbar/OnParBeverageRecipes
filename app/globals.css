@@ -227,7 +227,14 @@ select:disabled {
   gap: 18px;
 }
 
-.topbar-title-row .logout-link {
+.topbar-title-row .topbar-account-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.topbar-account-actions .logout-link {
   flex: 0 0 auto;
 }
 
@@ -448,6 +455,11 @@ select:disabled {
   border-color: var(--juniper);
   outline: 2px solid rgba(31, 95, 84, 0.25);
   outline-offset: 2px;
+}
+
+.pmb-refresh-button {
+  cursor: pointer;
+  font: inherit;
 }
 
 .eyebrow {
@@ -8263,7 +8275,7 @@ body {
   padding-right: 104px;
 }
 
-.topbar .logout-link {
+.topbar .topbar-account-actions {
   position: absolute;
   top: 24px;
   right: 26px;
@@ -8450,7 +8462,7 @@ tbody tr:hover {
     padding-right: 88px;
   }
 
-  .topbar .logout-link {
+  .topbar .topbar-account-actions {
     top: 18px;
     right: 20px;
   }

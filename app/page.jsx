@@ -117,7 +117,10 @@ export default function DashboardPage() {
       <header className="topbar">
         <div className="topbar-title-row">
           <h1>Beverage Dashboard</h1>
-          <a className="logout-link" href="/api/logout" aria-label={`Log out of the ${sessionRole} dashboard`}>Log out</a>
+          <div className="topbar-account-actions">
+            <button className="logout-link pmb-refresh-button dashboard-owner-only" id="refresh-all-pmb" type="button">Refresh PMB</button>
+            <a className="logout-link" href="/api/logout" aria-label={`Log out of the ${sessionRole} dashboard`}>Log out</a>
+          </div>
         </div>
         <div className="topbar-actions">
           <div className="top-actions dashboard-owner-only" aria-label="Dashboard sections">
@@ -131,7 +134,6 @@ export default function DashboardPage() {
               <span className="dashboard-menu-icon" aria-hidden="true"><i></i><i></i><i></i></span>
             </summary>
             <div className="dashboard-menu-popover">
-                      <button className="dashboard-menu-item" id="refresh-all-pmb" type="button">Refresh PMB</button>
                       <button className="dashboard-menu-item" id="weekly-usage-tab" data-menu-tab="weekly-usage" type="button">Weekly Usage</button>
               <button className="dashboard-menu-item" data-menu-tab="pricing" type="button">Tap Pricing</button>
               <button className="dashboard-menu-item" data-menu-tab="ingredients" type="button">Ingredient &amp; Keg Costs</button>

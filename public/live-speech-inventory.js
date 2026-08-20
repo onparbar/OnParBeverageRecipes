@@ -9,13 +9,16 @@
   let searchTimer = null;
   let lastAnalyzedSearch = "";
   let conversationalSearchQuery = "";
+  let activeInventoryRoot = null;
 
-  function getTranscriptField() {
-    return document.querySelector('[aria-label="Spoken inventory transcript"]');
+  function getTranscriptField(root = activeInventoryRoot) {
+    if (root?.isConnected) return root.querySelector('[aria-label="Spoken inventory transcript"]');
+    const fields = [...document.querySelectorAll('[aria-label="Spoken inventory transcript"]')];
+    return fields.find((field) => field.offsetParent !== null) || fields[0] || null;
   }
 
-  function getAssistantRoot() {
-    const field = getTranscriptField();
+  function getAssistantRoot(root = activeInventoryRoot) {
+    const field = getTranscriptField(root);
     return field?.closest("details") || field?.parentElement || null;
   }
 
@@ -280,12 +283,13 @@
     field.insertAdjacentElement("afterend", button);
   }
 
-  function startListening() {
+  function startListening(root = activeInventoryRoot) {
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Recognition) return false;
 
+    activeInventoryRoot = root?.isConnected ? root : getAssistantRoot();
     const recognition = new Recognition();
-    const startingTranscript = String(getTranscriptField()?.value || "").trim();
+    const startingTranscript = String(getTranscriptField(activeInventoryRoot)?.value || "").trim();
     activeRecognition = recognition;
     recognition.lang = "en-US";
     recognition.continuous = true;
@@ -329,14 +333,16 @@
     }
     const label = button.textContent.trim().toLowerCase();
     if (label !== "speak" && label !== "listening...") return;
-    const field = getTranscriptField();
-    if (!field || !getAssistantRoot()?.contains(button)) return;
+    const clickedRoot = button.closest("details");
+    const field = getTranscriptField(clickedRoot);
+    if (!field || !clickedRoot?.contains(button)) return;
+    activeInventoryRoot = clickedRoot;
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Recognition) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     if (activeRecognition) stopListening();
-    else startListening();
+    else startListening(clickedRoot);
   }, true);
 
   document.addEventListener("submit", (event) => {
@@ -346,7 +352,10 @@
   }, true);
 
   document.addEventListener("input", (event) => {
-    if (event.target.matches?.('[aria-label="Spoken inventory transcript"]')) scheduleReview();
+    if (event.target.matches?.('[aria-label="Spoken inventory transcript"]')) {
+      activeInventoryRoot = event.target.closest("details");
+      scheduleReview();
+    }
   });
 
   new MutationObserver(() => {
