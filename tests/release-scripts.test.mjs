@@ -39,6 +39,19 @@ test("the par agent follows the checked release through the Node 22 helper", asy
   assert.match(daemon, /<string>--dry-run<\/string>/);
 });
 
+test("the manual production par-agent check is guarded and dry-run only", async () => {
+  const workflow = await readFile(".github/workflows/par-agent-check.yml", "utf8");
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /\bpush:|\bschedule:/);
+  assert.match(workflow, /group: onpar-production-deploy/);
+  assert.match(workflow, /- onpar-production/);
+  assert.match(workflow, /environment: production/);
+  assert.match(workflow, /service_dir="\/Users\/onpar\/OnParBeverageRecipes-service"/);
+  assert.match(workflow, /helper="\$\{service_dir\}\/\.deploy\/run-par-agent\.sh"/);
+  assert.match(workflow, /"\$\{helper\}" --dry-run/);
+  assert.doesNotMatch(workflow, /\bsudo\b|update-par-agent\.mjs/);
+});
+
 test("smoke checks are legacy-compatible only when both modern endpoints are absent", async () => {
   const source = await readFile("scripts/smoke-on-site.sh", "utf8");
   assert.match(source, /cat-file -e .*app\/api\/version\/route\.js/);

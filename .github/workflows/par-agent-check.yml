@@ -1,0 +1,43 @@
+name: Run par agent check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: onpar-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on:
+      - self-hosted
+      - onpar-production
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Run the deployed par agent without publishing
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          service_dir="/Users/onpar/OnParBeverageRecipes-service"
+          current_release="${service_dir}/current"
+          helper="${service_dir}/.deploy/run-par-agent.sh"
+
+          if [ "$(id -un)" != "onpar" ]; then
+            echo "The production runner must run as onpar." >&2
+            exit 1
+          fi
+          if [ ! -L "${current_release}" ] || [ ! -d "${current_release}" ]; then
+            echo "The active production release is unavailable." >&2
+            exit 1
+          fi
+          if [ ! -x "${helper}" ]; then
+            echo "The installed par-agent helper is unavailable." >&2
+            exit 1
+          fi
+
+          ONPAR_SERVICE_DIR="${current_release}" "${helper}" --dry-run
