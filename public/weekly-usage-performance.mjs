@@ -36,10 +36,14 @@ function isPmbUsageEntry(entry) {
   return Object.prototype.hasOwnProperty.call(entry, "volumeOz");
 }
 
-function getPmbHistory(item) {
-  return Array.isArray(item?.history)
-    ? item.history.filter((entry) => isPmbUsageEntry(entry) && getLabelStartTime(entry.label))
-    : [];
+function getTimedPmbHistory(item) {
+  const history = [];
+  (Array.isArray(item?.history) ? item.history : []).forEach((entry) => {
+    if (!isPmbUsageEntry(entry)) return;
+    const startTime = getLabelStartTime(entry.label);
+    if (startTime) history.push({ entry, startTime });
+  });
+  return history;
 }
 
 export function getWeeklyUsagePerformanceCategory(item) {
@@ -166,12 +170,15 @@ export function buildWeeklyUsagePerformance(
   const normalizedCategory = PERFORMANCE_CATEGORIES.has(category) ? category : "all";
   const normalizedLimit = Math.max(1, Math.min(25, Math.floor(Number(limit) || 10)));
   const sourceItems = Array.isArray(items) ? items.filter(Boolean) : [];
+  const preparedItems = sourceItems.map((item) => ({
+    item,
+    history: getTimedPmbHistory(item),
+  }));
   const labelsByTime = new Map();
 
-  sourceItems.forEach((item) => {
-    getPmbHistory(item).forEach((entry) => {
-      const time = getLabelStartTime(entry.label);
-      if (!labelsByTime.has(time)) labelsByTime.set(time, clean(entry.label));
+  preparedItems.forEach(({ history }) => {
+    history.forEach(({ entry, startTime }) => {
+      if (!labelsByTime.has(startTime)) labelsByTime.set(startTime, clean(entry.label));
     });
   });
 
@@ -181,22 +188,21 @@ export function buildWeeklyUsagePerformance(
   const latestPeriod = periods[0] || null;
   const expectedPreviousStartTime = latestPeriod ? latestPeriod.startTime - WEEK_MS : 0;
   const previousPeriod = periods.find((period) => period.startTime === expectedPreviousStartTime) || null;
-  const eligibleItems = sourceItems.filter((item) => (
+  const eligibleItems = preparedItems.filter(({ item }) => (
     normalizedCategory === "all" || getWeeklyUsagePerformanceCategory(item) === normalizedCategory
   ));
 
-  const tapRows = eligibleItems.map((item) => {
-    const pmbHistory = getPmbHistory(item);
+  const tapRows = eligibleItems.map(({ item, history }) => {
     const currentEntry = latestPeriod
-      ? pmbHistory.find((entry) => getLabelStartTime(entry.label) === latestPeriod.startTime)
+      ? history.find((record) => record.startTime === latestPeriod.startTime)?.entry || null
       : null;
     const previousEntry = previousPeriod
-      ? pmbHistory.find((entry) => getLabelStartTime(entry.label) === previousPeriod.startTime)
+      ? history.find((record) => record.startTime === previousPeriod.startTime)?.entry || null
       : null;
     const currentOz = getWeeklyUsageEntryPouredOz(item, currentEntry, getFullOunces);
     const previousOz = getWeeklyUsageEntryPouredOz(item, previousEntry, getFullOunces);
-    const hasOlderPmbUsage = Boolean(previousPeriod) && pmbHistory.some((entry) => (
-      getLabelStartTime(entry.label) < previousPeriod.startTime
+    const hasOlderPmbUsage = Boolean(previousPeriod) && history.some(({ entry, startTime }) => (
+      startTime < previousPeriod.startTime
       && getWeeklyUsageEntryPouredOz(item, entry, getFullOunces) !== null
     ));
 

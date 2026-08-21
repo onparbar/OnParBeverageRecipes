@@ -623,9 +623,7 @@ function combinePmbConnectionAlerts({
 function buildKpis({
   summary,
   planNumbersAvailable,
-  usage,
-  pricing,
-  priceFeedCurrent,
+  live,
   orders,
   prep,
   deferred,
@@ -636,27 +634,43 @@ function buildKpis({
   const estimatedKnownPurchaseCost = nonNegativeNumber(summary.estimatedKnownPurchaseCost);
   const missingPriceCount = count(summary.missingPriceCount);
   const costComplete = summary.estimatedPurchaseCostComplete === true && missingPriceCount === 0;
-  const hasUsageCoverage = usage.hasCurrentPeriod;
-  const pricingKnown = priceFeedCurrent && pricing.total > 0;
   const planUnavailableDetail = "";
   const trackedVendors = orders?.available === true && Array.isArray(orders.vendors)
     ? orders.vendors
     : null;
   const outstandingVendors = trackedVendors?.filter((vendor) => vendor?.ordered !== true) || [];
+  const completedVendors = trackedVendors?.filter((vendor) => vendor?.ordered === true) || [];
+  const completedOrderLineCount = completedVendors
+    .reduce((total, vendor) => total + count(vendor?.items?.length), 0);
+  const completedPurchaseCost = completedVendors
+    .reduce((total, vendor) => total + nonNegativeNumber(vendor?.estimatedTotal), 0);
   const remainingOrderLineCount = trackedVendors
-    ? outstandingVendors.reduce((total, vendor) => total + count(vendor?.items?.length), 0)
+    ? live
+      ? Math.max(0, orderLineCount - completedOrderLineCount)
+      : outstandingVendors.reduce((total, vendor) => total + count(vendor?.items?.length), 0)
     : orderLineCount;
   const remainingPurchaseCost = trackedVendors
-    ? outstandingVendors.reduce((total, vendor) => total + nonNegativeNumber(vendor?.estimatedTotal), 0)
+    ? live
+      ? Math.max(0, estimatedKnownPurchaseCost - completedPurchaseCost)
+      : outstandingVendors.reduce((total, vendor) => total + nonNegativeNumber(vendor?.estimatedTotal), 0)
     : estimatedKnownPurchaseCost;
   const trackedPrepItems = prep?.available === true && Array.isArray(prep.items)
     ? prep.items
     : null;
+  const completedPrepItems = trackedPrepItems?.filter((item) => item?.completed === true) || [];
   const remainingPrepItems = trackedPrepItems?.filter((item) => item?.completed !== true) || [];
+  const completedCocktailBatchTotal = completedPrepItems
+    .reduce((total, item) => total + nonNegativeNumber(item?.quantity), 0);
   const remainingCocktailBatchTotal = trackedPrepItems
-    ? remainingPrepItems.reduce((total, item) => total + nonNegativeNumber(item?.quantity), 0)
+    ? live
+      ? Math.max(0, cocktailBatchTotal - completedCocktailBatchTotal)
+      : remainingPrepItems.reduce((total, item) => total + nonNegativeNumber(item?.quantity), 0)
     : cocktailBatchTotal;
-  const remainingCocktailLineCount = trackedPrepItems ? remainingPrepItems.length : cocktailLineCount;
+  const remainingCocktailLineCount = trackedPrepItems
+    ? live
+      ? Math.max(0, cocktailLineCount - completedPrepItems.length)
+      : remainingPrepItems.length
+    : cocktailLineCount;
 
   return [
     {
@@ -671,8 +685,8 @@ function buildKpis({
       confidence: !planNumbersAvailable ? "unavailable" : costComplete ? "verified" : "partial",
       target: DASHBOARD_OVERVIEW_TARGETS.weeklyPlan,
     },
-    {
-      id: "cocktails-to-make",
+      {
+        id: "cocktails-to-make",
       label: "Cocktails to make",
       value: planNumbersAvailable ? formatQuantity(remainingCocktailBatchTotal) : "—",
       rawValue: planNumbersAvailable ? remainingCocktailBatchTotal : null,
@@ -681,35 +695,9 @@ function buildKpis({
         : planUnavailableDetail,
       tone: planNumbersAvailable ? (remainingCocktailBatchTotal > 0 ? "accent" : "neutral") : "critical",
       confidence: planNumbersAvailable ? "verified" : "unavailable",
-      target: DASHBOARD_OVERVIEW_TARGETS.weeklyPlan,
-    },
-    {
-      id: "usage-coverage",
-      label: "PMB usage coverage",
-      value: hasUsageCoverage ? `${formatCount(usage.capturedCount)} / ${formatCount(usage.eligibleCount)}` : "—",
-      rawValue: hasUsageCoverage ? usage.capturedCount : null,
-      detail: !hasUsageCoverage
-        ? "No complete current PMB week is available."
-        : usage.currentComplete
-          ? `${usage.latestLabel} · all active taps captured${usage.trendComplete ? " · trend comparable" : usage.comparableCount ? ` · ${formatCount(usage.comparableCount)} taps comparable` : " · no comparable prior-week taps"}`
-          : `${usage.latestLabel} · partial capture; ${formatCount(usage.comparableCount)} taps comparable for movement`,
-      tone: usage.currentComplete && usage.trendComplete ? "positive" : "warning",
-      confidence: !hasUsageCoverage ? "unavailable" : usage.currentComplete ? (usage.trendComplete ? "verified" : "partial") : "partial",
-      target: DASHBOARD_OVERVIEW_TARGETS.weeklyUsage,
-    },
-    {
-      id: "pricing-floor",
-      label: `${formatQuantity(pricing.targetMarginPercent)}% pricing floor`,
-      value: pricingKnown ? `${formatCount(pricing.onTargetCount)} / ${formatCount(pricing.total)}` : "—",
-      rawValue: pricingKnown ? pricing.onTargetCount : null,
-      detail: !pricingKnown
-        ? "Requires a current PMB price read before advisor counts can be trusted."
-        : `${formatCount(pricing.belowFloorCount)} below floor · ${formatCount(pricing.blockedCount)} blocked · beer and cocktails only`,
-      tone: !pricingKnown ? "warning" : pricing.belowFloorCount > 0 || pricing.blockedCount > 0 ? "warning" : "positive",
-      confidence: pricingKnown ? (pricing.blockedCount > 0 ? "partial" : "verified") : "unavailable",
-      target: DASHBOARD_OVERVIEW_TARGETS.pricing,
-    },
-  ];
+        target: DASHBOARD_OVERVIEW_TARGETS.weeklyPlan,
+      },
+    ];
 }
 
 function buildQuickActions({
@@ -798,8 +786,15 @@ export function buildDashboardOverview(signals = {}, options = {}) {
   const usageFreshAfterDays = nonNegativeNumber(options.usageFreshAfterDays ?? 8) || 8;
   const kegLevelFreshAfterHours = nonNegativeNumber(options.kegLevelFreshAfterHours ?? 24) || 24;
   const pricingFreshAfterHours = nonNegativeNumber(options.pricingFreshAfterHours ?? 24) || 24;
-  const weeklyPlan = signals.weeklyPlan && typeof signals.weeklyPlan === "object" ? signals.weeklyPlan : {};
-  const summary = weeklyPlan.summary && typeof weeklyPlan.summary === "object" ? weeklyPlan.summary : {};
+    const weeklyPlan = signals.weeklyPlan && typeof signals.weeklyPlan === "object" ? signals.weeklyPlan : {};
+    const summary = weeklyPlan.summary && typeof weeklyPlan.summary === "object" ? weeklyPlan.summary : {};
+    const liveWeeklyPlan = signals.liveWeeklyPlan && typeof signals.liveWeeklyPlan === "object"
+      ? signals.liveWeeklyPlan
+      : {};
+    const liveSummary = liveWeeklyPlan.summary && typeof liveWeeklyPlan.summary === "object"
+      ? liveWeeklyPlan.summary
+      : summary;
+    const hasLiveWeeklyPlan = liveWeeklyPlan.available === true;
   const planState = getPlanState(weeklyPlan, nowTime, staleAfterDays);
   const shared = signals.shared && typeof signals.shared === "object" ? signals.shared : {};
   const sharedSources = SHARED_SOURCE_DEFINITIONS.map((definition) => (
@@ -894,19 +889,25 @@ export function buildDashboardOverview(signals = {}, options = {}) {
   );
   const inventoryBlocksPlanNumbers = !planState.lockedForWeek && missingCurrentCount > 0;
   const sharedBlocksPlanNumbers = !planState.lockedForWeek && sharedResult.blocksPlanNumbers;
-  const planNumbersAvailable = planState.actionable
-    && !sharedBlocksPlanNumbers
-    && !usageBlocksPlanNumbers
-    && !kegBlocksPlanNumbers
-    && !inventoryBlocksPlanNumbers;
-  const kpis = buildKpis({
-    summary,
-    planNumbersAvailable,
-    usage,
-    pricing,
-    priceFeedCurrent: pricingResult.priceFeedCurrent,
-    orders: signals.orders,
-    prep: signals.prep,
+    const planNumbersAvailable = planState.actionable
+      && !sharedBlocksPlanNumbers
+      && !usageBlocksPlanNumbers
+      && !kegBlocksPlanNumbers
+      && !inventoryBlocksPlanNumbers;
+    const livePlanNumbersAvailable = hasLiveWeeklyPlan
+      ? !sharedResult.blocksPlanNumbers
+        && usage.hasCurrentPeriod
+        && usage.currentComplete
+        && !["loading", "partial", "offline", "not-checked", "stale"].includes(kegFeed.status)
+        && kegFeedAgeState !== "stale"
+        && missingCurrentCount === 0
+      : planNumbersAvailable;
+    const kpis = buildKpis({
+      summary: hasLiveWeeklyPlan ? liveSummary : summary,
+      planNumbersAvailable: livePlanNumbersAvailable,
+      live: hasLiveWeeklyPlan,
+      orders: signals.orders,
+      prep: signals.prep,
     deferred,
   });
   const quickActions = buildQuickActions({

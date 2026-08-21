@@ -105,9 +105,47 @@ test("builds a clear overview from fully verified source signals", () => {
   assert.equal(kpis["cocktails-to-make"].value, "3");
   assert.equal(kpis["order-readiness"], undefined);
   assert.equal(kpis["purchase-cost"], undefined);
-  assert.equal(kpis["usage-coverage"].value, "102 / 102");
-  assert.equal(kpis["pricing-floor"].value, "47 / 47");
+  assert.equal(kpis["usage-coverage"], undefined);
+  assert.equal(kpis["pricing-floor"], undefined);
   assert.equal(overview.quickActions.find((item) => item.id === "weekly-usage")?.label, "View Beverage Trends");
+});
+
+test("uses live needs for Dashboard work counters without replacing the locked plan", () => {
+  const signals = readySignals();
+  signals.weeklyPlan.lockedForWeek = true;
+  signals.liveWeeklyPlan = {
+    available: true,
+    summary: {
+      orderLineCount: 5,
+      cocktailBatchTotal: 2,
+      cocktailLineCount: 2,
+      estimatedKnownPurchaseCost: 250,
+      missingPriceCount: 0,
+      estimatedPurchaseCostComplete: true,
+    },
+  };
+  signals.orders = {
+    available: true,
+    vendors: [
+      { vendor: "Bonbright", ordered: true, estimatedTotal: 100, items: [{}, {}] },
+      { vendor: "OHLQ", ordered: false, estimatedTotal: 150, items: [{}, {}, {}] },
+    ],
+  };
+  signals.prep = {
+    available: true,
+    items: [
+      { name: "Finished", quantity: 1, completed: true },
+      { name: "Still needed", quantity: 1, completed: false },
+    ],
+  };
+
+  const overview = buildDashboardOverview(signals, { now });
+  const kpis = Object.fromEntries(overview.kpis.map((item) => [item.id, item]));
+
+  assert.equal(overview.planNumbersAvailable, true);
+  assert.equal(kpis["items-to-order"].value, "3");
+  assert.equal(kpis["items-to-order"].detail, "$150.00 estimated");
+  assert.equal(kpis["cocktails-to-make"].value, "1");
 });
 
 test("stale plans hide order, prep, and cost numbers instead of presenting old quantities", () => {
@@ -143,7 +181,6 @@ test("partial Weekly Usage keeps lowest-pour claims guarded while using comparab
 
   const overview = buildDashboardOverview(signals, { now });
   const alert = overview.alerts.find((item) => item.id === "weekly-usage-partial");
-  const coverage = overview.kpis.find((item) => item.id === "usage-coverage");
 
   assert.ok(alert);
   assert.equal(alert.severity, "warning");
@@ -152,9 +189,7 @@ test("partial Weekly Usage keeps lowest-pour claims guarded while using comparab
   assert.match(alert.message, /lowest-poured rankings stay withheld/);
   assert.match(alert.message, /Weekly movement uses the 90 taps captured in both weeks/);
   assert.match(alert.details[0], /Tap 91.*No prior-week usage/i);
-  assert.equal(coverage.value, "94 / 102");
-  assert.equal(coverage.confidence, "partial");
-  assert.match(coverage.detail, /90 taps comparable/);
+  assert.equal(overview.kpis.find((item) => item.id === "usage-coverage"), undefined);
   assert.equal(overview.planNumbersAvailable, false);
 });
 
@@ -169,10 +204,9 @@ test("a complete current week does not alert for expected new-tap exclusions", (
 
   const overview = buildDashboardOverview(signals, { now });
   const alert = overview.alerts.find((item) => item.id === "weekly-usage-trend-incomplete");
-  const coverage = overview.kpis.find((item) => item.id === "usage-coverage");
 
   assert.equal(alert, undefined);
-  assert.match(coverage.detail, /100 taps comparable/);
+  assert.equal(overview.kpis.find((item) => item.id === "usage-coverage"), undefined);
 });
 
 test("a real reporting gap still produces a week-over-week alert when new taps are also present", () => {
@@ -317,13 +351,11 @@ test("offline price sync suppresses advisor claims while keeping the owner actio
 
   const overview = buildDashboardOverview(signals, { now });
   const alertIds = overview.alerts.map((item) => item.id);
-  const pricingKpi = overview.kpis.find((item) => item.id === "pricing-floor");
   const pricingAction = overview.quickActions.find((item) => item.id === "pricing");
 
   assert.ok(alertIds.includes("pmb-pricing-offline"));
   assert.ok(!alertIds.includes("pricing-below-floor"), "stale/offline advisor counts must not be promoted as current");
-  assert.equal(pricingKpi.value, "—");
-  assert.equal(pricingKpi.confidence, "unavailable");
+  assert.equal(overview.kpis.find((item) => item.id === "pricing-floor"), undefined);
   assert.equal(pricingAction.label, "Check Tap Pricing");
   assert.equal(pricingAction.target, DASHBOARD_OVERVIEW_TARGETS.pricing);
 });

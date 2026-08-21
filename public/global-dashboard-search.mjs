@@ -10,19 +10,50 @@ export function normalizeGlobalSearchText(value) {
     .replace(/\s+/g, " ");
 }
 
+const DASHBOARD_SEARCH_FIELD_CACHE = new WeakMap();
+const DASHBOARD_DATA_IDENTITY_CACHE = new WeakMap();
+
 function getSearchFields(item) {
+  const extraValues = Array.isArray(item?.searchText) ? item.searchText : [item?.searchText];
+  const signature = [item?.title, item?.section, item?.subtitle, ...extraValues]
+    .map((value) => String(value ?? ""))
+    .join("\u0000");
+  const cached = item && typeof item === "object" ? DASHBOARD_SEARCH_FIELD_CACHE.get(item) : null;
+  if (cached?.signature === signature) return cached.fields;
+
   const title = normalizeGlobalSearchText(item?.title);
   const section = normalizeGlobalSearchText(item?.section);
   const subtitle = normalizeGlobalSearchText(item?.subtitle);
-  const extra = (Array.isArray(item?.searchText) ? item.searchText : [item?.searchText])
+  const extra = extraValues
     .map(normalizeGlobalSearchText)
     .filter(Boolean)
     .join(" ");
-  return {
+  const fields = {
     title,
     secondary: [section, subtitle, extra].filter(Boolean).join(" "),
     combined: [title, section, subtitle, extra].filter(Boolean).join(" "),
   };
+  if (item && typeof item === "object") {
+    DASHBOARD_SEARCH_FIELD_CACHE.set(item, { signature, fields });
+  }
+  return fields;
+}
+
+function getDashboardDataIdentity(item) {
+  const signature = [item?.name, item?.tapNumber, item?.wall]
+    .map((value) => String(value ?? ""))
+    .join("\u0000");
+  const cached = item && typeof item === "object" ? DASHBOARD_DATA_IDENTITY_CACHE.get(item) : null;
+  if (cached?.signature === signature) return cached.identity;
+
+  const identity = {
+    haystack: normalizeGlobalSearchText(`${item?.name || ""} ${item?.tapNumber || ""}`),
+    wall: normalizeGlobalSearchText(item?.wall),
+  };
+  if (item && typeof item === "object") {
+    DASHBOARD_DATA_IDENTITY_CACHE.set(item, { signature, identity });
+  }
+  return identity;
 }
 
 function getSearchScore(item, query, tokens) {
@@ -257,9 +288,9 @@ export function searchDashboardData(items, rawQuery, { limit = 50 } = {}) {
     .filter(Boolean)
     .filter((item) => intent.visibility === "hidden" ? item.hidden === true : item.hidden !== true)
     .filter((item) => !intent.category || item.category === intent.category)
-    .filter((item) => !intent.wall || normalizeGlobalSearchText(item.wall) === intent.wall)
+    .filter((item) => !intent.wall || getDashboardDataIdentity(item).wall === intent.wall)
     .filter((item) => {
-      const haystack = normalizeGlobalSearchText(`${item.name || ""} ${item.tapNumber || ""}`);
+      const { haystack } = getDashboardDataIdentity(item);
       return intent.nameTerms.every((term) => haystack.includes(term));
     })
     .map((item) => {

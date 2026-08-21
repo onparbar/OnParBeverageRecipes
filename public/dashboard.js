@@ -159,6 +159,10 @@ import {
 import { buildInventoryRealityCheck } from "./inventory-reality-check.mjs";
 import { buildThirtySecondBriefing } from "./thirty-second-briefing.mjs";
 import { buildWhatIfPlan } from "./what-if-planning.mjs";
+import { createDashboardRenderCoordinator } from "./dashboard-render-coordinator.mjs";
+import { calculateWeeklyIngredientPrepNeed } from "./weekly-plan-prep-needs.mjs";
+
+const dashboardRenderCoordinator = createDashboardRenderCoordinator();
 
 const CSV_PATH = "./data/cocktail-recipes.csv";
 const NEW_COCKTAILS_CSV_PATH = "./data/new-cocktails.csv";
@@ -1331,22 +1335,24 @@ async function runUnifiedPmbRefresh() {
     button.textContent = "Refreshing...";
   }
   try {
-    await Promise.allSettled([
-      runKegLevelSync(),
-      runTapPricingSync(),
-      runPmbWeeklyUsageSync({ automatic: true }),
-      runVendorSync({ automatic: true }),
-      checkPmbQueueConnection(),
-    ]);
-    await Promise.allSettled([
-      flushPendingSharedWeeklyUsageSave(),
-      flushPendingInventoryFieldSyncs(),
-      flushPendingParAgentStateSync(),
-    ]);
-    if (!getCurrentMondayKegPlanSnapshot() && !hasPublishedWeeklyPlanRecommendations()) {
-      await runKegParAgent();
-    }
-    renderDashboardOverview();
+    await dashboardRenderCoordinator.batch(async () => {
+      await Promise.allSettled([
+        runKegLevelSync(),
+        runTapPricingSync(),
+        runPmbWeeklyUsageSync({ automatic: true }),
+        runVendorSync({ automatic: true }),
+        checkPmbQueueConnection(),
+      ]);
+      await Promise.allSettled([
+        flushPendingSharedWeeklyUsageSave(),
+        flushPendingInventoryFieldSyncs(),
+        flushPendingParAgentStateSync(),
+      ]);
+      if (!getCurrentMondayKegPlanSnapshot() && !hasPublishedWeeklyPlanRecommendations()) {
+        await runKegParAgent();
+      }
+      renderDashboardOverview();
+    });
   } finally {
     releaseOwnerLoginSyncLock(lockToken);
     unifiedPmbRefreshRunning = false;
@@ -4031,6 +4037,7 @@ function createRecipeCard(recipe, state) {
 }
 
 function renderPricing() {
+  if (dashboardRenderCoordinator.defer("pricing", renderPricing)) return;
   const searchTerm = pricingSearch.value.trim().toLowerCase();
   const visibleTapRows = getLiveTapPricingRows(searchTerm);
 
@@ -4776,6 +4783,7 @@ function renderPricingSummary(visibleTapRows = getLiveTapPricingRows(pricingSear
 }
 
 function renderIngredients() {
+  if (dashboardRenderCoordinator.defer("ingredients", renderIngredients)) return;
   const searchTerm = ingredientSearch.value.trim().toLowerCase();
   const visibleIngredients = ingredients.filter((ingredient) => {
     if (ingredient.id === "water") return false;
@@ -4893,6 +4901,7 @@ function renderIngredientSummary(visibleIngredientsInput = ingredients.filter((i
 }
 
 function renderInventory() {
+  if (dashboardRenderCoordinator.defer("inventory", renderInventory)) return;
   const visibleItems = getVisibleInventoryItems();
   const groupedItems = groupInventoryForDisplay(visibleItems);
   const reorderItems = getInventoryReorderItems(visibleItems);
@@ -5027,8 +5036,10 @@ function hasPublishedWeeklyPlanRecommendations(now = new Date()) {
   return Boolean(snapshot) && isRecommendationForOperatingWeek(snapshot.generatedAt, now);
 }
 
-function getWeeklyPlanModel() {
-  const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
+function getWeeklyPlanModel({ live = false } = {}) {
+  const snapshot = live
+    ? null
+    : getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
   const plan = snapshot
     ? hydrateWeeklyPlanLiquorTapPricing(snapshot.plan)
     : buildWeeklyActionPlan({
@@ -5363,38 +5374,14 @@ function renderWeeklyPlanCocktailRows(items) {
 }
 
 function getWeeklySimpleSyrupNeed(cocktails = []) {
-  let totalOz = 0;
-  const unmatched = [];
-
-  cocktails.forEach((item) => {
-    const recipe = findRecipeForWallProduct(getActiveRecipes(), item.name);
-    if (!recipe) {
-      unmatched.push(item.name);
-      return;
-    }
-
-    const syrupOzPerRecipe = sum((recipe.ingredients || [])
-      .filter((ingredient) => normalizeIngredientAlias(ingredient.name).toLowerCase() === "simple syrup")
-      .map((ingredient) => toNumber(ingredient.oz)));
-    if (!syrupOzPerRecipe) return;
-
-    const recipeBatchOz = getRecipeTotals(recipe).oz;
-    const plannedBatchOz = toNumber(item.batchSizeOz);
-    const quantity = toNumber(item.quantity);
-    if (!recipeBatchOz || !plannedBatchOz || !quantity) {
-      unmatched.push(item.name);
-      return;
-    }
-
-    totalOz += syrupOzPerRecipe * (plannedBatchOz / recipeBatchOz) * quantity;
+  const activeRecipes = getActiveRecipes();
+  return calculateWeeklyIngredientPrepNeed({
+    plannedItems: cocktails,
+    ingredientName: "simple syrup",
+    resolveRecipe: (item) => findRecipeForWallProduct(activeRecipes, item.name),
+    getRecipeYieldOz: (recipe) => getRecipeTotals(recipe).oz,
+    normalizeIngredientName: normalizeIngredientAlias,
   });
-
-  return {
-    totalOz,
-    gallons: totalOz / 128,
-    unmatched,
-    complete: unmatched.length === 0,
-  };
 }
 
 function renderWeeklyPlanLiquorTapRows(items) {
@@ -5887,8 +5874,11 @@ function renderMondayRunCompact(run) {
 }
 
 function renderDashboardOverview() {
+  if (dashboardRenderCoordinator.defer("overview", renderDashboardOverview)) return;
   if (!dashboardOverview || isEmployeeDashboard) return;
+  const lockedForWeek = hasPublishedWeeklyPlanRecommendations();
   const plan = getWeeklyPlanModel();
+  const livePlan = lockedForWeek ? getWeeklyPlanModel({ live: true }) : plan;
   const freshness = getWeeklyPlanFreshness(plan);
   const usagePerformance = buildWeeklyUsagePerformance(weeklyUsageItems, {
     category: "all",
@@ -5901,11 +5891,15 @@ function renderDashboardOverview() {
   const recipeCoverage = getWallCocktailRecipeCoverage();
   const overview = buildDashboardOverview({
     weeklyPlan: {
-      readiness: freshness.readiness,
-      generatedAt: parAgentState?.recommendations?.generatedAt,
-      lockedForWeek: hasPublishedWeeklyPlanRecommendations(),
-      summary: plan.summary,
-    },
+        readiness: freshness.readiness,
+        generatedAt: parAgentState?.recommendations?.generatedAt,
+        lockedForWeek,
+        summary: plan.summary,
+      },
+      liveWeeklyPlan: {
+        available: true,
+        summary: livePlan.summary,
+      },
     shared: {
       dashboard: getDashboardSharedOverviewSource(),
       inventory: getInventorySharedOverviewSource(),
@@ -5976,9 +5970,9 @@ function renderDashboardOverview() {
 
     ${renderMondayRunCompact(mondayRun)}
 
-    <section class="dashboard-kpi-grid" aria-label="Weekly operations summary">
-      ${overview.kpis.map((kpi) => {
-        const showDetail = kpi.confidence !== "verified" || ["items-to-order", "usage-coverage"].includes(kpi.id);
+      <section class="dashboard-kpi-grid" aria-label="Weekly operations summary">
+        ${overview.kpis.map((kpi) => {
+          const showDetail = kpi.confidence !== "verified" || kpi.id === "items-to-order";
         return `
           <button class="dashboard-kpi dashboard-kpi--${escapeHtml(kpi.tone)}" type="button" data-dashboard-target="${escapeHtml(kpi.target)}">
             <span>${escapeHtml(kpi.label)}</span>
@@ -7195,6 +7189,7 @@ function isEasternMonday(now = new Date()) {
 }
 
 function renderWeeklyPlan() {
+  if (dashboardRenderCoordinator.defer("weekly-plan", renderWeeklyPlan)) return;
   if (!weeklyPlan) return;
   const recommendations = parAgentState?.recommendations;
   const plan = getWeeklyPlanModel();
@@ -7281,6 +7276,7 @@ function renderWeeklyPlan() {
 }
 
 function renderKegLevels() {
+  if (dashboardRenderCoordinator.defer("keg-levels", renderKegLevels)) return;
   if (!kegSummary || !kegWalls) return;
 
   const wallNames = ["Patio", "Main", "Karaoke"];
@@ -7910,6 +7906,7 @@ function getWeeklyUsagePerformanceCategoryLabel(category) {
 }
 
 function renderWeeklyUsage() {
+  if (dashboardRenderCoordinator.defer("weekly-usage", renderWeeklyUsage)) return;
   if (!weeklyUsageSummary || !weeklyUsageTable || !weeklyUsageHead) return;
 
   const searchTerm = clean(weeklyUsageSearch?.value).toLowerCase();
@@ -13052,7 +13049,7 @@ function createInventoryRow(item, mode) {
     : '<span class="inventory-order-zero">Price needed</span>';
   row.innerHTML = `
     <td><strong>${escapeHtml(item.name)}</strong>${item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${item.orderHoldReason ? `<span class="table-note table-note--warning">Ordering hold: ${escapeHtml(item.orderHoldReason)}</span>` : ""}${linkedNotes.join("")}</td>
-    <td>${mode === "stock" ? `<input class="inventory-input" data-field="onHand" name="inventory-on-hand-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" pattern="${item.allowsDecimal ? "[0-9]*[.]?[0-9]*" : "[0-9]*"}" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(item.onHandDisplay)}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>
+    <td>${mode === "stock" ? `<input class="inventory-input" data-field="onHand" name="inventory-on-hand-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" pattern="${item.allowsDecimal ? "[0-9]*[.]?[0-9]*" : "[0-9]*"}" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getInventoryDisplayValue(item, "onHand"))}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>
     <td>${mode === "stock" ? `<div class="inventory-par-cell"><input class="inventory-input inventory-input--par ${isRowEditing ? "is-editing" : "is-locked"}" data-field="par" name="inventory-par-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" pattern="${item.allowsDecimal ? "[0-9]*[.]?[0-9]*" : "[0-9]*"}" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(item.parDisplay)}" aria-label="Par for ${escapeHtml(item.name)}" ${isRowEditing ? "" : "readonly"}></div>` : formatInventoryQuantity(item.parDisplay)}</td>
     <td data-cell="order" class="${item.orderQuantity > 0 ? "inventory-order-flag" : "muted"}">${orderCell}</td>
     <td>${escapeHtml(packLabel)}</td>
@@ -13172,9 +13169,10 @@ function previewInventoryValue(id, field, value, row) {
   const item = findInventoryItem(id);
   if (!item) return;
 
-  setInventoryItemDisplayValue(item, field, value);
+  const nextValue = field === "onHand" && !clean(value) ? "0" : value;
+  setInventoryItemDisplayValue(item, field, nextValue);
   syncInventoryRowCells(row, item);
-  persistInventoryField(id, field, value);
+  persistInventoryField(id, field, nextValue);
   renderInventoryPanels();
 }
 
@@ -13182,7 +13180,8 @@ function commitInventoryValue(id, field, value) {
   const item = findInventoryItem(id);
   if (!item) return;
 
-  const normalized = normalizeInventoryInputValue(value, item.allowsDecimal);
+  const normalizedInput = normalizeInventoryInputValue(value, item.allowsDecimal);
+  const normalized = field === "onHand" && !normalizedInput ? "0" : normalizedInput;
   setInventoryItemDisplayValue(item, field, normalized);
   persistInventoryField(id, field, normalized);
 }
@@ -13215,6 +13214,7 @@ function syncInventoryItemCatalogLinks() {
   const ingredientById = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
 
   inventoryItems.forEach((item) => {
+    item.onHandDisplay = clean(item.onHandDisplay) || "0";
     const ingredient = ingredientById.get(item.id) || null;
     item.linkedIngredientName = ingredient?.name || item.name;
     item.vendorProduct = ingredient?.vendorProduct || getVendorMapping(item.id) || null;
@@ -13273,14 +13273,14 @@ function setInventoryItemDisplayValue(item, field, value) {
   if (field === "par") {
     item.parDisplay = clean(value);
   } else {
-    item.onHandDisplay = clean(value);
+    item.onHandDisplay = clean(value) || "0";
   }
   recalculateInventoryItem(item);
 }
 
 function getInventoryDisplayValue(item, field) {
   if (!item) return "";
-  return field === "par" ? item.parDisplay : item.onHandDisplay;
+  return field === "par" ? item.parDisplay : clean(item.onHandDisplay) || "0";
 }
 
 function persistInventoryField(id, field, value) {

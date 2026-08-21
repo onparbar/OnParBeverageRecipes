@@ -8437,14 +8437,33 @@ body {
   box-shadow: var(--soft-shadow);
 }
 
-.topbar > h1 {
-  padding-right: 104px;
+.topbar-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(16px, 2vw, 28px);
+  width: 100%;
+  min-width: 0;
+}
+
+.topbar-title-row h1 {
+  min-width: 0;
+  margin: 0;
 }
 
 .topbar .topbar-account-actions {
-  position: absolute;
-  top: 24px;
-  right: 26px;
+  position: static;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.topbar-account-actions .logout-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .topbar h1 {
@@ -8453,12 +8472,34 @@ body {
 }
 
 .topbar-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
+  min-width: 0;
   gap: 6px;
   border: 1px solid rgba(47, 107, 95, 0.1);
   border-radius: 18px;
   padding: 6px;
   background: rgba(245, 240, 224, 0.74);
+  overflow: visible;
   scrollbar-width: none;
+}
+
+.topbar .top-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  min-width: 0;
+}
+
+.topbar .top-actions .tab-button {
+  width: 100%;
+  min-width: 0;
+}
+
+.topbar .dashboard-menu {
+  min-width: 0;
+  justify-self: end;
 }
 
 .topbar-actions::-webkit-scrollbar {
@@ -8624,13 +8665,21 @@ tbody tr:hover {
     padding: 20px;
   }
 
-  .topbar > h1 {
-    padding-right: 88px;
+  .topbar-title-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
   }
 
   .topbar .topbar-account-actions {
-    top: 18px;
-    right: 20px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .topbar-account-actions .logout-link {
+    width: 100%;
+    padding-inline: 12px;
   }
 
   .topbar h1 {
@@ -8638,7 +8687,7 @@ tbody tr:hover {
   }
 
   .topbar-actions {
-    margin-inline: -2px;
+    margin-inline: 0;
   }
 
   .topbar-actions > * {
