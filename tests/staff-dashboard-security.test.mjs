@@ -91,7 +91,16 @@ test("staff page loads only its dedicated bundle", async () => {
 test("middleware redirects employee root access, allows owner staff previews, and blocks non-staff assets", async () => {
   const middlewareSource = await readProjectFile("middleware.js");
   assert.match(middlewareSource, /sessionRole === "employee"/);
-  assert.match(middlewareSource, /pathname === "\/"[\s\S]*getPublicUrl\(request, "\/staff"\)/);
+  assert.match(middlewareSource, /pathname === "\/"[\s\S]*redirectToPublicPath\("\/staff"\)/);
   assert.match(middlewareSource, /!isEmployeeAllowedDashboardRequest/);
   assert.doesNotMatch(middlewareSource, /if \(pathname === "\/staff"\)/);
+});
+
+test("middleware keeps authentication redirects on the browser's public origin", async () => {
+  const middlewareSource = await readProjectFile("middleware.js");
+  assert.match(middlewareSource, /function redirectToPublicPath\(pathname, searchParams/);
+  assert.match(middlewareSource, /Location: location/);
+  assert.match(middlewareSource, /redirectToPublicPath\("\/login", loginParams\)/);
+  assert.doesNotMatch(middlewareSource, /request\.nextUrl\.clone\(\)/);
+  assert.doesNotMatch(middlewareSource, /NextResponse\.redirect\(/);
 });

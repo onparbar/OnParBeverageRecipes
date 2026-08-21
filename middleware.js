@@ -25,12 +25,16 @@ function isApiPath(pathname) {
   return pathname.startsWith("/api/");
 }
 
-function getPublicUrl(request, pathname) {
-  const url = request.nextUrl.clone();
-  url.pathname = pathname;
-  url.search = "";
-  url.hash = "";
-  return url;
+function redirectToPublicPath(pathname, searchParams = new URLSearchParams()) {
+  const query = searchParams.toString();
+  const location = `${pathname}${query ? `?${query}` : ""}`;
+  return new NextResponse(null, {
+    status: 307,
+    headers: {
+      "Cache-Control": "no-store",
+      Location: location,
+    },
+  });
 }
 
 function nextPrivateResponse() {
@@ -47,7 +51,7 @@ export async function middleware(request) {
 
   if (isPublicPath(pathname)) {
     if (isAuthed && pathname === "/login") {
-      return NextResponse.redirect(getPublicUrl(request, "/"));
+      return redirectToPublicPath("/");
     }
     return NextResponse.next();
   }
@@ -55,7 +59,7 @@ export async function middleware(request) {
   if (isAuthed) {
     if (sessionRole === "employee") {
       if (pathname === "/") {
-        return NextResponse.redirect(getPublicUrl(request, "/staff"));
+        return redirectToPublicPath("/staff");
       }
       if (!isEmployeeAllowedDashboardRequest({ pathname, method: request.method })) {
         if (isApiPath(pathname)) {
@@ -84,17 +88,17 @@ export async function middleware(request) {
     );
   }
 
-  const loginUrl = getPublicUrl(request, "/login");
-  loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
+  const loginParams = new URLSearchParams();
+  loginParams.set("next", `${pathname}${request.nextUrl.search}`);
   const authStatus = getDashboardAuthStatus();
   if (!authStatus.hasOwnerPassword) {
-    loginUrl.searchParams.set("setup", "missing-password");
+    loginParams.set("setup", "missing-password");
   } else if (!authStatus.hasSessionSecret) {
-    loginUrl.searchParams.set("setup", "missing-session-secret");
+    loginParams.set("setup", "missing-session-secret");
   } else if (!authStatus.sessionSecretStrong) {
-    loginUrl.searchParams.set("setup", "weak-session-secret");
+    loginParams.set("setup", "weak-session-secret");
   }
-  return NextResponse.redirect(loginUrl);
+  return redirectToPublicPath("/login", loginParams);
 }
 
 export const config = {
