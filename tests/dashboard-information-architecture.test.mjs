@@ -229,7 +229,9 @@ test("custom cabinet bottles inherit the requested Proof and OHLQ mappings", () 
   assert.match(dashboardSource, /"korbel-brut": \{ vendor: "Proof"/);
   assert.match(dashboardSource, /"buffalo-trace": \{ vendor: "OHLQ"/);
   assert.match(dashboardSource, /"makers-mark": \{ vendor: "OHLQ"/);
-  assert.match(dashboardSource, /getVendorMapping\(id\) \|\| item\.vendorProduct/);
+  assert.match(dashboardSource, /const vendorProduct = getVendorMapping\(id\) \|\| item\.vendorProduct/);
+  assert.match(dashboardSource, /vendorProduct\?\.syncVendor \|\| vendorProduct\?\.vendor/);
+  assert.doesNotMatch(dashboardSource, /item\.priceUpdatedAt \? item\.vendorProduct\?\.vendor/);
 });
 
 test("Weekly Plan previews live needs and locks from the current Monday inventory snapshot", () => {

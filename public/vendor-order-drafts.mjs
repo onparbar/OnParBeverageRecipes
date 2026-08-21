@@ -63,7 +63,7 @@ function applyManualOrderAdjustments(plan = {}, catalog = [], adjustments = []) 
     const source = catalogById.get(clean(adjustment.catalogId));
     const quantity = Number(adjustment.quantity);
     const reason = clean(adjustment.reason);
-    if (!source || !Number.isInteger(quantity) || quantity <= 0 || !reason) return;
+    if (!source || !Number.isInteger(quantity) || quantity < 0 || !reason) return;
     const vendor = normalizeVendor(source.vendor);
     const internalId = clean(source.internalId || source.id);
     const vendorSku = clean(source.vendorSku || source.preferredSku);
@@ -86,6 +86,10 @@ function applyManualOrderAdjustments(plan = {}, catalog = [], adjustments = []) 
       return true;
     });
     const existing = existingIndex >= 0 ? orders[existingCollection][existingIndex] : null;
+    if (quantity === 0) {
+      if (existingIndex >= 0) orders[existingCollection].splice(existingIndex, 1);
+      return;
+    }
     const casePackaged = Boolean(source.casePackaged ?? existing?.casePackaged);
     const packSize = Math.max(1, Number(source.packSize ?? existing?.packSize) || 1);
     const requestedUnits = casePackaged ? quantity * packSize : quantity;
@@ -223,18 +227,23 @@ function buildDraftLine(item, vendor, sourceDate) {
   };
 }
 
-function selectProofMinimumTopUps(candidates = [], subtotal = 0, minimum = 350) {
+function selectProofMinimumTopUps(candidates = [], subtotal = 0, minimum = 350, existingLines = []) {
   const gapCents = Math.max(0, Math.ceil((minimum - subtotal) * 100));
   if (!gapCents) return [];
   const eligible = candidates.map((item) => {
     const packSize = Math.max(1, Number(item.packSize) || 1);
     const unitCost = numberOrNull(item.unitCost);
-    const projectedPrepUseUnits = Math.floor(Number(item.projectedPrepUseUnits) || 0);
+    const replacementNeedUnits = Math.floor(Number(item.replacementNeedUnits ?? item.projectedPrepUseUnits) || 0);
+    const identity = clean(item.id || item.internalId).toLowerCase();
+    const alreadyOrderedUnits = existingLines
+      .filter((line) => line.internalId.toLowerCase() === identity)
+      .reduce((total, line) => total + (Number(line.requestedUnits) || 0), 0);
+    const additionalNeedUnits = Math.max(0, replacementNeedUnits - alreadyOrderedUnits);
     return {
       ...item,
       packSize,
       unitCost,
-      maxCases: Math.floor(projectedPrepUseUnits / packSize),
+      maxCases: Math.ceil(additionalNeedUnits / packSize),
       caseCostCents: unitCost === null ? 0 : Math.round(unitCost * packSize * 100),
     };
   }).filter((item) => (
@@ -279,7 +288,7 @@ function selectProofMinimumTopUps(candidates = [], subtotal = 0, minimum = 350) 
 }
 
 function applyProofMinimumTopUps(lines, candidates, subtotal, minimum, sourceDate) {
-  const additions = selectProofMinimumTopUps(candidates, subtotal, minimum);
+  const additions = selectProofMinimumTopUps(candidates, subtotal, minimum, lines);
   additions.forEach((item) => {
     const identity = clean(item.id || item.internalId).toLowerCase();
     const existing = lines.find((line) => line.internalId.toLowerCase() === identity);
@@ -303,6 +312,7 @@ export function buildVendorOrderDrafts(plan = {}, {
   budgetLimit = null,
   proofMinimum = 350,
   proofMinimumCandidates = [],
+  proofPrepRequirement = "unknown",
   manualAdjustments = [],
   manualCatalog = [],
   now = new Date(),
@@ -321,8 +331,22 @@ export function buildVendorOrderDrafts(plan = {}, {
     });
     return { group, vendor, lines };
   });
+  const deferredOrders = [];
+  const activeGroups = groups.filter(({ vendor, lines }) => {
+    if (vendor !== "Proof" || proofPrepRequirement !== "not-required") return true;
+    const estimatedTotal = lines.reduce((total, line) => total + (numberOrNull(line.extendedCost) || 0), 0);
+    const hasUnresolvedLine = lines.some((line) => line.blockers.length > 0);
+    if (estimatedTotal >= proofMinimum || hasUnresolvedLine) return true;
+    deferredOrders.push({
+      vendor,
+      lineCount: lines.length,
+      estimatedTotal,
+      reason: `Below $${proofMinimum}; inventory covers this week's cocktail prep.`,
+    });
+    return false;
+  });
 
-  const drafts = groups.map(({ group, vendor, lines }) => {
+  const drafts = activeGroups.map(({ group, vendor, lines }) => {
     lines.forEach((line) => {
       const key = `${vendor.toLowerCase()}|${line.internalId.toLowerCase() || line.productName.toLowerCase()}`;
       if ((duplicateKeys.get(key) || 0) > 1) {
@@ -388,6 +412,7 @@ export function buildVendorOrderDrafts(plan = {}, {
     schedule,
     weeklyTotal,
     budgetLimit: normalizedBudget,
+    deferredOrders,
     drafts,
     canApproveAll: drafts.length > 0 && drafts.every((draft) => draft.canApprove),
   };

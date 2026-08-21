@@ -18,6 +18,7 @@ export function buildThirtySecondBriefing({ overview = {}, plan = {}, mondayRun 
   const alerts = Array.isArray(overview.alerts) ? overview.alerts : [];
   const criticalAlerts = alerts.filter((item) => item?.severity === "critical");
   const warningAlerts = alerts.filter((item) => item?.severity === "warning");
+  const informationalAlerts = alerts.filter((item) => !["critical", "warning"].includes(item?.severity));
   const nextStep = mondayRun.complete ? null : mondayRun.nextStep;
 
   if (criticalAlerts.length) {
@@ -50,7 +51,7 @@ export function buildThirtySecondBriefing({ overview = {}, plan = {}, mondayRun 
     }
   }
 
-  const remainingAlerts = [...criticalAlerts.slice(1), ...warningAlerts].slice(0, 2);
+  const remainingAlerts = [...criticalAlerts.slice(1), ...warningAlerts, ...informationalAlerts];
   remainingAlerts.forEach((alert) => addUnique(lines, {
     tone: alert.severity || "warning",
     text: clean(alert.title),
@@ -67,7 +68,7 @@ export function buildThirtySecondBriefing({ overview = {}, plan = {}, mondayRun 
     });
   }
 
-  const visibleLines = lines.slice(0, 4);
+  const visibleLines = lines.slice(0, 6);
   return {
     lines: visibleLines,
     voiceText: visibleLines.map((item) => [item.text, item.detail].filter(Boolean).join(". ")).join(". "),

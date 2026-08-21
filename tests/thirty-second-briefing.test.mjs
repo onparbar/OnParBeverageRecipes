@@ -23,3 +23,17 @@ test("uses the next Monday step when no urgent exception exists", () => {
   });
   assert.equal(briefing.lines[0].text, "Next: Count inventory");
 });
+
+test("keeps all current operational alerts in the briefing", () => {
+  const alerts = Array.from({ length: 5 }, (_, index) => ({
+    severity: index === 0 ? "critical" : "warning",
+    title: `Alert ${index + 1}`,
+    message: `Issue ${index + 1}`,
+    action: { target: "dashboard" },
+  }));
+  const briefing = buildThirtySecondBriefing({
+    overview: { alerts, planNumbersAvailable: false },
+    mondayRun: { complete: true },
+  });
+  assert.deepEqual(briefing.lines.map((item) => item.text), alerts.map((item) => item.title));
+});

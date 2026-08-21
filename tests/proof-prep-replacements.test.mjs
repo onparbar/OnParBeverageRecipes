@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildProofPrepReplacementCandidates } from "../public/proof-prep-replacements.mjs";
+import {
+  buildProofPrepOrderContext,
+  buildProofPrepReplacementCandidates,
+} from "../public/proof-prep-replacements.mjs";
 
 test("projects exact Proof bottle replacement needs from locked cocktail batches", () => {
   const candidates = buildProofPrepReplacementCandidates({
@@ -21,6 +24,8 @@ test("projects exact Proof bottle replacement needs from locked cocktail batches
       packSize: 12,
       caseCost: 60,
       matchedSku: "PROOF-LIME-12",
+      onHandDisplay: "12",
+      parDisplay: "12",
       vendorProduct: { vendor: "Proof", productName: "Lime Juice", bottleOz: 33.814 },
     }],
   });
@@ -28,8 +33,51 @@ test("projects exact Proof bottle replacement needs from locked cocktail batches
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].projectedPrepUseOz, 540);
   assert.equal(candidates[0].projectedPrepUseUnits, 16);
+  assert.equal(candidates[0].replacementNeedUnits, 16);
   assert.equal(candidates[0].unitCost, 5);
   assert.equal(candidates[0].shelfStable, true);
+});
+
+test("uses inventory on hand and par before permitting a Proof prep replacement", () => {
+  const context = buildProofPrepOrderContext({
+    cocktails: [{ name: "House Margarita", quantity: 1 }],
+    recipes: [{ title: "House Margarita", ingredients: [{ name: "Lime Juice", oz: 270 }] }],
+    inventoryItems: [{
+      id: "lime-juice",
+      name: "Lime Juice",
+      casePackaged: true,
+      packSize: 12,
+      caseCost: 60,
+      matchedSku: "PROOF-LIME-12",
+      onHandDisplay: "24",
+      parDisplay: "12",
+      vendorProduct: { vendor: "Proof", productName: "Lime Juice", bottleOz: 33.814 },
+    }],
+  });
+
+  assert.equal(context.requirement, "not-required");
+  assert.deepEqual(context.candidates, []);
+});
+
+test("keeps Proof under review when a required inventory count is blank", () => {
+  const context = buildProofPrepOrderContext({
+    cocktails: [{ name: "House Margarita", quantity: 1 }],
+    recipes: [{ title: "House Margarita", ingredients: [{ name: "Lime Juice", oz: 270 }] }],
+    inventoryItems: [{
+      id: "lime-juice",
+      name: "Lime Juice",
+      casePackaged: true,
+      packSize: 12,
+      caseCost: 60,
+      matchedSku: "PROOF-LIME-12",
+      onHandDisplay: "",
+      parDisplay: "12",
+      vendorProduct: { vendor: "Proof", productName: "Lime Juice", bottleOz: 33.814 },
+    }],
+  });
+
+  assert.equal(context.requirement, "unknown");
+  assert.deepEqual(context.candidates, []);
 });
 
 test("skips candidates with ambiguous identity or missing ordering data", () => {

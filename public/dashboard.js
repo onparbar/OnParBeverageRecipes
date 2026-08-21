@@ -135,7 +135,7 @@ import {
   mergeRequiredComingSoonItems,
 } from "./coming-soon-items.mjs";
 import { buildVendorOrderDrafts } from "./vendor-order-drafts.mjs";
-import { buildProofPrepReplacementCandidates } from "./proof-prep-replacements.mjs";
+import { buildProofPrepOrderContext } from "./proof-prep-replacements.mjs";
 import { selectPmbCurrentTapSnapshot } from "./pmb-current-tap-snapshot.mjs";
 import { applyMappedInventoryPackageRule } from "./inventory-product-rules.mjs";
 import { getProductPriceAliases, normalizeProductPriceKey } from "./product-price-matching.mjs";
@@ -5498,22 +5498,6 @@ function getPmbPricingOverviewFeed() {
   };
 }
 
-function renderDashboardAlert(alert) {
-  const details = alert.details || [];
-  return `
-    <article class="dashboard-alert dashboard-alert--${escapeHtml(alert.severity)}">
-      <div class="dashboard-alert__marker" aria-hidden="true"></div>
-      <div class="dashboard-alert__copy">
-        <span>${escapeHtml(alert.severity === "critical" ? "Action required" : alert.severity === "warning" ? "Review" : "Good to know")}</span>
-        <h3>${escapeHtml(alert.title)}</h3>
-        <p>${escapeHtml(alert.message)}</p>
-        ${details.length ? `<details><summary>See ${formatNumber(details.length)} detail${details.length === 1 ? "" : "s"}</summary><ul>${details.map((detail) => `<li>${escapeHtml(detail)}</li>`).join("")}</ul></details>` : ""}
-      </div>
-      ${alert.action ? `<button class="dashboard-overview-link" type="button" data-dashboard-target="${escapeHtml(alert.action.target)}">${escapeHtml(alert.action.label)} <span aria-hidden="true">→</span></button>` : ""}
-    </article>
-  `;
-}
-
 function getDashboardCompletedPrepItems() {
   if (!dashboardStaffPrepPlan.available) return [];
   return dashboardStaffPrepPlan.items
@@ -5811,7 +5795,6 @@ function renderDashboardOverview() {
     ...overview.alertCounts,
     warning: overview.alertCounts.warning + tapPrintAlerts.length + missingPriceAlerts.length,
   };
-  const leadingAlerts = overview.alerts.slice(0, 6);
   const mondayRun = getMondayRunModel(plan, freshness);
   const briefing = buildThirtySecondBriefing({ overview, plan, mondayRun });
 
@@ -5862,17 +5845,6 @@ function renderDashboardOverview() {
     </section>
 
     ${renderDashboardCompletedPrep()}
-
-    <section class="dashboard-overview-alerts" aria-labelledby="dashboard-alerts-title">
-        <div class="dashboard-section-heading">
-          <h2 id="dashboard-alerts-title">Alerts &amp; follow-ups</h2>
-          <span>${formatNumber(overview.alerts.length)} total</span>
-        </div>
-        <div class="dashboard-alert-list">
-          ${leadingAlerts.length ? leadingAlerts.map(renderDashboardAlert).join("") : '<div class="dashboard-overview-empty"><strong>No current alerts</strong></div>'}
-        </div>
-        ${overview.alerts.length > leadingAlerts.length ? `<p class="dashboard-alert-more">${formatNumber(overview.alerts.length - leadingAlerts.length)} additional informational notice${overview.alerts.length - leadingAlerts.length === 1 ? "" : "s"} are available in the linked workspaces.</p>` : ""}
-    </section>
 
     <section class="dashboard-beverage-pulse" id="dashboard-beverage-pulse" aria-labelledby="dashboard-beverage-pulse-title"></section>
   `;
@@ -6601,8 +6573,9 @@ function renderWeeklyPlanProvenance({ latestCompletedWeek, latestCompletedUsageS
   `;
 }
 
-function getWeeklyPlanVendorLines(plan) {
-  return groupWeeklyPlanOrdersByVendor(plan).map((group) => ({
+function getWeeklyPlanVendorLines(plan, deferredOrders = []) {
+  const deferredVendors = new Set(deferredOrders.map((item) => item.vendor));
+  return groupWeeklyPlanOrdersByVendor(plan).filter((group) => !deferredVendors.has(group.vendor)).map((group) => ({
     ...group,
     items: group.items.map((item) => ({
       ...item,
@@ -6617,12 +6590,11 @@ function getWeeklyPlanVendorLines(plan) {
   }));
 }
 
-function renderWeeklyPlanByVendor(plan) {
-  const groups = getWeeklyPlanVendorLines(plan);
-  if (!groups.length) return '<p class="weekly-plan-empty">No active purchasing lines. Review held and excluded items below before concluding no order is needed.</p>';
-  return groups.map((group) => renderWeeklyPlanGroup(
+function renderWeeklyPlanByVendor(plan, deferredOrders = []) {
+  const groups = getWeeklyPlanVendorLines(plan, deferredOrders);
+  const activeOrders = groups.map((group) => renderWeeklyPlanGroup(
     `${group.vendor} Order`,
-    group.items.length,
+    sum(group.items.map((item) => toNumber(item.quantity))),
     `<div class="weekly-plan-vendor-summary"><strong>${group.hasCompletePricing ? money(group.estimatedCost) : `${money(group.estimatedCost)} subtotal`}</strong></div><div class="weekly-plan-list">${group.items.map((item) => {
       const details = [
         item.tapNumbers?.length ? `Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.map(formatNumber).join(", ")}` : "",
@@ -6639,6 +6611,15 @@ function renderWeeklyPlanByVendor(plan) {
       `;
     }).join("")}</div>`,
   )).join("");
+  const deferred = deferredOrders.map((item) => renderWeeklyPlanGroup(
+    `${item.vendor} skipped`,
+    0,
+    `<div class="weekly-plan-vendor-summary"><strong>${money(item.estimatedTotal)}</strong><span>${escapeHtml(item.reason)}</span></div>`,
+    "held",
+  )).join("");
+  return activeOrders || deferred
+    ? `${activeOrders}${deferred}`
+    : '<p class="weekly-plan-empty">No active purchasing lines. Review held and excluded items below before concluding no order is needed.</p>';
 }
 
 function renderWeeklyPlanReview(plan) {
@@ -6675,12 +6656,14 @@ function renderWeeklyPlanReview(plan) {
 function getVendorOrderDraftModel(plan, freshness) {
   if (orderRehearsalMode) return buildOrderRehearsalModel();
   const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
+  const proofPrep = buildProofPrepOrderContext({
+    cocktails: plan?.prep?.cocktails,
+    recipes,
+    inventoryItems,
+  });
   return buildVendorOrderDrafts(plan, {
-    proofMinimumCandidates: buildProofPrepReplacementCandidates({
-      cocktails: plan?.prep?.cocktails,
-      recipes,
-      inventoryItems,
-    }),
+    proofMinimumCandidates: proofPrep.candidates,
+    proofPrepRequirement: proofPrep.requirement,
     generatedAt: snapshot?.generatedAt || "",
     sourceDate: snapshot?.publishedAt || "",
     freshness: freshness.readiness,
@@ -6704,14 +6687,15 @@ function renderVendorOrderAdjustments() {
       <div class="vendor-order-adjustments__fields">
         <label><span>Product</span><select data-order-adjustment-product>${catalog.map((item) => {
           const saved = savedByCatalogId.get(item.catalogId);
-          return `<option value="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}" data-order-adjustment-default-quantity="${formatNumber(saved?.quantity || item.currentPlanQuantity || 1)}" data-order-adjustment-default-reason="${escapeHtml(saved?.reason || "")}" data-order-adjustment-quantity-unit="${escapeHtml(item.quantityUnit)}">${escapeHtml(`${item.vendor} · ${item.name}`)}</option>`;
+          return `<option value="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}" data-order-adjustment-default-quantity="${formatNumber(saved?.quantity ?? item.currentPlanQuantity ?? 1)}" data-order-adjustment-default-reason="${escapeHtml(saved?.reason || "")}" data-order-adjustment-quantity-unit="${escapeHtml(item.quantityUnit)}">${escapeHtml(`${item.vendor} · ${item.name}`)}</option>`;
         }).join("")}</select></label>
         <label><span>Quantity</span><div class="vendor-order-adjustments__quantity"><input type="number" min="1" max="999" step="1" inputmode="numeric" data-order-adjustment-quantity-input><small data-order-adjustment-unit-label></small></div></label>
         <label><span>Reason</span><input type="text" maxlength="240" data-order-adjustment-reason-input placeholder="St. Patrick's Day"></label>
         <label><span>Manager</span><input type="text" maxlength="80" autocomplete="name" data-order-adjustment-manager placeholder="Manager name"></label>
         <button class="primary-button" type="button" data-order-adjustment-save>Save</button>
+        <button class="ghost-button" type="button" data-order-adjustment-exclude>Remove from order</button>
       </div>
-      ${weeklyOrderTracking.adjustments.length ? `<div class="vendor-order-adjustments__saved">${weeklyOrderTracking.adjustments.map((item) => `<div><span><strong>${escapeHtml(item.name)}</strong> · ${formatNumber(item.quantity)} ${escapeHtml(item.quantityUnit)}</span><small>${escapeHtml(item.reason)} · ${escapeHtml(item.adjustedBy)}</small><button class="mini-button" type="button" data-order-adjustment-remove="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}">Use plan</button></div>`).join("")}</div>` : ""}
+      ${weeklyOrderTracking.adjustments.length ? `<div class="vendor-order-adjustments__saved">${weeklyOrderTracking.adjustments.map((item) => `<div><span><strong>${escapeHtml(item.name)}</strong> · ${item.quantity === 0 ? "Removed this week" : `${formatNumber(item.quantity)} ${escapeHtml(item.quantityUnit)}`}</span><small>${escapeHtml(item.reason)} · ${escapeHtml(item.adjustedBy)}</small><button class="mini-button" type="button" data-order-adjustment-remove="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}">Use plan</button></div>`).join("")}</div>` : ""}
     </details>
   `;
 }
@@ -6733,12 +6717,12 @@ function renderAssistedOrderPanel(draft, saved) {
   `;
 }
 
-function renderVendorOrderDraftWorkspace(plan, freshness) {
-  const model = getVendorOrderDraftModel(plan, freshness);
+function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) {
+  const model = providedModel || getVendorOrderDraftModel(plan, freshness);
   currentVendorOrderDraftViews = new Map();
   const savedDrafts = orderRehearsalMode ? model.savedDrafts : weeklyOrderTracking.drafts;
   const savedById = new Map((savedDrafts || []).map((draft) => [draft.id, draft]));
-  if (!model.drafts.length) return "";
+  if (!model.drafts.length) return weeklyOrderTracking.adjustments.length ? renderVendorOrderAdjustments() : "";
   return `
     <section class="vendor-order-drafts${orderRehearsalMode ? " vendor-order-drafts--rehearsal" : ""}" aria-labelledby="vendor-order-drafts-title">
       <header class="vendor-order-drafts__header">
@@ -6885,6 +6869,24 @@ function bindOwnerWeeklyOrderTrackingEvents() {
       catalogId: option.value,
       vendor: option.dataset.orderAdjustmentVendor,
       quantity,
+      reason,
+      adjustedBy,
+    });
+  });
+  adjustmentPanel?.querySelector("[data-order-adjustment-exclude]")?.addEventListener("click", async () => {
+    const option = adjustmentProduct?.selectedOptions?.[0];
+    const adjustedBy = clean(adjustmentManager?.value);
+    const reason = clean(adjustmentReason?.value);
+    if (!option || !reason || !adjustedBy) {
+      weeklyOrderTrackingMessage = "Choose a product and enter the reason and manager.";
+      renderWeeklyPlan();
+      return;
+    }
+    await saveVendorOrderDraftAction({
+      action: "set-order-adjustment",
+      catalogId: option.value,
+      vendor: option.dataset.orderAdjustmentVendor,
+      quantity: 0,
       reason,
       adjustedBy,
     });
@@ -7068,8 +7070,15 @@ function renderWeeklyPlan() {
   if (!weeklyPlan) return;
   const recommendations = parAgentState?.recommendations;
   const plan = getWeeklyPlanModel();
-  const summary = plan.summary;
   const freshness = getWeeklyPlanFreshness(plan);
+  const vendorOrderModel = getVendorOrderDraftModel(plan, freshness);
+  const deferredOrderLineCount = sum(vendorOrderModel.deferredOrders?.map((item) => item.lineCount) || []);
+  const deferredOrderCost = sum(vendorOrderModel.deferredOrders?.map((item) => item.estimatedTotal) || []);
+  const summary = {
+    ...plan.summary,
+    orderLineCount: Math.max(0, toNumber(plan.summary.orderLineCount) - deferredOrderLineCount),
+    estimatedKnownPurchaseCost: Math.max(0, toNumber(plan.summary.estimatedKnownPurchaseCost) - deferredOrderCost),
+  };
   const planLocked = Boolean(getCurrentWeeklyPlanSnapshot(recommendations, new Date()));
   const updatedText = planLocked ? "Thursday delivery · locked through Sunday" : "Live needs";
   const priceNote = summary.estimatedPurchaseCostComplete
@@ -7102,7 +7111,7 @@ function renderWeeklyPlan() {
     <div class="weekly-plan-columns">
       <section class="weekly-plan-column">
         <div class="weekly-plan-column__header"><h2>Order This Week</h2></div>
-        ${renderWeeklyPlanByVendor(plan)}
+        ${renderWeeklyPlanByVendor(plan, vendorOrderModel.deferredOrders)}
       </section>
       <section class="weekly-plan-column weekly-plan-column--prep">
         <div class="weekly-plan-column__header"><h2>Cocktails To Make</h2></div>
@@ -7110,7 +7119,7 @@ function renderWeeklyPlan() {
       </section>
     </div>
     ${orderRehearsalMode || !planLocked ? "" : renderOwnerWeeklyOrderTracking()}
-    ${orderRehearsalMode || planLocked ? renderVendorOrderDraftWorkspace(plan, freshness) : ""}
+    ${orderRehearsalMode || planLocked ? renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel) : ""}
     ${renderWeeklyPlanReview(plan)}
   `;
 
@@ -12572,6 +12581,8 @@ function normalizeCustomInventoryItem(item) {
   const casePackaged = Boolean(item.casePackaged) || packSize > 1;
   const caseCost = toNumber(item.caseCost) || (toNumber(item.unitCost) * packSize);
   const unitCost = getInventoryUnitCost(caseCost, packSize);
+  const vendorProduct = getVendorMapping(id) || item.vendorProduct || getCustomInventoryVendorProduct(name, group);
+  const priceSource = clean(vendorProduct?.syncVendor || vendorProduct?.vendor);
   const normalized = {
     id,
     name,
@@ -12585,10 +12596,10 @@ function normalizeCustomInventoryItem(item) {
     caseCost,
     baseUnitCost: unitCost,
     unitCost,
-    vendorProduct: getVendorMapping(id) || item.vendorProduct || getCustomInventoryVendorProduct(name, group),
+    vendorProduct,
     parDisplay,
     note: unitCost > 0
-      ? `${item.priceUpdatedAt ? item.vendorProduct?.vendor || "Vendor" : "Manual"} price`
+      ? `${priceSource || "Manual"} price`
       : "Price needed",
     isCustomInventory: true,
     matchedSku: clean(item.matchedSku),
@@ -15848,8 +15859,9 @@ function getCatalogUnitCost(ingredient) {
   if (bottleOz && bottlePrice) return bottlePrice / bottleOz;
   const catalogUnitCost = ingredient.totalOz ? ingredient.totalCost / ingredient.totalOz : 0;
   if (catalogUnitCost) return catalogUnitCost;
-  const mappedBottleOz = toNumber(ingredient?.vendorProduct?.bottleOz);
-  const mappedBottlePrice = toNumber(ingredient?.vendorProduct?.unitPrice);
+  const vendorProduct = ingredient?.vendorProduct || getVendorMapping(ingredient?.id);
+  const mappedBottleOz = toNumber(vendorProduct?.bottleOz);
+  const mappedBottlePrice = toNumber(vendorProduct?.unitPrice);
   if (mappedBottleOz && mappedBottlePrice) return mappedBottlePrice / mappedBottleOz;
   return 0;
 }

@@ -156,6 +156,22 @@ test("does not use refrigerated or unjustified Proof products as minimum filler"
   assert.ok(result.drafts[0].warnings.some((item) => item.code === "PROOF_DELIVERY_FEE"));
 });
 
+test("defers a sub-minimum Proof order when counted inventory covers cocktail prep", () => {
+  const result = buildVendorOrderDrafts(inventoryPlan(), {
+    ...options,
+    proofPrepRequirement: "not-required",
+  });
+
+  assert.equal(result.drafts.length, 0);
+  assert.equal(result.weeklyTotal, 0);
+  assert.deepEqual(result.deferredOrders, [{
+    vendor: "Proof",
+    lineCount: 1,
+    estimatedTotal: 36,
+    reason: "Below $350; inventory covers this week's cocktail prep.",
+  }]);
+});
+
 test("includes Proof minimum top-ups in the idempotency identity", () => {
   const candidate = {
     id: "lime-juice",
@@ -228,5 +244,55 @@ test("applies a one-order manager quantity without changing the Weekly Plan", ()
   assert.equal(line.extendedCost, 555);
   assert.match(line.reason, /St\. Patrick's Day/);
   assert.ok(result.drafts[0].warnings.some((item) => item.code === "MANUAL_ORDER_ADJUSTMENT"));
+  assert.equal(plan.orders.beerKegs[0].quantity, 1);
+});
+
+test("removes a manager-excluded product from this week's vendor draft", () => {
+  const plan = {
+    orders: {
+      beerKegs: [{
+        internalId: "guinness",
+        productName: "Guinness",
+        name: "Guinness",
+        vendor: "Bonbright",
+        vendorSku: "BB-GUINNESS",
+        vendorProductName: "Guinness",
+        quantity: 1,
+        casePackaged: false,
+        packSize: 1,
+        unitCost: 185,
+        estimatedCost: 185,
+        hasKnownPrice: true,
+      }],
+      liquorTapBottles: [],
+      liquor: [],
+      mixers: [],
+      supplies: [],
+    },
+  };
+  const result = buildVendorOrderDrafts(plan, {
+    ...options,
+    manualCatalog: [{
+      catalogId: "catalog-guinness",
+      internalId: "guinness",
+      name: "Guinness",
+      vendor: "Bonbright",
+      vendorSku: "BB-GUINNESS",
+      vendorProductName: "Guinness",
+      lineType: "Beer keg",
+      orderCategory: "beerKegs",
+      packSize: 1,
+      unitCost: 185,
+      currentPlanQuantity: 1,
+    }],
+    manualAdjustments: [{
+      catalogId: "catalog-guinness",
+      quantity: 0,
+      reason: "Already covered",
+      adjustedBy: "Samantha",
+    }],
+  });
+
+  assert.equal(result.drafts.length, 0);
   assert.equal(plan.orders.beerKegs[0].quantity, 1);
 });
