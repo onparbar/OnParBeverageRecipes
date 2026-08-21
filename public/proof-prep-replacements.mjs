@@ -72,7 +72,7 @@ function getProjectedProofUsage({
 export function buildProofPrepOrderContext(options = {}) {
   const { projectedOzById, unresolvedRecipe } = getProjectedProofUsage(options);
   let unresolvedInventory = false;
-  let replacementRequired = false;
+  let prepPurchaseRequired = false;
 
   const candidates = [...projectedOzById.values()].flatMap(({ item, projectedOz }) => {
     const bottleOz = number(item?.bottleOz || item?.vendorProduct?.bottleOz);
@@ -82,13 +82,15 @@ export function buildProofPrepOrderContext(options = {}) {
     const projectedPrepUseUnits = bottleOz > 0 ? Math.ceil(projectedOz / bottleOz) : 0;
     const rawOnHand = item?.onHandDisplay ?? item?.onHand;
     const rawPar = item?.parDisplay ?? item?.par;
-    if (!(projectedPrepUseUnits > 0) || clean(rawOnHand) === "" || clean(rawPar) === "") {
+    if (!(projectedPrepUseUnits > 0) || clean(rawOnHand) === "") {
       unresolvedInventory = true;
       return [];
     }
-    const replacementNeedUnits = Math.max(0, Math.ceil(number(rawPar) + projectedPrepUseUnits - number(rawOnHand)));
+    const onHandUnits = number(rawOnHand);
+    if (onHandUnits < projectedPrepUseUnits) prepPurchaseRequired = true;
+    if (clean(rawPar) === "") return [];
+    const replacementNeedUnits = Math.max(0, Math.ceil(number(rawPar) + projectedPrepUseUnits - onHandUnits));
     if (!(replacementNeedUnits > 0)) return [];
-    replacementRequired = true;
     if (!item?.casePackaged || !vendorSku || !(unitCost > 0)) return [];
     return [{
       id: clean(item.id),
@@ -101,7 +103,7 @@ export function buildProofPrepOrderContext(options = {}) {
       packSize,
       projectedPrepUseUnits,
       projectedPrepUseOz: projectedOz,
-      onHandUnits: number(rawOnHand),
+      onHandUnits,
       parUnits: number(rawPar),
       replacementNeedUnits,
       unitCost,
@@ -110,7 +112,7 @@ export function buildProofPrepOrderContext(options = {}) {
 
   return {
     candidates,
-    requirement: replacementRequired
+    requirement: prepPurchaseRequired
       ? "required"
       : unresolvedRecipe || unresolvedInventory ? "unknown" : "not-required",
   };

@@ -49,6 +49,32 @@ export function resolveKegOnDeckOption(options = [], selection = null) {
   return options.find((option) => clean(option?.id) === selectedId) || null;
 }
 
+export function normalizeKegOnDeckOverrides({
+  overrides = {},
+  comingSoonItems = [],
+  recipes = [],
+} = {}) {
+  return Object.fromEntries(Object.entries(overrides || {}).flatMap(([key, saved]) => {
+    if (!saved) return [];
+    const option = resolveKegOnDeckOption(buildKegOnDeckOptions({
+      comingSoonItems,
+      recipes,
+      selected: saved,
+    }), saved);
+    if (!option) return [[key, saved]];
+    const existing = saved && typeof saved === "object" ? saved : {};
+    return [[key, {
+      ...existing,
+      comingSoonId: option.id,
+      name: option.name,
+      kind: option.kind,
+      plu: positiveNumber(option.plu),
+      onHand: clean(existing.onHand),
+      onHandUnit: clean(option.kind).toLowerCase() === "liquor" ? "oz" : "keg",
+    }]];
+  }));
+}
+
 export function isKegOnDeckProductInstalled(onDeckProduct, currentProduct) {
   if (!onDeckProduct || !currentProduct) return false;
 

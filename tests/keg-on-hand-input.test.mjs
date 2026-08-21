@@ -5,7 +5,9 @@ import {
   createClearedKegOnHandOverrides,
   getAdjacentKegOnHandIndex,
   getKegOnHandEditorValue,
+  getKegOnHandOuncesEditorValue,
   normalizeKegOnHandDraft,
+  normalizeKegOnHandOuncesDraft,
 } from "../public/keg-on-hand-input.mjs";
 
 test("shows saved zero counts as an empty editor and removes accidental leading zeroes", () => {
@@ -19,6 +21,14 @@ test("keeps the last valid whole-keg value when invalid text is entered", () => 
   assert.equal(normalizeKegOnHandDraft("1.5", "1"), "1");
   assert.equal(normalizeKegOnHandDraft("abc", "2"), "2");
   assert.equal(normalizeKegOnHandDraft("", "2"), "");
+});
+
+test("allows decimal ounces without allowing decimal backup kegs", () => {
+  assert.equal(normalizeKegOnHandOuncesDraft("062.5"), "62.5");
+  assert.equal(normalizeKegOnHandOuncesDraft("62.55"), "62.55");
+  assert.equal(normalizeKegOnHandOuncesDraft("62.555", "62.5"), "62.5");
+  assert.equal(getKegOnHandOuncesEditorValue("0"), "");
+  assert.equal(normalizeKegOnHandDraft("62.5", "2"), "2");
 });
 
 test("moves to the on-hand box directly above or below without leaving the list", () => {

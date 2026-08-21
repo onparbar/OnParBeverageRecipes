@@ -5,8 +5,22 @@ export function normalizeKegOnHandDraft(value, fallback = "") {
   return cleaned.replace(/^0+(?=\d)/, "");
 }
 
+export function normalizeKegOnHandOuncesDraft(value, fallback = "") {
+  const cleaned = String(value ?? "").trim();
+  if (!cleaned) return "";
+  if (!/^\d+(?:\.\d{0,2})?$/.test(cleaned)) return String(fallback ?? "");
+  const [whole, decimal] = cleaned.split(".");
+  const normalizedWhole = whole.replace(/^0+(?=\d)/, "");
+  return decimal === undefined ? normalizedWhole : `${normalizedWhole}.${decimal}`;
+}
+
 export function getKegOnHandEditorValue(value) {
   const normalized = normalizeKegOnHandDraft(value);
+  return normalized === "0" ? "" : normalized;
+}
+
+export function getKegOnHandOuncesEditorValue(value) {
+  const normalized = normalizeKegOnHandOuncesDraft(value);
   return normalized === "0" ? "" : normalized;
 }
 

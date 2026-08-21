@@ -500,3 +500,16 @@ test("the view model fails closed when no source signals have been checked", () 
   assert.ok(ids.includes("pmb-pricing-unchecked"));
   assert.equal(overview.kpis.find((item) => item.id === "items-to-order")?.value, "—");
 });
+
+test("the unavailable PMB keg-level alert refreshes PMB instead of navigating", () => {
+  const signals = readySignals();
+  signals.pmb.kegLevels = {
+    status: "offline",
+    error: "Current keg quantities could not be verified.",
+  };
+
+  const overview = buildDashboardOverview(signals, { now });
+  const alert = overview.alerts.find((item) => item.id === "pmb-keg-levels-offline");
+  assert.equal(alert?.action.target, DASHBOARD_OVERVIEW_TARGETS.refreshPmb);
+  assert.equal(alert?.action.label, "Refresh PMB");
+});

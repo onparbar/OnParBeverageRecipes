@@ -82,6 +82,28 @@ test("preserves saved Coming Soon details without duplicating required products"
   assert.equal(merged.find(({ id }) => id === "beer:99")?.plu, 99);
 });
 
+test("removes the mistaken legacy Vodka Cran card in favor of the canonical clone", () => {
+  const merged = mergeRequiredComingSoonItems([
+    {
+      id: "recipe:vodka-cran-tito-s",
+      recipeId: "vodka-cran-tito-s",
+      name: "VODKA CRAN (TITO'S)",
+      kind: "recipe",
+      chargePerOz: 2.09,
+    },
+    {
+      id: "recipe:vodka-cran-2",
+      recipeId: "vodka-cran-tito-s",
+      name: "Vodka Cran (Tito's) 2",
+      kind: "recipe",
+    },
+  ]);
+
+  assert.equal(merged.some(({ id }) => id === "recipe:vodka-cran-tito-s"), false);
+  assert.equal(merged.filter(({ id }) => id === "recipe:vodka-cran-2").length, 1);
+  assert.equal(merged.find(({ id }) => id === "recipe:vodka-cran-2")?.cloneSourceName, "VODKA CRAN (TITO'S) 1");
+});
+
 test("labels beer, liquor, and cocktail Coming Soon items correctly", () => {
   assert.equal(getComingSoonKindLabel("beer"), "Beer keg");
   assert.equal(getComingSoonKindLabel("liquor"), "Liquor tap");

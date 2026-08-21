@@ -59,6 +59,28 @@ test("uses inventory on hand and par before permitting a Proof prep replacement"
   assert.deepEqual(context.candidates, []);
 });
 
+test("defers a sub-minimum Proof order when inventory covers prep even if prep will lower stock below par", () => {
+  const context = buildProofPrepOrderContext({
+    cocktails: [{ name: "House Margarita", quantity: 1 }],
+    recipes: [{ title: "House Margarita", ingredients: [{ name: "Lime Juice", oz: 270 }] }],
+    inventoryItems: [{
+      id: "lime-juice",
+      name: "Lime Juice",
+      casePackaged: true,
+      packSize: 12,
+      caseCost: 60,
+      matchedSku: "PROOF-LIME-12",
+      onHandDisplay: "10",
+      parDisplay: "12",
+      vendorProduct: { vendor: "Proof", productName: "Lime Juice", bottleOz: 33.814 },
+    }],
+  });
+
+  assert.equal(context.requirement, "not-required");
+  assert.equal(context.candidates[0].projectedPrepUseUnits, 8);
+  assert.equal(context.candidates[0].replacementNeedUnits, 10);
+});
+
 test("keeps Proof under review when a required inventory count is blank", () => {
   const context = buildProofPrepOrderContext({
     cocktails: [{ name: "House Margarita", quantity: 1 }],

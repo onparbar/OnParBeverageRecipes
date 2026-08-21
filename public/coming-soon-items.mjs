@@ -54,6 +54,10 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
   }),
 ]);
 
+const REQUIRED_COMING_SOON_LEGACY_IDS = Object.freeze({
+  "recipe:vodka-cran-2": Object.freeze(["recipe:vodka-cran-tito-s"]),
+});
+
 function clean(value) {
   return String(value ?? "").trim();
 }
@@ -109,6 +113,9 @@ export function mergeRequiredComingSoonItems(items = [], pmbPublishQueue = []) {
   });
 
   REQUIRED_COMING_SOON_ITEMS.forEach((required) => {
+    (REQUIRED_COMING_SOON_LEGACY_IDS[required.id] || []).forEach((legacyId) => {
+      byId.delete(legacyId);
+    });
     const existing = byId.get(required.id);
     byId.set(required.id, existing
       ? {

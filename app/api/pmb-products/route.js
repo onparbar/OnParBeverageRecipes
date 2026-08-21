@@ -735,11 +735,30 @@ async function trySendConfigUpdate(config, token) {
   }
 }
 
-export async function GET() {
+export async function GET(request) {
+  const cloneImageFor = clean(new URL(request.url).searchParams.get("cloneImageFor"));
   try {
+    if (cloneImageFor) await requireDashboardRequestRole(request, { owner: true });
     const config = getConfig();
     const token = await getAuthtoken(config);
     const products = await getProductList(config, token);
+    if (cloneImageFor) {
+      const sourceProduct = getCloneSourceProduct(products.productlist, cloneImageFor);
+      const imageUrl = getCloneImageUrl(sourceProduct, config.baseUrl);
+      const imageFile = await buildPmbImageFile(imageUrl, sourceProduct.name || cloneImageFor);
+      if (!imageFile) {
+        return NextResponse.json(
+          { ok: false, error: `${cloneImageFor} does not have a PMB image.` },
+          { status: 404, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+      return new NextResponse(imageFile.buffer, {
+        headers: {
+          "Cache-Control": "private, max-age=300",
+          "Content-Type": imageFile.contentType,
+        },
+      });
+    }
     const productCount = Array.isArray(products.productlist) ? products.productlist.length : 0;
     return NextResponse.json(
       {

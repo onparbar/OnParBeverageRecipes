@@ -3,6 +3,7 @@ const HOUR_MS = 60 * 60 * 1000;
 
 export const DASHBOARD_OVERVIEW_TARGETS = Object.freeze({
   sharedDashboardSetup: "shared-dashboard-setup",
+  refreshPmb: "refresh-pmb",
   weeklyPlan: "weekly-plan",
   kegLevels: "keg-levels",
   pricing: "pricing",
@@ -423,7 +424,7 @@ function buildKegLevelAlerts(feed, ageState) {
       priority: 60,
       title: "Live PMB keg levels are unavailable",
       message: feed.error || "Current keg quantities could not be verified. Previously loaded levels must not be assumed current.",
-      action: makeAction("Retry Keg Levels", DASHBOARD_OVERVIEW_TARGETS.kegLevels),
+      action: makeAction("Refresh PMB", DASHBOARD_OVERVIEW_TARGETS.refreshPmb),
     })];
   }
   if (feed.status === "not-checked") {

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildKegOnDeckOptions,
   isKegOnDeckProductInstalled,
+  normalizeKegOnDeckOverrides,
   resolveKegOnDeckOption,
 } from "../public/keg-on-deck-options.mjs";
 
@@ -144,4 +145,25 @@ test("offers an active queued liquor tap for On Deck selection", () => {
   });
 
   assert.equal(resolveKegOnDeckOption(options, "liquor:woodford-reserve")?.name, "Woodford Reserve");
+});
+
+test("upgrades an older saved Triple Jam clone name to the required Cider name", () => {
+  const normalized = normalizeKegOnDeckOverrides({
+    overrides: {
+      "karaoke-79": {
+        comingSoonId: "beer:triple-jam-2",
+        name: "Triple Jam 2",
+        kind: "beer",
+        onHand: "1",
+      },
+    },
+    comingSoonItems: [{
+      id: "beer:triple-jam-2",
+      name: "Triple Jam Cider 2",
+      kind: "beer",
+    }],
+  });
+
+  assert.equal(normalized["karaoke-79"].name, "Triple Jam Cider 2");
+  assert.equal(normalized["karaoke-79"].onHand, "1");
 });

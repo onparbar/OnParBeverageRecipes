@@ -39,6 +39,7 @@ import {
 import {
   buildKegOnDeckOptions,
   isKegOnDeckProductInstalled,
+  normalizeKegOnDeckOverrides,
   resolveKegOnDeckOption,
 } from "./keg-on-deck-options.mjs";
 import {
@@ -70,7 +71,9 @@ import {
   createClearedKegOnHandOverrides,
   getAdjacentKegOnHandIndex,
   getKegOnHandEditorValue,
+  getKegOnHandOuncesEditorValue,
   normalizeKegOnHandDraft,
+  normalizeKegOnHandOuncesDraft,
 } from "./keg-on-hand-input.mjs";
 import {
   buildActiveComingSoonBeerItems,
@@ -136,6 +139,7 @@ import {
 } from "./coming-soon-items.mjs";
 import { buildVendorOrderDrafts } from "./vendor-order-drafts.mjs";
 import { buildProofPrepOrderContext } from "./proof-prep-replacements.mjs";
+import { netLiquorTapRecommendations } from "./liquor-cabinet-netting.mjs";
 import { selectPmbCurrentTapSnapshot } from "./pmb-current-tap-snapshot.mjs";
 import { applyMappedInventoryPackageRule } from "./inventory-product-rules.mjs";
 import {
@@ -174,7 +178,7 @@ const INVENTORY_ORDER_STORAGE_KEY = "cocktail-dashboard-inventory-order";
 const INVENTORY_UNIT_MODEL_STORAGE_KEY = "cocktail-dashboard-inventory-unit-model";
 const INVENTORY_UNIT_MODEL_VERSION = "2";
 const PRICE_OVERRIDE_MODEL_STORAGE_KEY = "cocktail-dashboard-price-override-model";
-const PRICE_OVERRIDE_MODEL_VERSION = "3";
+const PRICE_OVERRIDE_MODEL_VERSION = "4";
 const KEG_ON_HAND_STORAGE_KEY = "cocktail-dashboard-keg-on-hand";
 const KEG_PAR_STORAGE_KEY = "cocktail-dashboard-keg-par";
 const KEG_ON_DECK_STORAGE_KEY = "cocktail-dashboard-keg-on-deck";
@@ -242,7 +246,7 @@ const DEFAULT_PRICE_OVERRIDES = {
   },
   "bacardi-superior": {
     bottleOz: "59.1745",
-    bottlePrice: "24.44",
+    bottlePrice: "26.32",
     updatedAt: "Default OHLQ pricing",
   },
   "blue-dot-juice": {
@@ -2982,6 +2986,10 @@ function bindEvents() {
       initializeSharedDashboardState();
       return;
     }
+    if (target.dataset.dashboardTarget === DASHBOARD_OVERVIEW_TARGETS.refreshPmb) {
+      void runUnifiedPmbRefresh();
+      return;
+    }
     if (target.dataset.dashboardTarget === "recipes") switchRecipeView("current");
     switchTab(target.dataset.dashboardTarget);
   });
@@ -4911,7 +4919,12 @@ function getWeeklyPlanRecommendations({ live = false } = {}) {
     : live && Array.isArray(parAgentState?.recommendations?.items)
       ? parAgentState.recommendations.items
       : [];
-  return sourceItems.map((item) => {
+  const nettedSourceItems = netLiquorTapRecommendations({
+    recommendations: sourceItems,
+    inventoryItems,
+    recipes,
+  });
+  return nettedSourceItems.map((item) => {
     if (item.isLiquorTap) {
       const orderProductName = normalizeIngredientAlias(
         normalizeLiquorTapProductName(item.orderProductName || item.name),
@@ -7232,12 +7245,13 @@ function renderComingSoonItem(item) {
   const isBeer = item.kind === "beer";
   const isRecipe = item.kind === "recipe";
   const isLiquor = item.kind === "liquor";
+  const imageUrl = getComingSoonImageUrl(item);
   const currentMargin = toNumber(item.targetMargin) || DEFAULT_BEER_TARGET_MARGIN;
   const currentPrice = getGeneratedBeerChargePerOz(item.kegCost, currentMargin);
   const replacement = item.replaceTapKey ? tapReplacementOverrides[item.replaceTapKey] : null;
   return `
     <article class="coming-soon-item" data-coming-soon-id="${escapeHtml(item.id)}">
-      ${item.imageUrl ? `<img class="coming-soon-item__image" src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(item.name)}">` : ""}
+      ${imageUrl ? `<img class="coming-soon-item__image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(item.name)}">` : ""}
       <div class="coming-soon-item__body">
         <div class="coming-soon-item__title">
           <strong>${escapeHtml(item.name)}</strong>
@@ -7279,6 +7293,15 @@ function renderComingSoonItem(item) {
       </div>
     </article>
   `;
+}
+
+function getComingSoonImageUrl(item) {
+  const savedImageUrl = clean(item?.imageUrl);
+  if (savedImageUrl) return savedImageUrl;
+  const cloneSourceName = clean(item?.cloneSourceName);
+  return cloneSourceName
+    ? `/api/pmb-products?cloneImageFor=${encodeURIComponent(cloneSourceName)}`
+    : "";
 }
 
 function getComingSoonCardDescription(value) {
@@ -8815,6 +8838,8 @@ function renderKegWallBlock(wallName, items) {
                 const onHand = getKegOnHandDisplay(item);
                 const need = getKegNeed(item);
                 const onDeck = getKegOnDeckItem(item);
+                const isLiquorTap = isLiquorOunceTap(toNumber(item.tapNumber));
+                const isLiquorOnDeck = normalizeTitle(onDeck?.kind) === "liquor";
                 const onDeckValue = getKegOnDeckInventoryValue(item, onDeck);
                 const currentValue = getKegCurrentValue(item, liveRow) + onDeckValue;
                 const pricing = getKegWallPricing(item, displayBrand);
@@ -8843,11 +8868,13 @@ function renderKegWallBlock(wallName, items) {
                     <td class="keg-usage-cell">${formatKegWeeklyUsageAverage(item, displayBrand)}</td>
                     <td>
                       <div class="keg-on-hand-stack">
-                        <input class="inventory-input keg-input keg-on-hand-input" data-keg-field="onHand" data-keg-key="${escapeHtml(itemKey)}" name="keg-on-hand-${escapeHtml(itemKey)}" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getKegOnHandEditorValue(onHand))}" placeholder="0" aria-label="On hand kegs for ${escapeHtml(displayBrand)}">
+                        ${isLiquorTap
+                          ? '<span class="inventory-order-zero">-</span>'
+                          : `<input class="inventory-input keg-input keg-on-hand-input" data-keg-field="onHand" data-keg-key="${escapeHtml(itemKey)}" name="keg-on-hand-${escapeHtml(itemKey)}" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getKegOnHandEditorValue(onHand))}" placeholder="0" aria-label="On hand kegs for ${escapeHtml(displayBrand)}">`}
                         ${onDeck ? `
                           <label class="keg-on-deck-count">
-                            <span>On Deck</span>
-                            <input class="inventory-input keg-on-deck-on-hand-input" data-keg-key="${escapeHtml(itemKey)}" name="keg-on-deck-on-hand-${escapeHtml(itemKey)}" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getKegOnHandEditorValue(onDeck.onHand))}" placeholder="0" aria-label="On hand kegs of ${escapeHtml(onDeck.name)} on deck for tap ${escapeHtml(item.tapNumber)}">
+                            <span>${isLiquorOnDeck ? "On Deck oz" : "On Deck"}</span>
+                            <input class="inventory-input keg-on-deck-on-hand-input" data-keg-key="${escapeHtml(itemKey)}" data-on-hand-unit="${isLiquorOnDeck ? "oz" : "keg"}" name="keg-on-deck-on-hand-${escapeHtml(itemKey)}" type="text" inputmode="${isLiquorOnDeck ? "decimal" : "numeric"}"${isLiquorOnDeck ? "" : ' pattern="[0-9]*"'} autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(isLiquorOnDeck ? getKegOnHandOuncesEditorValue(onDeck.onHand) : getKegOnHandEditorValue(onDeck.onHand))}" placeholder="0" aria-label="On hand ${isLiquorOnDeck ? "ounces" : "kegs"} of ${escapeHtml(onDeck.name)} on deck for tap ${escapeHtml(item.tapNumber)}">
                           </label>
                         ` : ""}
                       </div>
@@ -9803,7 +9830,10 @@ function bindKegLevelEvents() {
   });
 
   document.querySelectorAll(".keg-on-deck-on-hand-input").forEach((input) => {
-    input.dataset.lastValidValue = normalizeKegOnHandDraft(input.value);
+    const normalizeValue = input.dataset.onHandUnit === "oz"
+      ? normalizeKegOnHandOuncesDraft
+      : normalizeKegOnHandDraft;
+    input.dataset.lastValidValue = normalizeValue(input.value);
     input.addEventListener("focus", () => input.select());
     input.addEventListener("click", () => input.select());
     input.addEventListener("input", (event) => {
@@ -9811,7 +9841,7 @@ function bindKegLevelEvents() {
       const key = target.dataset.kegKey;
       const saved = kegOnDeckOverrides[key];
       if (!key || !saved || typeof saved !== "object") return;
-      const nextValue = normalizeKegOnHandDraft(target.value, target.dataset.lastValidValue || "");
+      const nextValue = normalizeValue(target.value, target.dataset.lastValidValue || "");
       if (target.value !== nextValue) target.value = nextValue;
       target.dataset.lastValidValue = nextValue;
       kegOnDeckOverrides[key] = {
@@ -10446,9 +10476,9 @@ function stageKegLevelsOutbox() {
     baseRevision: prior?.baseRevision ?? parAgentState?.revision,
     payload: {
       action: "sync-state",
-      onHandOverrides: { ...kegOnHandOverrides },
+      onHandOverrides: getShareableKegOnHandOverrides(),
       parOverrides: { ...kegParOverrides },
-      onDeckOverrides: { ...kegOnDeckOverrides },
+      onDeckOverrides: getShareableKegOnDeckOverrides(),
       settings: getParAgentSettings(),
     },
     updatedAt: new Date().toISOString(),
@@ -10473,12 +10503,12 @@ function restoreKegLevelsOutbox(result = {}) {
     ...(result || {}),
     revision: Number(result?.revision ?? parAgentStateOutbox.baseRevision),
     initialized: result?.initialized !== false,
-    onHandOverrides: { ...(payload.onHandOverrides || {}) },
+    onHandOverrides: getShareableKegOnHandOverrides(payload.onHandOverrides),
     parOverrides: { ...(payload.parOverrides || {}) },
     onDeckOverrides: { ...(payload.onDeckOverrides || {}) },
     settings: { ...(payload.settings || {}) },
   };
-  kegOnHandOverrides = { ...(payload.onHandOverrides || {}) };
+  kegOnHandOverrides = getShareableKegOnHandOverrides(payload.onHandOverrides);
   kegParOverrides = { ...(payload.parOverrides || {}) };
   kegOnDeckOverrides = { ...(payload.onDeckOverrides || {}) };
   saveKegOnHandOverrides();
@@ -10540,7 +10570,7 @@ function applyParAgentState(state, { hydrate = false } = {}) {
     parAgentMessage = "Setup needed: import Keg Levels only from the service computer. Counts and par choices stay on this device until then.";
     return;
   }
-  const serverOnHand = parAgentState.onHandOverrides || {};
+  const serverOnHand = getShareableKegOnHandOverrides(parAgentState.onHandOverrides);
   const serverPars = parAgentState.parOverrides || {};
   const serverOnDeck = parAgentState.onDeckOverrides || {};
   kegOnHandOverrides = { ...serverOnHand };
@@ -10634,9 +10664,14 @@ function getParAgentRecommendation(item) {
   if (!hasCurrentParAgentRecommendations()) return null;
   const key = getKegItemKey(item);
   const recommendations = parAgentState?.recommendations?.items || [];
-  return recommendations.find((entry) => entry.key === key)
+  const recommendation = recommendations.find((entry) => entry.key === key)
     || recommendations.find((entry) => toNumber(entry.tapNumber) === toNumber(item.tapNumber))
     || null;
+  if (!recommendation?.isLiquorTap) return recommendation;
+  return getWeeklyPlanRecommendations({ live: true }).find((entry) => (
+    entry.key === recommendation.key
+    || toNumber(entry.tapNumber) === toNumber(recommendation.tapNumber)
+  )) || recommendation;
 }
 
 function scheduleLiveWeeklyPlanRefresh() {
@@ -10654,9 +10689,9 @@ function scheduleLiveWeeklyPlanRefresh() {
 
 function scheduleParAgentStateSync({ immediate = false } = {}) {
   const candidate = {
-    onHandOverrides: kegOnHandOverrides,
+    onHandOverrides: getShareableKegOnHandOverrides(),
     parOverrides: kegParOverrides,
-    onDeckOverrides: kegOnDeckOverrides,
+    onDeckOverrides: getShareableKegOnDeckOverrides(),
     settings: getParAgentSettings(),
   };
   if (!parAgentStateOutbox && !haveKegLevelInputsChanged(parAgentState, candidate)) {
@@ -10830,9 +10865,9 @@ async function runKegParAgent() {
     const result = await requestParAgentState({
         action: "run",
         expectedRevision: parAgentState.revision,
-        onHandOverrides: kegOnHandOverrides,
+        onHandOverrides: getShareableKegOnHandOverrides(),
         parOverrides: kegParOverrides,
-        onDeckOverrides: kegOnDeckOverrides,
+        onDeckOverrides: getShareableKegOnDeckOverrides(),
         settings: getParAgentSettings(),
       }, PAR_AGENT_RUN_REQUEST_TIMEOUT_MS);
 
@@ -10925,7 +10960,7 @@ async function initializeSharedKegLevelsFromServiceComputer() {
     await requirePmbWorkNetworkForServiceImport();
     parAgentMessage = "Importing the service computer's Keg Levels choices...";
     renderKegLevels();
-    const result = await requestParAgentState({ action: "initialize", expectedRevision: 0, onHandOverrides: kegOnHandOverrides, parOverrides: kegParOverrides, onDeckOverrides: kegOnDeckOverrides, settings: getParAgentSettings() });
+    const result = await requestParAgentState({ action: "initialize", expectedRevision: 0, onHandOverrides: getShareableKegOnHandOverrides(), parOverrides: kegParOverrides, onDeckOverrides: getShareableKegOnDeckOverrides(), settings: getParAgentSettings() });
     applyParAgentState(result);
     parAgentMessage = "Service-computer Keg Levels imported. Counts, pars, on-deck choices, and recommendations are now shared.";
   } catch (error) {
@@ -11096,7 +11131,19 @@ function getKegWallItemByKey(key) {
 }
 
 function getKegOnHandDisplay(item) {
+  if (isLiquorOunceTap(toNumber(item?.tapNumber))) return "";
   return String(kegOnHandOverrides[getKegItemKey(item)] ?? "");
+}
+
+function getShareableKegOnHandOverrides(overrides = kegOnHandOverrides) {
+  const liquorKeys = new Set(
+    kegWallItems
+      .filter((item) => isLiquorOunceTap(toNumber(item?.tapNumber)))
+      .map((item) => getKegItemKey(item)),
+  );
+  return Object.fromEntries(
+    Object.entries(overrides || {}).filter(([key]) => !liquorKeys.has(key)),
+  );
 }
 
 function getKegParDisplay(item) {
@@ -11115,6 +11162,7 @@ function getKegOnDeckItem(itemOrKey) {
       kind: option.kind,
       plu: toNumber(option.plu),
       onHand: String(saved?.onHand ?? ""),
+      onHandUnit: normalizeTitle(option.kind) === "liquor" ? "oz" : "keg",
     };
   }
   return typeof saved === "object" && clean(saved.name)
@@ -11129,6 +11177,10 @@ function getKegOnDeckOptions(itemOrKey) {
     recipes,
     selected: kegOnDeckOverrides[key],
   });
+}
+
+function getShareableKegOnDeckOverrides(overrides = kegOnDeckOverrides) {
+  return normalizeKegOnDeckOverrides({ overrides, comingSoonItems, recipes });
 }
 
 function clearKegOnDeckIfInstalled(itemOrKey, currentProduct) {
@@ -11184,6 +11236,7 @@ function setKegOnDeckItem(key, comingSoonId) {
     kind: item.kind,
     plu: toNumber(item.plu),
     onHand: previous?.comingSoonId === item.id ? String(previous.onHand ?? "") : "",
+    onHandUnit: normalizeTitle(item.kind) === "liquor" ? "oz" : "keg",
     updatedAt: new Date().toISOString(),
   };
 }
@@ -11440,19 +11493,11 @@ function getKegCurrentValue(item, liveRow) {
 }
 
 function getKegOnDeckInventoryValue(item, onDeck = getKegOnDeckItem(item)) {
-  const onHandKegs = toNumber(onDeck?.onHand);
-  if (!onDeck || onHandKegs <= 0) return 0;
+  const onHandAmount = toNumber(onDeck?.onHand);
+  if (!onDeck || onHandAmount <= 0) return 0;
 
   const comingSoonItem = comingSoonItems.find((entry) => entry.id === onDeck.comingSoonId) || {};
   const kind = normalizeTitle(onDeck.kind || comingSoonItem.kind);
-  const directCost = toNumber(comingSoonItem.batchCost || comingSoonItem.kegCost);
-  if (directCost > 0) return directCost * onHandKegs;
-
-  if (kind === "recipe") {
-    const recipe = recipes.find((entry) => entry.id === (comingSoonItem.recipeId || onDeck.comingSoonId?.replace(/^recipe:/, "")));
-    const batchCost = recipe ? toNumber(getRecipeTotals(recipe).cost) : 0;
-    return batchCost * onHandKegs;
-  }
 
   if (kind === "liquor") {
     const mappedLiquor = customLiquorTaps.find((entry) => (
@@ -11460,16 +11505,22 @@ function getKegOnDeckInventoryValue(item, onDeck = getKegOnDeckItem(item)) {
     )) || {};
     const bottleCost = toNumber(comingSoonItem.bottleCost || mappedLiquor.bottleCost);
     const bottleOz = toNumber(comingSoonItem.bottleOz || mappedLiquor.bottleOz);
-    const fullOunces = getDefaultKegLevelSize({ ...item, type: "Shots" });
-    return bottleCost && bottleOz && fullOunces
-      ? (bottleCost / bottleOz) * fullOunces * onHandKegs
-      : 0;
+    return bottleCost && bottleOz ? (bottleCost / bottleOz) * onHandAmount : 0;
+  }
+
+  const directCost = toNumber(comingSoonItem.batchCost || comingSoonItem.kegCost);
+  if (directCost > 0) return directCost * onHandAmount;
+
+  if (kind === "recipe") {
+    const recipe = recipes.find((entry) => entry.id === (comingSoonItem.recipeId || onDeck.comingSoonId?.replace(/^recipe:/, "")));
+    const batchCost = recipe ? toNumber(getRecipeTotals(recipe).cost) : 0;
+    return batchCost * onHandAmount;
   }
 
   const pricingItem = findKegPricingItem(onDeck.name);
   const costPerOz = pricingItem ? getKegCatalogUnitCost(pricingItem) : 0;
   const kegOz = toNumber(comingSoonItem.kegOz) || toNumber(pricingItem?.kegOz) || getDefaultKegSizeOz(item);
-  return costPerOz && kegOz ? costPerOz * kegOz * onHandKegs : 0;
+  return costPerOz && kegOz ? costPerOz * kegOz * onHandAmount : 0;
 }
 
 function findKegPricingItem(name) {
@@ -12250,7 +12301,9 @@ function getInventorySpeechSourceItems() {
       normalizeTitle(item.name).includes("fireball") ? "Fireball" : "",
     ].filter(Boolean),
   }));
-  const kegSources = kegWallItems.map((item) => {
+  const kegSources = kegWallItems
+    .filter((item) => !isLiquorOunceTap(toNumber(item?.tapNumber)))
+    .map((item) => {
     const key = getKegItemKey(item);
     const liveRow = getKegLiveRow(item);
     const name = getKegDisplayBrand(item, liveRow);
@@ -12260,7 +12313,7 @@ function getInventorySpeechSourceItems() {
       target: "keg",
       group: `${item.wall} tap ${formatNumber(item.tapNumber)}`,
       wall: item.wall,
-      unit: "kegs",
+      unit: normalizeTitle(onDeck.kind) === "liquor" ? "oz" : "kegs",
       packSize: 1,
       aliases: [
         item.brand,
@@ -12492,6 +12545,7 @@ async function applyReviewedInventorySpeechChanges() {
           kegOnDeckOverrides[key] = {
             ...saved,
             onHand: change.value,
+            onHandUnit: normalizeTitle(saved.kind) === "liquor" ? "oz" : "keg",
             updatedAt: new Date().toISOString(),
           };
           return;
@@ -13057,8 +13111,24 @@ function syncInventoryItemCatalogLinks() {
     item.vendorProduct = ingredient?.vendorProduct || getVendorMapping(item.id) || null;
     Object.assign(item, applyMappedInventoryPackageRule(item, item.vendorProduct));
     item.unitCost = getInventoryBottleCost(item, ingredient);
+    item.note = getInventoryPriceSourceNote(item);
     recalculateInventoryItem(item);
   });
+}
+
+function getInventoryPriceSourceNote(item) {
+  const override = priceOverrides[item.id];
+  const overrideSource = clean(override?.updatedAt);
+  const existingNote = /^(?:ohlq|provi) price$/i.test(clean(item.note)) ? "" : item.note;
+  if (toNumber(override?.bottlePrice) > 0) {
+    if (/ohlq|provi/i.test(overrideSource)) return "";
+    return existingNote;
+  }
+
+  const mappedUnitPrice = toNumber(item.vendorProduct?.unitPrice)
+    || (toNumber(item.vendorProduct?.casePrice) / normalizePackSize(item.vendorProduct?.packSize || 1));
+  const mappedSource = clean(item.vendorProduct?.syncVendor || item.vendorProduct?.vendor);
+  return mappedUnitPrice > 0 && /ohlq|provi/i.test(mappedSource) ? "" : existingNote;
 }
 
 function getInventoryBottleCost(item, ingredient) {
@@ -14236,6 +14306,10 @@ function hydrateComingSoonRecipeItems() {
     return {
       ...item,
       ...hydrated,
+      id: item.id,
+      name: item.name,
+      recipeId: item.recipeId,
+      cloneSourceName: item.cloneSourceName,
       imageUrl: clean(item.imageUrl) || clean(hydrated.imageUrl),
     };
   });
@@ -17218,6 +17292,15 @@ function loadOverrides() {
       Math.abs(toNumber(savedOverrides["tito-s"]?.bottlePrice) - 25.85) < 0.001
     ) {
       savedOverrides["tito-s"] = DEFAULT_PRICE_OVERRIDES["tito-s"];
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(savedOverrides));
+    }
+    if (
+      needsKnownBadOverrideRepair &&
+      isRoughlyEqual(toNumber(savedOverrides["bacardi-superior"]?.bottleOz), 59.1745) &&
+      Math.abs(toNumber(savedOverrides["bacardi-superior"]?.bottlePrice) - 24.44) < 0.001 &&
+      /ohlq/i.test(clean(savedOverrides["bacardi-superior"]?.updatedAt))
+    ) {
+      savedOverrides["bacardi-superior"] = DEFAULT_PRICE_OVERRIDES["bacardi-superior"];
       localStorage.setItem(STORAGE_KEY, JSON.stringify(savedOverrides));
     }
     localStorage.setItem(PRICE_OVERRIDE_MODEL_STORAGE_KEY, PRICE_OVERRIDE_MODEL_VERSION);

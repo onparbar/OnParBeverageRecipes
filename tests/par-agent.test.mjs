@@ -201,6 +201,32 @@ test("uses built-in cocktails as saved On Deck make choices", () => {
   });
 });
 
+test("counts a prepared On Deck cocktail keg before recommending another batch", () => {
+  const tap = cocktailTap("SPIKED STRAWBERRY LEMONADE (TITO'S) 1", 65);
+  const result = buildRawRecommendation(
+    tap,
+    { fillLevelPercent: 10, rawKegSize: 1536, rawKegSizeDp: 0 },
+    [{ volumeOz: 535 }],
+    {
+      onHandOverrides: {},
+      onDeckOverrides: {
+        [tap.key]: {
+          comingSoonId: "recipe:on-par-tee",
+          name: "On Par Tee",
+          kind: "recipe",
+          onHand: "1",
+          onHandUnit: "keg",
+        },
+      },
+    },
+    {},
+  );
+
+  assert.equal(result.currentStockKegs, 1.1);
+  assert.equal(result.actionType, "make");
+  assert.equal(result.orderQty, 0);
+});
+
 test("orders a beer keg only when total stock is below average weekly usage plus 0.5 keg", () => {
   const tap = beerTap();
   const baseArgs = [
