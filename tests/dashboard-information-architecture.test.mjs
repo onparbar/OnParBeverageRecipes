@@ -45,6 +45,25 @@ test("current and old recipes share one Recipes workspace", () => {
   assert.match(dashboardSource, /recipeView: inactive \? "old" : "current"/);
 });
 
+test("recipe coverage requires an exact PMB tap instead of a stale template-name fallback", () => {
+  const start = dashboardSource.indexOf("function getWallCocktailRecipeCoverage()");
+  const end = dashboardSource.indexOf("function findRecipeForWallProduct", start);
+  const coverageSource = dashboardSource.slice(start, end);
+  assert.match(coverageSource, /kegLiveLevels\.get\(`tap:\$\{toNumber\(item\.tapNumber\)\}`\)/);
+  assert.doesNotMatch(coverageSource, /getKegLiveRow\(item\)/);
+});
+
+test("speech inventory assigns On Deck units only where the On Deck product is defined", () => {
+  const start = dashboardSource.indexOf("function getInventorySpeechSourceItems()");
+  const onDeckStart = dashboardSource.indexOf("const onDeckSources", start);
+  const end = dashboardSource.indexOf("function renderInventorySpeechAssistant", onDeckStart);
+  const currentKegSource = dashboardSource.slice(start, onDeckStart);
+  const onDeckSource = dashboardSource.slice(onDeckStart, end);
+  assert.doesNotMatch(currentKegSource, /onDeck\.kind/);
+  assert.match(currentKegSource, /unit: "kegs"/);
+  assert.match(onDeckSource, /unit: normalizeTitle\(onDeck\.kind\) === "liquor" \? "oz" : "kegs"/);
+});
+
 test("new recipe cards use spirit labels without physical-wall suffixes", () => {
   assert.match(dashboardSource, /canonicalTitle: "Whiskey Smash \(Jim Beam\)"/);
   assert.match(dashboardSource, /canonicalTitle: "Apple Jack \(Jack Fire\)"/);

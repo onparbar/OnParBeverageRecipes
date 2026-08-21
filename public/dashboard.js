@@ -3787,7 +3787,8 @@ function renderRecipes() {
 function getWallCocktailRecipeCoverage() {
   const records = kegWallItems
     .map((item) => {
-      const liveRow = getKegLiveRow(item);
+      const liveRow = kegLiveLevels.get(`tap:${toNumber(item.tapNumber)}`) || null;
+      if (!liveRow) return null;
       const displayBrand = getKegDisplayBrand(item, liveRow);
       const context = getKegCostContext(item, displayBrand);
       if (context.kind !== "cocktail") return null;
@@ -12346,7 +12347,7 @@ function getInventorySpeechSourceItems() {
       target: "keg",
       group: `${item.wall} tap ${formatNumber(item.tapNumber)}`,
       wall: item.wall,
-      unit: normalizeTitle(onDeck.kind) === "liquor" ? "oz" : "kegs",
+      unit: "kegs",
       packSize: 1,
       aliases: [
         item.brand,
@@ -12368,7 +12369,7 @@ function getInventorySpeechSourceItems() {
       target: "keg",
       group: `${item.wall} tap ${formatNumber(item.tapNumber)} · On Deck`,
       wall: item.wall,
-      unit: "kegs",
+      unit: normalizeTitle(onDeck.kind) === "liquor" ? "oz" : "kegs",
       packSize: 1,
       aliases: [
         `On Deck ${onDeck.name}`,
