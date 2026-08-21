@@ -7,22 +7,38 @@ import {
   REQUIRED_COMING_SOON_ITEMS,
 } from "../public/coming-soon-items.mjs";
 
-test("keeps the six requested products in Coming Soon", () => {
+test("keeps the required products in Coming Soon", () => {
   assert.deepEqual(
     REQUIRED_COMING_SOON_ITEMS.map(({ name }) => name),
     [
       "Bacardi Sunset",
       "On Par Tee (Crown Royal) 1",
       "Whiskey Smash (Jim Beam) 1",
-      "Triple Jam 2",
+      "Triple Jam Cider 2",
+      "Vodka Cran (Tito's) 2",
+      "Don Julio Blanco (Tequila) 2",
       "Woodford Reserve",
       "Captain Morgan",
     ],
   );
 
   const merged = mergeRequiredComingSoonItems([]);
-  assert.equal(merged.length, 6);
-  assert.deepEqual(merged.map(({ kind }) => kind), ["recipe", "recipe", "recipe", "beer", "liquor", "liquor"]);
+  assert.equal(merged.length, 8);
+  assert.deepEqual(merged.map(({ kind }) => kind), ["recipe", "recipe", "recipe", "beer", "recipe", "liquor", "liquor", "liquor"]);
+  assert.deepEqual(
+    merged.find(({ id }) => id === "recipe:vodka-cran-2"),
+    {
+      id: "recipe:vodka-cran-2",
+      kind: "recipe",
+      recipeId: "vodka-cran-tito-s",
+      name: "Vodka Cran (Tito's) 2",
+      cloneSourceName: "VODKA CRAN (TITO'S) 1",
+    },
+  );
+  assert.equal(
+    merged.find(({ id }) => id === "liquor:don-julio-blanco-2")?.cloneSourceName,
+    "Don Julio Blanco (Tequila) 3",
+  );
   assert.equal(
     merged.find(({ id }) => id === "liquor:woodford-reserve")?.untappdQuery,
     "Woodford Reserve Bourbon",
@@ -40,12 +56,14 @@ test("preserves saved Coming Soon details without duplicating required products"
       name: "On Par Tee",
       kind: "recipe",
       batchOz: 1452,
+      imageUrl: "https://old.example/on-par-tee.png",
       replacedAt: "2026-08-14T18:00:00.000Z",
     },
     {
       id: "liquor:woodford-reserve",
       name: "Woodford Reserve",
       kind: "liquor",
+      imageUrl: "https://labels.untappd.com/old-woodford",
       untappdQuery: "old broad search",
       untappdId: 6686987,
     },
@@ -56,7 +74,10 @@ test("preserves saved Coming Soon details without duplicating required products"
   assert.equal(merged.find(({ id }) => id === "recipe:on-par-tee")?.name, "On Par Tee (Crown Royal) 1");
   assert.equal(merged.find(({ id }) => id === "recipe:on-par-tee")?.batchOz, 1452);
   assert.equal(merged.find(({ id }) => id === "recipe:on-par-tee")?.replacedAt, "2026-08-14T18:00:00.000Z");
+  assert.equal(merged.find(({ id }) => id === "recipe:on-par-tee")?.imageUrl, "/images/products/on-par-tee-classic.png");
+  assert.equal(merged.find(({ id }) => id === "recipe:whiskey-smash")?.imageUrl, "/images/products/whiskey-smash-classic.png");
   assert.equal(merged.find(({ id }) => id === "liquor:woodford-reserve")?.untappdQuery, "Woodford Reserve Bourbon");
+  assert.equal(merged.find(({ id }) => id === "liquor:woodford-reserve")?.imageUrl, "/images/products/woodford-reserve-classic.png");
   assert.equal(merged.find(({ id }) => id === "liquor:woodford-reserve")?.untappdId, 6686987);
   assert.equal(merged.find(({ id }) => id === "beer:99")?.plu, 99);
 });

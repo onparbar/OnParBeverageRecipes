@@ -138,7 +138,11 @@ import { buildVendorOrderDrafts } from "./vendor-order-drafts.mjs";
 import { buildProofPrepOrderContext } from "./proof-prep-replacements.mjs";
 import { selectPmbCurrentTapSnapshot } from "./pmb-current-tap-snapshot.mjs";
 import { applyMappedInventoryPackageRule } from "./inventory-product-rules.mjs";
-import { getProductPriceAliases, normalizeProductPriceKey } from "./product-price-matching.mjs";
+import {
+  getProductPriceAliases,
+  normalizeProductPriceKey,
+  productPriceKeysMatch,
+} from "./product-price-matching.mjs";
 import { haveKegLevelInputsChanged } from "./keg-level-state.mjs";
 import {
   buildSpeechInventoryCatalog,
@@ -1075,6 +1079,7 @@ let parAgentInputsChangedAt = "";
 let parAgentStateSyncTimer = null;
 let parAgentStateSyncQueue = Promise.resolve();
 let parAgentStateMutationVersion = 0;
+let liveWeeklyPlanRefreshTimer = null;
 let parAgentStateOutbox = loadKegLevelsOutbox();
 let parAgentStateOutboxDurable = true;
 let weeklyPlanUpdating = false;
@@ -1328,6 +1333,9 @@ async function runUnifiedPmbRefresh() {
       flushPendingInventoryFieldSyncs(),
       flushPendingParAgentStateSync(),
     ]);
+    if (!getCurrentMondayKegPlanSnapshot() && !hasPublishedWeeklyPlanRecommendations()) {
+      await runKegParAgent();
+    }
     renderDashboardOverview();
   } finally {
     releaseOwnerLoginSyncLock(lockToken);
@@ -5589,12 +5597,21 @@ function getMissingPriceAlerts() {
       id: "missing-product-costs",
       severity: "warning",
       title: "Product costs missing",
-      message: `${formatNumber(missingCosts.length)} current product${missingCosts.length === 1 ? " needs" : "s need"} a cost.`,
+      message: formatMissingCostMessage(missingCosts),
       details: missingCosts.slice(0, 10),
       action: { label: "Open Costs", target: "ingredients" },
     });
   }
   return alerts;
+}
+
+function formatMissingCostMessage(items) {
+  const names = items
+    .map((item) => String(item || "").split(" · ")[0].trim())
+    .filter(Boolean);
+  if (names.length === 1) return `${names[0]} needs a cost.`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} need a cost.`;
+  return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more need a cost.`;
 }
 
 function getMondayRunModel(plan, freshness) {
@@ -8925,6 +8942,28 @@ function renderTapChangeControls(item, liveRow, displayBrand = item.brand) {
   `;
 }
 
+function getMappedIngredientUnitCost(name) {
+  const mappingEntry = [
+    ...Object.entries(PROOF_MAPPINGS),
+    ...Object.entries(OHLQ_MAPPINGS),
+  ].find(([id, mapping]) => (
+    [
+      id.replace(/-/g, " "),
+      mapping?.productName,
+      ...(Array.isArray(mapping?.searchAliases) ? mapping.searchAliases : []),
+    ]
+      .filter(Boolean)
+      .some((alias) => productPriceKeysMatch(name, alias))
+  ));
+  if (!mappingEntry) return 0;
+
+  const [id, mapping] = mappingEntry;
+  const override = priceOverrides[id];
+  const bottleOz = toNumber(override?.bottleOz) || toNumber(mapping?.bottleOz);
+  const bottlePrice = toNumber(override?.bottlePrice) || toNumber(mapping?.unitPrice);
+  return bottleOz > 0 && bottlePrice > 0 ? bottlePrice / bottleOz : 0;
+}
+
 function getKegWallPricing(item, displayBrand = item?.brand) {
   const livePrice = getLiveTapPriceForKegWallItem(item, displayBrand);
   const portions = getLiveTapPortions(livePrice);
@@ -8937,7 +8976,8 @@ function getKegWallPricing(item, displayBrand = item?.brand) {
 
   if (livePrice?.ingredient || itemType === "shots" || isLiquorOunceTap(toNumber(item?.tapNumber))) {
     const ingredient = livePrice?.ingredient || getIngredientForKegWallItem(displayBrand || item?.brand, livePrice);
-    const costPerOz = ingredient ? getCatalogUnitCost(ingredient) : 0;
+    const costPerOz = (ingredient ? getCatalogUnitCost(ingredient) : 0)
+      || getMappedIngredientUnitCost(displayBrand || item?.brand);
     return {
       livePrice,
       costPerOz,
@@ -9549,7 +9589,6 @@ function renderKegLevelAdjustRow(item, liveRow, displayBrand = item.brand) {
                 <input class="inventory-input keg-adjust-percent" data-keg-key="${escapeHtml(itemKey)}" type="text" inputmode="decimal" value="${escapeHtml(targetPercent)}" aria-label="Target keg level percent for ${escapeHtml(item.brand)}"${disabled ? " disabled" : ""}>
               </label>
               <button class="primary-button push-keg-level-adjust" data-keg-key="${escapeHtml(itemKey)}" type="button"${disabled || kegConfigUpdateRunning ? " disabled" : ""}>Push to tap</button>
-              <button class="mini-button close-keg-adjust" data-keg-key="${escapeHtml(itemKey)}" type="button">Close</button>
             </div>
           </section>
           ${renderKegEditFinancialPanel(item, displayBrand)}
@@ -9719,15 +9758,6 @@ function bindKegLevelEvents() {
       const key = button.dataset.kegKey;
       activeKegAdjustKey = activeKegAdjustKey === key ? "" : key;
       renderKegLevels();
-    });
-  });
-
-  document.querySelectorAll(".close-keg-adjust").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (activeKegAdjustKey === button.dataset.kegKey) {
-        activeKegAdjustKey = "";
-        renderKegLevels();
-      }
     });
   });
 
@@ -10609,6 +10639,19 @@ function getParAgentRecommendation(item) {
     || null;
 }
 
+function scheduleLiveWeeklyPlanRefresh() {
+  if (
+    !parAgentState?.initialized
+    || getCurrentMondayKegPlanSnapshot()
+    || hasPublishedWeeklyPlanRecommendations()
+  ) return;
+  clearTimeout(liveWeeklyPlanRefreshTimer);
+  liveWeeklyPlanRefreshTimer = window.setTimeout(() => {
+    liveWeeklyPlanRefreshTimer = null;
+    void runKegParAgent();
+  }, 900);
+}
+
 function scheduleParAgentStateSync({ immediate = false } = {}) {
   const candidate = {
     onHandOverrides: kegOnHandOverrides,
@@ -10621,6 +10664,7 @@ function scheduleParAgentStateSync({ immediate = false } = {}) {
     return;
   }
   parAgentInputsChangedAt = new Date().toISOString();
+  scheduleLiveWeeklyPlanRefresh();
   parAgentStateMutationVersion += 1;
   const mutationVersion = parAgentStateMutationVersion;
   const staged = stageKegLevelsOutbox();
@@ -14188,9 +14232,11 @@ function hydrateComingSoonRecipeItems() {
     if (item.kind !== "recipe" || !item.recipeId) return item;
     const recipe = recipes.find((entry) => entry.id === item.recipeId);
     if (!recipe) return item;
+    const hydrated = buildComingSoonItemFromRecipe(recipe, { createdAt: item.createdAt });
     return {
       ...item,
-      ...buildComingSoonItemFromRecipe(recipe, { createdAt: item.createdAt }),
+      ...hydrated,
+      imageUrl: clean(item.imageUrl) || clean(hydrated.imageUrl),
     };
   });
 }

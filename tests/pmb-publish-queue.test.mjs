@@ -48,7 +48,7 @@ test("requires a complete product record before it becomes an On Deck publishing
 test("accepts an exact PMB source clone without inventing duplicate metadata", () => {
   const payload = {
     productKind: "beer",
-    name: "Triple Jam 2",
+    name: "Triple Jam Cider 2",
     cloneSourceName: "TRIPLE JAM CIDER 1",
   };
   assert.deepEqual(getPmbPublishReadiness(payload), {

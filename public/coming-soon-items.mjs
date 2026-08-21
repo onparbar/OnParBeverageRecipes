@@ -10,18 +10,33 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
     kind: "recipe",
     recipeId: "on-par-tee",
     name: "On Par Tee (Crown Royal) 1",
+    imageUrl: "/images/products/on-par-tee-classic.png",
   }),
   Object.freeze({
     id: "recipe:whiskey-smash",
     kind: "recipe",
     recipeId: "whiskey-smash",
     name: "Whiskey Smash (Jim Beam) 1",
+    imageUrl: "/images/products/whiskey-smash-classic.png",
   }),
   Object.freeze({
     id: "beer:triple-jam-2",
     kind: "beer",
-    name: "Triple Jam 2",
+    name: "Triple Jam Cider 2",
     cloneSourceName: "TRIPLE JAM CIDER 1",
+  }),
+  Object.freeze({
+    id: "recipe:vodka-cran-2",
+    kind: "recipe",
+    recipeId: "vodka-cran-tito-s",
+    name: "Vodka Cran (Tito's) 2",
+    cloneSourceName: "VODKA CRAN (TITO'S) 1",
+  }),
+  Object.freeze({
+    id: "liquor:don-julio-blanco-2",
+    kind: "liquor",
+    name: "Don Julio Blanco (Tequila) 2",
+    cloneSourceName: "Don Julio Blanco (Tequila) 3",
   }),
   Object.freeze({
     id: "liquor:woodford-reserve",
@@ -101,6 +116,7 @@ export function mergeRequiredComingSoonItems(items = [], pmbPublishQueue = []) {
           ...existing,
           id: required.id,
           name: required.name,
+          imageUrl: required.imageUrl || existing.imageUrl,
           untappdQuery: required.untappdQuery || existing.untappdQuery,
         }
       : { ...required });
