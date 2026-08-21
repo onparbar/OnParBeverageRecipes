@@ -498,6 +498,7 @@ const KEG_PRICING_KEY_ALIASES = {
   "nb-vd-rgr-ipa": "voodoo-ranger-ipa",
   "voodoo-regular-ipa": "voodoo-ranger-ipa",
   "bells-two-hearted-ipa": "two-hearted-ipa",
+  "triple-jam": "triple-jam-cider",
 };
 const BONBRIGHT_KEG_ALIASES = {
   "miller-lite": ["Lite 1/2 BBL", "Lite", "Miller Light"],
@@ -575,7 +576,8 @@ function normalizeKegVendorCatalogKey(value) {
 
 function getKegVendorCatalogProduct(...values) {
   for (const value of values) {
-    const product = KEG_VENDOR_PRODUCT_CATALOG[normalizeKegVendorCatalogKey(value)];
+    const normalizedKey = normalizeKegVendorCatalogKey(value);
+    const product = KEG_VENDOR_PRODUCT_CATALOG[KEG_PRICING_KEY_ALIASES[normalizedKey] || normalizedKey];
     if (product) return product;
   }
   return null;
@@ -774,11 +776,11 @@ const STATIC_RECIPE_PRESENTATION = Object.freeze({
   }),
   "whiskey-smash": Object.freeze({
     canonicalTitle: "Whiskey Smash (Jim Beam)",
-    imageUrl: "/images/products/whiskey-smash-pmb.png",
+    imageUrl: "/images/products/whiskey-smash-classic.png",
   }),
   "on-par-tee": Object.freeze({
     canonicalTitle: "On Par Tee (Crown Royal)",
-    imageUrl: "/images/products/on-par-tee-pmb.png",
+    imageUrl: "/images/products/on-par-tee-classic.png",
   }),
   "apple-jack-whiskey": Object.freeze({
     canonicalTitle: "Apple Jack (Jack Fire)",
@@ -1112,6 +1114,7 @@ let beerUntappdSearchTimer = null;
 let liquorUntappdSearchTimer = null;
 let beerUntappdRequestId = 0;
 let liquorUntappdRequestId = 0;
+let liquorBottleLookupRequestId = 0;
 let selectedUntappdBeer = null;
 let selectedUntappdLiquor = null;
 let liveTapPrices = new Map();
@@ -7140,7 +7143,9 @@ function renderKegLevels() {
     return row?.levelAvailable !== false && level != null && String(level).trim() !== "" && Number.isFinite(Number(level));
   }).length;
   const reorderCount = kegWallItems.filter((item) => getKegNeed(item) > 0).length;
-  const currentInventoryValue = sum(kegWallItems.map((item) => getKegCurrentValue(item, getKegLiveRow(item))));
+  const currentInventoryValue = sum(kegWallItems.map((item) => (
+    getKegCurrentValue(item, getKegLiveRow(item)) + getKegOnDeckInventoryValue(item)
+  )));
   const recipeCoverage = getWallCocktailRecipeCoverage();
 
   kegSummary.innerHTML = `
@@ -8788,19 +8793,18 @@ function renderKegWallBlock(wallName, items) {
                 const itemKey = getKegItemKey(item);
                 const replacement = tapReplacementOverrides[itemKey];
                 const displayBrand = getKegDisplayBrand(item, liveRow);
-                const pmbChangedBrand = !replacement && clean(displayBrand) && normalizeWeeklyUsageName(displayBrand, { stripWallNumber: false }) !== normalizeWeeklyUsageName(item.brand, { stripWallNumber: false });
                 const onHand = getKegOnHandDisplay(item);
                 const need = getKegNeed(item);
-                const currentValue = getKegCurrentValue(item, liveRow);
+                const onDeck = getKegOnDeckItem(item);
+                const onDeckValue = getKegOnDeckInventoryValue(item, onDeck);
+                const currentValue = getKegCurrentValue(item, liveRow) + onDeckValue;
                 const pricing = getKegWallPricing(item, displayBrand);
                 const rowTypeClass = getKegRowTypeClass(item);
-                const onDeck = getKegOnDeckItem(item);
                 const mainRow = `
                   <tr class="${rowTypeClass}" data-keg-row-key="${escapeHtml(itemKey)}">
                     <td>${item.tapNumber}</td>
                     <td class="keg-product-cell">
                       ${replacement ? `<span class="table-note">Replacing ${escapeHtml(replacement.oldBrand)}</span>` : ""}
-                      ${pmbChangedBrand ? `<span class="table-note table-note--accent">PMB current tap</span>` : ""}
                       ${onDeck ? `
                         <span class="table-note table-note--accent keg-on-deck-summary">
                           <span>On deck: ${escapeHtml(onDeck.name)}</span>
@@ -8812,10 +8816,23 @@ function renderKegWallBlock(wallName, items) {
                     <td class="keg-level-cell ${getKegLevelClass(liveRow?.fillLevelPercent)}">
                       <span class="keg-level-display">${formatKegCurrentLevel(item, liveRow)}</span>
                     </td>
-                    <td class="keg-value-cell">${currentValue > 0 ? money(currentValue) : '<span class="inventory-order-zero">-</span>'}</td>
+                    <td class="keg-value-cell">
+                      ${currentValue > 0 ? money(currentValue) : '<span class="inventory-order-zero">-</span>'}
+                      ${toNumber(onDeck?.onHand) > 0 ? `<span class="table-note table-note--accent">${onDeckValue > 0 ? `On Deck ${money(onDeckValue)}` : "On Deck price needed"}</span>` : ""}
+                    </td>
                     <td class="keg-pricing-cell">${pricing.chargeHtml}</td>
                     <td class="keg-usage-cell">${formatKegWeeklyUsageAverage(item, displayBrand)}</td>
-                    <td><input class="inventory-input keg-input keg-on-hand-input" data-keg-field="onHand" data-keg-key="${escapeHtml(itemKey)}" name="keg-on-hand-${escapeHtml(itemKey)}" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getKegOnHandEditorValue(onHand))}" placeholder="0" aria-label="On hand kegs for ${escapeHtml(displayBrand)}"></td>
+                    <td>
+                      <div class="keg-on-hand-stack">
+                        <input class="inventory-input keg-input keg-on-hand-input" data-keg-field="onHand" data-keg-key="${escapeHtml(itemKey)}" name="keg-on-hand-${escapeHtml(itemKey)}" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getKegOnHandEditorValue(onHand))}" placeholder="0" aria-label="On hand kegs for ${escapeHtml(displayBrand)}">
+                        ${onDeck ? `
+                          <label class="keg-on-deck-count">
+                            <span>On Deck</span>
+                            <input class="inventory-input keg-on-deck-on-hand-input" data-keg-key="${escapeHtml(itemKey)}" name="keg-on-deck-on-hand-${escapeHtml(itemKey)}" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getKegOnHandEditorValue(onDeck.onHand))}" placeholder="0" aria-label="On hand kegs of ${escapeHtml(onDeck.name)} on deck for tap ${escapeHtml(item.tapNumber)}">
+                          </label>
+                        ` : ""}
+                      </div>
+                    </td>
                     <td class="keg-need-cell">${renderKegNeedCell(item, need)}</td>
                   </tr>`;
                 return `${mainRow}${activeKegAdjustKey === itemKey ? renderKegLevelAdjustRow(item, liveRow, displayBrand) : ""}`;
@@ -9646,21 +9663,28 @@ async function pushKegLevelAdjustment(key) {
 }
 
 function clearAllKegOnHand() {
-  const nonZeroCount = kegWallItems.filter((item) => (
+  const activeNonZeroCount = kegWallItems.filter((item) => (
     toNumber(kegOnHandOverrides[getKegItemKey(item)]) > 0
   )).length;
+  const assignedOnDeck = Object.entries(kegOnDeckOverrides).filter(([, item]) => item && typeof item === "object");
+  const onDeckNonZeroCount = assignedOnDeck.filter(([, item]) => toNumber(item.onHand) > 0).length;
+  const nonZeroCount = activeNonZeroCount + onDeckNonZeroCount;
   if (!confirmDashboardAction(
-    "Clear the entire Keg Levels on-hand column?",
+    "Clear every Keg Levels on-hand count?",
     [
-      `All ${kegWallItems.length} on-hand counts will be set to zero.`,
+      `All ${kegWallItems.length} current and ${assignedOnDeck.length} On Deck counts will be set to zero.`,
       `${nonZeroCount} non-zero count${nonZeroCount === 1 ? "" : "s"} will be cleared.`,
     ],
     "This updates the shared counts used by the par agent.",
   )) return;
 
   kegOnHandOverrides = createClearedKegOnHandOverrides(kegWallItems, getKegItemKey);
+  assignedOnDeck.forEach(([key, item]) => {
+    kegOnDeckOverrides[key] = { ...item, onHand: "0", updatedAt: new Date().toISOString() };
+  });
   saveKegOnHandOverrides();
-  kegSyncMessage = `Cleared all ${kegWallItems.length} on-hand counts to zero.`;
+  saveKegOnDeckOverrides();
+  kegSyncMessage = "Cleared all current and On Deck counts to zero.";
   scheduleParAgentStateSync({ immediate: true });
   renderKegLevels();
 }
@@ -9743,6 +9767,31 @@ function bindKegLevelEvents() {
 
     input.addEventListener("change", () => {
       scheduleParAgentStateSync();
+    });
+  });
+
+  document.querySelectorAll(".keg-on-deck-on-hand-input").forEach((input) => {
+    input.dataset.lastValidValue = normalizeKegOnHandDraft(input.value);
+    input.addEventListener("focus", () => input.select());
+    input.addEventListener("click", () => input.select());
+    input.addEventListener("input", (event) => {
+      const target = event.currentTarget;
+      const key = target.dataset.kegKey;
+      const saved = kegOnDeckOverrides[key];
+      if (!key || !saved || typeof saved !== "object") return;
+      const nextValue = normalizeKegOnHandDraft(target.value, target.dataset.lastValidValue || "");
+      if (target.value !== nextValue) target.value = nextValue;
+      target.dataset.lastValidValue = nextValue;
+      kegOnDeckOverrides[key] = {
+        ...saved,
+        onHand: nextValue || "0",
+        updatedAt: new Date().toISOString(),
+      };
+      saveKegOnDeckOverrides();
+    });
+    input.addEventListener("change", () => {
+      scheduleParAgentStateSync();
+      renderKegLevels();
     });
   });
 
@@ -10032,7 +10081,7 @@ async function sendComingSoonItemToPmb(id, { activate = false } = {}) {
 
 function buildPmbPayloadFromComingSoonItem(item) {
   const imageUrl = clean(item.imageUrl);
-  return {
+  const payload = {
     productKind: item.kind === "recipe" ? "cocktail" : item.kind,
     plu: toNumber(item.plu) || "",
     name: item.name,
@@ -10047,7 +10096,25 @@ function buildPmbPayloadFromComingSoonItem(item) {
     targetMargin: toNumber(item.targetMargin),
     notes: item.description,
     imageUrl: imageUrl.startsWith("/") ? new URL(imageUrl, window.location.origin).href : imageUrl,
+    cloneSourceName: clean(item.cloneSourceName),
   };
+  if (!payload.cloneSourceName) {
+    const missing = [];
+    if (!clean(payload.name)) missing.push("name");
+    if (!(toNumber(payload.pricePerOz) > 0)) missing.push("pour price");
+    if (!(toNumber(payload.servingOz) > 0)) missing.push("serving size");
+    if (!clean(payload.imageUrl)) missing.push("picture");
+    if (!clean(payload.notes)) missing.push("description");
+    if (!clean(payload.brewery)) missing.push("producer");
+    if (!clean(payload.style)) missing.push("style");
+    if (!(toNumber(payload.abvPercent) > 0)) missing.push("ABV");
+    if (!(toNumber(payload.kegOz) > 0)) missing.push("keg size");
+    if (!(toNumber(payload.kegCost) > 0)) missing.push("keg cost");
+    if (missing.length) {
+      throw new Error(`Finish this product before sending it to PMB: ${missing.join(", ")}.`);
+    }
+  }
+  return payload;
 }
 
 function saveCustomBeerMargin(comingSoonId, targetMargin, pricePerOz) {
@@ -11001,6 +11068,7 @@ function getKegOnDeckItem(itemOrKey) {
       name: option.name,
       kind: option.kind,
       plu: toNumber(option.plu),
+      onHand: String(saved?.onHand ?? ""),
     };
   }
   return typeof saved === "object" && clean(saved.name)
@@ -11058,6 +11126,7 @@ function reconcileInstalledKegOnDeckProducts() {
 
 function setKegOnDeckItem(key, comingSoonId) {
   const item = resolveKegOnDeckOption(getKegOnDeckOptions(key), comingSoonId);
+  const previous = kegOnDeckOverrides[key];
   if (!key) return;
   if (!item) {
     delete kegOnDeckOverrides[key];
@@ -11068,6 +11137,7 @@ function setKegOnDeckItem(key, comingSoonId) {
     name: item.name,
     kind: item.kind,
     plu: toNumber(item.plu),
+    onHand: previous?.comingSoonId === item.id ? String(previous.onHand ?? "") : "",
     updatedAt: new Date().toISOString(),
   };
 }
@@ -11321,6 +11391,39 @@ function getKegCurrentValueBreakdown(item, liveRow) {
 function getKegCurrentValue(item, liveRow) {
   const values = getKegCurrentValueBreakdown(item, liveRow);
   return values.connectedValue + values.backupValue;
+}
+
+function getKegOnDeckInventoryValue(item, onDeck = getKegOnDeckItem(item)) {
+  const onHandKegs = toNumber(onDeck?.onHand);
+  if (!onDeck || onHandKegs <= 0) return 0;
+
+  const comingSoonItem = comingSoonItems.find((entry) => entry.id === onDeck.comingSoonId) || {};
+  const kind = normalizeTitle(onDeck.kind || comingSoonItem.kind);
+  const directCost = toNumber(comingSoonItem.batchCost || comingSoonItem.kegCost);
+  if (directCost > 0) return directCost * onHandKegs;
+
+  if (kind === "recipe") {
+    const recipe = recipes.find((entry) => entry.id === (comingSoonItem.recipeId || onDeck.comingSoonId?.replace(/^recipe:/, "")));
+    const batchCost = recipe ? toNumber(getRecipeTotals(recipe).cost) : 0;
+    return batchCost * onHandKegs;
+  }
+
+  if (kind === "liquor") {
+    const mappedLiquor = customLiquorTaps.find((entry) => (
+      normalizeKegProductName(entry.name) === normalizeKegProductName(onDeck.name)
+    )) || {};
+    const bottleCost = toNumber(comingSoonItem.bottleCost || mappedLiquor.bottleCost);
+    const bottleOz = toNumber(comingSoonItem.bottleOz || mappedLiquor.bottleOz);
+    const fullOunces = getDefaultKegLevelSize({ ...item, type: "Shots" });
+    return bottleCost && bottleOz && fullOunces
+      ? (bottleCost / bottleOz) * fullOunces * onHandKegs
+      : 0;
+  }
+
+  const pricingItem = findKegPricingItem(onDeck.name);
+  const costPerOz = pricingItem ? getKegCatalogUnitCost(pricingItem) : 0;
+  const kegOz = toNumber(comingSoonItem.kegOz) || toNumber(pricingItem?.kegOz) || getDefaultKegSizeOz(item);
+  return costPerOz && kegOz ? costPerOz * kegOz * onHandKegs : 0;
 }
 
 function findKegPricingItem(name) {
@@ -12123,7 +12226,26 @@ function getInventorySpeechSourceItems() {
       ].filter(Boolean),
     };
   });
-  return [...inventorySources, ...kegSources];
+  const onDeckSources = kegWallItems.flatMap((item) => {
+    const key = getKegItemKey(item);
+    const onDeck = getKegOnDeckItem(item);
+    if (!onDeck) return [];
+    return [{
+      id: `keg-on-deck:${key}`,
+      name: onDeck.name,
+      target: "keg",
+      group: `${item.wall} tap ${formatNumber(item.tapNumber)} · On Deck`,
+      wall: item.wall,
+      unit: "kegs",
+      packSize: 1,
+      aliases: [
+        `On Deck ${onDeck.name}`,
+        `${onDeck.name} On Deck`,
+        `${item.wall} wall On Deck ${onDeck.name}`,
+      ],
+    }];
+  });
+  return [...inventorySources, ...kegSources, ...onDeckSources];
 }
 
 function renderInventorySpeechAssistant() {
@@ -12317,10 +12439,22 @@ async function applyReviewedInventorySpeechChanges() {
     }
     if (kegChanges.length) {
       kegChanges.forEach((change) => {
+        if (change.id.startsWith("keg-on-deck:")) {
+          const key = change.id.replace(/^keg-on-deck:/, "");
+          const saved = kegOnDeckOverrides[key];
+          if (!saved || typeof saved !== "object") return;
+          kegOnDeckOverrides[key] = {
+            ...saved,
+            onHand: change.value,
+            updatedAt: new Date().toISOString(),
+          };
+          return;
+        }
         const key = change.id.replace(/^keg:/, "");
         kegOnHandOverrides[key] = change.value;
       });
       saveKegOnHandOverrides();
+      saveKegOnDeckOverrides();
       scheduleParAgentStateSync({ immediate: true });
       const saved = await flushPendingParAgentStateSync();
       if (!saved) throw new Error("Keg Levels counts did not finish saving.");
@@ -13631,10 +13765,11 @@ async function addLiquorProduct(event) {
     abvPercent,
     ibu: 0,
     kegOz: bottleOz,
+    kegCost: bottleCost,
     bottleCost,
     bottleOz,
     notes,
-    imageUrl: clean(selectedUntappdLiquor?.imageUrl),
+    imageUrl: clean(selectedUntappdLiquor?.bottleImageUrl),
     untappdId: toNumber(selectedUntappdLiquor?.untappdId),
   };
 
@@ -14405,7 +14540,7 @@ function applyUntappdBeerSelection(item) {
 }
 
 function applyUntappdLiquorSelection(item) {
-  selectedUntappdLiquor = item;
+  selectedUntappdLiquor = { ...item, bottleImageUrl: "" };
   if (liquorProductNameInput) liquorProductNameInput.value = item.name;
   if (liquorProductAbvInput && item.abv != null) liquorProductAbvInput.value = String(item.abv);
   if (liquorProductNotesInput) {
@@ -14414,9 +14549,39 @@ function applyUntappdLiquorSelection(item) {
   }
   hideUntappdSearchResults("liquor");
   setLiquorProductStatus(
-    `Selected ${item.name} from On Par’s Untappd menu${item.menuName ? ` (${item.menuName})` : ""}.`,
-    "success",
+    `Selected ${item.name}. Finding its bottle picture...`,
+    "loading",
   );
+  void hydrateSelectedLiquorBottleImage(item);
+}
+
+async function hydrateSelectedLiquorBottleImage(item) {
+  const requestId = ++liquorBottleLookupRequestId;
+  const identity = clean(item?.name);
+  try {
+    const response = await fetch(
+      `/api/cocktail-lookup?kind=liquor&q=${encodeURIComponent(identity)}`,
+      { cache: "no-store" },
+    );
+    const result = await parseJsonResponse(response);
+    if (requestId !== liquorBottleLookupRequestId || clean(selectedUntappdLiquor?.name) !== identity) return;
+    const bottleImageUrl = clean(result?.items?.[0]?.imageUrl);
+    if (!response.ok || !bottleImageUrl) {
+      throw new Error(result?.error || "No exact bottle picture was found.");
+    }
+    selectedUntappdLiquor = {
+      ...selectedUntappdLiquor,
+      bottleImageUrl,
+      bottleImageSource: clean(result.items[0].sourceName),
+    };
+    setLiquorProductStatus(`${identity} is ready with a bottle picture.`, "success");
+  } catch (error) {
+    if (requestId !== liquorBottleLookupRequestId || clean(selectedUntappdLiquor?.name) !== identity) return;
+    setLiquorProductStatus(
+      clean(error?.message) || "No exact bottle picture was found. Try the full liquor name.",
+      "error",
+    );
+  }
 }
 
 function syncPmbProductCreativeDefaults() {
@@ -15233,6 +15398,8 @@ function applyRecipeEdits(recipe) {
     ...presentedRecipe,
     ...edits,
     title: clean(canonicalTitle) || clean(edits.title) || presentedRecipe.title,
+    description: clean(edits.description) || presentedRecipe.description,
+    imageUrl: clean(edits.imageUrl) || presentedRecipe.imageUrl,
     ingredients: (edits.ingredients || []).map((ingredient) => ({
       ...ingredient,
       id: slugify(ingredient.name),

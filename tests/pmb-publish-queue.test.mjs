@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   enqueuePmbPublishItem,
   getPmbPublishQueueCounts,
+  getPmbPublishReadiness,
   markPmbPublishFailed,
   markPmbPublished,
   normalizePmbPublishQueue,
@@ -20,7 +21,61 @@ const beerPayload = {
   kegOz: 1984,
   kegCost: 185,
   targetMargin: 82,
+  imageUrl: "https://example.com/miller-lite.jpg",
+  notes: "A crisp light lager.",
 };
+
+test("requires a complete product record before it becomes an On Deck publishing choice", () => {
+  const readiness = getPmbPublishReadiness({ productKind: "beer", name: "New Beer" });
+  assert.equal(readiness.ready, false);
+  assert.deepEqual(readiness.missing, [
+    "pour price",
+    "serving size",
+    "picture",
+    "description",
+    "producer",
+    "style",
+    "ABV",
+    "keg size",
+    "keg cost",
+  ]);
+  assert.throws(
+    () => enqueuePmbPublishItem([], { productKind: "beer", name: "New Beer" }),
+    /Finish this product before adding it/,
+  );
+});
+
+test("accepts an exact PMB source clone without inventing duplicate metadata", () => {
+  const payload = {
+    productKind: "beer",
+    name: "Triple Jam 2",
+    cloneSourceName: "TRIPLE JAM CIDER 1",
+  };
+  assert.deepEqual(getPmbPublishReadiness(payload), {
+    ready: true,
+    missing: [],
+    source: "PMB clone",
+  });
+  assert.equal(enqueuePmbPublishItem([], payload).item.status, "ready");
+});
+
+test("accepts bottle cost as the inventory value for a complete liquor product", () => {
+  const payload = {
+    productKind: "liquor",
+    name: "House Bourbon",
+    pricePerOz: 2.5,
+    servingOz: 1.5,
+    imageUrl: "data:image/jpeg;base64,bottle",
+    notes: "Straight bourbon whiskey.",
+    brewery: "House Distillery",
+    style: "Bourbon",
+    abvPercent: 40,
+    kegOz: 59.1745,
+    bottleCost: 42,
+  };
+  assert.equal(getPmbPublishReadiness(payload).ready, true);
+  assert.equal(enqueuePmbPublishItem([], payload).item.status, "ready");
+});
 
 test("queues a ready PMB product without sending or inventing publish data", () => {
   const result = enqueuePmbPublishItem([], beerPayload, {

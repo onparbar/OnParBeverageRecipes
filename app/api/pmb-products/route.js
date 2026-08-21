@@ -453,6 +453,64 @@ function normalizeName(value) {
   return clean(value).toLowerCase();
 }
 
+function normalizeCloneProductName(value) {
+  return normalizeName(value).replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function getCloneSourceProduct(productList, sourceName) {
+  const expected = normalizeCloneProductName(sourceName);
+  const matches = (Array.isArray(productList) ? productList : [])
+    .filter((product) => normalizeCloneProductName(product?.name) === expected);
+  if (matches.length !== 1) {
+    throw new Error(`PMB must contain exactly one ${clean(sourceName)} product before it can be copied.`);
+  }
+  return matches[0];
+}
+
+function getCloneImageUrl(product, baseUrl) {
+  const candidates = [
+    product?.image_url,
+    product?.imageUrl,
+    product?.product_image_url,
+    product?.productImageUrl,
+    product?.product_image,
+    product?.productImage,
+    product?.image_path,
+    product?.imagePath,
+    product?.picture_url,
+    product?.picture,
+    product?.photo_url,
+    product?.photo,
+    product?.image,
+  ];
+  for (const candidate of candidates) {
+    const raw = typeof candidate === "object"
+      ? candidate?.url || candidate?.src || candidate?.path
+      : candidate;
+    const value = clean(raw);
+    if (!value) continue;
+    if (/^data:image\//i.test(value)) return value;
+    try {
+      return new URL(value, baseUrl).toString();
+    } catch {
+      // Try the next known PMB image field.
+    }
+  }
+  return "";
+}
+
+function buildClonedProduct(input, plu, sourceProduct) {
+  const requestedProduct = buildProduct(input, plu);
+  return {
+    ...requestedProduct,
+    ...sourceProduct,
+    plu,
+    name: requestedProduct.name,
+    active: 1,
+    inuse: 1,
+  };
+}
+
 function buildProduct(input, plu) {
   const productKind = clean(input.productKind || input.kind || "cocktail").toLowerCase();
   const isBeer = productKind === "beer";
@@ -719,8 +777,18 @@ export async function POST(request) {
     const config = getConfig();
     const token = await getAuthtoken(config);
     const plu = toNumber(input.plu) || await getNextPlu(config, token);
-    const product = buildProduct(input, plu);
-    const imageFile = await buildPmbImageFile(input.imageUrl, product.name);
+    const cloneSourceName = clean(input.cloneSourceName);
+    const sourceProduct = cloneSourceName
+      ? getCloneSourceProduct((await getProductList(config, token)).productlist, cloneSourceName)
+      : null;
+    const product = sourceProduct
+      ? buildClonedProduct(input, plu, sourceProduct)
+      : buildProduct(input, plu);
+    const cloneImageUrl = sourceProduct ? getCloneImageUrl(sourceProduct, config.baseUrl) : "";
+    const imageFile = await buildPmbImageFile(input.imageUrl || cloneImageUrl, product.name);
+    if (sourceProduct && !imageFile) {
+      throw new Error(`PMB did not provide the ${cloneSourceName} image, so the duplicate was not created.`);
+    }
     const uiWrite = await createProductViaManagementUi(config, token, product, imageFile, {
       matchByPluOnly: input.matchByPluOnly === true,
     });

@@ -134,7 +134,7 @@ function simplifyDescription(description, fallback = "") {
   return `${text.slice(0, 357).replace(/\s+\S*$/, "")}...`;
 }
 
-async function normalizeImage(rawImageUrl, baseUrl) {
+async function normalizeImage(rawImageUrl, baseUrl, { plainBottle = false } = {}) {
   const imageUrl = toAbsoluteUrl(rawImageUrl, baseUrl);
   if (!imageUrl) return null;
 
@@ -142,7 +142,10 @@ async function normalizeImage(rawImageUrl, baseUrl) {
     const input = await fetchImageBuffer(imageUrl);
     for (const quality of [86, 78, 70, 62, 54]) {
       const output = await sharp(input, { animated: false, limitInputPixels: 40_000_000 })
-        .resize(IMAGE_WIDTH, IMAGE_HEIGHT, { fit: "cover", position: "center" })
+        .resize(IMAGE_WIDTH, IMAGE_HEIGHT, plainBottle
+          ? { fit: "contain", position: "center", background: "#f3efe7" }
+          : { fit: "cover", position: "center" })
+        .flatten({ background: plainBottle ? "#f3efe7" : "#ffffff" })
         .withMetadata({ density: 72 })
         .jpeg({ quality, progressive: true })
         .toBuffer();
@@ -207,7 +210,7 @@ function getSourceName(url) {
   }
 }
 
-function scoreItem(item, query) {
+function scoreItem(item, query, kind = "cocktail") {
   const haystack = `${item.title} ${item.description} ${item.sourceName}`.toLowerCase();
   const queryWords = clean(query).toLowerCase().split(/\s+/).filter((word) => word.length > 2);
   const wordScore = queryWords.reduce((score, word) => score + (haystack.includes(word) ? 2 : 0), 0);
@@ -215,14 +218,16 @@ function scoreItem(item, query) {
   const descriptionScore = item.description ? 3 : 0;
   const sourceScore = /liquor|cocktail|mixology|recipe|imbibe|difford|thespruce|delish|foodandwine|allrecipes/i.test(item.sourceName) ? 2 : 0;
   const penalty = /facebook|instagram|x\.com|twitter|pinterest|youtube|amazon|walmart|instacart|doordash/i.test(item.sourceName) ? -12 : 0;
-  return wordScore + imageScore + descriptionScore + sourceScore + penalty;
+  const bottleScore = kind === "liquor" && /\bbottle\b|\b750\s*ml\b|\b1\s*l\b|bourbon|whiskey|whisky|vodka|rum|tequila|gin|liqueur/i.test(haystack) ? 10 : 0;
+  const cocktailPenalty = kind === "liquor" && /\bcocktail|recipe|mixed drink|served in|cocktail glass\b/i.test(haystack) ? -18 : 0;
+  return wordScore + imageScore + descriptionScore + sourceScore + penalty + bottleScore + cocktailPenalty;
 }
 
-async function buildItem(result, query) {
+async function buildItem(result, query, kind) {
   try {
     const html = await fetchText(result.url);
     const rawImage = getMeta(html, ["og:image", "twitter:image", "image"]);
-    const image = rawImage ? await normalizeImage(rawImage, result.url) : null;
+    const image = rawImage ? await normalizeImage(rawImage, result.url, { plainBottle: kind === "liquor" }) : null;
     if (!image) return null;
 
     const description = simplifyDescription(
@@ -247,6 +252,7 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const query = clean(searchParams.get("q"));
+    const kind = clean(searchParams.get("kind")).toLowerCase() === "liquor" ? "liquor" : "cocktail";
     if (!query) {
       return NextResponse.json({ error: "Cocktail name is required." }, { status: 400 });
     }
@@ -254,12 +260,15 @@ export async function GET(request) {
       return NextResponse.json({ error: "Cocktail name is too long." }, { status: 400 });
     }
 
-    const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(`${query} cocktail image recipe`)}`;
+    const searchTerms = kind === "liquor"
+      ? `${query} exact liquor bottle official product image white background -cocktail -recipe`
+      : `${query} cocktail image recipe`;
+    const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(searchTerms)}`;
     const searchHtml = await fetchText(searchUrl);
     const results = extractDuckDuckGoResults(searchHtml);
-    const items = (await Promise.all(results.map((result) => buildItem(result, query))))
+    const items = (await Promise.all(results.map((result) => buildItem(result, query, kind))))
       .filter(Boolean)
-      .sort((a, b) => scoreItem(b, query) - scoreItem(a, query))
+      .sort((a, b) => scoreItem(b, query, kind) - scoreItem(a, query, kind))
       .slice(0, 5);
 
     return NextResponse.json({ items });

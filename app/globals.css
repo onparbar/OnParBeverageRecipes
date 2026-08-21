@@ -7131,6 +7131,30 @@ td {
   text-underline-offset: 2px;
 }
 
+.keg-on-hand-stack {
+  display: grid;
+  gap: 6px;
+  min-width: 72px;
+}
+
+.keg-on-deck-count {
+  display: grid;
+  gap: 3px;
+}
+
+.keg-on-deck-count > span {
+  color: var(--juniper-dark);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.keg-on-deck-count .inventory-input {
+  min-width: 64px;
+  width: 100%;
+}
+
 .portion-list {
   display: grid;
   gap: 4px;

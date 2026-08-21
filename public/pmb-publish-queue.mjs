@@ -40,6 +40,44 @@ function normalizePublishedProduct(value) {
   };
 }
 
+function positiveNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0;
+}
+
+export function getPmbPublishReadiness(payload) {
+  const value = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+  const kind = normalizeKind(value.productKind);
+  const missing = [];
+  if (!kind) missing.push("product type");
+  if (!clean(value.name)) missing.push("name");
+
+  const cloneSourceName = clean(value.cloneSourceName);
+  if (cloneSourceName) {
+    return {
+      ready: missing.length === 0,
+      missing,
+      source: "PMB clone",
+    };
+  }
+
+  if (!positiveNumber(value.pricePerOz)) missing.push("pour price");
+  if (!positiveNumber(value.servingOz)) missing.push("serving size");
+  if (!clean(value.imageUrl)) missing.push("picture");
+  if (!clean(value.notes || value.description)) missing.push("description");
+  if (!clean(value.brewery || value.producer)) missing.push("producer");
+  if (!clean(value.style)) missing.push("style");
+  if (!positiveNumber(value.abvPercent ?? value.abv)) missing.push("ABV");
+  if (!positiveNumber(value.kegOz)) missing.push("keg size");
+  if (!positiveNumber(value.kegCost ?? value.batchCost ?? value.bottleCost)) missing.push("keg cost");
+
+  return {
+    ready: missing.length === 0,
+    missing,
+    source: "product record",
+  };
+}
+
 export function normalizePmbPublishQueueItem(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   if (!value.payload || typeof value.payload !== "object" || Array.isArray(value.payload)) return null;
@@ -102,6 +140,10 @@ export function enqueuePmbPublishItem(queue, payload, {
   const name = clean(payload.name);
   if (!kind || !name) {
     throw new Error("A beer or liquor product with a name is required.");
+  }
+  const readiness = getPmbPublishReadiness({ ...payload, productKind: kind, name });
+  if (!readiness.ready) {
+    throw new Error(`Finish this product before adding it: ${readiness.missing.join(", ")}.`);
   }
 
   const timestamp = normalizeTimestamp(now);

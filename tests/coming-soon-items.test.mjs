@@ -7,21 +7,22 @@ import {
   REQUIRED_COMING_SOON_ITEMS,
 } from "../public/coming-soon-items.mjs";
 
-test("keeps the five requested products in Coming Soon", () => {
+test("keeps the six requested products in Coming Soon", () => {
   assert.deepEqual(
     REQUIRED_COMING_SOON_ITEMS.map(({ name }) => name),
     [
       "Bacardi Sunset",
       "On Par Tee (Crown Royal) 1",
       "Whiskey Smash (Jim Beam) 1",
+      "Triple Jam 2",
       "Woodford Reserve",
       "Captain Morgan",
     ],
   );
 
   const merged = mergeRequiredComingSoonItems([]);
-  assert.equal(merged.length, 5);
-  assert.deepEqual(merged.map(({ kind }) => kind), ["recipe", "recipe", "recipe", "liquor", "liquor"]);
+  assert.equal(merged.length, 6);
+  assert.deepEqual(merged.map(({ kind }) => kind), ["recipe", "recipe", "recipe", "beer", "liquor", "liquor"]);
   assert.equal(
     merged.find(({ id }) => id === "liquor:woodford-reserve")?.untappdQuery,
     "Woodford Reserve Bourbon",

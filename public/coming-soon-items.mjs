@@ -18,15 +18,23 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
     name: "Whiskey Smash (Jim Beam) 1",
   }),
   Object.freeze({
+    id: "beer:triple-jam-2",
+    kind: "beer",
+    name: "Triple Jam 2",
+    cloneSourceName: "TRIPLE JAM CIDER 1",
+  }),
+  Object.freeze({
     id: "liquor:woodford-reserve",
     kind: "liquor",
     name: "Woodford Reserve",
+    imageUrl: "/images/products/woodford-reserve-classic.png",
     untappdQuery: "Woodford Reserve Bourbon",
   }),
   Object.freeze({
     id: "liquor:captain-morgan",
     kind: "liquor",
     name: "Captain Morgan",
+    imageUrl: "/images/products/captain-morgan-original-classic.png",
     untappdQuery: "Captain Morgan Original Spiced Rum",
   }),
 ]);
