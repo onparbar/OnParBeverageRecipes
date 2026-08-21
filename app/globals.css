@@ -2399,7 +2399,7 @@ h1 {
   z-index: 20;
   top: 0;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
   margin: 14px 0 18px;
   border: 1px solid rgba(31, 95, 84, 0.2);
@@ -2437,7 +2437,7 @@ h1 {
 
 .staff-overview-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-top: 22px;
 }
@@ -2726,13 +2726,6 @@ h1 {
 .staff-prep-list {
   display: grid;
   gap: 10px;
-}
-
-.staff-prep-group-title {
-  margin: 0.35rem 0 0;
-  padding: 0.7rem 0.2rem 0.2rem;
-  color: var(--ink);
-  font-size: clamp(1.25rem, 2vw, 1.65rem);
 }
 
 .keg-row--liquor .keg-on-hand-stack {

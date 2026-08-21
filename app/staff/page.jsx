@@ -23,6 +23,7 @@ export default function StaffRecipePage() {
       <nav className="staff-section-tabs" role="tablist" aria-label="Staff workspaces">
         <button className="staff-section-tab is-active" data-staff-section-tab="overview" type="button" role="tab" aria-controls="staff-overview-panel" aria-selected="true">Overview</button>
         <button className="staff-section-tab" data-staff-section-tab="prep" type="button" role="tab" aria-controls="staff-prep-panel" aria-selected="false" tabIndex={-1}>Cocktails to Make</button>
+        <button className="staff-section-tab" data-staff-section-tab="liquor" type="button" role="tab" aria-controls="staff-liquor-panel" aria-selected="false" tabIndex={-1}>Liquor to Add</button>
         <button className="staff-section-tab" data-staff-section-tab="recipes" type="button" role="tab" aria-controls="staff-recipes-panel" aria-selected="false" tabIndex={-1}>Recipes</button>
         <button className="staff-section-tab" data-staff-section-tab="orders" type="button" role="tab" aria-controls="staff-orders-panel" aria-selected="false" tabIndex={-1}>Orders to Receive</button>
         <button className="staff-section-tab" data-staff-section-tab="taps" type="button" role="tab" aria-controls="staff-taps-panel" aria-selected="false" tabIndex={-1}>Tap Sheets</button>
@@ -42,6 +43,11 @@ export default function StaffRecipePage() {
               <span>Cocktails to make</span>
               <strong id="staff-overview-prep-value">—</strong>
               <small id="staff-overview-prep-detail">Loading prep plan...</small>
+            </button>
+            <button className="staff-overview-card" data-staff-section-target="liquor" type="button">
+              <span>Liquor to add</span>
+              <strong id="staff-overview-liquor-value">—</strong>
+              <small id="staff-overview-liquor-detail">Loading keg refills...</small>
             </button>
             <button className="staff-overview-card" data-staff-section-target="orders" type="button">
               <span>Orders to receive</span>
@@ -69,6 +75,21 @@ export default function StaffRecipePage() {
           </div>
           <div id="staff-prep-summary" className="staff-prep-summary" aria-live="polite"></div>
           <div id="staff-prep-list" className="staff-prep-list" aria-busy="true"></div>
+        </section>
+
+        <section className="panel staff-prep-panel" id="staff-liquor-panel" role="tabpanel" aria-labelledby="staff-liquor-title" hidden>
+          <div className="staff-recipe-intro">
+            <div>
+              <p className="eyebrow">Current weekly plan</p>
+              <h2 id="staff-liquor-title">Liquor to add to kegs</h2>
+            </div>
+            <p>Add the listed bottles directly to each keg, then check it off.</p>
+          </div>
+          <div id="staff-liquor-status" className="staff-recipe-status" role="status" aria-live="polite">
+            Loading this week&apos;s liquor checklist...
+          </div>
+          <div id="staff-liquor-summary" className="staff-prep-summary" aria-live="polite"></div>
+          <div id="staff-liquor-list" className="staff-prep-list" aria-busy="true"></div>
         </section>
 
         <section className="panel staff-order-panel" id="staff-orders-panel" role="tabpanel" aria-labelledby="staff-order-title" hidden>

@@ -32,26 +32,12 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
     name: "Vodka Cran (Tito's) 2",
     cloneSourceName: "VODKA CRAN (TITO'S) 1",
   }),
-  Object.freeze({
-    id: "liquor:don-julio-blanco-2",
-    kind: "liquor",
-    name: "Don Julio Blanco (Tequila) 2",
-    cloneSourceName: "Don Julio Blanco (Tequila) 3",
-  }),
-  Object.freeze({
-    id: "liquor:woodford-reserve",
-    kind: "liquor",
-    name: "Woodford Reserve",
-    imageUrl: "/images/products/woodford-reserve-classic.png",
-    untappdQuery: "Woodford Reserve Bourbon",
-  }),
-  Object.freeze({
-    id: "liquor:captain-morgan",
-    kind: "liquor",
-    name: "Captain Morgan",
-    imageUrl: "/images/products/captain-morgan-original-classic.png",
-    untappdQuery: "Captain Morgan Original Spiced Rum",
-  }),
+]);
+
+const RETIRED_COMING_SOON_IDS = new Set([
+  "liquor:captain-morgan",
+  "liquor:don-julio-blanco-2",
+  "liquor:woodford-reserve",
 ]);
 
 const REQUIRED_COMING_SOON_LEGACY_IDS = Object.freeze({
@@ -101,13 +87,19 @@ export function getComingSoonKindLabel(kind, { compact = false } = {}) {
 
 export function mergeRequiredComingSoonItems(items = [], pmbPublishQueue = []) {
   const safeItems = Array.isArray(items)
-    ? items.filter((item) => item && typeof item === "object" && clean(item.id) && clean(item.name))
+    ? items.filter((item) => (
+        item
+        && typeof item === "object"
+        && clean(item.id)
+        && clean(item.name)
+        && !RETIRED_COMING_SOON_IDS.has(clean(item.id))
+      ))
     : [];
   const byId = new Map(safeItems.map((item) => [clean(item.id), { ...item }]));
 
   (Array.isArray(pmbPublishQueue) ? pmbPublishQueue : []).forEach((queuedItem) => {
     const item = getQueuedComingSoonProduct(queuedItem);
-    if (!item) return;
+    if (!item || RETIRED_COMING_SOON_IDS.has(item.id)) return;
     const existing = [...byId.values()].find((entry) => clean(entry.name).toLowerCase() === item.name.toLowerCase());
     byId.set(existing?.id || item.id, existing ? { ...item, ...existing } : item);
   });

@@ -10169,10 +10169,21 @@ async function sendComingSoonItemToPmb(id, { activate = false } = {}) {
   const item = comingSoonItems.find((entry) => entry.id === id);
   if (!item) return null;
 
-  const payload = {
-    ...buildPmbPayloadFromComingSoonItem(item),
-    ...(activate ? { isActive: true, isInUse: true, sendConfigUpdate: true } : {}),
-  };
+  let payload;
+  try {
+    payload = {
+      ...buildPmbPayloadFromComingSoonItem(item),
+      ...(activate ? { isActive: true, isInUse: true, sendConfigUpdate: true } : {}),
+    };
+  } catch (error) {
+    kegSyncMessage = clean(error?.message) || `${item.name} needs more information before it can be sent to PMB.`;
+    if (item.kind === "liquor") {
+      openComingSoonLiquorSetup(item);
+    } else {
+      renderKegLevels();
+    }
+    return null;
+  }
   if (!payload.pricePerOz) {
     kegSyncMessage = `${item.name} needs a tap wall price before PMB product creation.`;
     renderKegLevels();
@@ -10234,8 +10245,50 @@ async function sendComingSoonItemToPmb(id, { activate = false } = {}) {
   }
 }
 
+function getComingSoonLiquorCatalogPricing(item) {
+  if (item?.kind !== "liquor") return null;
+  const catalogKey = clean(item.id).replace(/^liquor:/, "");
+  return CATALOG_PRICING[catalogKey] || null;
+}
+
+function openComingSoonLiquorSetup(item) {
+  const catalogPricing = getComingSoonLiquorCatalogPricing(item);
+  const bottleCost = toNumber(item.bottleCost || item.kegCost || catalogPricing?.unitPrice);
+  const bottleOz = toNumber(item.bottleOz || item.kegOz || catalogPricing?.bottleOz);
+
+  switchTab("add");
+  switchAddProductType("liquor");
+  selectedUntappdLiquor = {
+    name: item.name,
+    producer: clean(item.brewery) || "On Par Entertainment",
+    brewery: clean(item.brewery) || "On Par Entertainment",
+    style: clean(item.style) || "Liquor",
+    abv: toNumber(item.abvPercent),
+    description: clean(item.description),
+    bottleImageUrl: clean(item.imageUrl),
+    untappdId: toNumber(item.untappdId),
+  };
+
+  if (liquorProductNameInput) liquorProductNameInput.value = item.name;
+  if (liquorProductPriceInput) liquorProductPriceInput.value = toNumber(item.chargePerOz || item.pricePerOz) || "";
+  if (liquorProductServingInput) liquorProductServingInput.value = toNumber(item.pourOz) || 1.5;
+  if (liquorProductAbvInput) liquorProductAbvInput.value = toNumber(item.abvPercent) || 40;
+  if (liquorProductBottleCostInput) liquorProductBottleCostInput.value = bottleCost || "";
+  if (liquorProductBottleOzInput) liquorProductBottleOzInput.value = bottleOz || "";
+  if (liquorProductNotesInput) liquorProductNotesInput.value = clean(item.description);
+
+  setLiquorProductStatus(`${item.name} needs a tap wall price. Enter it, then save.`, "error");
+  window.requestAnimationFrame(() => {
+    liquorProductForm?.scrollIntoView({ behavior: "smooth", block: "start" });
+    liquorProductPriceInput?.focus();
+  });
+}
+
 function buildPmbPayloadFromComingSoonItem(item) {
   const imageUrl = clean(item.imageUrl);
+  const liquorCatalogPricing = getComingSoonLiquorCatalogPricing(item);
+  const liquorBottleOz = toNumber(item.bottleOz || item.kegOz || liquorCatalogPricing?.bottleOz);
+  const liquorBottleCost = toNumber(item.bottleCost || item.kegCost || liquorCatalogPricing?.unitPrice);
   const payload = {
     productKind: item.kind === "recipe" ? "cocktail" : item.kind,
     plu: toNumber(item.plu) || "",
@@ -10246,8 +10299,12 @@ function buildPmbPayloadFromComingSoonItem(item) {
     style: item.kind === "beer" ? "Beer" : item.kind === "liquor" ? "Liquor" : "Draft Cocktail",
     abvPercent: toNumber(item.abvPercent),
     ibu: "0",
-    kegOz: item.kind === "beer" ? toNumber(item.kegOz) || STANDARD_BEER_KEG_OZ : STANDARD_COCKTAIL_KEG_OZ,
-    kegCost: toNumber(item.kegCost || item.batchCost),
+    kegOz: item.kind === "beer"
+      ? toNumber(item.kegOz) || STANDARD_BEER_KEG_OZ
+      : item.kind === "liquor"
+        ? liquorBottleOz
+        : STANDARD_COCKTAIL_KEG_OZ,
+    kegCost: item.kind === "liquor" ? liquorBottleCost : toNumber(item.kegCost || item.batchCost),
     targetMargin: toNumber(item.targetMargin),
     notes: item.description,
     imageUrl: imageUrl.startsWith("/") ? new URL(imageUrl, window.location.origin).href : imageUrl,

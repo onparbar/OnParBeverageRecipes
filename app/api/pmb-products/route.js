@@ -318,7 +318,7 @@ function getSafeImageBasename(value) {
     .slice(0, 64) || "product";
 }
 
-async function readImageSourceBuffer(imageUrl) {
+async function readImageSourceBuffer(imageUrl, { trustedBaseUrl = "" } = {}) {
   const source = String(imageUrl || "").trim();
   if (!source) return null;
 
@@ -343,15 +343,46 @@ async function readImageSourceBuffer(imageUrl) {
     throw new Error("PMB product image must use http or https.");
   }
 
-  const response = await fetchRemoteBuffer(parsedUrl, {
-    acceptedContentTypes: SAFE_IMAGE_TYPES,
-    headers: {
-      "User-Agent": "OnParBeverageDashboard/1.0",
-      Accept: "image/avif,image/webp,image/apng,image/png,image/jpeg,image/gif",
-    },
-    maxBytes: PRODUCT_IMAGE_SOURCE_MAX_BYTES,
-    timeoutMs: 10_000,
-  });
+  let trustedOrigin = "";
+  try {
+    trustedOrigin = trustedBaseUrl ? new URL(trustedBaseUrl).origin : "";
+  } catch {
+    trustedOrigin = "";
+  }
+
+  const headers = {
+    "User-Agent": "OnParBeverageDashboard/1.0",
+    Accept: "image/avif,image/webp,image/apng,image/png,image/jpeg,image/gif",
+  };
+  let response;
+  if (trustedOrigin && parsedUrl.origin === trustedOrigin) {
+    const directResponse = await fetch(parsedUrl, {
+      headers,
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+    });
+    const contentType = clean(directResponse.headers.get("content-type")).split(";")[0].toLowerCase();
+    const contentLength = Number(directResponse.headers.get("content-length") || 0);
+    if (contentLength > PRODUCT_IMAGE_SOURCE_MAX_BYTES) {
+      throw new Error("PMB product image source is too large. Use an image under 15MB before cropping.");
+    }
+    if (directResponse.ok && !SAFE_IMAGE_TYPES.includes(contentType)) {
+      throw new Error(`PMB product image returned an unsupported content type (${contentType || "unknown"}).`);
+    }
+    response = {
+      ok: directResponse.ok,
+      status: directResponse.status,
+      buffer: Buffer.from(await directResponse.arrayBuffer()),
+    };
+  } else {
+    response = await fetchRemoteBuffer(parsedUrl, {
+      acceptedContentTypes: SAFE_IMAGE_TYPES,
+      headers,
+      maxBytes: PRODUCT_IMAGE_SOURCE_MAX_BYTES,
+      timeoutMs: 10_000,
+    });
+  }
 
   if (!response.ok) {
     throw new Error(`PMB product image download failed (${response.status}).`);
@@ -366,8 +397,8 @@ async function readImageSourceBuffer(imageUrl) {
   return buffer;
 }
 
-async function buildPmbImageFile(imageUrl, productName) {
-  const sourceBuffer = await readImageSourceBuffer(imageUrl);
+async function buildPmbImageFile(imageUrl, productName, options = {}) {
+  const sourceBuffer = await readImageSourceBuffer(imageUrl, options);
   if (!sourceBuffer) return null;
 
   for (const quality of [88, 82, 76, 70, 64, 58, 52]) {
@@ -745,7 +776,9 @@ export async function GET(request) {
     if (cloneImageFor) {
       const sourceProduct = getCloneSourceProduct(products.productlist, cloneImageFor);
       const imageUrl = getCloneImageUrl(sourceProduct, config.baseUrl);
-      const imageFile = await buildPmbImageFile(imageUrl, sourceProduct.name || cloneImageFor);
+      const imageFile = await buildPmbImageFile(imageUrl, sourceProduct.name || cloneImageFor, {
+        trustedBaseUrl: config.baseUrl,
+      });
       if (!imageFile) {
         return NextResponse.json(
           { ok: false, error: `${cloneImageFor} does not have a PMB image.` },
@@ -804,7 +837,9 @@ export async function POST(request) {
       ? buildClonedProduct(input, plu, sourceProduct)
       : buildProduct(input, plu);
     const cloneImageUrl = sourceProduct ? getCloneImageUrl(sourceProduct, config.baseUrl) : "";
-    const imageFile = await buildPmbImageFile(input.imageUrl || cloneImageUrl, product.name);
+    const imageFile = await buildPmbImageFile(input.imageUrl || cloneImageUrl, product.name, {
+      trustedBaseUrl: input.imageUrl ? "" : sourceProduct ? config.baseUrl : "",
+    });
     if (sourceProduct && !imageFile) {
       throw new Error(`PMB did not provide the ${cloneSourceName} image, so the duplicate was not created.`);
     }

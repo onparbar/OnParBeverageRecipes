@@ -43,6 +43,9 @@ const recipeGrid = document.querySelector("#staff-recipe-grid");
 const prepStatusPanel = document.querySelector("#staff-prep-status");
 const prepSummary = document.querySelector("#staff-prep-summary");
 const prepList = document.querySelector("#staff-prep-list");
+const liquorStatusPanel = document.querySelector("#staff-liquor-status");
+const liquorSummary = document.querySelector("#staff-liquor-summary");
+const liquorList = document.querySelector("#staff-liquor-list");
 const orderStatusPanel = document.querySelector("#staff-order-status");
 const orderSummary = document.querySelector("#staff-order-summary");
 const orderList = document.querySelector("#staff-order-list");
@@ -64,6 +67,8 @@ const overviewTargets = [...document.querySelectorAll("[data-staff-section-targe
 const overviewWeek = document.querySelector("#staff-overview-week");
 const overviewPrepValue = document.querySelector("#staff-overview-prep-value");
 const overviewPrepDetail = document.querySelector("#staff-overview-prep-detail");
+const overviewLiquorValue = document.querySelector("#staff-overview-liquor-value");
+const overviewLiquorDetail = document.querySelector("#staff-overview-liquor-detail");
 const overviewOrderValue = document.querySelector("#staff-overview-order-value");
 const overviewOrderDetail = document.querySelector("#staff-overview-order-detail");
 const overviewRecipeValue = document.querySelector("#staff-overview-recipe-value");
@@ -707,40 +712,46 @@ function bindSmartReceivingEvents() {
 
 function renderStaffPrepPlan() {
   prepList.replaceChildren();
+  liquorList.replaceChildren();
   prepList.setAttribute("aria-busy", "false");
+  liquorList.setAttribute("aria-busy", "false");
   if (!prepPlan.available) {
     prepStatusPanel.dataset.state = "error";
+    liquorStatusPanel.dataset.state = "error";
     prepStatusPanel.textContent = prepPlan.message || "A manager has not published this week's cocktail prep plan yet.";
+    liquorStatusPanel.textContent = prepPlan.message || "A manager has not published this week's liquor plan yet.";
     prepSummary.textContent = "";
+    liquorSummary.textContent = "";
     prepList.append(createEmptyState("There are no current cocktail prep assignments to check off."));
+    liquorList.append(createEmptyState("There are no current liquor keg assignments to check off."));
     return;
   }
 
   delete prepStatusPanel.dataset.state;
-  prepStatusPanel.textContent = prepPlan.generatedAt
+  delete liquorStatusPanel.dataset.state;
+  const planMessage = prepPlan.generatedAt
     ? `Showing the shared ${formatPlanWeek(prepPlan.generatedAt)} plan.`
     : "Showing the current shared weekly plan.";
+  prepStatusPanel.textContent = planMessage;
+  liquorStatusPanel.textContent = planMessage;
   const liquorRefills = Array.isArray(prepPlan.liquorRefills) ? prepPlan.liquorRefills : [];
-  const taskTotal = prepPlan.totalCount + prepPlan.liquorRefillTotalCount;
-  const completedTotal = prepPlan.completedCount + prepPlan.liquorRefillCompletedCount;
-  prepSummary.textContent = taskTotal
-    ? `${formatNumber(completedTotal)} of ${formatNumber(taskTotal)} tasks complete`
-    : "No prep tasks this week.";
-  if (!prepPlan.items.length && !liquorRefills.length) {
-    prepList.append(createEmptyState("Nothing needs to be prepared from the current weekly plan."));
-    return;
-  }
-  if (prepPlan.items.length) prepList.append(createStaffPrepGroupTitle("Make Cocktails"));
-  prepPlan.items.forEach((item) => prepList.append(createStaffPrepItem(item)));
-  if (liquorRefills.length) prepList.append(createStaffPrepGroupTitle("Add Liquor To Kegs"));
-  liquorRefills.forEach((item) => prepList.append(createStaffPrepItem(item)));
-}
+  prepSummary.textContent = prepPlan.totalCount
+    ? `${formatNumber(prepPlan.completedCount)} of ${formatNumber(prepPlan.totalCount)} prepared`
+    : "No cocktails to make this week.";
+  liquorSummary.textContent = prepPlan.liquorRefillTotalCount
+    ? `${formatNumber(prepPlan.liquorRefillCompletedCount)} of ${formatNumber(prepPlan.liquorRefillTotalCount)} added`
+    : "No liquor to add this week.";
 
-function createStaffPrepGroupTitle(label) {
-  const heading = document.createElement("h3");
-  heading.className = "staff-prep-group-title";
-  heading.textContent = label;
-  return heading;
+  if (prepPlan.items.length) {
+    prepPlan.items.forEach((item) => prepList.append(createStaffPrepItem(item)));
+  } else {
+    prepList.append(createEmptyState("No cocktails need to be made this week."));
+  }
+  if (liquorRefills.length) {
+    liquorRefills.forEach((item) => liquorList.append(createStaffPrepItem(item)));
+  } else {
+    liquorList.append(createEmptyState("No liquor needs to be added to kegs this week."));
+  }
 }
 
 function createStaffPrepItem(item) {
@@ -1211,7 +1222,7 @@ function bindStaffSectionEvents() {
 }
 
 function switchStaffSection(section) {
-  const nextSection = ["overview", "prep", "recipes", "orders", "taps"].includes(section) ? section : "overview";
+  const nextSection = ["overview", "prep", "liquor", "recipes", "orders", "taps"].includes(section) ? section : "overview";
   sectionTabButtons.forEach((button) => {
     const selected = button.dataset.staffSectionTab === nextSection;
     button.classList.toggle("is-active", selected);
@@ -1238,9 +1249,14 @@ function renderStaffOverview() {
     const remainingPrep = Math.max(0, prepPlan.totalCount - prepPlan.completedCount);
     overviewPrepValue.textContent = `${formatNumber(remainingPrep)} left`;
     overviewPrepDetail.textContent = `${formatNumber(prepPlan.completedCount)} of ${formatNumber(prepPlan.totalCount)} prepared`;
+    const remainingLiquor = Math.max(0, prepPlan.liquorRefillTotalCount - prepPlan.liquorRefillCompletedCount);
+    overviewLiquorValue.textContent = `${formatNumber(remainingLiquor)} left`;
+    overviewLiquorDetail.textContent = `${formatNumber(prepPlan.liquorRefillCompletedCount)} of ${formatNumber(prepPlan.liquorRefillTotalCount)} added`;
   } else {
     overviewPrepValue.textContent = "No plan";
     overviewPrepDetail.textContent = "Waiting for the Monday plan";
+    overviewLiquorValue.textContent = "No plan";
+    overviewLiquorDetail.textContent = "Waiting for the Monday plan";
   }
 
   if (orderTracking.available) {

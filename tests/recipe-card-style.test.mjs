@@ -122,15 +122,20 @@ test("the employee view opens on a weekly overview with separate work tabs", asy
 
   assert.match(staffPageSource, /data-staff-section-tab="overview"/);
   assert.match(staffPageSource, /data-staff-section-tab="prep"/);
+  assert.match(staffPageSource, /data-staff-section-tab="liquor"/);
   assert.match(staffPageSource, /data-staff-section-tab="recipes"/);
   assert.match(staffPageSource, /data-staff-section-tab="orders"/);
   assert.match(staffPageSource, /className="panel is-active staff-overview-panel"/);
   assert.match(staffPageSource, /data-staff-section-target="prep"/);
+  assert.match(staffPageSource, /data-staff-section-target="liquor"/);
   assert.match(staffPageSource, /data-staff-section-target="orders"/);
   assert.match(staffPageSource, /data-staff-section-target="recipes"/);
+  assert.match(staffPageSource, /id="staff-liquor-panel"/);
   assert.match(staffDashboardSource, /function switchStaffSection\(section\)/);
   assert.match(staffDashboardSource, /function renderStaffOverview\(\)/);
-  assert.match(stylesheet, /\.staff-section-tabs \{[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/s);
+  assert.match(staffDashboardSource, /liquorList\.append\(createStaffPrepItem\(item\)\)/);
+  assert.match(stylesheet, /\.staff-section-tabs \{[^}]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/s);
+  assert.match(stylesheet, /\.staff-overview-grid \{[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/s);
 });
 
 test("cocktails in the employee prep list expand their matching recipe inline", () => {
