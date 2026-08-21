@@ -1079,7 +1079,6 @@ let parAgentStateOutbox = loadKegLevelsOutbox();
 let parAgentStateOutboxDurable = true;
 let weeklyPlanUpdating = false;
 let weeklyPlanRefreshMessage = "";
-let weeklyPlanGroupMode = "vendor";
 let weeklyOrderTracking = { available: false, generatedAt: "", drafts: [], adjustments: [], adjustmentCatalog: [], vendors: [], itemCount: 0, receivedCount: 0, notReceivedCount: 0, notReceivedItems: [] };
 let weeklyOrderTrackingMessage = "Loading shared order tracking...";
 let weeklyOrderTrackingRefreshRunning = false;
@@ -4857,10 +4856,10 @@ function renderInventory() {
   renderInventorySpeechAssistant();
 }
 
-function getWeeklyPlanInventoryItems() {
+function getWeeklyPlanInventoryItems({ live = false } = {}) {
   const mondaySnapshot = getCurrentMondayInventorySnapshot(inventoryHistory, new Date());
-  if (!mondaySnapshot) return [];
-  return (mondaySnapshot.items || [])
+  const sourceItems = mondaySnapshot?.items || (live ? getInventorySnapshotItems() : []);
+  return sourceItems
     .filter((snapshotItem) => (
       !isFoodDepartmentOrderedInventoryItem(snapshotItem.name)
       && toNumber(snapshotItem.parDisplay) > 0
@@ -4897,9 +4896,13 @@ function getCurrentMondayKegPlanSnapshot(now = new Date()) {
   return getCurrentMondayInventorySnapshot(inventoryHistory, now)?.kegPlanSnapshot || null;
 }
 
-function getWeeklyPlanRecommendations() {
+function getWeeklyPlanRecommendations({ live = false } = {}) {
   const frozenKegPlan = getCurrentMondayKegPlanSnapshot();
-  const sourceItems = Array.isArray(frozenKegPlan?.items) ? frozenKegPlan.items : [];
+  const sourceItems = Array.isArray(frozenKegPlan?.items)
+    ? frozenKegPlan.items
+    : live && Array.isArray(parAgentState?.recommendations?.items)
+      ? parAgentState.recommendations.items
+      : [];
   return sourceItems.map((item) => {
     if (item.isLiquorTap) {
       const orderProductName = normalizeIngredientAlias(
@@ -4946,8 +4949,8 @@ function getWeeklyPlanRecommendations() {
 }
 
 function hasPublishedWeeklyPlanRecommendations(now = new Date()) {
-  return Boolean(parAgentState?.recommendations?.generatedAt)
-    && isRecommendationForOperatingWeek(parAgentState.recommendations.generatedAt, now);
+  const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, now);
+  return Boolean(snapshot) && isRecommendationForOperatingWeek(snapshot.generatedAt, now);
 }
 
 function getWeeklyPlanModel() {
@@ -4955,8 +4958,8 @@ function getWeeklyPlanModel() {
   const plan = snapshot
     ? hydrateWeeklyPlanLiquorTapPricing(snapshot.plan)
     : buildWeeklyActionPlan({
-      inventoryItems: getWeeklyPlanInventoryItems(),
-      recommendations: getWeeklyPlanRecommendations(),
+      inventoryItems: getWeeklyPlanInventoryItems({ live: true }),
+      recommendations: getWeeklyPlanRecommendations({ live: true }),
     });
   return refreshWeeklyPlanMetadata(plan, {
     resolveBeerOrder: (item) => {
@@ -5341,18 +5344,21 @@ function getWeeklyPlanFreshness(plan) {
   );
   const mondayKegPlan = getCurrentMondayKegPlanSnapshot();
   const lockedSnapshot = Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date()));
+  const liveRecommendations = !lockedSnapshot && !mondayKegPlan
+    ? parAgentState?.recommendations
+    : null;
   const recommendationSummary = lockedSnapshot
     ? parAgentState?.recommendations?.summary || {}
-    : mondayKegPlan?.summary || {};
+    : mondayKegPlan?.summary || liveRecommendations?.summary || {};
   const inventorySnapshotCurrent = Boolean(mondayKegPlan);
   const readiness = evaluateWeeklyPlanReadiness({
     parInitialized: Boolean(parAgentState?.initialized),
     recommendationGeneratedAt: lockedSnapshot
       ? parAgentState?.recommendations?.generatedAt
-      : mondayKegPlan?.generatedAt,
+      : mondayKegPlan?.generatedAt || liveRecommendations?.generatedAt,
     recommendationError: lockedSnapshot ? "" : parAgentError || (parAgentStateOutbox ? "Keg Levels has an unsynced recovery operation." : ""),
     recommendationInventoryMissing: Boolean(recommendationSummary.inventoryStateMissing),
-    recommendationSourceCurrent: lockedSnapshot || Boolean(mondayKegPlan),
+    recommendationSourceCurrent: lockedSnapshot || Boolean(mondayKegPlan) || Boolean(liveRecommendations?.generatedAt),
     parInputsChangedAt: lockedSnapshot ? "" : parAgentInputsChangedAt,
     weeklyUsageInitialized: weeklyUsageSharedInitialized,
     weeklyUsageSavePending: lockedSnapshot ? false : weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites > 0 || Boolean(weeklyUsageSharedSaveTimer) || Boolean(weeklyUsageSharedOutbox),
@@ -7065,9 +7071,7 @@ function renderWeeklyPlan() {
   const summary = plan.summary;
   const freshness = getWeeklyPlanFreshness(plan);
   const planLocked = Boolean(getCurrentWeeklyPlanSnapshot(recommendations, new Date()));
-  const updatedText = recommendations?.generatedAt
-    ? "Thursday delivery · locked through Sunday"
-    : "Publish Monday for Thursday delivery.";
+  const updatedText = planLocked ? "Thursday delivery · locked through Sunday" : "Live needs";
   const priceNote = summary.estimatedPurchaseCostComplete
     ? ""
     : `${summary.missingPriceCount ? `${formatNumber(summary.missingPriceCount)} active line${summary.missingPriceCount === 1 ? " is" : "s are"} missing a price. ` : ""}The total shown is the known-price subtotal, not a complete spend total.`;
@@ -7081,7 +7085,6 @@ function renderWeeklyPlan() {
       <div class="weekly-plan-actions">
         ${ORDER_REHEARSAL_AVAILABLE ? `<button class="ghost-button" id="toggle-order-rehearsal" type="button">${orderRehearsalMode ? "Exit Rehearsal" : "Rehearsal"}</button>` : ""}
         <button class="primary-button" id="run-weekly-plan-agent" type="button"${parAgentRunning || weeklyPlanUpdating || planLocked ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Locking..." : planLocked ? "Plan locked through Sunday" : "Lock Monday Plan"}</button>
-        <label><span>Group purchases</span><select id="weekly-plan-group-mode"><option value="category"${weeklyPlanGroupMode === "category" ? " selected" : ""}>By category</option><option value="vendor"${weeklyPlanGroupMode === "vendor" ? " selected" : ""}>By vendor</option></select></label>
       </div>
     </header>
     <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : ""))}</p>
@@ -7099,21 +7102,15 @@ function renderWeeklyPlan() {
     <div class="weekly-plan-columns">
       <section class="weekly-plan-column">
         <div class="weekly-plan-column__header"><h2>Order This Week</h2></div>
-        ${weeklyPlanGroupMode === "vendor" ? renderWeeklyPlanByVendor(plan) : `
-          ${renderWeeklyPlanGroup("Beer Kegs", plan.orders.beerKegs.length, renderWeeklyPlanTapRows(plan.orders.beerKegs, { action: "Order", unit: "kegs" }), "beer")}
-          ${renderWeeklyPlanGroup("Liquor Tap Bottles", plan.orders.liquorTapBottles.length, renderWeeklyPlanLiquorTapRows(plan.orders.liquorTapBottles), "liquor")}
-          ${renderWeeklyPlanGroup("Liquor Bottles", plan.orders.liquor.length, renderWeeklyPlanInventoryRows(plan.orders.liquor), "liquor")}
-          ${renderWeeklyPlanGroup("Mixers", plan.orders.mixers.length, renderWeeklyPlanInventoryRows(plan.orders.mixers), "mixers")}
-          ${renderWeeklyPlanGroup("Other Supplies", plan.orders.supplies.length, renderWeeklyPlanInventoryRows(plan.orders.supplies))}
-        `}
+        ${renderWeeklyPlanByVendor(plan)}
       </section>
       <section class="weekly-plan-column weekly-plan-column--prep">
         <div class="weekly-plan-column__header"><h2>Cocktails To Make</h2></div>
         ${renderWeeklyPlanCocktailRows(plan.prep.cocktails)}
       </section>
     </div>
-    ${orderRehearsalMode ? "" : renderOwnerWeeklyOrderTracking()}
-    ${renderVendorOrderDraftWorkspace(plan, freshness)}
+    ${orderRehearsalMode || !planLocked ? "" : renderOwnerWeeklyOrderTracking()}
+    ${orderRehearsalMode || planLocked ? renderVendorOrderDraftWorkspace(plan, freshness) : ""}
     ${renderWeeklyPlanReview(plan)}
   `;
 
@@ -7123,10 +7120,6 @@ function renderWeeklyPlan() {
     weeklyOrderTrackingMessage = orderRehearsalMode
       ? "Rehearsal uses isolated fixture data."
       : "Live Weekly Plan restored.";
-    renderWeeklyPlan();
-  });
-  document.querySelector("#weekly-plan-group-mode")?.addEventListener("change", (event) => {
-    weeklyPlanGroupMode = event.currentTarget.value === "vendor" ? "vendor" : "category";
     renderWeeklyPlan();
   });
   bindOwnerWeeklyOrderTrackingEvents();
@@ -13187,6 +13180,7 @@ async function saveInventorySnapshot() {
     timeZone: "America/New_York",
     weekday: "short",
   }).format(now);
+  let outsideMondayReason = "";
   const recordCaptureEvent = async (event, code = "") => {
     await fetch("/api/dashboard-activity", {
       method: "POST",
@@ -13202,8 +13196,16 @@ async function saveInventorySnapshot() {
     renderInventoryPanels();
   };
   if (easternWeekday !== "Mon") {
-    await failCapture("capture is available at any time on Monday Eastern.", "MONDAY_SNAPSHOT_DAY_REQUIRED");
-    return;
+    outsideMondayReason = clean(window.prompt("Why are you saving this Monday snapshot late?") || "");
+    if (!outsideMondayReason) {
+      await failCapture("a reason is required when saving outside Monday.", "MONDAY_SNAPSHOT_REASON_REQUIRED");
+      return;
+    }
+    if (!confirmDashboardAction(
+      "Save this week's Monday snapshot outside Monday?",
+      [`Reason: ${outsideMondayReason}`],
+      "All normal data checks will still run.",
+    )) return;
   }
   if (getCurrentMondayInventorySnapshot(inventoryHistory, now)) {
     inventorySharedMessage = "This Monday snapshot is already saved.";
@@ -13290,6 +13292,7 @@ async function saveInventorySnapshot() {
       kegPlanSnapshot,
       reliableCapture: true,
       captureMetadata: {
+        outsideMondayReason,
         sourceFreshness: {
           inventory: "current",
           weeklyUsage: "current",
@@ -15843,7 +15846,12 @@ function getCatalogUnitCost(ingredient) {
   const preparedUnitCost = getPreparedIngredientFinishedUnitCost(ingredient.id, bottlePrice);
   if (preparedUnitCost) return preparedUnitCost;
   if (bottleOz && bottlePrice) return bottlePrice / bottleOz;
-  return ingredient.totalOz ? ingredient.totalCost / ingredient.totalOz : 0;
+  const catalogUnitCost = ingredient.totalOz ? ingredient.totalCost / ingredient.totalOz : 0;
+  if (catalogUnitCost) return catalogUnitCost;
+  const mappedBottleOz = toNumber(ingredient?.vendorProduct?.bottleOz);
+  const mappedBottlePrice = toNumber(ingredient?.vendorProduct?.unitPrice);
+  if (mappedBottleOz && mappedBottlePrice) return mappedBottlePrice / mappedBottleOz;
+  return 0;
 }
 
 function getCatalogCost(ingredient) {

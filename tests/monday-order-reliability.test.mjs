@@ -76,12 +76,28 @@ test("partial source data blocks capture without changing the prior state", () =
   assert.equal(base.snapshots.length, 0);
 });
 
-test("reliable capture has no fixed time but remains Monday Eastern only", () => {
+test("an outside-Monday capture requires a reason", () => {
   assert.throws(() => applyInventoryStateAction(initializedState(), "save-snapshot", {
     items,
     summary,
     kegPlanSnapshot,
     reliableCapture: true,
     captureMetadata,
-  }, "owner", new Date("2026-08-18T15:00:00.000Z")), (error) => error.code === "MONDAY_SNAPSHOT_DAY_REQUIRED");
+  }, "owner", new Date("2026-08-18T15:00:00.000Z")), (error) => error.code === "MONDAY_SNAPSHOT_REASON_REQUIRED");
+});
+
+test("an explained outside-Monday capture is saved for the Monday operating week", () => {
+  const state = applyInventoryStateAction(initializedState(), "save-snapshot", {
+    items,
+    summary,
+    kegPlanSnapshot,
+    reliableCapture: true,
+    captureMetadata: {
+      ...captureMetadata,
+      outsideMondayReason: "Inventory issues were corrected after Monday's count.",
+    },
+  }, "owner", new Date("2026-08-18T15:00:00.000Z"));
+  assert.equal(state.snapshots[0].weekOf, "2026-08-17");
+  assert.equal(state.snapshots[0].captureMetadata.capturedOutsideMonday, true);
+  assert.equal(state.snapshots[0].captureMetadata.outsideMondayReason, "Inventory issues were corrected after Monday's count.");
 });

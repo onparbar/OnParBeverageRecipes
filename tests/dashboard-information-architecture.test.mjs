@@ -232,8 +232,11 @@ test("custom cabinet bottles inherit the requested Proof and OHLQ mappings", () 
   assert.match(dashboardSource, /getVendorMapping\(id\) \|\| item\.vendorProduct/);
 });
 
-test("Weekly Plan requires and reads the current Monday inventory snapshot", () => {
+test("Weekly Plan previews live needs and locks from the current Monday inventory snapshot", () => {
   assert.match(dashboardSource, /getCurrentMondayInventorySnapshot\(inventoryHistory/);
+  assert.match(dashboardSource, /getInventorySnapshotItems\(\)/);
+  assert.match(dashboardSource, /parAgentState\.recommendations\.items/);
+  assert.match(dashboardSource, /Live needs/);
   assert.match(dashboardSource, /Save this week's Monday Inventory Snapshot before locking the plan/);
   assert.match(dashboardSource, /kegPlanSnapshot: mondaySnapshot\.kegPlanSnapshot/);
   assert.match(dashboardSource, /tapInputs: \(parAgentState\.recommendations\.items \|\| \[\]\)\.map/);
