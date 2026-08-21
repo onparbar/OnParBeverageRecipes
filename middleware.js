@@ -25,15 +25,29 @@ function isApiPath(pathname) {
   return pathname.startsWith("/api/");
 }
 
-function redirectToPublicPath(pathname, searchParams = new URLSearchParams()) {
-  const query = searchParams.toString();
-  const location = `${pathname}${query ? `?${query}` : ""}`;
-  return new NextResponse(null, {
-    status: 307,
-    headers: {
-      "Cache-Control": "no-store",
-      Location: location,
-    },
+const PUBLIC_HOSTS = new Set(["onparbev.com", "www.onparbev.com"]);
+
+function firstForwardedValue(value) {
+  return String(value || "").split(",")[0].trim().toLowerCase();
+}
+
+function getRedirectOrigin(request) {
+  const forwardedHost = firstForwardedValue(request.headers.get("x-forwarded-host"));
+  const requestHost = firstForwardedValue(request.headers.get("host"));
+  const publicHost = [forwardedHost, requestHost, request.nextUrl.hostname]
+    .map((host) => host.split(":")[0])
+    .find((host) => PUBLIC_HOSTS.has(host));
+
+  if (publicHost) return `https://${publicHost}`;
+  if (request.headers.get("cf-ray")) return "https://onparbev.com";
+  return request.nextUrl.origin;
+}
+
+function redirectToPublicPath(request, pathname, searchParams = new URLSearchParams()) {
+  const url = new URL(pathname, getRedirectOrigin(request));
+  url.search = searchParams.toString();
+  return NextResponse.redirect(url, {
+    headers: { "Cache-Control": "no-store" },
   });
 }
 
@@ -51,7 +65,7 @@ export async function middleware(request) {
 
   if (isPublicPath(pathname)) {
     if (isAuthed && pathname === "/login") {
-      return redirectToPublicPath("/");
+      return redirectToPublicPath(request, "/");
     }
     return NextResponse.next();
   }
@@ -59,7 +73,7 @@ export async function middleware(request) {
   if (isAuthed) {
     if (sessionRole === "employee") {
       if (pathname === "/") {
-        return redirectToPublicPath("/staff");
+        return redirectToPublicPath(request, "/staff");
       }
       if (!isEmployeeAllowedDashboardRequest({ pathname, method: request.method })) {
         if (isApiPath(pathname)) {
@@ -98,7 +112,7 @@ export async function middleware(request) {
   } else if (!authStatus.sessionSecretStrong) {
     loginParams.set("setup", "weak-session-secret");
   }
-  return redirectToPublicPath("/login", loginParams);
+  return redirectToPublicPath(request, "/login", loginParams);
 }
 
 export const config = {
