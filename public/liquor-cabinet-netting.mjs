@@ -44,10 +44,17 @@ function findRecipe(recommendation, recipes) {
     if (exact) return exact;
   }
   const nameKey = key(recommendation?.orderProductName || recommendation?.name, { recipe: true });
-  return recipes.find((recipe) => key(recipe?.title || recipe?.name, { recipe: true }) === nameKey) || null;
+  const exact = recipes.find((recipe) => key(recipe?.title || recipe?.name, { recipe: true }) === nameKey);
+  if (exact) return exact;
+  if (/^(?:strawberry|watermelon|peach|blueberry) margarita$/.test(nameKey)) {
+    return recipes.find((recipe) => /strawberry watermelon peach blueberry marg/.test(
+      key(recipe?.title || recipe?.name, { recipe: true }),
+    )) || null;
+  }
+  return null;
 }
 
-function getCabinetAvailability({ recommendations, inventoryItems, recipes }) {
+function getProjectedCocktailOz({ recommendations, inventoryItems, recipes }) {
   const projectedOzById = new Map();
   let unresolvedCocktail = false;
 
@@ -69,16 +76,46 @@ function getCabinetAvailability({ recommendations, inventoryItems, recipes }) {
       });
     });
 
-  if (unresolvedCocktail) return new Map();
+  return unresolvedCocktail ? null : projectedOzById;
+}
+
+export function getLiquorCabinetWeeklyBottleNeeds({
+  recommendations = [],
+  inventoryItems = [],
+  recipes = [],
+} = {}) {
+  const sourceInventory = Array.isArray(inventoryItems) ? inventoryItems : [];
+  const projectedOzById = getProjectedCocktailOz({
+    recommendations: Array.isArray(recommendations) ? recommendations : [],
+    inventoryItems: sourceInventory,
+    recipes: Array.isArray(recipes) ? recipes : [],
+  });
+  if (!projectedOzById) return null;
+
+  const needs = new Map();
+  for (const item of sourceInventory.filter(isLiquorInventoryItem)) {
+    const id = clean(item.id);
+    const projectedOz = projectedOzById.get(id) || 0;
+    const bottleOz = number(item?.bottleOz || item?.vendorProduct?.bottleOz);
+    if (projectedOz > 0 && !(bottleOz > 0)) return null;
+    needs.set(id, {
+      item,
+      projectedOz,
+      requiredBottles: projectedOz > 0 ? Math.ceil(projectedOz / bottleOz) : 0,
+    });
+  }
+  return needs;
+}
+
+function getCabinetAvailability({ recommendations, inventoryItems, recipes }) {
+  const weeklyNeeds = getLiquorCabinetWeeklyBottleNeeds({ recommendations, inventoryItems, recipes });
+  if (!weeklyNeeds) return new Map();
 
   const availability = new Map();
   inventoryItems.filter(isLiquorInventoryItem).forEach((item) => {
     const rawOnHand = item?.onHandDisplay ?? item?.onHand;
     if (clean(rawOnHand) === "") return;
-    const projectedOz = projectedOzById.get(clean(item.id)) || 0;
-    const bottleOz = number(item?.bottleOz || item?.vendorProduct?.bottleOz);
-    if (projectedOz > 0 && !(bottleOz > 0)) return;
-    const reservedBottles = projectedOz > 0 ? Math.ceil(projectedOz / bottleOz) : 0;
+    const reservedBottles = weeklyNeeds.get(clean(item.id))?.requiredBottles || 0;
     const availableBottles = Math.max(0, Math.floor(number(rawOnHand)) - reservedBottles);
     [item.id, item.name, item.linkedIngredientName, item.vendorProduct?.productName].forEach((value) => {
       const identity = key(value);

@@ -52,7 +52,7 @@ test("projects last-week category sales from exact pours and verified per-ounce 
   );
 });
 
-test("keeps the selected wall separate and discloses pours without a verified price", () => {
+test("keeps beer and cocktails on the selected wall while including venue liquor", () => {
   const items = [
     item({ id: "main-beer", tapNumber: 21, history: [pmb(latestLabel, 100)] }),
     item({ id: "main-cocktail", tapNumber: 47, type: "Cocktail", history: [pmb(latestLabel, 50)] }),
@@ -65,12 +65,32 @@ test("keeps the selected wall separate and discloses pours without a verified pr
   });
 
   assert.equal(mix.projectedSales, 200);
-  assert.equal(mix.capturedTapCount, 2);
+  assert.equal(mix.capturedTapCount, 3);
   assert.equal(mix.pricedTapCount, 1);
-  assert.equal(mix.unpricedTapCount, 1);
+  assert.equal(mix.unpricedTapCount, 2);
   assert.deepEqual(
     mix.categories.map((row) => [row.category, row.sharePercent]),
     [["cocktail", 0], ["beer", 100], ["liquor", 0]],
+  );
+});
+
+test("includes Patio and Karaoke liquor in a Main projected sales mix", () => {
+  const mix = buildLastWeekProjectedSalesMix([
+    item({ id: "main-beer", tapNumber: 21, history: [pmb(latestLabel, 100)] }),
+    item({ id: "patio-liquor", tapNumber: 1, type: "Shots", displayUnit: "oz", history: [pmb(latestLabel, 20)] }),
+    item({ id: "karaoke-liquor", tapNumber: 83, type: "Shots", displayUnit: "oz", history: [pmb(latestLabel, 30)] }),
+  ], {
+    wall: "main",
+    getSellingPricePerOz: (source) => source.id === "main-beer" ? 2 : 5,
+  });
+
+  assert.deepEqual(
+    mix.categories.map((row) => [row.category, row.projectedSales, row.sharePercent]),
+    [
+      ["cocktail", 0, 0],
+      ["beer", 200, 44],
+      ["liquor", 250, 56],
+    ],
   );
 });
 

@@ -219,9 +219,10 @@ export function buildLastWeekPourLeaders(
 }
 
 /**
- * Estimates the selected wall's latest saved weekly sales as exact PMB poured
- * ounces multiplied by the caller's current verified selling price per ounce.
- * The percentages intentionally exclude taps without a verified current price.
+ * Estimates the latest saved weekly sales from PMB poured ounces and the
+ * caller's current selling price per ounce. Beer and cocktail taps follow the
+ * selected wall; liquor combines Patio and Karaoke so Main still has a venue
+ * liquor contribution. Taps without a usable current price remain excluded.
  */
 export function buildLastWeekProjectedSalesMix(
   items = [],
@@ -247,7 +248,13 @@ export function buildLastWeekProjectedSalesMix(
   let pricedTapCount = 0;
 
   sourceItems
-    .filter((item) => resolveWall(item) === clean(wall).toLowerCase())
+    .filter((item) => {
+      const category = resolveCategory(item);
+      const itemWall = resolveWall(item);
+      return category === "liquor"
+        ? itemWall === "patio" || itemWall === "karaoke"
+        : itemWall === clean(wall).toLowerCase();
+    })
     .forEach((item) => {
       const entries = (Array.isArray(item?.history) ? item.history : [])
         .filter((entry) => getWeekStartTime(entry?.label) === latestTime);

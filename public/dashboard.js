@@ -139,7 +139,10 @@ import {
 } from "./coming-soon-items.mjs";
 import { buildVendorOrderDrafts } from "./vendor-order-drafts.mjs";
 import { buildProofPrepOrderContext } from "./proof-prep-replacements.mjs";
-import { netLiquorTapRecommendations } from "./liquor-cabinet-netting.mjs";
+import {
+  getLiquorCabinetWeeklyBottleNeeds,
+  netLiquorTapRecommendations,
+} from "./liquor-cabinet-netting.mjs";
 import { selectPmbCurrentTapSnapshot } from "./pmb-current-tap-snapshot.mjs";
 import { applyMappedInventoryPackageRule } from "./inventory-product-rules.mjs";
 import {
@@ -4546,6 +4549,18 @@ function getPricingAdvisorCurrentPrice(livePrice) {
   return servingOz ? toNumber(single?.price) / servingOz : 0;
 }
 
+function getAverageLiquorSellingPricePerOz(livePrice) {
+  const portionRates = getLiveTapPortions(livePrice).flatMap((portion) => {
+    const price = toNumber(portion?.price);
+    const servingOz = toNumber(portion?.quantityOz) || getPortionServingOz(portion);
+    return price > 0 && servingOz > 0 ? [price / servingOz] : [];
+  });
+  if (portionRates.length) {
+    return portionRates.reduce((total, rate) => total + rate, 0) / portionRates.length;
+  }
+  return toNumber(livePrice?.chargePerOz);
+}
+
 function getRecipePricingAdvisorTimestamp(recipe) {
   const pricedIngredients = (recipe?.ingredients || []).filter((ingredient) => (
     toNumber(ingredient.oz) > 0 && getIngredientCost(ingredient).cost > 0
@@ -4875,7 +4890,27 @@ function renderInventory() {
 function getWeeklyPlanInventoryItems({ live = false } = {}) {
   const mondaySnapshot = getCurrentMondayInventorySnapshot(inventoryHistory, new Date());
   const sourceItems = mondaySnapshot?.items || (live ? getInventorySnapshotItems() : []);
+  const frozenKegPlan = getCurrentMondayKegPlanSnapshot();
+  const recommendationItems = Array.isArray(frozenKegPlan?.items)
+    ? frozenKegPlan.items
+    : live && Array.isArray(parAgentState?.recommendations?.items)
+      ? parAgentState.recommendations.items
+      : [];
+  const liquorBottleNeeds = getLiquorCabinetWeeklyBottleNeeds({
+    recommendations: recommendationItems,
+    inventoryItems,
+    recipes,
+  });
   return sourceItems
+    .map((snapshotItem) => {
+      if (!/liquor/i.test(clean(snapshotItem.group)) || !liquorBottleNeeds) return snapshotItem;
+      const requiredBottles = liquorBottleNeeds.get(clean(snapshotItem.id))?.requiredBottles || 0;
+      const onHand = Math.max(0, Math.floor(toNumber(snapshotItem.onHandDisplay)));
+      return {
+        ...snapshotItem,
+        orderDisplay: String(Math.max(0, requiredBottles - onHand)),
+      };
+    })
     .filter((snapshotItem) => (
       !isFoodDepartmentOrderedInventoryItem(snapshotItem.name)
       && toNumber(snapshotItem.parDisplay) > 0
@@ -5692,18 +5727,11 @@ function getMondayRunModel(plan, freshness) {
             : "Set up",
     },
     {
-      id: "snapshot",
-      label: "Save snapshot",
-      target: "inventory",
-      complete: mondaySnapshotSaved,
-      status: mondaySnapshotSaved ? "Saved" : "Save",
-    },
-    {
       id: "plan",
-      label: "Lock plan",
+      label: "Save & lock plan",
       target: "weekly-plan",
       complete: planLocked,
-      status: planLocked ? "Locked" : freshness.readiness?.actionable ? "Ready" : "Waiting",
+      status: planLocked ? "Locked" : mondaySnapshotSaved ? "Snapshot saved" : freshness.readiness?.actionable ? "Ready" : "Waiting",
     },
     {
       id: "orders",
@@ -5770,6 +5798,19 @@ function renderMondayRun(run) {
           </li>
         `).join("")}
       </ol>
+    </section>
+  `;
+}
+
+function renderMondayRunCompact(run) {
+  const progress = run.steps.length ? Math.round((run.completedCount / run.steps.length) * 100) : 0;
+  return `
+    <section class="monday-run monday-run--compact" aria-label="Monday Run">
+      <header class="monday-run__header">
+        <div><h2>Monday Run</h2><span>${formatNumber(run.completedCount)} / ${formatNumber(run.steps.length)}</span></div>
+        <button class="${run.complete ? "ghost-button" : "primary-button"}" type="button" data-dashboard-target="weekly-plan">${run.complete ? "Review" : "Continue"}</button>
+      </header>
+      <div class="monday-run__progress" role="progressbar" aria-label="Monday Run progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="--monday-run-progress: ${progress}%"></span></div>
     </section>
   `;
 }
@@ -5846,7 +5887,6 @@ function renderDashboardOverview() {
     <section class="thirty-second-briefing" aria-labelledby="thirty-second-briefing-title">
       <header>
         <h2 id="thirty-second-briefing-title">30-second briefing</h2>
-        <button class="ghost-button" type="button" data-read-dashboard-briefing>Listen</button>
       </header>
       <div class="thirty-second-briefing__lines">
         ${briefing.lines.map((item) => `
@@ -5858,7 +5898,7 @@ function renderDashboardOverview() {
       </div>
     </section>
 
-    ${renderMondayRun(mondayRun)}
+    ${renderMondayRunCompact(mondayRun)}
 
     <section class="dashboard-kpi-grid" aria-label="Weekly operations summary">
       ${overview.kpis.map((kpi) => {
@@ -5878,11 +5918,6 @@ function renderDashboardOverview() {
 
     <section class="dashboard-beverage-pulse" id="dashboard-beverage-pulse" aria-labelledby="dashboard-beverage-pulse-title"></section>
   `;
-  dashboardOverview.querySelector("[data-read-dashboard-briefing]")?.addEventListener("click", () => {
-    if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance !== "function") return;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(new SpeechSynthesisUtterance(briefing.voiceText));
-  });
   renderDashboardBeveragePulse();
 }
 
@@ -5907,7 +5942,7 @@ function getWeeklyUsageItemSellingRate(item) {
   }
   const category = getWeeklyUsagePerformanceCategory(item);
   const sellingPricePerOz = category === "liquor"
-    ? getPricingAdvisorCurrentPrice(livePrice)
+    ? getAverageLiquorSellingPricePerOz(livePrice)
     : toNumber(livePrice.chargePerOz);
   return sellingPricePerOz > 0
     ? { sellingPricePerOz }
@@ -6221,7 +6256,7 @@ function renderDashboardProjectedSalesMix(mix) {
   }
   const coverageCopy = mix.unpricedTapCount
     ? `${formatNumber(mix.unpricedTapCount)} poured tap${mix.unpricedTapCount === 1 ? " was" : "s were"} left out because a current price was unavailable.`
-    : "All captured taps on this wall had a current price.";
+    : "All captured taps were priced.";
   return `
     <aside class="dashboard-pulse-sales-mix">
       <div class="dashboard-pulse-sales-mix__header">
@@ -6240,7 +6275,7 @@ function renderDashboardProjectedSalesMix(mix) {
           </div>
         `).join("")}
       </div>
-      <p>Exact PMB ounces × current prices. ${escapeHtml(coverageCopy)}</p>
+      <p>PMB ounces × current prices · liquor uses an average. ${escapeHtml(coverageCopy)}</p>
     </aside>
   `;
 }
@@ -7110,6 +7145,7 @@ function renderWeeklyPlan() {
     estimatedKnownPurchaseCost: Math.max(0, toNumber(plan.summary.estimatedKnownPurchaseCost) - deferredOrderCost),
   };
   const planLocked = Boolean(getCurrentWeeklyPlanSnapshot(recommendations, new Date()));
+  const mondayRun = getMondayRunModel(plan, freshness);
   const updatedText = planLocked ? "Thursday delivery · locked through Sunday" : "Live needs";
   const priceNote = summary.estimatedPurchaseCostComplete
     ? ""
@@ -7123,10 +7159,11 @@ function renderWeeklyPlan() {
       </div>
       <div class="weekly-plan-actions">
         ${ORDER_REHEARSAL_AVAILABLE ? `<button class="ghost-button" id="toggle-order-rehearsal" type="button">${orderRehearsalMode ? "Exit Rehearsal" : "Rehearsal"}</button>` : ""}
-        <button class="primary-button" id="run-weekly-plan-agent" type="button"${parAgentRunning || weeklyPlanUpdating || planLocked ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Locking..." : planLocked ? "Plan locked through Sunday" : "Lock Monday Plan"}</button>
+        <button class="primary-button" id="run-weekly-plan-agent" type="button"${parAgentRunning || weeklyPlanUpdating || planLocked ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Saving & locking..." : planLocked ? "Plan locked through Sunday" : "Save & Lock Plan"}</button>
       </div>
     </header>
     <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : ""))}</p>
+    ${renderMondayRun(mondayRun)}
     ${renderWeeklyPlanReadiness(freshness.readiness)}
     ${renderWeeklyPlanProvenance(freshness)}
     <div class="weekly-plan-stats">
@@ -10903,24 +10940,22 @@ async function runWeeklyPlanUpdate() {
     renderWeeklyPlan();
     return;
   }
-  if (!getCurrentMondayInventorySnapshot(inventoryHistory, new Date())) {
-    weeklyPlanRefreshMessage = "Save this week's Monday Inventory Snapshot before locking the plan.";
-    renderWeeklyPlan();
-    return;
-  }
-  const frozenKegPlan = getCurrentMondayKegPlanSnapshot();
-  if (!frozenKegPlan) {
-    weeklyPlanRefreshMessage = "Resave this week's Monday Snapshot so it includes PMB keg levels, backup/on-hand kegs, and cocktail prep needs.";
-    renderWeeklyPlan();
-    return;
-  }
-
   weeklyPlanUpdating = true;
   parAgentError = "";
-  weeklyPlanRefreshMessage = "Locking the order and cocktail plan from the saved Monday snapshot...";
+  weeklyPlanRefreshMessage = "Saving the Monday snapshot and locking its order and cocktail plan...";
   renderWeeklyPlan();
 
   try {
+    if (!getCurrentMondayInventorySnapshot(inventoryHistory, new Date())) {
+      const snapshotSaved = await saveInventorySnapshot();
+      if (!snapshotSaved) {
+        throw new Error(inventorySharedMessage || "The Monday snapshot could not be saved.");
+      }
+    }
+    const frozenKegPlan = getCurrentMondayKegPlanSnapshot();
+    if (!frozenKegPlan) {
+      throw new Error("The Monday snapshot does not include verified keg levels, on-hand kegs, and cocktail prep needs.");
+    }
     const published = await publishCurrentWeeklyPlanSnapshot();
     if (!published) throw new Error("The saved Monday snapshot could not be locked for the week.");
 
@@ -12247,7 +12282,6 @@ function renderInventorySummary(visibleItems, reorderItems) {
     <div class="summary-line"><span>Items to reorder</span><strong>${reorderItems.length}</strong></div>
     <div class="summary-line"><span>Reorder cost</span><strong>${money(reorderCost)}</strong></div>
     <div class="sync-panel inventory-actions-panel">
-      <button class="primary-button" id="save-inventory-snapshot" type="button"${inventorySharedSaving || !inventorySharedInitialized ? " disabled" : ""}>${inventorySharedSaving ? "Saving..." : inventorySharedInitialized ? "Save Monday Snapshot" : "Shared setup required"}</button>
       <button class="ghost-button" id="clear-inventory-on-hand" type="button"${inventorySharedSaving ? " disabled" : ""}>Clear on hand</button>
       ${inventorySharedProvisioned && !inventorySharedInitialized ? '<button class="ghost-button" id="initialize-shared-inventory" type="button">Import from service computer</button>' : ""}
       ${inventorySharedSaveError || !inventorySharedInitialized ? `<p class="sync-status">${escapeHtml(inventorySharedMessage)}</p>` : ""}
@@ -12259,7 +12293,6 @@ function renderInventorySummary(visibleItems, reorderItems) {
 }
 
 function bindInventorySummaryEvents() {
-  document.querySelector("#save-inventory-snapshot")?.addEventListener("click", saveInventorySnapshot);
   document.querySelector("#clear-inventory-on-hand")?.addEventListener("click", clearAllInventoryOnHand);
   document.querySelector("#initialize-shared-inventory")?.addEventListener(
     "click",
@@ -13324,26 +13357,26 @@ async function saveInventorySnapshot() {
     outsideMondayReason = clean(window.prompt("Why are you saving this Monday snapshot late?") || "");
     if (!outsideMondayReason) {
       await failCapture("a reason is required when saving outside Monday.", "MONDAY_SNAPSHOT_REASON_REQUIRED");
-      return;
+      return false;
     }
     if (!confirmDashboardAction(
       "Save this week's Monday snapshot outside Monday?",
       [`Reason: ${outsideMondayReason}`],
       "All normal data checks will still run.",
-    )) return;
+    )) return false;
   }
   if (getCurrentMondayInventorySnapshot(inventoryHistory, now)) {
     inventorySharedMessage = "This Monday snapshot is already saved.";
     renderInventoryPanels();
-    return;
+    return true;
   }
   if (!inventorySharedInitialized) {
     setInventorySharedStatus("Monday snapshots cannot be shared until the service computer completes the one-time inventory import.");
-    return;
+    return false;
   }
   if (kegSyncLoading) {
     setInventorySharedStatus("PMB keg levels are still loading. Save the Monday snapshot after the refresh finishes.");
-    return;
+    return false;
   }
 
   const realityCheck = getInventoryRealityCheckModel();
@@ -13354,7 +13387,7 @@ async function saveInventorySnapshot() {
       : "Review the unusual counts before saving the Monday snapshot.";
     renderInventoryPanels();
     renderInventoryRealityCheck(realityCheck);
-    return;
+    return false;
   }
   document.querySelector("#inventory-reality-check")?.remove();
 
@@ -13364,11 +13397,11 @@ async function saveInventorySnapshot() {
   const usageResult = await runPmbWeeklyUsageSync();
   if (!usageResult?.ok || !await flushPendingSharedWeeklyUsageSave()) {
     await failCapture(usageResult?.error || weeklyUsageSharedSaveError || "Weekly Usage could not be saved.", "WEEKLY_USAGE_NOT_READY");
-    return;
+    return false;
   }
   if (!await flushPendingParAgentStateSync()) {
     await failCapture("backup/on-hand keg counts could not be saved.", "KEG_COUNTS_NOT_READY");
-    return;
+    return false;
   }
   const levelsLoaded = await runKegLevelSync();
   const summary = getInventorySnapshotSummary();
@@ -13376,11 +13409,11 @@ async function saveInventorySnapshot() {
     await failCapture(levelsLoaded
       ? `PMB returned ${summary.liveTapCount} of ${summary.tapCount} configured taps. Refresh Keg Levels and try again.`
       : kegSyncMessage, "PMB_LEVELS_NOT_READY");
-    return;
+    return false;
   }
   if (!liveTapPricingUpdatedAt) {
     await failCapture("current PMB pricing has not been verified.", "PRICING_NOT_READY");
-    return;
+    return false;
   }
 
   setInventorySharedStatus("Calculating and freezing Monday keg orders and cocktail prep...", true);
@@ -13406,7 +13439,7 @@ async function saveInventorySnapshot() {
     : null;
   if (!kegPlanSnapshot) {
     await failCapture(parAgentMessage || "keg and cocktail recommendations could not be calculated.", "RECOMMENDATIONS_NOT_READY");
-    return;
+    return false;
   }
 
   const state = await runSharedInventoryAction(
@@ -13456,7 +13489,9 @@ async function saveInventorySnapshot() {
       : "Monday snapshot saved, but the cleared backup/on-hand keg fields still need to finish syncing.";
     renderInventoryHistory();
     renderInventoryPanels();
+    return true;
   }
+  return false;
 }
 
 function getInventorySnapshotSummary() {

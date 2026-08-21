@@ -277,6 +277,27 @@ test("Main beer keeps one extra keg and can recommend two for a high-usage tap",
   assert.match(result.reason, /keep 2 unopened backup kegs/);
 });
 
+test("standard Main beer orders one keg when connected plus on hand is below weekly average plus one backup", () => {
+  const tap = {
+    ...beerTap("TRUTH 1", 36),
+    key: "main-36",
+    wall: "Main",
+  };
+  const result = buildRawRecommendation(
+    tap,
+    { fillLevelPercent: 10, rawKegSize: 1984, rawKegSizeDp: 0 },
+    [{ volumeOz: 793.6 }],
+    { onHandOverrides: {}, onDeckOverrides: {} },
+    {},
+  );
+
+  assert.equal(result.currentStockKegs, 0.1);
+  assert.equal(result.avgWeeklyKegs, 0.4);
+  assert.equal(result.targetStockKegs, 1.4);
+  assert.equal(result.gapKegs, 1.3);
+  assert.equal(result.orderQty, 1);
+});
+
 test("named Main beers keep high coverage even below the usage threshold", () => {
   ["Astra Red Cream Soda 1", "Blake's Triple Jam 1", "Guinness Draught 1"].forEach((name, index) => {
     const tap = {

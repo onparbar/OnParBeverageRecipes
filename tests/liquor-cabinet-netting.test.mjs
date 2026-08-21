@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { netLiquorTapRecommendations } from "../public/liquor-cabinet-netting.mjs";
+import {
+  getLiquorCabinetWeeklyBottleNeeds,
+  netLiquorTapRecommendations,
+} from "../public/liquor-cabinet-netting.mjs";
 
 const titos = {
   id: "tito-s",
@@ -75,4 +78,41 @@ test("allocates shared cabinet stock only once across matching liquor taps", () 
 
   assert.equal(result[0].orderQty, 0);
   assert.equal(result[1].orderQty, 1);
+});
+
+test("recognizes a flavored margarita from the shared margarita recipe without disabling other liquor netting", () => {
+  const result = netLiquorTapRecommendations({
+    recommendations: [
+      { name: "Blueberry Margarita (Jose Cuervo) 1", actionType: "make", orderQty: 1 },
+      refill,
+    ],
+    inventoryItems: [titos],
+    recipes: [{
+      title: "Strawberry/Watermelon/Peach/Blueberry Marg (Tequilla)",
+      ingredients: [{ name: "Jose Cuervo", oz: 40 }],
+    }],
+  });
+
+  assert.equal(result[1].cabinetUsedQty, 2);
+  assert.equal(result[1].orderQty, 0);
+});
+
+test("calculates weekly liquor bottle needs without turning an unused par gap into an order", () => {
+  const bulleit = {
+    id: "bulleit-bourbon",
+    name: "Bulleit Bourbon",
+    group: "Liquor Cabinet",
+    onHandDisplay: "14",
+    bottleOz: 33.8,
+  };
+  const needs = getLiquorCabinetWeeklyBottleNeeds({
+    recommendations: [
+      { name: "Vodka Cran (Tito's) 1", orderProductName: "Vodka Cran (Tito's) 1", actionType: "make", orderQty: 1 },
+    ],
+    inventoryItems: [titos, bulleit],
+    recipes: [vodkaCran],
+  });
+
+  assert.equal(needs.get("tito-s").requiredBottles, 2);
+  assert.equal(needs.get("bulleit-bourbon").requiredBottles, 0);
 });

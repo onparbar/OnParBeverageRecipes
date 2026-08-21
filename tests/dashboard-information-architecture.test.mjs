@@ -72,7 +72,7 @@ test("Dashboard owns the combined beverage pulse instead of duplicating it in We
 });
 
 test("Weekly Plan uses one Monday lock action without print or CSV controls", () => {
-  assert.match(dashboardSource, /Lock Monday Plan/);
+  assert.match(dashboardSource, /Save & Lock Plan/);
   assert.doesNotMatch(dashboardSource, /id="export-weekly-plan"/);
   assert.doesNotMatch(dashboardSource, /id="print-weekly-plan"/);
   assert.doesNotMatch(dashboardSource, /function exportWeeklyPlanCsv/);
@@ -239,7 +239,8 @@ test("Weekly Plan previews live needs and locks from the current Monday inventor
   assert.match(dashboardSource, /getInventorySnapshotItems\(\)/);
   assert.match(dashboardSource, /parAgentState\.recommendations\.items/);
   assert.match(dashboardSource, /Live needs/);
-  assert.match(dashboardSource, /Save this week's Monday Inventory Snapshot before locking the plan/);
+  assert.match(dashboardSource, /Save & Lock Plan/);
+  assert.doesNotMatch(dashboardSource, /id="save-inventory-snapshot"/);
   assert.match(dashboardSource, /kegPlanSnapshot: mondaySnapshot\.kegPlanSnapshot/);
   assert.match(dashboardSource, /tapInputs: \(parAgentState\.recommendations\.items \|\| \[\]\)\.map/);
   assert.match(dashboardSource, /backup\/on-hand keg fields are cleared for the next count/);
@@ -273,7 +274,7 @@ test("the initial Dashboard uses a light visual beverage pulse and change-only O
   assert.match(dashboardSource, /No liquor pours were saved for the Patio or Karaoke wall last week/);
   assert.match(dashboardSource, /Projected sales mix/);
   assert.match(dashboardSource, /const projectedSalesMix = buildLastWeekProjectedSalesMix\(/);
-  assert.match(dashboardSource, /Exact PMB ounces × current prices/);
+  assert.match(dashboardSource, /PMB ounces × current prices · liquor uses an average/);
   assert.match(dashboardSource, /dashboard-pulse-bar/);
   assert.match(dashboardSource, /data-seller-ranking-wall/);
   assert.match(dashboardSource, /Main wall/);
