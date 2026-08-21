@@ -35,8 +35,11 @@ test("staff bundle does not contain owner pricing, ordering, or browser-storage 
   });
 });
 
-test("staff profile guard detects owner storage without reading or mutating its values", async () => {
+test("staff profile guard protects employee sessions while allowing an intentional owner preview", async () => {
   const staffBundle = await readProjectFile("public/staff-dashboard.js");
+  assert.match(staffBundle, /const isOwnerPreview = session\.role === "owner"/);
+  assert.match(staffBundle, /!\["employee", "owner"\]\.includes\(session\.role\)/);
+  assert.match(staffBundle, /!isOwnerPreview && !profileCheck\.safe && !isLocalStaffPreview\(\)/);
   assert.match(staffBundle, /window\.localStorage\.length/);
   assert.match(staffBundle, /window\.localStorage\.key\(index\)/);
   assert.match(staffBundle, /key\.startsWith\("cocktail-dashboard-"\)/);
@@ -85,10 +88,10 @@ test("staff page loads only its dedicated bundle", async () => {
   assert.match(await readProjectFile("public/staff-dashboard.js"), /Quantity received/);
 });
 
-test("middleware redirects employee root access and blocks non-staff assets", async () => {
+test("middleware redirects employee root access, allows owner staff previews, and blocks non-staff assets", async () => {
   const middlewareSource = await readProjectFile("middleware.js");
   assert.match(middlewareSource, /sessionRole === "employee"/);
   assert.match(middlewareSource, /pathname === "\/"[\s\S]*getPublicUrl\(request, "\/staff"\)/);
   assert.match(middlewareSource, /!isEmployeeAllowedDashboardRequest/);
-  assert.match(middlewareSource, /pathname === "\/staff"[\s\S]*getPublicUrl\(request, "\/"\)/);
+  assert.doesNotMatch(middlewareSource, /if \(pathname === "\/staff"\)/);
 });

@@ -101,7 +101,8 @@ async function initStaffRecipes() {
       window.location.replace("/login?next=/staff");
       return;
     }
-    if (session.role !== "employee") {
+    const isOwnerPreview = session.role === "owner";
+    if (!["employee", "owner"].includes(session.role)) {
       window.location.replace("/");
       return;
     }
@@ -109,7 +110,7 @@ async function initStaffRecipes() {
     bindStaffSectionEvents();
 
     const profileCheck = inspectStaffBrowserProfile();
-    if (!profileCheck.safe && !isLocalStaffPreview()) {
+    if (!isOwnerPreview && !profileCheck.safe && !isLocalStaffPreview()) {
       lockStaffRecipesForBrowserProfile(profileCheck.storageUnavailable);
       return;
     }

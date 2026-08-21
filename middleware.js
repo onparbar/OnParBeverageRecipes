@@ -74,9 +74,6 @@ export async function middleware(request) {
       }
       return nextPrivateResponse();
     }
-    if (pathname === "/staff") {
-      return NextResponse.redirect(getPublicUrl(request, "/"));
-    }
     return nextPrivateResponse();
   }
 
