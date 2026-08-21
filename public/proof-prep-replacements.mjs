@@ -15,17 +15,24 @@ function key(value) {
     .replace(/[’']/g, "")
     .replace(/\s+[123]$/, "")
     .replace(/\s+(?:main|karaoke|patio)(?: wall)?$/, "")
+    .replace(/\([^)]*\)/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function getRecipe(cocktail, recipes) {
-  const cocktailKey = key(cocktail?.recipeName || cocktail?.name);
-  if (!cocktailKey) return null;
+function getRecipe(cocktail, recipes, recipeAliases = {}) {
+  const cocktailKeys = [cocktail?.recipeId, cocktail?.recipeName, cocktail?.name]
+    .map(key)
+    .filter(Boolean);
+  if (!cocktailKeys.length) return null;
+  const aliasKeys = Object.entries(recipeAliases).flatMap(([productName, recipeName]) => (
+    cocktailKeys.includes(key(productName)) ? [key(recipeName)] : []
+  ));
+  const matchingKeys = new Set([...cocktailKeys, ...aliasKeys]);
   return recipes.find((recipe) => (
-    key(recipe?.id) === key(cocktail?.recipeId)
-    || key(recipe?.title || recipe?.name) === cocktailKey
+    matchingKeys.has(key(recipe?.id))
+    || matchingKeys.has(key(recipe?.title || recipe?.name))
   )) || null;
 }
 
@@ -43,12 +50,13 @@ function getProjectedProofUsage({
   cocktails = [],
   recipes = [],
   inventoryItems = [],
+  recipeAliases = {},
 } = {}) {
   const projectedOzById = new Map();
   let unresolvedRecipe = false;
   (Array.isArray(cocktails) ? cocktails : []).forEach((cocktail) => {
     const batches = Math.max(0, Math.floor(number(cocktail?.quantity)));
-    const recipe = batches ? getRecipe(cocktail, Array.isArray(recipes) ? recipes : []) : null;
+    const recipe = batches ? getRecipe(cocktail, Array.isArray(recipes) ? recipes : [], recipeAliases) : null;
     if (batches && !recipe) unresolvedRecipe = true;
     if (!recipe) return;
     (Array.isArray(recipe.ingredients) ? recipe.ingredients : []).forEach((ingredient) => {

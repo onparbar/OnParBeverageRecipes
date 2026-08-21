@@ -621,17 +621,16 @@ function combinePmbConnectionAlerts({
 }
 
 function buildKpis({
-  planState,
   summary,
   planNumbersAvailable,
   usage,
   pricing,
   priceFeedCurrent,
+  orders,
+  prep,
   deferred,
 }) {
   const orderLineCount = count(summary.orderLineCount);
-  const beerKegTotal = nonNegativeNumber(summary.beerKegTotal);
-  const inventoryLineCount = count(summary.inventoryLineCount);
   const cocktailBatchTotal = nonNegativeNumber(summary.cocktailBatchTotal);
   const cocktailLineCount = count(summary.cocktailLineCount);
   const estimatedKnownPurchaseCost = nonNegativeNumber(summary.estimatedKnownPurchaseCost);
@@ -640,56 +639,48 @@ function buildKpis({
   const hasUsageCoverage = usage.hasCurrentPeriod;
   const pricingKnown = priceFeedCurrent && pricing.total > 0;
   const planUnavailableDetail = "";
+  const trackedVendors = orders?.available === true && Array.isArray(orders.vendors)
+    ? orders.vendors
+    : null;
+  const outstandingVendors = trackedVendors?.filter((vendor) => vendor?.ordered !== true) || [];
+  const remainingOrderLineCount = trackedVendors
+    ? outstandingVendors.reduce((total, vendor) => total + count(vendor?.items?.length), 0)
+    : orderLineCount;
+  const remainingPurchaseCost = trackedVendors
+    ? outstandingVendors.reduce((total, vendor) => total + nonNegativeNumber(vendor?.estimatedTotal), 0)
+    : estimatedKnownPurchaseCost;
+  const trackedPrepItems = prep?.available === true && Array.isArray(prep.items)
+    ? prep.items
+    : null;
+  const remainingPrepItems = trackedPrepItems?.filter((item) => item?.completed !== true) || [];
+  const remainingCocktailBatchTotal = trackedPrepItems
+    ? remainingPrepItems.reduce((total, item) => total + nonNegativeNumber(item?.quantity), 0)
+    : cocktailBatchTotal;
+  const remainingCocktailLineCount = trackedPrepItems ? remainingPrepItems.length : cocktailLineCount;
 
   return [
     {
-      id: "order-readiness",
-      label: "Order status",
-      value: planState.label,
-      rawValue: planState.status,
-      detail: planState.details[0] || (planState.status === "ready"
-        ? "Ready to lock."
-        : ""),
-      tone: planState.actionable ? (planState.status === "review" ? "warning" : "positive") : "critical",
-      confidence: planState.actionable ? "verified" : "unavailable",
-      target: DASHBOARD_OVERVIEW_TARGETS.weeklyPlan,
-    },
-    {
       id: "items-to-order",
       label: "Items to order",
-      value: planNumbersAvailable ? formatCount(orderLineCount) : "—",
-      rawValue: planNumbersAvailable ? orderLineCount : null,
+      value: planNumbersAvailable ? formatCount(remainingOrderLineCount) : "—",
+      rawValue: planNumbersAvailable ? remainingOrderLineCount : null,
       detail: planNumbersAvailable
-        ? `${formatQuantity(beerKegTotal)} beer ${plural(beerKegTotal, "keg")} · ${formatCount(inventoryLineCount)} inventory ${plural(inventoryLineCount, "line")}`
+        ? `${formatCurrency(remainingPurchaseCost)}${costComplete ? " estimated" : ` known · ${formatCount(missingPriceCount)} missing ${plural(missingPriceCount, "price")}`}`
         : planUnavailableDetail,
-      tone: planNumbersAvailable ? (orderLineCount > 0 ? "accent" : "neutral") : "critical",
-      confidence: planNumbersAvailable ? "verified" : "unavailable",
+      tone: planNumbersAvailable ? (remainingOrderLineCount > 0 ? "accent" : "neutral") : "critical",
+      confidence: !planNumbersAvailable ? "unavailable" : costComplete ? "verified" : "partial",
       target: DASHBOARD_OVERVIEW_TARGETS.weeklyPlan,
     },
     {
       id: "cocktails-to-make",
       label: "Cocktails to make",
-      value: planNumbersAvailable ? formatQuantity(cocktailBatchTotal) : "—",
-      rawValue: planNumbersAvailable ? cocktailBatchTotal : null,
+      value: planNumbersAvailable ? formatQuantity(remainingCocktailBatchTotal) : "—",
+      rawValue: planNumbersAvailable ? remainingCocktailBatchTotal : null,
       detail: planNumbersAvailable
-        ? `${formatCount(cocktailLineCount)} cocktail ${plural(cocktailLineCount, "line")}${deferred.cocktailIngredientNetting !== false ? " · batch prep only; ingredient netting deferred" : ""}`
+        ? `${formatCount(remainingCocktailLineCount)} ${plural(remainingCocktailLineCount, "type")} left${deferred.cocktailIngredientNetting !== false ? " · ingredient netting deferred" : ""}`
         : planUnavailableDetail,
-      tone: planNumbersAvailable ? (cocktailBatchTotal > 0 ? "accent" : "neutral") : "critical",
+      tone: planNumbersAvailable ? (remainingCocktailBatchTotal > 0 ? "accent" : "neutral") : "critical",
       confidence: planNumbersAvailable ? "verified" : "unavailable",
-      target: DASHBOARD_OVERVIEW_TARGETS.weeklyPlan,
-    },
-    {
-      id: "purchase-cost",
-      label: "Estimated purchase cost",
-      value: planNumbersAvailable ? formatCurrency(estimatedKnownPurchaseCost) : "—",
-      rawValue: planNumbersAvailable ? estimatedKnownPurchaseCost : null,
-      detail: !planNumbersAvailable
-        ? planUnavailableDetail
-        : costComplete
-          ? "All active purchase lines have a known price."
-          : `${formatCount(missingPriceCount)} active ${plural(missingPriceCount, "line is", "lines are")} unpriced; this is the known subtotal, not a complete estimate.`,
-      tone: !planNumbersAvailable ? "critical" : costComplete ? "neutral" : "warning",
-      confidence: !planNumbersAvailable ? "unavailable" : costComplete ? "verified" : "partial",
       target: DASHBOARD_OVERVIEW_TARGETS.weeklyPlan,
     },
     {
@@ -909,12 +900,13 @@ export function buildDashboardOverview(signals = {}, options = {}) {
     && !kegBlocksPlanNumbers
     && !inventoryBlocksPlanNumbers;
   const kpis = buildKpis({
-    planState,
     summary,
     planNumbersAvailable,
     usage,
     pricing,
     priceFeedCurrent: pricingResult.priceFeedCurrent,
+    orders: signals.orders,
+    prep: signals.prep,
     deferred,
   });
   const quickActions = buildQuickActions({

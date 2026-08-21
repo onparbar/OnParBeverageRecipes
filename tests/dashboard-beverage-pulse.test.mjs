@@ -143,6 +143,35 @@ test("keeps beer and cocktail leaders on the selected wall while combining Patio
   );
 });
 
+test("Karaoke guest favorites use only Karaoke liquor pours", () => {
+  const leaders = buildLastWeekPourLeaders([
+    item({ id: "patio-patron", name: "Patron 3", tapNumber: 1, type: "Shots", displayUnit: "oz", history: [pmb(latestLabel, 400)] }),
+    item({ id: "karaoke-titos", name: "Tito's 2", tapNumber: 83, type: "Shots", displayUnit: "oz", history: [pmb(latestLabel, 60)] }),
+  ], { wall: "karaoke", metric: "oz" });
+
+  assert.deepEqual(
+    leaders.sections.liquor.rows.map((row) => [row.name, row.value, row.walls]),
+    [["Tito's", 60, ["karaoke"]]],
+  );
+});
+
+test("Karaoke projected sales mix uses only Karaoke liquor pours", () => {
+  const mix = buildLastWeekProjectedSalesMix([
+    item({ id: "patio-patron", tapNumber: 1, type: "Shots", displayUnit: "oz", history: [pmb(latestLabel, 400)] }),
+    item({ id: "karaoke-titos", tapNumber: 83, type: "Shots", displayUnit: "oz", history: [pmb(latestLabel, 60)] }),
+  ], {
+    wall: "karaoke",
+    getSellingPricePerOz: () => 5,
+  });
+
+  assert.equal(mix.projectedSales, 300);
+  assert.equal(mix.capturedTapCount, 1);
+  assert.deepEqual(
+    mix.categories.map((row) => [row.category, row.projectedSales, row.sharePercent]),
+    [["cocktail", 0, 0], ["beer", 0, 0], ["liquor", 300, 100]],
+  );
+});
+
 test("switches leader order from poured ounces to projected sales", () => {
   const items = [
     item({ id: "volume", name: "Volume Beer", tapNumber: 21, history: [pmb(latestLabel, 100)] }),

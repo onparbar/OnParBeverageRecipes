@@ -42,7 +42,7 @@ test("builds top five and bottom three for the latest six recorded weeks and all
   const rankings = buildWeeklyUsageSellerRankings(items);
 
   assert.equal(rankings.recordedWeekCount, 7);
-  assert.equal(rankings.dataBoundary.allTimeLabel, "All saved PMB weeks");
+  assert.equal(rankings.dataBoundary.allTimeLabel, "All saved usage weeks");
   assert.equal(rankings.dataBoundary.legacySalesIncluded, false);
   assert.equal(rankings.dataBoundary.crossWallAggregation, false);
   assert.equal(rankings.dataBoundary.requiresVerifiedWallAndCategory, true);
@@ -144,6 +144,20 @@ test("breaks average ties by stronger sample count, then name and stable id", ()
 
   assert.deepEqual(rankings.recent.top.map((row) => row.name), ["Alpha", "bravo", "zulu"]);
   assert.deepEqual(rankings.recent.bottom.map((row) => row.name), ["Alpha", "bravo", "zulu"]);
+});
+
+test("keeps archived and retired products out of current bottom rankings", () => {
+  const current = item({ id: "current", name: "Voodoo Ranger IPA 1", history: [pmb(labels[0], 100)] });
+  const archived = item({ id: "archived", name: "Budweiser 1", history: [pmb(labels[0], 10)] });
+  const retired = item({ id: "retired", name: "Breakfast Stout 1", history: [pmb(labels[0], 5)] });
+  const rankings = buildWeeklyUsageSellerRankings([current, archived, retired], {
+    isBottomEligible: (source) => source === current,
+  });
+
+  assert.deepEqual(rankings.recent.top.map((row) => row.name), [
+    "Voodoo Ranger IPA", "Budweiser", "Breakfast Stout",
+  ]);
+  assert.deepEqual(rankings.recent.bottom.map((row) => row.name), ["Voodoo Ranger IPA"]);
 });
 
 test("supports category-specific rankings without changing the shared period window", () => {
@@ -379,7 +393,7 @@ test("lets the caller resolve a verified profit rate for each recorded week", ()
   assert.equal(rankings.metricMetadata.historicalRatesInferred, false);
 });
 
-test("profit requires exact PMB ounces even when displayed PMB usage can be converted", () => {
+test("profit uses converted saved keg history when the full keg size is known", () => {
   const source = item({
     id: "converted",
     history: [{ label: labels[0], source: "PMB", value: 0.5 }],
@@ -396,9 +410,29 @@ test("profit requires exact PMB ounces even when displayed PMB usage can be conv
 
   assert.equal(volume.recent.top[0].averageWeeklyOz, 992);
   assert.equal(profit.recordedWeekCount, 1);
-  assert.equal(profit.recent.eligibleCount, 0);
-  assert.equal(profit.metricMetadata.unavailableExactVolumeSampleCount, 1);
-  assert.match(profit.metricMetadata.unavailableReason, /exact poured ounces/i);
+  assert.equal(profit.recent.eligibleCount, 1);
+  assert.equal(profit.recent.top[0].averageWeeklyGrossProfit, 1_984);
+  assert.equal(profit.metricMetadata.estimatedVolumeSampleCount, 1);
+});
+
+test("includes legacy keg fractions in all-time ounces without treating missing weeks as zero", () => {
+  const rankings = buildWeeklyUsageSellerRankings([
+    item({
+      id: "blended",
+      history: [
+        pmb(labels[0], 500),
+        { label: labels[1], value: 0.5 },
+      ],
+    }),
+  ], {
+    getFullOunces: () => 1_984,
+  });
+
+  assert.equal(rankings.recordedWeekCount, 2);
+  assert.equal(rankings.allTime.top[0].totalOz, 1_492);
+  assert.equal(rankings.allTime.top[0].averageWeeklyOz, 746);
+  assert.equal(rankings.metricMetadata.exactVolumeSampleCount, 1);
+  assert.equal(rankings.metricMetadata.estimatedVolumeSampleCount, 1);
 });
 
 test("keeps zero and negative gross-profit drinks eligible when their PMB volume is positive", () => {

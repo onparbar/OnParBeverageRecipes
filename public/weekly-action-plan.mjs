@@ -377,7 +377,8 @@ export function evaluateWeeklyPlanReadiness({
 
   if (!publishedPlanLocked && !parInitialized) blockers.push("Shared Keg Levels setup is incomplete.");
   if (!publishedPlanLocked && !inventoryInitialized) blockers.push("Shared inventory setup is incomplete.");
-  if (!publishedPlanLocked && !inventorySnapshotCurrent) blockers.push("Save this week's Monday Inventory Snapshot before locking the plan.");
+  // The combined Save & lock action captures the current Monday snapshot before
+  // publishing, so a missing current snapshot is not a preflight blocker.
   if (!publishedPlanLocked && inventorySavePending) blockers.push("Inventory changes are still saving.");
   if (!publishedPlanLocked && inventorySaveError) blockers.push(`The latest inventory save failed: ${clean(inventorySaveError)}`);
   if (!publishedPlanLocked && !weeklyUsageInitialized) blockers.push("Shared Weekly Usage setup is incomplete.");

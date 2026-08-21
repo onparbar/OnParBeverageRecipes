@@ -290,7 +290,7 @@ test("readiness blocks incomplete inputs, keeps the current-week plan fixed, and
   assert.equal(evaluateWeeklyPlanReadiness({ ...base, weeklyUsageSaveError: "Revision conflict" }).status, "blocked");
   assert.equal(evaluateWeeklyPlanReadiness({ ...base, inventorySavePending: true }).status, "blocked");
   assert.equal(evaluateWeeklyPlanReadiness({ ...base, inventorySaveError: "Network unavailable" }).status, "blocked");
-  assert.equal(evaluateWeeklyPlanReadiness({ ...base, inventorySnapshotCurrent: false }).status, "blocked");
+  assert.equal(evaluateWeeklyPlanReadiness({ ...base, inventorySnapshotCurrent: false }).status, "ready");
   assert.equal(evaluateWeeklyPlanReadiness({ ...base, recommendationSourceCurrent: false }).status, "ready");
   assert.equal(evaluateWeeklyPlanReadiness({
     ...base,

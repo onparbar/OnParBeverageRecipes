@@ -8,13 +8,13 @@ const RANKING_METRICS = new Set(["volume", "profit"]);
 const RANKING_WALLS = new Set(["all", "patio", "main", "karaoke"]);
 
 export const WEEKLY_USAGE_SELLER_RANKING_DATA_BOUNDARY = Object.freeze({
-  source: "PMB",
+  source: "PMB + saved keg history",
   metric: "poured ounces",
   legacySalesIncluded: false,
   crossWallAggregation: false,
   requiresVerifiedWallAndCategory: true,
-  allTimeLabel: "All saved PMB weeks",
-  allTimeDescription: "All-time means every saved PMB poured-usage week. Legacy GoTab-only history is excluded.",
+  allTimeLabel: "All saved usage weeks",
+  allTimeDescription: "Exact PMB ounces are preferred; older keg history is converted using the product's full keg size.",
 });
 
 function clean(value) {
@@ -211,6 +211,8 @@ function getItemHistoryByWeek(
       quality.ignoredEntryCount += 1;
       return;
     }
+    if (finiteNonNegativeNumber(entry?.volumeOz) !== null) quality.exactVolumeSampleCount += 1;
+    else quality.estimatedVolumeSampleCount += 1;
 
     const label = clean(entry.label);
     const savedLabel = quality.labelsByTime.get(time);
@@ -218,15 +220,6 @@ function getItemHistoryByWeek(
 
     let value = pouredOz;
     if (metric === "profit") {
-      const exactPouredOz = isPmbUsageEntry(entry)
-        ? finiteNonNegativeNumber(entry.volumeOz)
-        : null;
-      if (exactPouredOz === null) {
-        quality.unavailableExactVolumeSampleCount += 1;
-        unavailableTimes.add(time);
-        return;
-      }
-
       const resolvedRate = resolveGrossProfitPerOz(getGrossProfitPerOz, item, {
         entry,
         weekStartTime: time,
@@ -239,7 +232,7 @@ function getItemHistoryByWeek(
         unavailableTimes.add(time);
         return;
       }
-      value = exactPouredOz * resolvedRate.rate;
+      value = pouredOz * resolvedRate.rate;
     }
 
     const samples = samplesByTime.get(time) || [];
@@ -279,11 +272,13 @@ function buildProducts(items, options, quality) {
       name: productName,
       category,
       wall: wallKey,
+      bottomEligible: false,
       tapNumbers: new Set(),
       walls: new Set(),
       membersByKey: new Map(),
       unavailableTimes: new Set(),
     };
+    if (options.isBottomEligible(item)) product.bottomEligible = true;
     if (compareText(productName, product.name) < 0) product.name = productName;
 
     const tapNumber = positiveInteger(item?.tapNumber);
@@ -328,6 +323,7 @@ function buildProducts(items, options, quality) {
       name: product.name,
       category: product.category,
       wall: product.wall,
+      bottomEligible: product.bottomEligible,
       tapNumbers: [...product.tapNumbers].sort((a, b) => a - b),
       walls: [...product.walls].sort(compareText),
       valuesByTime: productValuesByTime,
@@ -430,6 +426,7 @@ function buildWindow(products, periods, { metric, topLimit, bottomLimit }) {
       name: product.name,
       category: product.category,
       wall: product.wall,
+      bottomEligible: product.bottomEligible,
       tapNumbers: product.tapNumbers,
       walls: product.walls,
       metric,
@@ -458,7 +455,7 @@ function buildWindow(products, periods, { metric, topLimit, bottomLimit }) {
     weekStartTimes: periods.map((period) => period.startTime),
     eligibleCount: rows.length,
     top: [...rows].sort((a, b) => compareRankingRows(a, b, -1)).slice(0, topLimit),
-    bottom: [...rows].sort((a, b) => compareRankingRows(a, b, 1)).slice(0, bottomLimit),
+    bottom: rows.filter((row) => row.bottomEligible).sort((a, b) => compareRankingRows(a, b, 1)).slice(0, bottomLimit),
   };
 }
 
@@ -477,6 +474,8 @@ function buildMetricMetadata(metric, quality) {
       unavailableItemCount: 0,
       unavailableSampleCount: 0,
       unavailableExactVolumeSampleCount: 0,
+      exactVolumeSampleCount: quality.exactVolumeSampleCount,
+      estimatedVolumeSampleCount: quality.estimatedVolumeSampleCount,
       unavailableReasons: [],
       unavailableReason: "",
     };
@@ -491,29 +490,29 @@ function buildMetricMetadata(metric, quality) {
     unit: "USD",
     averageField: "averageWeeklyGrossProfit",
     totalField: "totalGrossProfit",
-    requiresExactPmbVolume: true,
+    requiresExactPmbVolume: false,
     requiresVerifiedPriceAndCost: true,
-    calculation: "Exact PMB poured ounces × caller-verified gross profit per ounce, resolved per tap and week.",
+    calculation: "Saved poured ounces × caller-verified gross profit per ounce, resolved per tap and week; older keg history uses keg-size conversions.",
     historicalRatesInferred: false,
     unavailableItemCount: quality.unavailableProfitItems.size,
     unavailableSampleCount: quality.unavailableProfitSampleCount,
     unavailableExactVolumeSampleCount: quality.unavailableExactVolumeSampleCount,
+    exactVolumeSampleCount: quality.exactVolumeSampleCount,
+    estimatedVolumeSampleCount: quality.estimatedVolumeSampleCount,
     unavailableReasons,
     unavailableReason: quality.unavailableProfitSampleCount
       ? "Some PMB usage was excluded because a verified selling price and cost per ounce were unavailable."
-      : quality.unavailableExactVolumeSampleCount
-        ? "Some PMB usage was excluded because exact poured ounces were unavailable."
-        : "",
+      : "",
   };
 }
 
 /**
  * Builds poured-usage or gross-profit rankings from saved Weekly Usage history.
  *
- * Only PMB-sourced entries (or source-less entries carrying exact `volumeOz`) are
- * eligible. Missing product weeks are not treated as zero; each row reports the
- * number of recorded weeks used in its average. Profit mode requires exact PMB
- * ounces and a verified per-ounce profit rate supplied by the caller for each tap.
+ * Exact PMB ounces are preferred. Older saved keg fractions are converted only
+ * when the full keg size is known. Missing product weeks are not treated as zero;
+ * each row reports the number of recorded weeks used in its average. Profit mode
+ * requires a verified per-ounce profit rate supplied by the caller for each tap.
  * A product offered on multiple walls remains a separate ranking row per wall.
  * Pass active and archived items together when all-time should include replacements.
  */
@@ -525,6 +524,7 @@ export function buildWeeklyUsageSellerRankings(
     metric = "volume",
     getFullOunces = () => 0,
     getGrossProfitPerOz = () => null,
+    isBottomEligible = () => true,
     recentWeekLimit = 6,
     topLimit = 5,
     bottomLimit = 3,
@@ -539,6 +539,7 @@ export function buildWeeklyUsageSellerRankings(
   const normalizedRecentWeekLimit = clampInteger(recentWeekLimit, 6, 1, 52);
   const normalizedTopLimit = clampInteger(topLimit, 5, 1, 25);
   const normalizedBottomLimit = clampInteger(bottomLimit, 3, 1, 25);
+  const resolveBottomEligibility = typeof isBottomEligible === "function" ? isBottomEligible : () => true;
   const sourceItems = Array.isArray(items) ? items.filter(Boolean) : [];
   const identifiedSourceItems = sourceItems.filter((item) => (
     resolveRankingCategory(item) && resolveRankingWall(item)
@@ -556,12 +557,15 @@ export function buildWeeklyUsageSellerRankings(
     unavailableProfitItems: new Set(),
     unavailableProfitSampleCount: 0,
     unavailableExactVolumeSampleCount: 0,
+    exactVolumeSampleCount: 0,
+    estimatedVolumeSampleCount: 0,
     unavailableProfitReasons: new Map(),
   };
 
   const products = buildProducts(selectedSourceItems, {
     getFullOunces,
     getGrossProfitPerOz,
+    isBottomEligible: resolveBottomEligibility,
     metric: normalizedMetric,
   }, quality);
   const periods = [...quality.labelsByTime.entries()]
@@ -585,7 +589,7 @@ export function buildWeeklyUsageSellerRankings(
     available: periods.length > 0 && products.length > 0,
     dataBoundary: {
       ...WEEKLY_USAGE_SELLER_RANKING_DATA_BOUNDARY,
-      recentLabel: `Latest ${normalizedRecentWeekLimit} saved PMB weeks`,
+      recentLabel: `Latest ${normalizedRecentWeekLimit} saved usage weeks`,
     },
     recordedWeekCount: periods.length,
     recent: buildWindow(products, periods.slice(0, normalizedRecentWeekLimit), limits),
@@ -603,6 +607,8 @@ export function buildWeeklyUsageSellerRankings(
       unavailableProfitItemCount: quality.unavailableProfitItems.size,
       unavailableProfitSampleCount: quality.unavailableProfitSampleCount,
       unavailableExactVolumeSampleCount: quality.unavailableExactVolumeSampleCount,
+      exactVolumeSampleCount: quality.exactVolumeSampleCount,
+      estimatedVolumeSampleCount: quality.estimatedVolumeSampleCount,
     },
   };
 }

@@ -118,6 +118,7 @@ export default function DashboardPage() {
         <div className="topbar-title-row">
           <h1>Beverage Dashboard</h1>
           <div className="topbar-account-actions">
+            <a className="logout-link dashboard-owner-only" href="/staff">Staff View</a>
             <button className="logout-link pmb-refresh-button dashboard-owner-only" id="refresh-all-pmb" type="button">Refresh PMB</button>
             <a className="logout-link" href="/api/logout" aria-label={`Log out of the ${sessionRole} dashboard`}>Log out</a>
           </div>
@@ -292,6 +293,7 @@ export default function DashboardPage() {
               <div>
                 <h2 id="pricing-advisor-title">82% Price Suggestions</h2>
               </div>
+              <button className="ghost-button" id="pricing-advisor-toggle" type="button" aria-expanded="false">Show all taps</button>
             </div>
             <div className="pricing-advisor__summary" id="pricing-advisor-summary" aria-live="polite"></div>
             <div className="pricing-table-wrap">
@@ -313,30 +315,29 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          <div className="pricing-layout">
-            <aside className="pricing-summary" id="pricing-summary"></aside>
-            <div className="pricing-table-wrap">
-              <table className="pricing-table">
-                <thead>
-                  <tr>
-                    <th>Tap</th>
-                    <th>Product</th>
-                    <th>Cost / oz</th>
-                    <th>Charge</th>
-                    <th>Margin</th>
-                  </tr>
-                </thead>
-                <tbody id="pricing-table"></tbody>
-              </table>
-            </div>
-          </div>
-
-          <section className="shot-pricing" aria-labelledby="shot-pricing-title">
-            <div className="shot-pricing__header">
-              <div>
-                <h2 id="shot-pricing-title">Shot pricing</h2>
+          <details className="pricing-directory">
+            <summary>All current tap prices</summary>
+            <div className="pricing-layout">
+              <aside className="pricing-summary" id="pricing-summary"></aside>
+              <div className="pricing-table-wrap">
+                <table className="pricing-table">
+                  <thead>
+                    <tr>
+                      <th>Tap</th>
+                      <th>Product</th>
+                      <th>Cost / oz</th>
+                      <th>Charge</th>
+                      <th>Margin</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pricing-table"></tbody>
+                </table>
               </div>
             </div>
+          </details>
+
+          <details className="shot-pricing">
+            <summary className="shot-pricing__header"><span id="shot-pricing-title">Shot pricing</span></summary>
             <div className="shot-pricing__summary" id="shot-pricing-summary" aria-live="polite"></div>
             <div className="pricing-table-wrap">
               <table className="pricing-table shot-pricing__table">
@@ -353,7 +354,7 @@ export default function DashboardPage() {
                 <tbody id="shot-pricing-table"></tbody>
               </table>
             </div>
-          </section>
+          </details>
 
         </section>
 
@@ -724,7 +725,9 @@ export default function DashboardPage() {
                   <div>
                     <h2>Current Inventory</h2>
                   </div>
-                  <form className="custom-inventory-form" id="custom-inventory-form" autoComplete="off" data-form-type="other">
+                  <details className="custom-inventory-editor" id="custom-inventory-editor">
+                    <summary>Add item</summary>
+                    <form className="custom-inventory-form" id="custom-inventory-form" autoComplete="off" data-form-type="other">
                     <label>
                       <span>Item</span>
                       <input id="custom-inventory-name" name="inventory-item-name" type="text" autoComplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="Patron Silver" required />
@@ -754,10 +757,11 @@ export default function DashboardPage() {
                       <input id="custom-inventory-unit-cost" name="inventory-item-case-cost" type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" autoComplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="0.00" />
                     </label>
                     <div className="custom-inventory-form__actions">
-                      <button className="primary-button" id="custom-inventory-submit" type="submit">Add item</button>
+                      <button className="primary-button" id="custom-inventory-submit" type="submit">Save</button>
                       <button className="ghost-button" id="custom-inventory-cancel" type="button" hidden>Cancel</button>
                     </div>
-                  </form>
+                    </form>
+                  </details>
                 </div>
                 <details className="inventory-speech" id="inventory-speech-assistant"></details>
                 <div className="inventory-table-wrap">

@@ -71,7 +71,16 @@ const overviewRecipeDetail = document.querySelector("#staff-overview-recipe-deta
 
 let recipes = [];
 let activeRecipeView = "current";
-let prepPlan = { available: false, generatedAt: "", items: [], completedCount: 0, totalCount: 0 };
+let prepPlan = {
+  available: false,
+  generatedAt: "",
+  items: [],
+  liquorRefills: [],
+  completedCount: 0,
+  totalCount: 0,
+  liquorRefillCompletedCount: 0,
+  liquorRefillTotalCount: 0,
+};
 let orderTracking = { available: false, generatedAt: "", vendors: [], itemCount: 0, receivedCount: 0, notReceivedCount: 0 };
 let tapSheets = { available: false, updatedAt: "", onDeckAvailable: false, walls: [] };
 let activeTapSheetWall = "main";
@@ -228,8 +237,11 @@ async function fetchStaffPrepPlan() {
       available: result?.available === true,
       generatedAt: clean(result?.generatedAt),
       items: Array.isArray(result?.items) ? result.items : [],
+      liquorRefills: Array.isArray(result?.liquorRefills) ? result.liquorRefills : [],
       completedCount: number(result?.completedCount),
       totalCount: number(result?.totalCount),
+      liquorRefillCompletedCount: number(result?.liquorRefillCompletedCount),
+      liquorRefillTotalCount: number(result?.liquorRefillTotalCount),
       message: clean(result?.message),
     };
   } catch (error) {
@@ -237,8 +249,11 @@ async function fetchStaffPrepPlan() {
       available: false,
       generatedAt: "",
       items: [],
+      liquorRefills: [],
       completedCount: 0,
       totalCount: 0,
+      liquorRefillCompletedCount: 0,
+      liquorRefillTotalCount: 0,
       message: error?.message || "The weekly prep checklist is unavailable.",
     };
   }
@@ -704,20 +719,34 @@ function renderStaffPrepPlan() {
   prepStatusPanel.textContent = prepPlan.generatedAt
     ? `Showing the shared ${formatPlanWeek(prepPlan.generatedAt)} plan.`
     : "Showing the current shared weekly plan.";
-  prepSummary.textContent = prepPlan.totalCount
-    ? `${formatNumber(prepPlan.completedCount)} of ${formatNumber(prepPlan.totalCount)} cocktail${prepPlan.totalCount === 1 ? "" : "s"} prepared`
-    : "No cocktail kegs need to be made this week.";
-  if (!prepPlan.items.length) {
-    prepList.append(createEmptyState("Nothing needs to be made from the current weekly plan."));
+  const liquorRefills = Array.isArray(prepPlan.liquorRefills) ? prepPlan.liquorRefills : [];
+  const taskTotal = prepPlan.totalCount + prepPlan.liquorRefillTotalCount;
+  const completedTotal = prepPlan.completedCount + prepPlan.liquorRefillCompletedCount;
+  prepSummary.textContent = taskTotal
+    ? `${formatNumber(completedTotal)} of ${formatNumber(taskTotal)} tasks complete`
+    : "No prep tasks this week.";
+  if (!prepPlan.items.length && !liquorRefills.length) {
+    prepList.append(createEmptyState("Nothing needs to be prepared from the current weekly plan."));
     return;
   }
+  if (prepPlan.items.length) prepList.append(createStaffPrepGroupTitle("Make Cocktails"));
   prepPlan.items.forEach((item) => prepList.append(createStaffPrepItem(item)));
+  if (liquorRefills.length) prepList.append(createStaffPrepGroupTitle("Add Liquor To Kegs"));
+  liquorRefills.forEach((item) => prepList.append(createStaffPrepItem(item)));
+}
+
+function createStaffPrepGroupTitle(label) {
+  const heading = document.createElement("h3");
+  heading.className = "staff-prep-group-title";
+  heading.textContent = label;
+  return heading;
 }
 
 function createStaffPrepItem(item) {
   const form = document.createElement("form");
   form.className = `staff-prep-item${item.completed ? " is-complete" : ""}`;
-  const recipe = findStaffRecipeForPrepItem(item);
+  const isLiquorRefill = item.kind === "liquor-refill";
+  const recipe = isLiquorRefill ? null : findStaffRecipeForPrepItem(item);
 
   const checkLabel = document.createElement("label");
   checkLabel.className = "staff-prep-check";
@@ -725,7 +754,9 @@ function createStaffPrepItem(item) {
   checkbox.type = "checkbox";
   checkbox.checked = item.completed === true;
   const checkText = document.createElement("span");
-  checkText.textContent = item.completed ? "Prepared" : "Check off when prepared";
+  checkText.textContent = item.completed
+    ? (isLiquorRefill ? "Added" : "Prepared")
+    : (isLiquorRefill ? "Check off when added" : "Check off when prepared");
   checkLabel.append(checkbox, checkText);
 
   const details = document.createElement("div");
@@ -755,15 +786,22 @@ function createStaffPrepItem(item) {
   } else {
     const heading = document.createElement("h3");
     heading.className = "staff-cocktail-name";
-    heading.textContent = formatStaffCocktailName(clean(item.displayName) || item.name);
+    heading.textContent = isLiquorRefill
+      ? (clean(item.displayName) || item.name)
+      : formatStaffCocktailName(clean(item.displayName) || item.name);
     details.append(heading);
   }
   const meta = document.createElement("p");
-  const labelDetails = [
-    item.wall ? `${clean(item.wall)} wall` : "",
-    number(item.batchSizeOz) > 0 ? `${formatNumber(item.batchSizeOz)} oz` : "",
-    number(item.quantity) > 1 ? `${formatNumber(item.quantity)} labels` : "",
-  ].filter(Boolean);
+  const labelDetails = isLiquorRefill
+    ? [
+      item.tapNumbers?.length ? `Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.join(", ")}` : "",
+      `${formatNumber(item.quantity)} bottle${number(item.quantity) === 1 ? "" : "s"}`,
+    ].filter(Boolean)
+    : [
+      item.wall ? `${clean(item.wall)} wall` : "",
+      number(item.batchSizeOz) > 0 ? `${formatNumber(item.batchSizeOz)} oz` : "",
+      number(item.quantity) > 1 ? `${formatNumber(item.quantity)} labels` : "",
+    ].filter(Boolean);
   meta.textContent = labelDetails.join(" · ");
   details.append(meta);
   if (item.completed && item.completedAt) {
@@ -775,7 +813,7 @@ function createStaffPrepItem(item) {
   const preparedField = document.createElement("label");
   preparedField.className = "staff-prep-name-field";
   const fieldLabel = document.createElement("span");
-  fieldLabel.textContent = "Prepared by";
+  fieldLabel.textContent = isLiquorRefill ? "Added by" : "Prepared by";
   const preparedInput = document.createElement("input");
   preparedInput.type = "text";
   preparedInput.maxLength = 80;
@@ -794,14 +832,18 @@ function createStaffPrepItem(item) {
   rowStatus.setAttribute("aria-live", "polite");
 
   checkbox.addEventListener("change", () => {
-    checkText.textContent = checkbox.checked ? "Prepared" : "Check off when prepared";
+    checkText.textContent = checkbox.checked
+      ? (isLiquorRefill ? "Added" : "Prepared")
+      : (isLiquorRefill ? "Check off when added" : "Check off when prepared");
     if (checkbox.checked && !clean(preparedInput.value)) preparedInput.focus();
   });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const preparedBy = clean(preparedInput.value);
     if (checkbox.checked && !preparedBy) {
-      rowStatus.textContent = "Enter who prepared this cocktail before checking it off.";
+      rowStatus.textContent = isLiquorRefill
+        ? "Enter who added the liquor before checking it off."
+        : "Enter who prepared this cocktail before checking it off.";
       rowStatus.dataset.state = "error";
       preparedInput.focus();
       return;
@@ -830,8 +872,11 @@ function createStaffPrepItem(item) {
         available: result.available === true,
         generatedAt: clean(result.generatedAt),
         items: Array.isArray(result.items) ? result.items : [],
+        liquorRefills: Array.isArray(result.liquorRefills) ? result.liquorRefills : [],
         completedCount: number(result.completedCount),
         totalCount: number(result.totalCount),
+        liquorRefillCompletedCount: number(result.liquorRefillCompletedCount),
+        liquorRefillTotalCount: number(result.liquorRefillTotalCount),
         message: clean(result.message),
       };
       renderStaffPrepPlan();

@@ -64,6 +64,44 @@ test("speech inventory assigns On Deck units only where the On Deck product is d
   assert.match(onDeckSource, /unit: normalizeTitle\(onDeck\.kind\) === "liquor" \? "oz" : "kegs"/);
 });
 
+test("tap editing puts On Deck before detailed tap controls", () => {
+  const start = dashboardSource.indexOf("function renderKegLevelAdjustRow");
+  const end = dashboardSource.indexOf("function syncKegAdjustPercentInput", start);
+  const editPanelSource = dashboardSource.slice(start, end);
+  assert.ok(editPanelSource.indexOf("renderKegOnDeckControl(item)") < editPanelSource.indexOf("keg-edit-section--level"));
+});
+
+test("tap rows show On Deck beneath the current product", () => {
+  const start = dashboardSource.indexOf("function renderTapChangeControls");
+  const end = dashboardSource.indexOf("function getMappedIngredientUnitCost", start);
+  const controlsSource = dashboardSource.slice(start, end);
+  assert.ok(controlsSource.indexOf("tap-product-current") < controlsSource.indexOf("keg-on-deck-summary"));
+  assert.ok(controlsSource.indexOf("keg-on-deck-summary") < controlsSource.indexOf("tap-change-controls"));
+});
+
+test("Keg Levels keeps customer tap pricing in the dedicated pricing workspace", () => {
+  const wallStart = dashboardSource.indexOf("function renderKegWallBlock");
+  const wallEnd = dashboardSource.indexOf("function getKegCanonicalResolution", wallStart);
+  const wallSource = dashboardSource.slice(wallStart, wallEnd);
+  const financeStart = dashboardSource.indexOf("function renderKegEditFinancialPanel");
+  const financeEnd = dashboardSource.indexOf("function renderKegOnDeckControl", financeStart);
+  const financeSource = dashboardSource.slice(financeStart, financeEnd);
+  assert.doesNotMatch(wallSource, /<th>Tap price<\/th>/);
+  assert.doesNotMatch(financeSource, /Tap price|Cost \/ oz|Margin/);
+  assert.match(financeSource, /<span>Par<\/span>/);
+});
+
+test("late Monday snapshots use an inline reason instead of an unsupported prompt", () => {
+  assert.match(dashboardSource, /id="weekly-plan-late-reason"/);
+  assert.match(dashboardSource, /weeklyPlanOutsideMondayReason/);
+  assert.doesNotMatch(dashboardSource, /window\.prompt\("Why are you saving this Monday snapshot late\?"\)/);
+});
+
+test("Weekly Plan source freshness uses compact provenance items", () => {
+  assert.equal((dashboardSource.match(/weekly-plan-provenance__item/g) || []).length, 4);
+  assert.match(pageSource, /id="weekly-plan"/);
+});
+
 test("new recipe cards use spirit labels without physical-wall suffixes", () => {
   assert.match(dashboardSource, /canonicalTitle: "Whiskey Smash \(Jim Beam\)"/);
   assert.match(dashboardSource, /canonicalTitle: "Apple Jack \(Jack Fire\)"/);
@@ -322,5 +360,7 @@ test("dashboard workspaces omit redundant eyebrow labels and explanatory blurbs"
     assert.doesNotMatch(`${pageSource}\n${dashboardSource}`, pattern);
   });
   assert.match(pageSource, /<h2 id="recipe-form-title">Add cocktail product<\/h2>/);
-  assert.match(dashboardSource, /Update needs/);
+  assert.doesNotMatch(dashboardSource, /Update needs/);
+  assert.match(dashboardSource, /Try again/);
+  assert.match(dashboardSource, /const mappedCostPerOz = getMappedIngredientUnitCost\(onDeck\.name\)/);
 });

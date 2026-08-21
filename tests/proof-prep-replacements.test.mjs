@@ -102,6 +102,33 @@ test("keeps Proof under review when a required inventory count is blank", () => 
   assert.deepEqual(context.candidates, []);
 });
 
+test("matches wall cocktail names through the existing recipe aliases", () => {
+  const context = buildProofPrepOrderContext({
+    cocktails: [{ name: "Blueberry Margarita (Jose Cuervo) 1", quantity: 1 }],
+    recipes: [{
+      title: "Strawberry/Watermelon/Peach/Blueberry Marg (Tequilla)",
+      ingredients: [{ name: "Lime Juice", oz: 270 }],
+    }],
+    recipeAliases: {
+      "BLUEBERRY MARGARITA (JOSE CUERVO)": "Strawberry/Watermelon/Peach/Blueberry Marg (Tequilla)",
+    },
+    inventoryItems: [{
+      id: "lime-juice",
+      name: "Lime Juice",
+      casePackaged: true,
+      packSize: 12,
+      caseCost: 60,
+      matchedSku: "PROOF-LIME-12",
+      onHandDisplay: "28",
+      parDisplay: "40",
+      vendorProduct: { vendor: "Proof", productName: "Lime Juice", bottleOz: 33.814 },
+    }],
+  });
+
+  assert.equal(context.requirement, "not-required");
+  assert.equal(context.candidates[0].projectedPrepUseUnits, 8);
+});
+
 test("skips candidates with ambiguous identity or missing ordering data", () => {
   const candidates = buildProofPrepReplacementCandidates({
     cocktails: [{ name: "House Margarita", quantity: 1 }],

@@ -124,3 +124,41 @@ test("reopening prep removes its completion from the checklist", () => {
   assert.equal(buildStaffPrepPlan(reopened).completedCount, 0);
   assert.deepEqual(reopened.prepChecklist, {});
 });
+
+test("ordered liquor tap bottles become shared staff refill tasks", () => {
+  const base = recommendations({
+    items: [
+      {
+        actionType: "order",
+        orderQty: 2,
+        name: "Tito's Vodka 2",
+        orderProductName: "Tito's Vodka",
+        tapNumber: 13,
+        wall: "Karaoke",
+        isLiquorTap: true,
+        unitCost: 28.2,
+      },
+    ],
+  });
+  const initial = buildStaffPrepPlan(base);
+
+  assert.equal(initial.totalCount, 0);
+  assert.equal(initial.liquorRefillTotalCount, 1);
+  assert.deepEqual(initial.liquorRefills.map((item) => ({
+    name: item.name,
+    quantity: item.quantity,
+    taps: item.tapNumbers,
+    completed: item.completed,
+  })), [{ name: "Tito's Vodka", quantity: 2, taps: [13], completed: false }]);
+
+  const updated = applyStaffPrepPlanUpdate(base, {
+    generatedAt: base.generatedAt,
+    itemId: initial.liquorRefills[0].id,
+    completed: true,
+    preparedBy: "Jordan",
+  }, { now: () => new Date("2026-08-11T17:00:00.000Z") });
+  const completed = buildStaffPrepPlan(updated);
+
+  assert.equal(completed.liquorRefillCompletedCount, 1);
+  assert.equal(completed.liquorRefills[0].preparedBy, "Jordan");
+});

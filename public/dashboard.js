@@ -854,6 +854,7 @@ const pricingTable = document.querySelector("#pricing-table");
 const pricingSummary = document.querySelector("#pricing-summary");
 const pricingAdvisorSummary = document.querySelector("#pricing-advisor-summary");
 const pricingAdvisorTable = document.querySelector("#pricing-advisor-table");
+const pricingAdvisorToggle = document.querySelector("#pricing-advisor-toggle");
 const shotPricingSummary = document.querySelector("#shot-pricing-summary");
 const shotPricingTable = document.querySelector("#shot-pricing-table");
 const ingredientSearch = document.querySelector("#ingredient-search");
@@ -1091,6 +1092,7 @@ let parAgentStateOutbox = loadKegLevelsOutbox();
 let parAgentStateOutboxDurable = true;
 let weeklyPlanUpdating = false;
 let weeklyPlanRefreshMessage = "";
+let weeklyPlanOutsideMondayReason = "";
 let weeklyOrderTracking = { available: false, generatedAt: "", drafts: [], adjustments: [], adjustmentCatalog: [], vendors: [], itemCount: 0, receivedCount: 0, notReceivedCount: 0, notReceivedItems: [] };
 let weeklyOrderTrackingMessage = "Loading shared order tracking...";
 let weeklyOrderTrackingRefreshRunning = false;
@@ -1145,6 +1147,7 @@ let shotPricingRowsByKey = new Map();
 let activePmbPriceUpdateKey = "";
 const pmbPriceUpdateMessages = new Map();
 let pricingAdvisorInputsByKey = new Map();
+let pricingAdvisorShowAll = false;
 let beverageNewsPayload = null;
 let beverageNewsLoading = false;
 let ohioComplianceAcknowledgement = {};
@@ -4093,7 +4096,9 @@ function renderShotPricing(visibleTapRows = []) {
         ></span>
       </label>
     `).join("");
-    const issue = row.blockers[0] || "Both portions and the physical PMB identity passed the safety checks.";
+    const issue = row.canEdit
+      ? row.blockers[0] || "Both portions and the physical PMB identity passed the safety checks."
+      : "";
 
     return `
       <tr class="shot-pricing-row${row.canEdit ? "" : " shot-pricing-row--blocked"}" data-shot-pricing-key="${escapeHtml(row.key)}">
@@ -4102,8 +4107,8 @@ function renderShotPricing(visibleTapRows = []) {
         <td><div class="portion-list">${currentPortions}</div></td>
         <td><div class="shot-pricing-fields">${editors}</div></td>
         <td>
-          <span class="pricing-advisor-status pricing-advisor-status--${row.canEdit ? "ready" : "review"}">${row.canEdit ? "Ready" : "Setup required"}</span>
-          <span class="table-note">${escapeHtml(issue)}</span>
+          <span class="pricing-advisor-status pricing-advisor-status--${row.canEdit ? "ready" : "review"}">${row.canEdit ? "Ready" : "Setup needed"}</span>
+          ${issue ? `<span class="table-note">${escapeHtml(issue)}</span>` : ""}
         </td>
         <td>
           <div class="pricing-advisor-action">
@@ -4220,8 +4225,20 @@ function renderPricingAdvisor(visibleTapRows = []) {
     .map(buildPricingAdvisorInput)
     .filter((item) => isPricingAdvisorEligibleKind(item.kind));
   const advisor = buildPricingAdvisor(advisorInputs);
+  const suggestedRows = advisor.rows.filter((item) => item.action === "increase" || item.action === "set");
+  const displayedRows = pricingAdvisorShowAll ? advisor.rows : suggestedRows;
   const advisorByKey = new Map(advisorInputs.map((input) => [input.updateKey, input]));
   pricingAdvisorInputsByKey = advisorByKey;
+  if (pricingAdvisorToggle) {
+    pricingAdvisorToggle.textContent = pricingAdvisorShowAll
+      ? "Show suggestions"
+      : `Show all ${formatNumber(advisor.rows.length)}`;
+    pricingAdvisorToggle.setAttribute("aria-expanded", pricingAdvisorShowAll ? "true" : "false");
+    pricingAdvisorToggle.onclick = () => {
+      pricingAdvisorShowAll = !pricingAdvisorShowAll;
+      renderPricingAdvisor(visibleTapRows);
+    };
+  }
   pricingAdvisorSummary.innerHTML = `
     <div><strong>${formatNumber(advisor.summary.priceChangeCount)}</strong><span>Price suggestions</span></div>
     ${advisor.summary.onTargetCount ? `<div><strong>${formatNumber(advisor.summary.onTargetCount)}</strong><span>At or above 82%</span></div>` : ""}
@@ -4229,7 +4246,7 @@ function renderPricingAdvisor(visibleTapRows = []) {
     ${advisor.summary.blockedCount ? `<div><strong>${formatNumber(advisor.summary.blockedCount)}</strong><span>Missing data</span></div>` : ""}
   `;
 
-  pricingAdvisorTable.innerHTML = advisor.rows.map((item) => {
+  pricingAdvisorTable.innerHTML = displayedRows.map((item) => {
     const source = advisorByKey.get(item.updateKey || item.id) || {};
     const status = getPricingAdvisorStatus(item);
     const issueCopy = item.issues.map((entry) => entry.message).join(" ");
@@ -4267,7 +4284,7 @@ function renderPricingAdvisor(visibleTapRows = []) {
         <td>${updateControl}</td>
       </tr>
     `;
-  }).join("") || '<tr><td colspan="8" class="empty-state">No tap-pricing rows match this search.</td></tr>';
+  }).join("") || `<tr><td colspan="8" class="empty-state">${pricingAdvisorShowAll ? "No tap-pricing rows match this search." : "No price changes suggested."}</td></tr>`;
 
   bindPmbPriceUpdateControls();
 }
@@ -5345,6 +5362,41 @@ function renderWeeklyPlanCocktailRows(items) {
   }).join("")}</div>`;
 }
 
+function getWeeklySimpleSyrupNeed(cocktails = []) {
+  let totalOz = 0;
+  const unmatched = [];
+
+  cocktails.forEach((item) => {
+    const recipe = findRecipeForWallProduct(getActiveRecipes(), item.name);
+    if (!recipe) {
+      unmatched.push(item.name);
+      return;
+    }
+
+    const syrupOzPerRecipe = sum((recipe.ingredients || [])
+      .filter((ingredient) => normalizeIngredientAlias(ingredient.name).toLowerCase() === "simple syrup")
+      .map((ingredient) => toNumber(ingredient.oz)));
+    if (!syrupOzPerRecipe) return;
+
+    const recipeBatchOz = getRecipeTotals(recipe).oz;
+    const plannedBatchOz = toNumber(item.batchSizeOz);
+    const quantity = toNumber(item.quantity);
+    if (!recipeBatchOz || !plannedBatchOz || !quantity) {
+      unmatched.push(item.name);
+      return;
+    }
+
+    totalOz += syrupOzPerRecipe * (plannedBatchOz / recipeBatchOz) * quantity;
+  });
+
+  return {
+    totalOz,
+    gallons: totalOz / 128,
+    unmatched,
+    complete: unmatched.length === 0,
+  };
+}
+
 function renderWeeklyPlanLiquorTapRows(items) {
   if (!items.length) return '<p class="weekly-plan-empty">No liquor-tap bottle orders this week.</p>';
   return `<div class="weekly-plan-list">${items.map((item) => `
@@ -5356,6 +5408,23 @@ function renderWeeklyPlanLiquorTapRows(items) {
       <b>Order ${formatNumber(item.quantity)} bottle${item.quantity === 1 ? "" : "s"}</b>
     </div>
   `).join("")}</div>`;
+}
+
+function renderWeeklyPlanLiquorRefillRows(items) {
+  if (!items.length) return '<p class="weekly-plan-empty">None this week.</p>';
+  return `<div class="weekly-plan-list">${items.map((item) => {
+    const taps = (item.tapNumbers || []).filter(Boolean);
+    const tapLabel = taps.length ? `Tap${taps.length === 1 ? "" : "s"} ${taps.join(", ")}` : "Tap unavailable";
+    return `
+      <div class="weekly-plan-item">
+        <div>
+          <strong>${escapeHtml(getCanonicalProductDisplayName(item.name))}</strong>
+          <span>${escapeHtml(tapLabel)}</span>
+        </div>
+        <b>${formatNumber(item.quantity)} bottle${item.quantity === 1 ? "" : "s"}</b>
+      </div>
+    `;
+  }).join("")}</div>`;
 }
 
 function renderWeeklyPlanGroup(title, count, content, accent = "") {
@@ -5811,6 +5880,7 @@ function renderMondayRunCompact(run) {
         <div><h2>Monday Run</h2><span>${formatNumber(run.completedCount)} / ${formatNumber(run.steps.length)}</span></div>
         <button class="${run.complete ? "ghost-button" : "primary-button"}" type="button" data-dashboard-target="weekly-plan">${run.complete ? "Review" : "Continue"}</button>
       </header>
+      <p class="monday-run__current-step"><span>${run.complete ? "Complete" : "Next"}:</span> <strong>${escapeHtml(run.complete ? "Review this week" : run.nextStep.label)}</strong></p>
       <div class="monday-run__progress" role="progressbar" aria-label="Monday Run progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="--monday-run-progress: ${progress}%"></span></div>
     </section>
   `;
@@ -5856,7 +5926,12 @@ function renderDashboardOverview() {
       advisorSummary: pricingAdvisor.summary,
     },
     inventory: { missingCurrentCount: getWeeklyPlanMissingInventoryCount() },
-    orders: { notReceivedItems: weeklyOrderTracking.notReceivedItems },
+    orders: {
+      available: weeklyOrderTracking.available,
+      vendors: weeklyOrderTracking.vendors,
+      notReceivedItems: weeklyOrderTracking.notReceivedItems,
+    },
+    prep: dashboardStaffPrepPlan,
     recipes: { missingRecipeCount: recipeCoverage.missing.length },
     deferred: { cocktailIngredientNetting: true },
   }, { now: new Date() });
@@ -6087,6 +6162,7 @@ function renderOnParInsights() {
   const isSalesRanking = sellerRankingMetric === "sales";
   const isProfitRanking = sellerRankingMetric === "profit";
   const isDollarRanking = isSalesRanking || isProfitRanking;
+  const currentPerformanceItems = new Set(weeklyUsageItems);
   const rankings = buildWeeklyUsageSellerRankings(
     [...weeklyUsageItems, ...weeklyUsageArchivedItems],
     {
@@ -6095,40 +6171,22 @@ function renderOnParInsights() {
       metric: isDollarRanking ? "profit" : "volume",
       getFullOunces: getWeeklyUsageFullOunces,
       getGrossProfitPerOz: isSalesRanking ? getWeeklyUsageItemSellingRate : getWeeklyUsageItemProfitRate,
+      isBottomEligible: (item) => currentPerformanceItems.has(item) && !isRetiredProduct(item),
       recentWeekLimit,
       topLimit: sellerRankingListSize,
       bottomLimit: sellerRankingListSize,
     },
   );
-  const unavailableExactVolumeSamples = rankings.metricMetadata.unavailableExactVolumeSampleCount;
-  const dollarCoverage = isDollarRanking
-    ? [
-        rankings.metricMetadata.unavailableItemCount
-          ? `${formatNumber(rankings.metricMetadata.unavailableItemCount)} product${rankings.metricMetadata.unavailableItemCount === 1 ? "" : "s"} excluded because price, cost, or liquor portion economics could not be verified.`
-          : "",
-        unavailableExactVolumeSamples
-          ? `${formatNumber(unavailableExactVolumeSamples)} saved sample${unavailableExactVolumeSamples === 1 ? "" : "s"} excluded because exact PMB ounces were unavailable.`
-          : "",
-        !rankings.metricMetadata.unavailableItemCount && !unavailableExactVolumeSamples
-          ? isProfitRanking
-            ? "All ranked products have verified current prices, costs, and exact PMB ounces."
-            : "All ranked products have verified current prices and exact PMB ounces."
-          : "",
-      ].filter(Boolean).join(" ")
-    : "Exact PMB poured ounces; corporate-party pours remain included.";
-  const identityCoverage = rankings.quality.unverifiedIdentityItemCount
-    ? `${formatNumber(rankings.quality.unverifiedIdentityItemCount)} saved historical ${rankings.quality.unverifiedIdentityItemCount === 1 ? "product was" : "products were"} excluded because ${rankings.quality.unverifiedIdentityItemCount === 1 ? "its" : "their"} wall or drink type could not be verified.`
-    : "";
   const emptyMessage = isDollarRanking
     ? isProfitRanking
       ? "No products in this filter have enough exact PMB usage plus verified current pricing and costs."
       : "No products in this filter have enough exact PMB usage and verified current pricing."
-    : "No positive PMB poured usage is saved for this filter.";
+    : "No positive poured usage is saved for this filter.";
   const periodRankings = sellerRankingPeriod === "all-time"
       ? rankings.allTime
       : rankings.recent;
   const periodTitle = sellerRankingPeriod === "all-time"
-    ? "All saved PMB weeks"
+    ? "All saved usage weeks"
     : recentWeekLimit === 1
       ? "Latest saved week"
       : `Last ${recentWeekLimit} saved weeks`;
@@ -6170,11 +6228,7 @@ function renderOnParInsights() {
     </header>
     <div class="onpar-insights__periods">
       ${renderSellerRankingPeriod(periodRankings, { title: periodTitle, allTime: sellerRankingPeriod === "all-time", metric: sellerRankingMetric, emptyMessage, listSize: sellerRankingListSize })}
-    </div>
-    <footer class="onpar-insights__footer">
-      <span>${escapeHtml([dollarCoverage, identityCoverage].filter(Boolean).join(" "))}</span>
-      <span>${isProfitRanking ? "Projected profit uses today’s verified prices and current costs." : isSalesRanking ? "Projected sales use today’s verified PMB prices." : "Averages use only the weeks recorded for each product."}</span>
-    </footer>`;
+    </div>`;
 }
 
 function getDashboardPulseWall(item) {
@@ -6616,21 +6670,21 @@ function renderWeeklyPlanProvenance({ latestCompletedWeek, latestCompletedUsageS
   const missingCounts = getWeeklyPlanMissingInventoryCount();
   return `
     <section class="weekly-plan-provenance" aria-label="Weekly plan source freshness">
-      <div>
+      <div class="weekly-plan-provenance__item">
         <span>Plan</span>
         <strong>${planLocked ? "Locked · " : ""}${recommendations?.generatedAt ? escapeHtml(formatUpdatedAt(recommendations.generatedAt)) : "Not generated"}</strong>
       </div>
-      <div>
+      <div class="weekly-plan-provenance__item">
         <span>Weekly Usage</span>
         <strong>${weeklyUsageSharedSaveError ? "Recovery review needed" : weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites || weeklyUsageSharedSaveTimer || weeklyUsageSharedOutbox ? "Saving changes" : latestCompletedWeek ? `Week of ${escapeHtml(formatIsoDate(latestCompletedWeek))}` : "No completed week"}</strong>
         ${weeklyUsageSharedSaveError ? `<small>${escapeHtml(weeklyUsageSharedSaveError)}</small>` : !latestCompletedUsageSaved ? `<small>${formatNumber(latestCompletedUsageRowCount)}/${formatNumber(weeklyUsageItems.length)} taps saved</small>` : ""}
       </div>
-      <div>
+      <div class="weekly-plan-provenance__item">
         <span>Inventory</span>
         <strong>${inventorySharedSaveError ? "Recovery review needed" : inventorySharedSaving || inventoryFieldSyncPendingCount || inventoryFieldSyncTimers.size || Object.keys(inventoryFieldOutbox).length || inventoryActionOutbox.length ? "Saving changes" : inventorySharedInitialized ? (inventorySharedUpdatedAt ? escapeHtml(formatUpdatedAt(inventorySharedUpdatedAt)) : "Shared inventory") : "Local / baseline only"}</strong>
         ${inventorySharedSaveError ? `<small>${escapeHtml(inventorySharedSaveError)}</small>` : missingCounts ? `<small>${formatNumber(missingCounts)} missing count${missingCounts === 1 ? "" : "s"}</small>` : ""}
       </div>
-      <div>
+      <div class="weekly-plan-provenance__item">
         <span>Prices</span>
         <strong>${priceTime ? escapeHtml(formatUpdatedAt(priceTime)) : "Bundled defaults"}</strong>
         ${vendorSyncRunning ? "<small>Syncing…</small>" : ""}
@@ -6726,6 +6780,7 @@ function getVendorOrderDraftModel(plan, freshness) {
     cocktails: plan?.prep?.cocktails,
     recipes,
     inventoryItems,
+    recipeAliases: Object.fromEntries([...MENU_ORDER, ...NEW_RECIPE_ORDER]),
   });
   return buildVendorOrderDrafts(plan, {
     proofMinimumCandidates: proofPrep.candidates,
@@ -7132,6 +7187,13 @@ function renderWeeklyPlanTrends() {
   `;
 }
 
+function isEasternMonday(now = new Date()) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+  }).format(now) === "Mon";
+}
+
 function renderWeeklyPlan() {
   if (!weeklyPlan) return;
   const recommendations = parAgentState?.recommendations;
@@ -7146,7 +7208,9 @@ function renderWeeklyPlan() {
     estimatedKnownPurchaseCost: Math.max(0, toNumber(plan.summary.estimatedKnownPurchaseCost) - deferredOrderCost),
   };
   const planLocked = Boolean(getCurrentWeeklyPlanSnapshot(recommendations, new Date()));
+  const requiresLateSnapshotReason = !planLocked && !isEasternMonday();
   const mondayRun = getMondayRunModel(plan, freshness);
+  const simpleSyrupNeed = getWeeklySimpleSyrupNeed(plan.prep.cocktails);
   const updatedText = planLocked ? "Thursday delivery · locked through Sunday" : "Live needs";
   const priceNote = summary.estimatedPurchaseCostComplete
     ? ""
@@ -7160,7 +7224,13 @@ function renderWeeklyPlan() {
       </div>
       <div class="weekly-plan-actions">
         ${ORDER_REHEARSAL_AVAILABLE ? `<button class="ghost-button" id="toggle-order-rehearsal" type="button">${orderRehearsalMode ? "Exit Rehearsal" : "Rehearsal"}</button>` : ""}
-        <button class="primary-button" id="run-weekly-plan-agent" type="button"${parAgentRunning || weeklyPlanUpdating || planLocked ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Saving & locking..." : planLocked ? "Plan locked through Sunday" : "Save & Lock Plan"}</button>
+        ${requiresLateSnapshotReason ? `
+          <label class="weekly-plan-late-reason">
+            <span>Reason required</span>
+            <input id="weekly-plan-late-reason" type="text" autocomplete="off" value="${escapeHtml(weeklyPlanOutsideMondayReason)}" placeholder="Why is this snapshot late?">
+          </label>
+        ` : ""}
+        <button class="primary-button" id="run-weekly-plan-agent" type="button"${parAgentRunning || weeklyPlanUpdating || planLocked || (requiresLateSnapshotReason && !clean(weeklyPlanOutsideMondayReason)) ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Saving & locking..." : planLocked ? "Plan locked through Sunday" : "Save & Lock Plan"}</button>
       </div>
     </header>
     <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : ""))}</p>
@@ -7172,6 +7242,7 @@ function renderWeeklyPlan() {
       <div><span>Beer kegs</span><strong>${formatNumber(summary.beerKegTotal)}</strong></div>
       <div><span>Liquor tap bottles</span><strong>${formatNumber(summary.liquorTapBottleTotal)}</strong></div>
       <div><span>Cocktail kegs to make</span><strong>${formatNumber(summary.cocktailBatchTotal)}</strong></div>
+      <div class="${simpleSyrupNeed.complete ? "" : "weekly-plan-stat--warning"}"><span>Simple syrup</span><strong>${simpleSyrupNeed.complete ? `${formatNumber(simpleSyrupNeed.gallons)} gal` : "Check recipes"}</strong>${simpleSyrupNeed.complete ? `<small>${formatNumber(simpleSyrupNeed.totalOz)} oz</small>` : `<small>${formatNumber(simpleSyrupNeed.unmatched.length)} unmatched cocktail${simpleSyrupNeed.unmatched.length === 1 ? "" : "s"}</small>`}</div>
       <div><span>Held for review</span><strong>${formatNumber(summary.heldLineCount + summary.excludedLineCount)}</strong></div>
       <div class="${summary.estimatedPurchaseCostComplete ? "" : "weekly-plan-stat--warning"}"><span>Purchase estimate</span><strong>${money(summary.estimatedKnownPurchaseCost)}</strong>${summary.missingPriceCount ? `<small>${formatNumber(summary.missingPriceCount)} missing price${summary.missingPriceCount === 1 ? "" : "s"}</small>` : ""}</div>
     </div>
@@ -7184,6 +7255,8 @@ function renderWeeklyPlan() {
       <section class="weekly-plan-column weekly-plan-column--prep">
         <div class="weekly-plan-column__header"><h2>Cocktails To Make</h2></div>
         ${renderWeeklyPlanCocktailRows(plan.prep.cocktails)}
+        <div class="weekly-plan-column__header"><h2>Add Liquor To Kegs</h2></div>
+        ${renderWeeklyPlanLiquorRefillRows(plan.orders.liquorTapBottles)}
       </section>
     </div>
     ${orderRehearsalMode || !planLocked ? "" : renderOwnerWeeklyOrderTracking()}
@@ -7192,6 +7265,11 @@ function renderWeeklyPlan() {
   `;
 
   document.querySelector("#run-weekly-plan-agent")?.addEventListener("click", runWeeklyPlanUpdate);
+  document.querySelector("#weekly-plan-late-reason")?.addEventListener("input", (event) => {
+    weeklyPlanOutsideMondayReason = event.currentTarget.value;
+    const saveButton = document.querySelector("#run-weekly-plan-agent");
+    if (saveButton) saveButton.disabled = !clean(weeklyPlanOutsideMondayReason);
+  });
   document.querySelector("#toggle-order-rehearsal")?.addEventListener("click", () => {
     orderRehearsalMode = !orderRehearsalMode;
     weeklyOrderTrackingMessage = orderRehearsalMode
@@ -7234,7 +7312,7 @@ function renderKegLevels() {
       <div class="summary-line"><span>Live levels found</span><strong>${liveCount}</strong></div>
       <div class="summary-line"><span>Kegs below par</span><strong>${reorderCount}</strong></div>
       ${recipeCoverage.missing.length ? `<div class="summary-line"><span>Missing recipes</span><strong>${recipeCoverage.missing.length}</strong></div>` : ""}
-      <div class="summary-line"><span>Current line value</span><strong>${money(currentInventoryValue)}</strong></div>
+      <div class="summary-line"><span>Keg inventory value</span><strong>${money(currentInventoryValue)}</strong></div>
     </div>
     ${recipeCoverage.missing.length ? `
       <div class="recipe-coverage-summary">
@@ -8859,8 +8937,6 @@ function renderKegWallBlock(wallName, items) {
               <th>Tap #</th>
               <th>Product</th>
               <th>Current level</th>
-              <th>Inventory value</th>
-              <th>Tap price</th>
               <th>Avg weekly</th>
               <th>On hand</th>
               <th>Need</th>
@@ -8878,31 +8954,17 @@ function renderKegWallBlock(wallName, items) {
                 const onDeck = getKegOnDeckItem(item);
                 const isLiquorTap = isLiquorOunceTap(toNumber(item.tapNumber));
                 const isLiquorOnDeck = normalizeTitle(onDeck?.kind) === "liquor";
-                const onDeckValue = getKegOnDeckInventoryValue(item, onDeck);
-                const currentValue = getKegCurrentValue(item, liveRow) + onDeckValue;
-                const pricing = getKegWallPricing(item, displayBrand);
                 const rowTypeClass = getKegRowTypeClass(item);
                 const mainRow = `
                   <tr class="${rowTypeClass}" data-keg-row-key="${escapeHtml(itemKey)}">
                     <td>${item.tapNumber}</td>
                     <td class="keg-product-cell">
                       ${replacement ? `<span class="table-note">Replacing ${escapeHtml(replacement.oldBrand)}</span>` : ""}
-                      ${onDeck ? `
-                        <span class="table-note table-note--accent keg-on-deck-summary">
-                          <span>On deck: ${escapeHtml(onDeck.name)}</span>
-                          <button class="keg-on-deck-remove" data-keg-key="${escapeHtml(itemKey)}" type="button" aria-label="Remove ${escapeHtml(onDeck.name)} from On Deck for tap ${escapeHtml(item.tapNumber)}">Remove</button>
-                        </span>
-                      ` : ""}
                       ${renderTapChangeControls(item, liveRow, displayBrand)}
                     </td>
                     <td class="keg-level-cell ${getKegLevelClass(liveRow?.fillLevelPercent)}">
                       <span class="keg-level-display">${formatKegCurrentLevel(item, liveRow)}</span>
                     </td>
-                    <td class="keg-value-cell">
-                      ${currentValue > 0 ? money(currentValue) : '<span class="inventory-order-zero">-</span>'}
-                      ${toNumber(onDeck?.onHand) > 0 ? `<span class="table-note table-note--accent">${onDeckValue > 0 ? `On Deck ${money(onDeckValue)}` : "On Deck price needed"}</span>` : ""}
-                    </td>
-                    <td class="keg-pricing-cell">${pricing.chargeHtml}</td>
                     <td class="keg-usage-cell">${formatKegWeeklyUsageAverage(item, displayBrand)}</td>
                     <td>
                       <div class="keg-on-hand-stack">
@@ -8980,6 +9042,7 @@ function getKegDisplayBrand(item, liveRow = null) {
 
 function renderTapChangeControls(item, liveRow, displayBrand = item.brand) {
   const itemKey = getKegItemKey(item);
+  const onDeck = getKegOnDeckItem(item);
   const replacement = tapReplacementOverrides[itemKey];
   const selectedValue = replacement?.sourceValue || (replacement?.comingSoonId ? `coming-soon:${replacement.comingSoonId}` : "");
   const options = getTapReplacementProductOptions(item, replacement);
@@ -8994,6 +9057,12 @@ function renderTapChangeControls(item, liveRow, displayBrand = item.brand) {
       <strong>${escapeHtml(displayBrand || item.brand)}</strong>
       ${replacement ? `<span class="table-note">Current replacement</span>` : ""}
     </div>
+    ${onDeck ? `
+      <span class="table-note table-note--accent keg-on-deck-summary">
+        <span>On deck: ${escapeHtml(onDeck.name)}</span>
+        <button class="keg-on-deck-remove" data-keg-key="${escapeHtml(itemKey)}" type="button" aria-label="Remove ${escapeHtml(onDeck.name)} from On Deck for tap ${escapeHtml(item.tapNumber)}">Remove</button>
+      </span>
+    ` : ""}
     <div class="tap-change-controls">
       <button class="mini-button toggle-keg-adjust" data-keg-key="${escapeHtml(itemKey)}" type="button"${adjustDisabled ? " disabled" : ""}>${activeKegAdjustKey === itemKey ? "Hide" : "Edit"}</button>
       ${isEditing ? `
@@ -9573,31 +9642,17 @@ function renderKegCostEmptyState(message) {
   return `<div class="empty-state keg-cost-empty">${escapeHtml(message)}</div>`;
 }
 
-function renderKegEditFinancialPanel(item, displayBrand = item?.brand) {
+function renderKegEditFinancialPanel(item) {
   const itemKey = getKegItemKey(item);
-  const pricing = getKegWallPricing(item, displayBrand);
   const par = getKegParDisplay(item);
   return `
     <section class="keg-edit-section keg-edit-section--finance">
       <div class="keg-edit-metrics">
-        <div>
-          <span>Tap price</span>
-          <strong>${pricing.chargeHtml}</strong>
-        </div>
-        <div>
-          <span>Cost / oz</span>
-          <strong>${pricing.costPerOz ? money(pricing.costPerOz) : '<span class="inventory-order-zero">-</span>'}</strong>
-        </div>
-        <div>
-          <span>Margin</span>
-          <strong>${pricing.marginHtml}</strong>
-        </div>
         <label class="keg-adjust-field keg-adjust-field--par">
           <span>Par</span>
           <input class="inventory-input keg-input keg-input--par" data-keg-field="par" data-keg-key="${escapeHtml(itemKey)}" type="number" min="0" step="0.01" inputmode="decimal" value="${escapeHtml(par)}" placeholder="0">
         </label>
       </div>
-      ${renderKegOnDeckControl(item)}
     </section>
   `;
 }
@@ -9636,8 +9691,11 @@ function renderKegLevelAdjustRow(item, liveRow, displayBrand = item.brand) {
     : "Refresh keg levels before adjusting this tap.";
   return `
     <tr class="keg-adjust-row">
-      <td colspan="8">
+      <td colspan="6">
         <div class="keg-adjust-panel keg-edit-panel">
+          <section class="keg-edit-section keg-edit-section--on-deck">
+            ${renderKegOnDeckControl(item)}
+          </section>
           <section class="keg-edit-section keg-edit-section--level">
             <div class="keg-adjust-panel__summary">
               <strong>${escapeHtml(displayBrand || item.brand)}</strong>
@@ -9656,7 +9714,7 @@ function renderKegLevelAdjustRow(item, liveRow, displayBrand = item.brand) {
               <button class="primary-button push-keg-level-adjust" data-keg-key="${escapeHtml(itemKey)}" type="button"${disabled || kegConfigUpdateRunning ? " disabled" : ""}>Push to tap</button>
             </div>
           </section>
-          ${renderKegEditFinancialPanel(item, displayBrand)}
+          ${renderKegEditFinancialPanel(item)}
           <section class="keg-edit-section keg-edit-section--costs">
             ${renderKegProductCostEditor(item, displayBrand)}
           </section>
@@ -10641,7 +10699,7 @@ function getParAgentStatusMessage() {
     return "Needs have not been calculated yet.";
   }
   if (!hasCurrentParAgentRecommendations()) {
-    return "Counts changed. Update needs again.";
+    return "Counts changed. Updating needs...";
   }
 
   const summary = recommendations.summary || {};
@@ -10659,9 +10717,11 @@ function getParAgentSettings() {
 function renderParAgentPanel() {
   return `
     <div class="sync-panel sync-panel--par-agent">
-      <div class="sync-actions par-agent-actions">
-        <button class="primary-button" id="run-par-agent" type="button"${parAgentRunning ? " disabled" : ""}>${parAgentRunning ? "Updating..." : "Update needs"}</button>
-      </div>
+      ${parAgentError ? `
+        <div class="sync-actions par-agent-actions">
+          <button class="primary-button" id="run-par-agent" type="button"${parAgentRunning ? " disabled" : ""}>${parAgentRunning ? "Updating..." : "Try again"}</button>
+        </div>
+      ` : ""}
       ${parAgentState?.initialized === false ? '<button class="ghost-button" id="initialize-shared-keg-levels" type="button">Import from service computer</button>' : ""}
       <p class="sync-status">${escapeHtml(parAgentMessage)}</p>
     </div>
@@ -10939,6 +10999,12 @@ async function runWeeklyPlanUpdate() {
     parAgentError = "Complete the shared Keg Levels, Weekly Usage, and Inventory setup before updating the Weekly Plan.";
     weeklyPlanRefreshMessage = parAgentError;
     renderWeeklyPlan();
+    return;
+  }
+  if (!isEasternMonday() && !clean(weeklyPlanOutsideMondayReason)) {
+    weeklyPlanRefreshMessage = "Enter a reason before saving this week's snapshot outside Monday.";
+    renderWeeklyPlan();
+    document.querySelector("#weekly-plan-late-reason")?.focus();
     return;
   }
   weeklyPlanUpdating = true;
@@ -11320,6 +11386,9 @@ function renderKegNeedCell(item, need) {
   }
 
   const orderProductName = getCanonicalProductDisplayName(recommendation.orderProductName);
+  if (recommendation.isLiquorTap && orderProductName && need > 0) {
+    return `<span class="inventory-order-value">Order ${formatNumber(need)} bottle${need === 1 ? "" : "s"} of ${escapeHtml(orderProductName)}</span>`;
+  }
   const actionLabel = recommendation.isLiquorTap
     ? "Order"
     : recommendation.actionType === "make"
@@ -11541,7 +11610,9 @@ function getKegOnDeckInventoryValue(item, onDeck = getKegOnDeckItem(item)) {
     )) || {};
     const bottleCost = toNumber(comingSoonItem.bottleCost || mappedLiquor.bottleCost);
     const bottleOz = toNumber(comingSoonItem.bottleOz || mappedLiquor.bottleOz);
-    return bottleCost && bottleOz ? (bottleCost / bottleOz) * onHandAmount : 0;
+    const mappedCostPerOz = getMappedIngredientUnitCost(onDeck.name);
+    const costPerOz = bottleCost && bottleOz ? bottleCost / bottleOz : mappedCostPerOz;
+    return costPerOz > 0 ? costPerOz * onHandAmount : 0;
   }
 
   const directCost = toNumber(comingSoonItem.batchCost || comingSoonItem.kegCost);
@@ -12753,6 +12824,8 @@ function editCustomInventoryItem(id) {
   customInventoryUnitCostInput.value = toNumber(item.caseCost) > 0 ? String(item.caseCost) : "";
   customInventorySubmitButton.textContent = "Update item";
   customInventoryCancelButton.hidden = false;
+  const editor = document.querySelector("#custom-inventory-editor");
+  if (editor) editor.open = true;
   customInventoryNameInput.focus();
 }
 
@@ -12760,8 +12833,10 @@ function resetCustomInventoryForm() {
   editingCustomInventoryId = "";
   customInventoryForm?.reset();
   if (customInventoryPackSizeInput) customInventoryPackSizeInput.value = "1";
-  if (customInventorySubmitButton) customInventorySubmitButton.textContent = "Add item";
+  if (customInventorySubmitButton) customInventorySubmitButton.textContent = "Save";
   if (customInventoryCancelButton) customInventoryCancelButton.hidden = true;
+  const editor = document.querySelector("#custom-inventory-editor");
+  if (editor) editor.open = false;
 }
 
 function getCustomInventoryVendorProduct(name, group) {
@@ -13339,7 +13414,7 @@ async function saveInventorySnapshot() {
     timeZone: "America/New_York",
     weekday: "short",
   }).format(now);
-  let outsideMondayReason = "";
+  const outsideMondayReason = easternWeekday === "Mon" ? "" : clean(weeklyPlanOutsideMondayReason);
   const recordCaptureEvent = async (event, code = "") => {
     await fetch("/api/dashboard-activity", {
       method: "POST",
@@ -13355,7 +13430,6 @@ async function saveInventorySnapshot() {
     renderInventoryPanels();
   };
   if (easternWeekday !== "Mon") {
-    outsideMondayReason = clean(window.prompt("Why are you saving this Monday snapshot late?") || "");
     if (!outsideMondayReason) {
       await failCapture("a reason is required when saving outside Monday.", "MONDAY_SNAPSHOT_REASON_REQUIRED");
       return false;
@@ -13481,6 +13555,7 @@ async function saveInventorySnapshot() {
     },
   );
   if (state) {
+    weeklyPlanOutsideMondayReason = "";
     kegOnHandOverrides = createClearedKegOnHandOverrides(kegWallItems, getKegItemKey);
     saveKegOnHandOverrides();
     scheduleParAgentStateSync({ immediate: true });

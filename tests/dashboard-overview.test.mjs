@@ -100,10 +100,11 @@ test("builds a clear overview from fully verified source signals", () => {
   assert.deepEqual(overview.alerts, []);
 
   const kpis = Object.fromEntries(overview.kpis.map((item) => [item.id, item]));
-  assert.equal(kpis["order-readiness"].value, "Ready to order");
   assert.equal(kpis["items-to-order"].value, "9");
+  assert.equal(kpis["items-to-order"].detail, "$486.50 estimated");
   assert.equal(kpis["cocktails-to-make"].value, "3");
-  assert.equal(kpis["purchase-cost"].value, "$486.50");
+  assert.equal(kpis["order-readiness"], undefined);
+  assert.equal(kpis["purchase-cost"], undefined);
   assert.equal(kpis["usage-coverage"].value, "102 / 102");
   assert.equal(kpis["pricing-floor"].value, "47 / 47");
   assert.equal(overview.quickActions.find((item) => item.id === "weekly-usage")?.label, "View Beverage Trends");
@@ -126,7 +127,6 @@ test("stale plans hide order, prep, and cost numbers instead of presenting old q
   assert.match(overview.alerts[0].message, /Weekly Usage changed/);
   assert.equal(kpis["items-to-order"].value, "—");
   assert.equal(kpis["cocktails-to-make"].value, "—");
-  assert.equal(kpis["purchase-cost"].value, "—");
   assert.equal(kpis["items-to-order"].rawValue, null);
   assert.equal(overview.quickActions[0].label, "Fix Weekly Plan");
 });
@@ -454,6 +454,32 @@ test("a locked Monday plan keeps its numbers when later keg levels are unavailab
   assert.equal(overview.planNumbersAvailable, true);
   assert.equal(kpis["items-to-order"].value, "9");
   assert.equal(kpis["cocktails-to-make"].value, "3");
+});
+
+test("completed vendor orders and staff prep reduce Dashboard work remaining", () => {
+  const signals = readySignals();
+  signals.weeklyPlan.lockedForWeek = true;
+  signals.orders = {
+    available: true,
+    vendors: [
+      { vendor: "Bonbright", ordered: true, estimatedTotal: 300, items: [{}, {}] },
+      { vendor: "OHLQ", ordered: false, estimatedTotal: 186.5, items: [{}, {}, {}] },
+    ],
+  };
+  signals.prep = {
+    available: true,
+    items: [
+      { name: "Finished", quantity: 2, completed: true },
+      { name: "Still needed", quantity: 1, completed: false },
+    ],
+  };
+
+  const overview = buildDashboardOverview(signals, { now });
+  const kpis = Object.fromEntries(overview.kpis.map((item) => [item.id, item]));
+
+  assert.equal(kpis["items-to-order"].value, "3");
+  assert.equal(kpis["items-to-order"].detail, "$186.50 estimated");
+  assert.equal(kpis["cocktails-to-make"].value, "1");
 });
 
 test("a locked Monday plan keeps its numbers when later usage, inventory, or shared checks change", () => {

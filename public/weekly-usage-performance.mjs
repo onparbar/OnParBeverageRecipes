@@ -49,12 +49,12 @@ export function getWeeklyUsagePerformanceCategory(item) {
 }
 
 export function getWeeklyUsageEntryPouredOz(item, entry, getFullOunces = () => 0) {
-  if (!isPmbUsageEntry(entry)) return null;
-
-  const exactPouredOz = finiteNonNegativeNumber(entry.volumeOz);
+  const exactPouredOz = finiteNonNegativeNumber(entry?.volumeOz);
   if (exactPouredOz !== null) return exactPouredOz;
 
-  const displayedValue = finiteNonNegativeNumber(entry.value);
+  const source = clean(entry?.source).toLowerCase();
+  if (/gotab|sales/.test(source)) return null;
+  const displayedValue = finiteNonNegativeNumber(entry?.value);
   if (displayedValue === null) return null;
   if (clean(item?.displayUnit).toLowerCase() === "oz") return displayedValue;
 

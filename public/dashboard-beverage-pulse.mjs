@@ -60,6 +60,14 @@ function resolveCategory(item) {
   return getWeeklyUsagePerformanceCategory(item);
 }
 
+function isInSelectedWall(category, itemWall, selectedWall) {
+  if (category !== "liquor") return itemWall === selectedWall;
+  if (selectedWall === "karaoke" || selectedWall === "patio") {
+    return itemWall === selectedWall;
+  }
+  return itemWall === "patio" || itemWall === "karaoke";
+}
+
 function normalizeProductName(value) {
   return clean(value).replace(/\s+[123]\s*$/, "").trim() || "Unnamed PMB product";
 }
@@ -109,9 +117,9 @@ function allocateWholePercentages(values) {
 }
 
 /**
- * Builds the three last-week Dashboard leaderboards. Beer and cocktail taps
- * follow the selected wall; liquor always combines the Patio and Karaoke
- * liquor walls so selecting Main never hides all liquor activity.
+ * Builds the three last-week Dashboard leaderboards. All categories follow a
+ * selected wall that has liquor taps. Main combines venue liquor because it
+ * has no liquor wall of its own.
  */
 export function buildLastWeekPourLeaders(
   items = [],
@@ -150,9 +158,7 @@ export function buildLastWeekPourLeaders(
   sourceItems.forEach((item) => {
     const category = resolveCategory(item);
     const itemWall = resolveWall(item);
-    const inScope = category === "liquor"
-      ? itemWall === "patio" || itemWall === "karaoke"
-      : itemWall === normalizedWall;
+    const inScope = isInSelectedWall(category, itemWall, normalizedWall);
     if (!CATEGORY_ORDER.includes(category) || !inScope) return;
 
     const pouredValues = (Array.isArray(item?.history) ? item.history : [])
@@ -220,9 +226,9 @@ export function buildLastWeekPourLeaders(
 
 /**
  * Estimates the latest saved weekly sales from PMB poured ounces and the
- * caller's current selling price per ounce. Beer and cocktail taps follow the
- * selected wall; liquor combines Patio and Karaoke so Main still has a venue
- * liquor contribution. Taps without a usable current price remain excluded.
+ * caller's current selling price per ounce. All categories follow a selected
+ * wall that has liquor taps. Main combines venue liquor because it has no
+ * liquor wall of its own. Taps without a usable current price remain excluded.
  */
 export function buildLastWeekProjectedSalesMix(
   items = [],
@@ -251,9 +257,7 @@ export function buildLastWeekProjectedSalesMix(
     .filter((item) => {
       const category = resolveCategory(item);
       const itemWall = resolveWall(item);
-      return category === "liquor"
-        ? itemWall === "patio" || itemWall === "karaoke"
-        : itemWall === clean(wall).toLowerCase();
+      return isInSelectedWall(category, itemWall, clean(wall).toLowerCase());
     })
     .forEach((item) => {
       const entries = (Array.isArray(item?.history) ? item.history : [])
