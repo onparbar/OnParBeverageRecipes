@@ -8905,42 +8905,97 @@ tbody tr:hover {
   gap: 0.55rem;
 }
 
-.inventory-speech__review {
-  max-height: 25rem;
+.inventory-speech__scope {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
 }
 
-.inventory-speech__review select,
-.inventory-speech__review input {
-  min-width: 7rem;
-  max-width: 15rem;
+.inventory-speech__scope .is-active {
+  border-color: var(--green, #276b5d);
+  background: var(--green, #276b5d);
+  color: #fff;
+}
+
+.inventory-speech__review {
+  display: grid;
+  gap: 0.7rem;
+  max-height: 36rem;
+  overflow: auto;
+  padding: 0.1rem 0.2rem 0.1rem 0.1rem;
+}
+
+.speech-review-card {
+  display: grid;
+  grid-template-columns: minmax(12rem, 2fr) minmax(6rem, 0.7fr) minmax(9rem, 1fr) minmax(5rem, 0.55fr) auto;
+  gap: 0.65rem;
+  align-items: end;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid rgba(78, 104, 82, 0.2);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.speech-review-card > * {
+  min-width: 0;
+}
+
+.speech-review-card__heard {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.speech-review-card__field {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.speech-review-card__heard > span,
+.speech-review-card__field > span {
+  color: var(--muted, #6d7972);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.speech-review-card__heard strong,
+.speech-review-card__field strong {
+  overflow-wrap: anywhere;
+}
+
+.speech-review-card select,
+.speech-review-card input {
+  position: static !important;
+  left: auto !important;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+.speech-review-card__warning {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--rust, #a64e3e);
+  font-weight: 750;
 }
 
 @media (max-width: 720px) {
-  .inventory-speech__review table,
-  .inventory-speech__review tbody,
-  .inventory-speech__review tr,
-  .inventory-speech__review td {
-    display: block;
+  .speech-review-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .speech-review-card__item,
+  .speech-review-card__location,
+  .speech-review-card__warning,
+  .speech-review-card > .speech-remove-proposal {
+    grid-column: 1 / -1;
+  }
+
+  .speech-review-card > .speech-remove-proposal {
     width: 100%;
-  }
-
-  .inventory-speech__review thead {
-    display: none;
-  }
-
-  .inventory-speech__review tr {
-    padding: 0.7rem;
-    border-bottom: 1px solid rgba(78, 104, 82, 0.18);
-  }
-
-  .inventory-speech__review td {
-    padding: 0.3rem 0;
-  }
-
-  .inventory-speech__review select,
-  .inventory-speech__review input {
-    width: 100%;
-    max-width: none;
   }
 }
 

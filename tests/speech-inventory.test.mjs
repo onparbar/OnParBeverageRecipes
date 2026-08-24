@@ -33,6 +33,34 @@ test("parses several products from one unpunctuated transcript", () => {
   ]);
 });
 
+test("parses a natural quantity-first cooler walk with voice variants and a current-count increment", () => {
+  const main = (id, name, currentValue = "0") => ({ id, name, target: "keg", wall: "Main", group: `Main ${id}`, unit: "kegs", currentValue });
+  const karaoke = (id, name) => ({ id, name, target: "keg", wall: "Karaoke", group: `Karaoke ${id}`, unit: "kegs", currentValue: "0" });
+  const coolerItems = [
+    main("michelob", "MICHELOB ULTRA 1"),
+    main("miller", "MILLER LITE 1"), karaoke("miller-2", "MILLER LITE 2"),
+    main("busch", "BUSCH LIGHT 1"), main("coors", "COORS LIGHT 1"), main("pbr", "PABST BLUE RIBBON 1"),
+    main("bud", "BUD LIGHT 1"), main("cincy", "CINCY LIGHT 1"), karaoke("cincy-2", "CINCY LIGHT 2"),
+    main("kona", "KONA BIG WAVE 1"), main("garage-lime", "GARAGE BEER LIME 1"), karaoke("garage-lime-2", "GARAGE BEER LIME 2"),
+    main("garage", "GARAGE BEER 1"), main("blue-moon", "BLUE MOON 1"), main("corona", "CORONA 1"),
+    main("voodoo-juicy", "VOODOO RANGER JUICY HAZE 1"), main("dortmunder", "DORTMUNDER GOLD LAGER 1"),
+    main("guinness", "GUINNESS DRAUGHT 1"), main("modelo", "MODELO 1"), karaoke("modelo-2", "MODELO 2"),
+    main("two-hearted", "TWO HEARTED IPA 1"), main("angry-orchard", "ANGRY ORCHARD 1"),
+    main("triple-jam", "TRIPLE JAM CIDER 1"), main("astra", "ASTRA RED CREAM SODA 1"), karaoke("astra-2", "ASTRA RED CREAM SODA 2"),
+    main("truly", "TRULY WILD BERRY 1"), main("truth", "TRUTH 1", "1"),
+  ];
+  const transcript = "okay I have three Mich Ultra 3 Miller Lite two Busch Light one, Coors, one PBR One Bud Light, one Scentsy light, one Kona one garage beer lime one regular garage beer, one blue moon one Corona One Voodoo juicy Haze one dortmundder, two Guinness, one Modelo, One Two Hearted IPA, two Angry Orchard, two triple Jam, one Astra, one truly and I need to add another truth";
+  const result = parseInventoryTranscript(transcript, coolerItems);
+
+  assert.deepEqual(result.proposals.map((entry) => [entry.matchedId, entry.quantity]), [
+    ["michelob", 3], ["miller", 3], ["busch", 2], ["coors", 1], ["pbr", 1], ["bud", 1],
+    ["cincy", 1], ["kona", 1], ["garage-lime", 1], ["garage", 1], ["blue-moon", 1], ["corona", 1],
+    ["voodoo-juicy", 1], ["dortmunder", 1], ["guinness", 2], ["modelo", 1], ["two-hearted", 1],
+    ["angry-orchard", 2], ["triple-jam", 2], ["astra", 1], ["truly", 1], ["truth", 2],
+  ]);
+  assert.equal(result.proposals.every((entry) => entry.status === "matched"), true);
+});
+
 test("supports bottles, cases, zero, walls, corrections, and skips", () => {
   const bottles = parseInventoryTranscript("Buffalo Trace twelve bottles", items).proposals[0];
   const cases = parseInventoryTranscript("Buffalo Trace two cases", items).proposals[0];
@@ -66,4 +94,3 @@ test("later duplicate mentions replace rather than duplicate a field update", ()
     { id: "fireball", target: "inventory", value: "5" },
   ]);
 });
-

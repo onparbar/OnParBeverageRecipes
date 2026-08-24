@@ -34,7 +34,10 @@
   }
 
   function contextFrom(value) {
-    return normalize(value).match(/\b(main|patio|karaoke)(?: wall| cooler)?\b/)?.[1] || "inventory";
+    const explicit = normalize(value).match(/\b(main|patio|karaoke)(?: wall| cooler)?\b/)?.[1];
+    if (explicit) return explicit;
+    const selected = getRoot()?.dataset.speechContext;
+    return ["main", "patio", "karaoke"].includes(selected) ? selected : "inventory";
   }
 
   function aliasCandidate(value) {
@@ -171,15 +174,12 @@
       .filter((entry) => entry.context === context || entry.context === "inventory")
       .sort((left, right) => right.alias.length - left.alias.length);
     if (!aliases.length) return transcript;
-    return String(transcript || "").split(/([,;\n]+)/).map((segment) => {
-      const candidate = aliasCandidate(segment);
-      const rule = aliases.find((entry) => entry.alias === candidate);
-      if (!rule || normalize(segment).includes(normalize(rule.product))) return segment;
-      const pattern = new RegExp(`\\b${escapeRegExp(rule.alias).replace(/\\ /g, "\\s+")}\\b`, "i");
-      if (!pattern.test(normalize(segment))) return segment;
+    return aliases.reduce((value, rule) => {
+      const pattern = new RegExp(`\\b${escapeRegExp(rule.alias).replace(/\\ /g, "\\s+")}\\b`, "gi");
+      if (!pattern.test(value)) return value;
       lastAliasMessage = `Matched ${rule.alias} → ${rule.product}`;
-      return segment.replace(pattern, rule.product);
-    }).join("");
+      return value.replace(pattern, rule.product);
+    }, String(transcript || ""));
   }
 
   function getTranscriptField(root = getRoot()) {

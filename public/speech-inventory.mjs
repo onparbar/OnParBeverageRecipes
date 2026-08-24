@@ -15,6 +15,8 @@ export function normalizeSpeechInventoryText(value) {
     .toLowerCase()
     .replace(/[^a-z0-9.]+/g, " ")
     .replace(/\s+/g, " ")
+    .replace(/\b(?:scentsy|sensei|cincinnati)\s+light\b/g, "cincy light")
+    .replace(/\bdortmund+er\b/g, "dortmunder")
     .trim();
 }
 
@@ -50,15 +52,31 @@ export function parseSpokenInventoryNumber(value) {
 
 function catalogAliases(item) {
   const normalizedName = normalizeSpeechInventoryText(item.name);
+  const suppliedAliases = [item.name, ...(item.aliases || [])]
+    .map(normalizeSpeechInventoryText)
+    .filter(Boolean);
+  const tapSuffixlessAliases = suppliedAliases
+    .map((alias) => alias.replace(/\s+[123]$/, "").trim())
+    .filter(Boolean);
   const spokenAliases = [];
   if (normalizedName.includes("michelob ultra")) {
-    spokenAliases.push("mic ultra", "mick ultra", "mich ultra", "mc ultra", "m c ultra", "mcultra");
+    spokenAliases.push("mic ultra", "mick ultra", "mich ultra", "mitch ultra", "mc ultra", "m c ultra", "mcultra");
   }
+  if (normalizedName.includes("pabst blue ribbon")) spokenAliases.push("pbr");
+  if (normalizedName.includes("coors light")) spokenAliases.push("coors");
+  if (normalizedName.includes("kona big wave")) spokenAliases.push("kona");
+  if (normalizedName.includes("garage beer lime")) spokenAliases.push("garage lime");
+  if (normalizedName.includes("voodoo ranger juicy haze")) spokenAliases.push("voodoo juicy haze", "juicy haze");
+  if (normalizedName.includes("dortmunder gold")) spokenAliases.push("dortmunder", "dortmunder gold");
+  if (normalizedName.includes("guinness draught")) spokenAliases.push("guinness");
+  if (normalizedName.includes("triple jam cider")) spokenAliases.push("triple jam");
+  if (normalizedName.includes("truly wild berry")) spokenAliases.push("truly");
+  if (normalizedName.includes("astra red cream soda")) spokenAliases.push("astra");
+  if (normalizedName.includes("boozy cucumber lemonade")) spokenAliases.push("boozy cucumber");
   if (normalizedName.includes("apple") || normalizedName.includes("angry orchard")) spokenAliases.push("apple");
   if (normalizedName.includes("angry orchard")) spokenAliases.push("apple cider");
   if (normalizedName.includes("sour monkey")) spokenAliases.push("sour mix");
-  return [...new Set([item.name, ...(item.aliases || []), ...spokenAliases]
-    .map(normalizeSpeechInventoryText)
+  return [...new Set([...suppliedAliases, ...tapSuffixlessAliases, ...spokenAliases]
     .filter(Boolean))]
     .sort((left, right) => right.length - left.length);
 }
@@ -76,6 +94,7 @@ export function buildSpeechInventoryCatalog(items = []) {
       wall: String(item.wall || "").trim(),
       unit: String(item.unit || (item.target === "keg" ? "kegs" : "units")).trim(),
       packSize: Math.max(1, Math.round(Number(item.packSize) || 1)),
+      currentValue: item.currentValue == null ? "" : String(item.currentValue),
       aliases: catalogAliases(item),
     }];
   });
@@ -101,7 +120,51 @@ function findAliasOccurrences(text, catalog) {
   return selected.sort((left, right) => left.start - right.start);
 }
 
+function findSpokenQuantityStart(value) {
+  const tokens = [...String(value || "").matchAll(/[a-z0-9.]+/g)];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index][0];
+    if (!NUMBER_TOKENS.has(token) && !/^\d+(?:\.\d+)?$/.test(token)) continue;
+    let end = index + 1;
+    while (end < tokens.length) {
+      const next = tokens[end][0];
+      if (!NUMBER_TOKENS.has(next) && !/^\d+(?:\.\d+)?$/.test(next)) break;
+      end += 1;
+    }
+    const quantity = parseSpokenInventoryNumber(tokens.slice(index, end).map((entry) => entry[0]).join(" "));
+    if (quantity !== null && quantity <= 500) return tokens[index].index;
+  }
+  return null;
+}
+
+function findIncrementStart(value) {
+  const match = String(value || "").match(/(?:^|\s)((?:(?:okay|ok|and|then)\s+)*(?:i\s+(?:need|want)\s+to\s+)?(?:oh\s+)?(?:whoops|oops)?\s*(?:please\s+)?(?:add\s+(?:another|one\s+more)|plus\s+(?:another|one)))\s*$/);
+  if (!match) return null;
+  return match.index + match[0].indexOf(match[1]);
+}
+
+function splitQuantityFirstTranscript(transcript, catalog) {
+  const text = normalizeSpeechInventoryText(transcript);
+  const matches = findAliasOccurrences(text, catalog);
+  if (matches.length < 2) return null;
+  const starts = matches.map((match, index) => {
+    const gapStart = index ? matches[index - 1].end : 0;
+    const gap = text.slice(gapStart, match.start);
+    const localStart = findIncrementStart(gap) ?? findSpokenQuantityStart(gap);
+    return localStart === null ? null : gapStart + localStart;
+  });
+  const supported = starts.filter((start) => start !== null).length;
+  if (starts[0] === null || supported < Math.ceil(matches.length * 0.75)) return null;
+  const resolvedStarts = starts.map((start, index) => start ?? matches[index].start);
+  return resolvedStarts.map((start, index) => text
+    .slice(start, resolvedStarts[index + 1] ?? text.length)
+    .trim())
+    .filter(Boolean);
+}
+
 function splitTranscript(transcript, catalog) {
+  const quantityFirst = splitQuantityFirstTranscript(transcript, catalog);
+  if (quantityFirst) return quantityFirst;
   return String(transcript || "")
     .split(/[,;\n.]+/)
     .flatMap((rawPart) => {
@@ -129,19 +192,26 @@ function splitTranscript(transcript, catalog) {
     });
 }
 
+function stripListLeadIn(value) {
+  return String(value || "")
+    .replace(/^(?:(?:okay|ok|so|and|then)\s+)*/, "")
+    .replace(/^(?:(?:i|we)\s+(?:have|got)|there\s+(?:is|are))\s+/, "")
+    .trim();
+}
+
 function extractQuantityAndProduct(clause, catalog = []) {
-  let text = normalizeSpeechInventoryText(clause)
+  let text = stripListLeadIn(normalizeSpeechInventoryText(clause))
     .replace(/^(?:oh\s+)?(?:whoops|oops)\s+/, "")
-    .replace(/^(?:please\s+)?add\s+(?:another|one\s+more)\s+/, "one ")
-    .replace(/^plus\s+(?:another|one)\s+/, "one ")
+    .replace(/^(?:i\s+(?:need|want)\s+to\s+)?(?:oh\s+)?(?:whoops|oops)?\s*(?:please\s+)?(?:add\s+(?:another|one\s+more)|plus\s+(?:another|one))\s+/, "one ")
     .replace(/\bfor now\b/g, " ")
     .replace(/\bon hand\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const unitMatch = text.match(/\b(cases?|bottles?|kegs?|units?)\b/);
-  const unit = unitMatch ? unitMatch[1].replace(/s$/, "") : "unit";
-  text = text.replace(/\b(cases?|bottles?|kegs?|units?)\b/g, " ").replace(/\s+/g, " ").trim();
-  const noMatch = text.match(/^i have no\s+(.+)$/);
+  const unitMatch = text.match(/\b(cases?|bottles?|kegs?|units?|ounces?|oz)\b/);
+  const rawUnit = unitMatch?.[1] || "";
+  const unit = /^(?:ounce|ounces|oz)$/.test(rawUnit) ? "oz" : rawUnit.replace(/s$/, "") || "unit";
+  text = text.replace(/\b(cases?|bottles?|kegs?|units?|ounces?|oz)\b/g, " ").replace(/\s+/g, " ").trim();
+  const noMatch = text.match(/^(?:i have\s+)?no\s+(.+)$/);
   if (noMatch) return { product: noMatch[1], quantity: 0, unit };
   const markerMatch = [...text.matchAll(/\b(to|is|has)\b/g)].pop();
   if (markerMatch) {
@@ -222,7 +292,7 @@ function matchProduct(productText, unit, catalog) {
   const product = normalizeSpeechInventoryText(productText);
   const requestedWall = product.match(/\b(main|patio|karaoke)(?: wall)?\b/)?.[1] || "";
   const withoutWall = product.replace(/\b(main|patio|karaoke)(?: wall)?\b/g, " ").replace(/\s+/g, " ").trim();
-  const target = unit === "keg" ? "keg" : unit === "bottle" || unit === "case" ? "inventory" : "";
+  const target = unit === "keg" || unit === "oz" ? "keg" : unit === "bottle" || unit === "case" ? "inventory" : "";
   const candidates = catalog.flatMap((item) => {
     if (target && item.target !== target) return [];
     if (requestedWall && item.target === "keg" && normalizeSpeechInventoryText(item.wall) !== requestedWall) return [];
@@ -241,6 +311,18 @@ function matchProduct(productText, unit, catalog) {
 
 function resolveContextualAmbiguities(proposals, catalog, sharedWall) {
   const itemsById = new Map(catalog.map((item) => [item.id, item]));
+  const wallCounts = proposals.reduce((counts, proposal) => {
+    if (proposal.status !== "matched") return counts;
+    const wall = normalizeSpeechInventoryText(itemsById.get(proposal.matchedId)?.wall);
+    if (wall) counts.set(wall, (counts.get(wall) || 0) + 1);
+    return counts;
+  }, new Map());
+  const rankedWalls = [...wallCounts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+  const inferredWall = sharedWall || (
+    rankedWalls[0]?.[1] >= 2 && rankedWalls[0][1] > (rankedWalls[1]?.[1] || 0)
+      ? rankedWalls[0][0]
+      : ""
+  );
   proposals.forEach((proposal, proposalIndex) => {
     if (proposal.status !== "ambiguous" || proposal.candidateIds.length < 2) return;
     const candidates = proposal.candidateIds.map((id) => itemsById.get(id)).filter(Boolean);
@@ -249,6 +331,7 @@ function resolveContextualAmbiguities(proposals, catalog, sharedWall) {
       let evidence = 0;
       proposals.forEach((neighbor, neighborIndex) => {
         if (neighborIndex === proposalIndex || neighbor.status !== "matched") return;
+        const neighborItem = itemsById.get(neighbor.matchedId);
         const distance = Math.abs(neighborIndex - proposalIndex);
         if (distance > 2) return;
         const weight = distance === 1 ? 2 : 1;
@@ -260,9 +343,13 @@ function resolveContextualAmbiguities(proposals, catalog, sharedWall) {
           score += 3 * weight;
           evidence += 1;
         }
+        if (candidate.wall && normalizeSpeechInventoryText(candidate.wall) === normalizeSpeechInventoryText(neighborItem?.wall)) {
+          score += 4 * weight;
+          evidence += 1;
+        }
       });
-      if (sharedWall && candidate.target === "keg" && normalizeSpeechInventoryText(candidate.wall) === sharedWall) {
-        score += 2;
+      if (inferredWall && candidate.target === "keg" && normalizeSpeechInventoryText(candidate.wall) === inferredWall) {
+        score += sharedWall ? 8 : 5;
         evidence += 1;
       }
       return { candidate, score, evidence };
@@ -275,6 +362,7 @@ function resolveContextualAmbiguities(proposals, catalog, sharedWall) {
       matchedName: selected.name,
       target: selected.target,
       group: selected.group,
+      wall: selected.wall,
       unit: selected.unit,
       confidence: "medium",
       warning: "",
@@ -292,9 +380,10 @@ export function parseInventoryTranscript(transcript, sourceItems = []) {
     const clause = sharedContext.wall && !/\b(main|patio|karaoke)(?: wall)?\b/.test(rawClause)
       ? `${rawClause} ${sharedContext.wall} wall`
       : rawClause;
-    const skipped = /^(skip|leave)\b/.test(clause);
-    const correction = /^(actually|change|set)\b/.test(clause);
-    const increment = /^(?:oh\s+)?(?:whoops|oops)?\s*(?:please\s+)?(?:add\s+(?:another|one\s+more)|plus\s+(?:another|one))\b/.test(clause);
+    const actionableClause = stripListLeadIn(normalizeSpeechInventoryText(clause));
+    const skipped = /^(skip|leave)\b/.test(actionableClause);
+    const correction = /^(actually|change|set)\b/.test(actionableClause);
+    const increment = /^(?:i\s+(?:need|want)\s+to\s+)?(?:oh\s+)?(?:whoops|oops)?\s*(?:please\s+)?(?:add\s+(?:another|one\s+more)|plus\s+(?:another|one))\b/.test(actionableClause);
     const extracted = extractQuantityAndProduct(clause.replace(/^(skip|leave)\s+/, ""), catalog);
     if (correction && /^(actually make|change|set)\s+that\b/.test(clause)) {
       const prior = [...proposals].reverse().find((proposal) => proposal.status === "matched");
@@ -314,6 +403,7 @@ export function parseInventoryTranscript(transcript, sourceItems = []) {
       matchedName: match.item?.name || "",
       target: match.item?.target || "",
       group: match.item?.group || "",
+      wall: match.item?.wall || "",
       quantity: extracted.quantity,
       spokenUnit: extracted.unit,
       unit: match.item?.unit || extracted.unit,
@@ -343,12 +433,22 @@ export function parseInventoryTranscript(transcript, sourceItems = []) {
     } else if (duplicateIndex >= 0) {
       proposals[duplicateIndex] = { ...proposal, corrected: true };
     } else if (increment && proposal.status === "matched") {
-      proposals.push({
-        ...proposal,
-        quantity: null,
-        confidence: "review",
-        warning: "Say the original count first, then add another",
-      });
+      const currentQuantity = Number(match.item.currentValue);
+      const addedQuantity = Number(proposal.quantity);
+      proposals.push(Number.isFinite(currentQuantity) && Number.isFinite(addedQuantity)
+        ? {
+          ...proposal,
+          quantity: currentQuantity + addedQuantity,
+          confidence: "medium",
+          warning: "",
+          incrementedFromCurrent: true,
+        }
+        : {
+          ...proposal,
+          quantity: null,
+          confidence: "review",
+          warning: "Enter the current count before adding another",
+        });
     } else proposals.push(proposal);
   });
   resolveContextualAmbiguities(proposals, catalog, sharedContext.wall);

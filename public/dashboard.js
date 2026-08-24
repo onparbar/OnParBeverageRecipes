@@ -995,6 +995,7 @@ let inventorySpeechMessage = "";
 let inventorySpeechListening = false;
 let inventorySpeechApplying = false;
 let inventorySpeechRecognition = null;
+let inventorySpeechKegScope = "main";
 let inventorySourceRows = [];
 let inventorySharedUpdatedAt = "";
 let inventorySharedMessage = "Loading shared inventory...";
@@ -12451,6 +12452,7 @@ function getInventorySpeechSourceItems() {
     group: item.group,
     unit: "units",
     packSize: item.packSize,
+    currentValue: item.onHandDisplay,
     aliases: [
       item.linkedIngredientName,
       item.vendorProduct?.productName,
@@ -12474,6 +12476,7 @@ function getInventorySpeechSourceItems() {
       wall: item.wall,
       unit: "kegs",
       packSize: 1,
+      currentValue: getKegOnHandDisplay(item),
       aliases: [
         item.brand,
         liveRow?.name,
@@ -12496,6 +12499,7 @@ function getInventorySpeechSourceItems() {
       wall: item.wall,
       unit: normalizeTitle(onDeck.kind) === "liquor" ? "oz" : "kegs",
       packSize: 1,
+      currentValue: onDeck.onHand,
       aliases: [
         `On Deck ${onDeck.name}`,
         `${onDeck.name} On Deck`,
@@ -12510,37 +12514,63 @@ function renderInventorySpeechAssistant() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   document.querySelectorAll("#inventory-speech-assistant, #keg-speech-assistant").forEach((assistant) => {
     const kegOnly = assistant.id === "keg-speech-assistant";
-    const sourceItems = getInventorySpeechSourceItems().filter((item) => !kegOnly || item.target === "keg");
+    const selectedWalls = inventorySpeechKegScope === "karaoke" ? new Set(["karaoke"]) : new Set(["main", "patio"]);
+    const sourceItems = getInventorySpeechSourceItems().filter((item) => {
+      if (!kegOnly) return item.target === "inventory";
+      return item.target === "keg" && selectedWalls.has(String(item.wall || "").toLowerCase());
+    });
     const catalog = buildSpeechInventoryCatalog(sourceItems);
+    assistant.dataset.speechContext = kegOnly ? inventorySpeechKegScope : "inventory";
     const wasOpen = assistant.open || inventorySpeechListening || inventorySpeechProposals.length > 0;
-    const reviewRows = inventorySpeechProposals.map((proposal) => {
+    const reviewCards = inventorySpeechProposals.map((proposal) => {
       const selected = catalog.find((item) => item.id === proposal.matchedId);
       const candidateIds = new Set(proposal.candidateIds || []);
-      const options = catalog
-        .filter((item) => !candidateIds.size || candidateIds.has(item.id) || item.id === proposal.matchedId)
+      const options = [...catalog]
+        .sort((left, right) => {
+          const leftRank = left.id === proposal.matchedId ? 0 : candidateIds.has(left.id) ? 1 : 2;
+          const rightRank = right.id === proposal.matchedId ? 0 : candidateIds.has(right.id) ? 1 : 2;
+          return leftRank - rightRank || left.name.localeCompare(right.name) || left.group.localeCompare(right.group);
+        })
         .map((item) => `<option value="${escapeHtml(item.id)}"${item.id === proposal.matchedId ? " selected" : ""}>${escapeHtml(item.name)} · ${escapeHtml(item.group)}</option>`)
         .join("");
       return `
-        <tr data-speech-proposal-id="${escapeHtml(proposal.id)}">
-          <td>${escapeHtml(proposal.phrase)}</td>
-          <td>
+        <article class="speech-review-card" data-speech-proposal-id="${escapeHtml(proposal.id)}">
+          <div class="speech-review-card__heard">
+            <span>Heard</span>
+            <strong>${escapeHtml(proposal.phrase)}</strong>
+          </div>
+          <label class="speech-review-card__field speech-review-card__item">
+            <span>Item</span>
             <select class="speech-match-select" aria-label="Matched product for ${escapeHtml(proposal.phrase)}">
               <option value="">${proposal.status === "skipped" ? "Skipped" : "Choose item"}</option>
               ${options}
             </select>
-            ${proposal.warning ? `<span class="table-note table-note--warning">${escapeHtml(proposal.warning)}</span>` : ""}
-          </td>
-          <td>${escapeHtml(selected?.group || proposal.group || "-")}</td>
-          <td><input class="inventory-input speech-quantity-input" type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" autocomplete="off" data-1p-ignore="true" data-lpignore="true" value="${Number.isFinite(Number(proposal.quantity)) ? escapeHtml(String(proposal.quantity)) : ""}" aria-label="Proposed quantity for ${escapeHtml(selected?.name || proposal.phrase)}"></td>
-          <td>${escapeHtml(selected?.unit || proposal.unit || "-")}</td>
-          <td>${escapeHtml(proposal.confidence || "review")}</td>
-          <td><button class="mini-button speech-remove-proposal" type="button">Remove</button></td>
-        </tr>`;
+          </label>
+          <label class="speech-review-card__field">
+            <span>Count</span>
+            <input class="inventory-input speech-quantity-input" type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" autocomplete="off" data-1p-ignore="true" data-lpignore="true" value="${Number.isFinite(Number(proposal.quantity)) ? escapeHtml(String(proposal.quantity)) : ""}" aria-label="Proposed quantity for ${escapeHtml(selected?.name || proposal.phrase)}">
+          </label>
+          <div class="speech-review-card__field speech-review-card__location">
+            <span>Location</span>
+            <strong>${escapeHtml(selected?.group || proposal.group || "-")}</strong>
+          </div>
+          <div class="speech-review-card__field">
+            <span>Unit</span>
+            <strong>${escapeHtml(selected?.unit || proposal.unit || "-")}</strong>
+          </div>
+          <button class="mini-button speech-remove-proposal" type="button">Remove</button>
+          ${proposal.warning ? `<p class="speech-review-card__warning">${escapeHtml(proposal.warning)}</p>` : ""}
+        </article>`;
     }).join("");
     const applicableCount = buildSpeechInventoryChanges(inventorySpeechProposals).length;
     assistant.innerHTML = `
       <summary>Count by voice</summary>
       <div class="inventory-speech__body">
+        ${kegOnly ? `
+          <div class="inventory-speech__scope" role="group" aria-label="Cooler">
+            <button class="ghost-button${inventorySpeechKegScope === "main" ? " is-active" : ""}" data-speech-scope="main" type="button" aria-pressed="${inventorySpeechKegScope === "main"}">Main cooler</button>
+            <button class="ghost-button${inventorySpeechKegScope === "karaoke" ? " is-active" : ""}" data-speech-scope="karaoke" type="button" aria-pressed="${inventorySpeechKegScope === "karaoke"}">Karaoke cooler</button>
+          </div>` : ""}
         <label>
           <span class="sr-only">Spoken inventory transcript</span>
           <textarea class="inventory-speech-transcript" aria-label="Spoken inventory transcript" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" placeholder="${kegOnly ? "Main wall: one Guinness, two Modelo, add another Angry Orchard" : "Guinness one, Modelo two, Garage Lime three"}">${escapeHtml(inventorySpeechTranscript)}</textarea>
@@ -12552,12 +12582,7 @@ function renderInventorySpeechAssistant() {
         </div>
         <p class="sync-status">${escapeHtml(inventorySpeechMessage || (SpeechRecognition ? "Nothing changes until you review and apply." : "Voice input is unavailable here. Type or paste the count instead."))}</p>
         ${inventorySpeechProposals.length ? `
-          <div class="inventory-table-wrap inventory-speech__review">
-            <table class="inventory-table">
-              <thead><tr><th>Heard</th><th>Item</th><th>Location</th><th>Count</th><th>Unit</th><th>Match</th><th></th></tr></thead>
-              <tbody>${reviewRows}</tbody>
-            </table>
-          </div>
+          <div class="inventory-speech__review">${reviewCards}</div>
           <button class="primary-button inventory-speech-apply" type="button"${inventorySpeechApplying || !applicableCount ? " disabled" : ""}>${inventorySpeechApplying ? "Applying..." : `Apply ${applicableCount}`}</button>
         ` : ""}
       </div>`;
@@ -12568,6 +12593,18 @@ function renderInventorySpeechAssistant() {
 
 function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
   const transcriptInput = assistant.querySelector(".inventory-speech-transcript");
+  assistant.querySelectorAll("[data-speech-scope]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextScope = button.dataset.speechScope === "karaoke" ? "karaoke" : "main";
+      if (nextScope === inventorySpeechKegScope) return;
+      stopInventorySpeechRecognition();
+      inventorySpeechKegScope = nextScope;
+      inventorySpeechTranscript = "";
+      inventorySpeechProposals = [];
+      inventorySpeechMessage = `${nextScope === "karaoke" ? "Karaoke" : "Main"} cooler selected.`;
+      renderInventorySpeechAssistant();
+    });
+  });
   transcriptInput?.addEventListener("input", () => {
     inventorySpeechTranscript = transcriptInput.value;
   });
