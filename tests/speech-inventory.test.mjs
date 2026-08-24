@@ -61,6 +61,39 @@ test("parses a natural quantity-first cooler walk with voice variants and a curr
   assert.equal(result.proposals.every((entry) => entry.status === "matched"), true);
 });
 
+test("matches naturally spoken cocktail names without PMB spirit suffixes", () => {
+  const cocktail = (id, name, aliases = []) => ({
+    id,
+    name,
+    aliases,
+    target: "keg",
+    wall: "Main",
+    group: `Main ${id}`,
+    unit: "kegs",
+    currentValue: "0",
+  });
+  const cocktailItems = [
+    cocktail("garage", "GARAGE BEER 1"),
+    cocktail("espresso", "ESPRESSO MARTINI (TITO'S) 1", ["Espresso Martini"]),
+    cocktail("jacked-up", "JACKED UP STRAWBERRY LEMONADE (JACK DANIELS) 1", ["Jacked Up Strawberry Lemonade"]),
+    cocktail("whiskey-smash", "WHISKEY SMASH (JIM BEAM) 1", ["Whiskey Smash"]),
+    cocktail("blueberry", "BLUEBERRY MARGARITA (JOSE CUERVO) 1", ["Blueberry Margarita"]),
+    cocktail("whiskey-sour", "WHISKEY SOUR (JACK DANIELS) 1", ["Whiskey Sour"]),
+    cocktail("washington-apple", "WASHINGTON APPLE (CROWN APPLE) 1", ["Washington Apple"]),
+    cocktail("bacardi-sunset", "BACARDI SUNSET 1", ["Bacardi Sunset"]),
+    cocktail("senorita", "STRAWBERRY SENORITA (JOSE CUERVO) 1", ["Strawberry Senorita"]),
+    cocktail("spiked-strawberry", "SPIKED STRAWBERRY LEMONADE (TITO'S) 1", ["Spiked Strawberry Lemonade"]),
+  ];
+  const transcript = "one garage rear regular, one espresso Martini one jacked up strawberry lemonade One Whiskey smash one blueberry margarita One Whiskey Sour one Washington Apple Schnapps One Bacardi Sunset one strawberry senorita and one spiked strawberry lemonade";
+  const result = parseInventoryTranscript(transcript, cocktailItems);
+
+  assert.deepEqual(result.proposals.map((entry) => [entry.matchedId, entry.quantity]), [
+    ["garage", 1], ["espresso", 1], ["jacked-up", 1], ["whiskey-smash", 1], ["blueberry", 1],
+    ["whiskey-sour", 1], ["washington-apple", 1], ["bacardi-sunset", 1], ["senorita", 1], ["spiked-strawberry", 1],
+  ]);
+  assert.equal(result.proposals.every((entry) => entry.status === "matched"), true);
+});
+
 test("supports bottles, cases, zero, walls, corrections, and skips", () => {
   const bottles = parseInventoryTranscript("Buffalo Trace twelve bottles", items).proposals[0];
   const cases = parseInventoryTranscript("Buffalo Trace two cases", items).proposals[0];

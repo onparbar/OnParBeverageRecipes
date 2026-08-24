@@ -8937,6 +8937,16 @@ tbody tr:hover {
   background: rgba(255, 255, 255, 0.88);
 }
 
+.speech-review-card--needs-review {
+  border: 2px solid var(--gold, #d6a83f);
+  background: rgba(255, 247, 218, 0.96);
+  box-shadow: 0 8px 20px rgba(126, 91, 10, 0.12);
+}
+
+.speech-review-card--needs-review .speech-review-card__heard > span {
+  color: #8a5d00;
+}
+
 .speech-review-card > * {
   min-width: 0;
 }

@@ -17,6 +17,8 @@ export function normalizeSpeechInventoryText(value) {
     .replace(/\s+/g, " ")
     .replace(/\b(?:scentsy|sensei|cincinnati)\s+light\b/g, "cincy light")
     .replace(/\bdortmund+er\b/g, "dortmunder")
+    .replace(/\bgarage\s+(?:rear|bear)\s+regular\b/g, "regular garage beer")
+    .replace(/\bwashington\s+apple(?:\s+schnapps)+\b/g, "washington apple")
     .trim();
 }
 

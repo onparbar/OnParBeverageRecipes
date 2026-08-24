@@ -7303,7 +7303,6 @@ function renderKegLevels() {
       <p class="sync-status">${escapeHtml(kegSyncMessage)}${kegUpdatedAt ? ` Last updated ${escapeHtml(formatUpdatedAt(kegUpdatedAt))}.` : ""}</p>
       ${liveCount < totalTaps ? `<p class="sync-status sync-status--warning">${formatNumber(totalTaps - liveCount)} tap${totalTaps - liveCount === 1 ? " needs" : "s need"} update. Refresh the connection only when guest taps are clear.</p>` : ""}
     </div>
-    <details class="inventory-speech" id="keg-speech-assistant"></details>
     <div class="keg-summary-stats">
       <div class="summary-line"><span>Total taps</span><strong>${totalTaps}</strong></div>
       <div class="summary-line"><span>Live levels found</span><strong>${liveCount}</strong></div>
@@ -7321,7 +7320,7 @@ function renderKegLevels() {
     ${renderCocktailsToMakePanel()}
   `;
 
-  kegWalls.innerHTML = wallNames
+  kegWalls.innerHTML = '<details class="inventory-speech" id="keg-speech-assistant"></details>' + wallNames
     .map((wallName) => renderKegWallBlock(wallName, kegWallItems.filter((item) => item.wall === wallName)))
     .join("") + renderComingSoonBlock();
 
@@ -12444,6 +12443,32 @@ async function clearAllInventoryOnHand() {
   );
 }
 
+function getKegSpeechAliases(value) {
+  const source = String(value || "").trim();
+  if (!source) return [];
+  const withoutTapNumber = source.replace(/\s+[123]\s*$/, "").trim();
+  const withoutAttribution = withoutTapNumber.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const sourceKey = slugify(withoutTapNumber);
+  const mappedAliases = [...MENU_ORDER, ...NEW_RECIPE_ORDER].flatMap(([pmbName, recipeName]) => {
+    const pmbKey = slugify(pmbName);
+    if (!sourceKey.includes(pmbKey) && !pmbKey.includes(sourceKey)) return [];
+    return [
+      pmbName,
+      recipeName,
+      String(pmbName).replace(/\s*\([^)]*\)\s*$/, "").trim(),
+      String(recipeName).replace(/\s*\([^)]*\)\s*$/, "").trim(),
+    ];
+  });
+  return [...new Set([withoutTapNumber, withoutAttribution, ...mappedAliases].filter(Boolean))];
+}
+
+function speechProposalNeedsReview(proposal) {
+  if (proposal?.status === "skipped") return false;
+  return proposal?.status !== "matched"
+    || proposal.quantity === null
+    || !Number.isFinite(Number(proposal.quantity));
+}
+
 function getInventorySpeechSourceItems() {
   const inventorySources = inventoryItems.map((item) => ({
     id: item.id,
@@ -12484,6 +12509,7 @@ function getInventorySpeechSourceItems() {
         `${item.wall} wall ${name}`,
         normalizeTitle(name).includes("michelob ultra") ? "Michelob" : "",
         normalizeTitle(name).includes("garage beer lime") ? "Garage Lime" : "",
+        ...[name, item.brand, liveRow?.name, liveRow?.tapProduct].flatMap(getKegSpeechAliases),
       ].filter(Boolean),
     };
   });
@@ -12522,9 +12548,13 @@ function renderInventorySpeechAssistant() {
     const catalog = buildSpeechInventoryCatalog(sourceItems);
     assistant.dataset.speechContext = kegOnly ? inventorySpeechKegScope : "inventory";
     const wasOpen = assistant.open || inventorySpeechListening || inventorySpeechProposals.length > 0;
-    const reviewCards = inventorySpeechProposals.map((proposal) => {
+    const orderedProposals = [...inventorySpeechProposals].sort((left, right) => (
+      Number(speechProposalNeedsReview(right)) - Number(speechProposalNeedsReview(left))
+    ));
+    const reviewCards = orderedProposals.map((proposal) => {
       const selected = catalog.find((item) => item.id === proposal.matchedId);
       const candidateIds = new Set(proposal.candidateIds || []);
+      const needsReview = speechProposalNeedsReview(proposal);
       const options = [...catalog]
         .sort((left, right) => {
           const leftRank = left.id === proposal.matchedId ? 0 : candidateIds.has(left.id) ? 1 : 2;
@@ -12534,9 +12564,9 @@ function renderInventorySpeechAssistant() {
         .map((item) => `<option value="${escapeHtml(item.id)}"${item.id === proposal.matchedId ? " selected" : ""}>${escapeHtml(item.name)} · ${escapeHtml(item.group)}</option>`)
         .join("");
       return `
-        <article class="speech-review-card" data-speech-proposal-id="${escapeHtml(proposal.id)}">
+        <article class="speech-review-card${needsReview ? " speech-review-card--needs-review" : ""}" data-speech-proposal-id="${escapeHtml(proposal.id)}">
           <div class="speech-review-card__heard">
-            <span>Heard</span>
+            <span>${needsReview ? "Review this" : "Heard"}</span>
             <strong>${escapeHtml(proposal.phrase)}</strong>
           </div>
           <label class="speech-review-card__field speech-review-card__item">
@@ -12616,9 +12646,10 @@ function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
     inventorySpeechTranscript = transcriptInput?.value || inventorySpeechTranscript;
     const parsed = parseInventoryTranscript(inventorySpeechTranscript, sourceItems);
     inventorySpeechProposals = parsed.proposals;
-    const needsReview = parsed.proposals.filter((proposal) => !["matched", "skipped"].includes(proposal.status)).length;
+    const reviewItems = parsed.proposals.filter(speechProposalNeedsReview);
+    const needsReview = reviewItems.length;
     inventorySpeechMessage = parsed.proposals.length
-      ? `${parsed.proposals.length} count${parsed.proposals.length === 1 ? "" : "s"} found${needsReview ? ` · ${needsReview} to review` : ""}.`
+      ? `${parsed.proposals.length} count${parsed.proposals.length === 1 ? "" : "s"} found${needsReview ? ` · Review: ${reviewItems.map((proposal) => `“${proposal.phrase}”`).join("; ")}` : " · Ready to apply"}.`
       : "No inventory counts were recognized.";
     renderInventorySpeechAssistant();
   });
