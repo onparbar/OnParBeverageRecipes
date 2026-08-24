@@ -273,6 +273,12 @@ test("retired Bottle Service inventory is removed without removing liquor-cabine
   assert.match(inventorySource, /^Patron,,,\$94\.00/m);
 });
 
+test("voice inventory can focus matching on the liquor and mixer cabinets", () => {
+  assert.match(dashboardSource, /data-speech-inventory-scope="cabinet"/);
+  assert.match(dashboardSource, /inventorySpeechInventoryScope !== "cabinet"/);
+  assert.match(dashboardSource, /\["liquor cabinet", "mixer cabinet"\]\.includes/);
+});
+
 test("inventory keeps advanced controls behind one row Edit action and retires Bubbly", () => {
   assert.match(dashboardSource, /inventory-row-edit-toggle/);
   assert.doesNotMatch(dashboardSource, /inventory-par-toggle/);
