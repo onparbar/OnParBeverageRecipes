@@ -9092,3 +9092,53 @@ tbody tr:hover {
     text-align: left;
   }
 }
+
+/* Keep the Keg Levels table readable when its horizontal scroller is in use. */
+table.keg-table {
+  table-layout: fixed;
+}
+
+table.keg-table th:nth-child(1),
+table.keg-table td:nth-child(1) {
+  width: 64px !important;
+  min-width: 64px !important;
+  max-width: 64px !important;
+}
+
+table.keg-table th:nth-child(2),
+table.keg-table td:nth-child(2) {
+  left: 64px !important;
+  width: 316px !important;
+  min-width: 316px !important;
+  max-width: 316px !important;
+}
+
+table.keg-table th:nth-child(3),
+table.keg-table td:nth-child(3),
+table.keg-table th:nth-child(4),
+table.keg-table td:nth-child(4) {
+  width: 130px !important;
+  min-width: 130px !important;
+  max-width: 130px !important;
+  text-align: center;
+}
+
+table.keg-table th:nth-child(5),
+table.keg-table td:nth-child(5) {
+  width: 120px !important;
+  min-width: 120px !important;
+  max-width: 120px !important;
+  text-align: center;
+}
+
+table.keg-table th:nth-child(6),
+table.keg-table td:nth-child(6) {
+  width: 160px !important;
+  min-width: 160px !important;
+  max-width: 160px !important;
+  text-align: center;
+}
+
+table.keg-table td:nth-child(5) input {
+  margin-inline: auto;
+}

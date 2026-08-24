@@ -12546,7 +12546,7 @@ function renderInventorySpeechAssistant() {
           <textarea class="inventory-speech-transcript" aria-label="Spoken inventory transcript" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" placeholder="${kegOnly ? "Main wall: one Guinness, two Modelo, add another Angry Orchard" : "Guinness one, Modelo two, Garage Lime three"}">${escapeHtml(inventorySpeechTranscript)}</textarea>
         </label>
         <div class="inventory-speech__actions">
-          <button class="ghost-button inventory-speech-listen" type="button"${SpeechRecognition ? "" : " disabled"}>${inventorySpeechListening ? "Stop" : "Speak"}</button>
+          <button class="ghost-button inventory-speech-listen" type="button"${SpeechRecognition ? "" : " disabled"}>${inventorySpeechListening ? "Finish count" : "Start count"}</button>
           <button class="primary-button inventory-speech-review" type="button">Review</button>
           <button class="ghost-button inventory-speech-clear" type="button">Clear</button>
         </div>
@@ -12642,7 +12642,13 @@ function startInventorySpeechRecognition() {
     renderInventorySpeechAssistant();
   };
   inventorySpeechRecognition.onerror = (event) => {
-    inventorySpeechMessage = event.error === "not-allowed" ? "Microphone permission was not granted." : "Voice input stopped. You can continue in the text box.";
+    inventorySpeechMessage = {
+      "not-allowed": "Microphone permission was not granted.",
+      "service-not-allowed": "Voice input is not available in this browser.",
+      "audio-capture": "No microphone was found.",
+      network: "Voice input could not reach the speech service.",
+    }[event.error] || "Voice input stopped. You can continue in the text box.";
+    renderInventorySpeechAssistant();
   };
   inventorySpeechRecognition.onend = () => {
     inventorySpeechListening = false;
@@ -12651,8 +12657,15 @@ function startInventorySpeechRecognition() {
   };
   inventorySpeechListening = true;
   inventorySpeechMessage = "Listening...";
-  inventorySpeechRecognition.start();
   renderInventorySpeechAssistant();
+  try {
+    inventorySpeechRecognition.start();
+  } catch {
+    inventorySpeechListening = false;
+    inventorySpeechRecognition = null;
+    inventorySpeechMessage = "Voice input could not start. Check microphone access, or type the count and press Review.";
+    renderInventorySpeechAssistant();
+  }
 }
 
 function stopInventorySpeechRecognition() {

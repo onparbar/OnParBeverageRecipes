@@ -191,26 +191,22 @@
     return field?.closest("details") || field?.parentElement || null;
   }
 
-  function buttonsInRoot() {
-    return [...(getRoot()?.querySelectorAll("button") || [])];
-  }
-
-  function buttonNamed(label) {
-    return buttonsInRoot().find((button) => button.textContent.trim().toLowerCase() === label.toLowerCase()) || null;
-  }
-
   function installControls() {
     const root = getRoot();
-    const speak = buttonNamed("Speak") || buttonNamed("Listening...");
-    if (!root || !speak) return;
+    const speechControl = root?.querySelector(".inventory-speech-listen:not([data-cooler-walk-control])");
+    if (!root || !speechControl) return;
+    speechControl.hidden = true;
+    speechControl.tabIndex = -1;
+    speechControl.setAttribute("aria-hidden", "true");
     if (!root.querySelector('[data-cooler-walk-control="true"]')) {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = speak.className;
+      button.className = speechControl.className;
       button.dataset.coolerWalkControl = "true";
-      button.textContent = walkActive ? "Finish cooler walk" : "Start cooler walk";
+      button.textContent = walkActive ? "Finish count" : "Start count";
+      button.disabled = speechControl.disabled;
       button.setAttribute("aria-pressed", walkActive ? "true" : "false");
-      speak.insertAdjacentElement("afterend", button);
+      speechControl.insertAdjacentElement("afterend", button);
     }
     if (!root.querySelector('[data-cooler-walk-status="true"]')) {
       const status = document.createElement("p");
@@ -237,30 +233,18 @@
     if (!root) return;
     const control = root.querySelector('[data-cooler-walk-control="true"]');
     const status = root.querySelector('[data-cooler-walk-status="true"]');
-    const words = loadAliases().length;
     if (control) {
-      const label = walkActive ? "Finish cooler walk" : "Start cooler walk";
+      const speechControl = root.querySelector(".inventory-speech-listen:not([data-cooler-walk-control])");
+      const label = walkActive ? "Finish count" : "Start count";
       if (control.textContent !== label) control.textContent = label;
+      control.disabled = speechControl?.disabled ?? true;
       control.setAttribute("aria-pressed", walkActive ? "true" : "false");
-    }
-    let wordsButton = root.querySelector('[data-cooler-walk-words="true"]');
-    if (words && !wordsButton) {
-      wordsButton = document.createElement("button");
-      wordsButton.type = "button";
-      wordsButton.className = buttonNamed("Speak")?.className || "";
-      wordsButton.dataset.coolerWalkWords = "true";
-      wordsButton.title = "Clear shared learned speech matches";
-      control?.insertAdjacentElement("afterend", wordsButton);
-    }
-    if (wordsButton) {
-      const wordsLabel = `Words ${words}`;
-      if (wordsButton.textContent !== wordsLabel) wordsButton.textContent = wordsLabel;
     }
     const counts = reviewCounts();
     const countSummary = `${counts.matched} heard${counts.unresolved ? ` · ${counts.unresolved} to review` : ""}`;
     const summary = walkActive
       ? countSummary
-      : lastWalkSummary || lastAliasMessage || (words ? `${words} learned words` : "");
+      : lastWalkSummary || lastAliasMessage || "";
     if (status && status.textContent !== summary) status.textContent = summary;
   }
 
@@ -270,13 +254,13 @@
     const root = getRoot();
     if (root?.tagName === "DETAILS") root.open = true;
     updateControls();
-    const speak = buttonNamed("Speak");
-    if (speak) speak.click();
+    const speechControl = root?.querySelector(".inventory-speech-listen:not([data-cooler-walk-control])");
+    if (speechControl?.textContent.trim() === "Start count") speechControl.click();
   }
 
   function finishWalk() {
-    const listening = buttonNamed("Listening...");
-    if (listening) listening.click();
+    const speechControl = getRoot()?.querySelector(".inventory-speech-listen:not([data-cooler-walk-control])");
+    if (speechControl?.textContent.trim() === "Finish count") speechControl.click();
     walkActive = false;
     const counts = reviewCounts();
     lastWalkSummary = `${counts.matched} heard${counts.unresolved ? ` · ${counts.unresolved} to review` : " · ready to apply"}`;
@@ -290,18 +274,6 @@
       event.preventDefault();
       if (walkActive) finishWalk();
       else startWalk();
-      return;
-    }
-    if (button.dataset.coolerWalkWords === "true") {
-      event.preventDefault();
-      const count = loadAliases().length;
-      if (count && window.confirm(`Forget ${count} shared learned speech matches?`)) {
-        localStorage.removeItem(STORAGE_KEY);
-        void clearSharedAliases();
-        lastAliasMessage = "";
-        button.remove();
-        updateControls();
-      }
       return;
     }
     if (button.textContent.trim().toLowerCase() === "review") {
