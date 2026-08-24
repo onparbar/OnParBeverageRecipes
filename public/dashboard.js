@@ -12734,6 +12734,12 @@ function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
   assistant.querySelector(".inventory-speech-apply")?.addEventListener("click", applyReviewedInventorySpeechChanges);
 }
 
+function cleanInventorySpeechRecognitionText(value) {
+  return String(value || "")
+    .replace(/\b(schnapps)(?:[\s,]+\1)+\b/gi, "$1")
+    .trim();
+}
+
 async function startInventorySpeechRecognition() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition || inventorySpeechListening) return;
@@ -12788,13 +12794,19 @@ async function startInventorySpeechRecognition() {
     const additions = [];
     const interim = [];
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
-      const words = event.results[index][0].transcript.trim();
+      const words = cleanInventorySpeechRecognitionText(event.results[index][0].transcript);
       if (!words) continue;
       if (event.results[index].isFinal) additions.push(words);
       else interim.push(words);
     }
-    if (additions.length) committedTranscript = [committedTranscript, ...additions].filter(Boolean).join(", ");
-    inventorySpeechTranscript = [committedTranscript, interim.join(" ")].filter(Boolean).join(interim.length ? " " : "");
+    if (additions.length) {
+      committedTranscript = cleanInventorySpeechRecognitionText(
+        [committedTranscript, ...additions].filter(Boolean).join(", "),
+      );
+    }
+    inventorySpeechTranscript = cleanInventorySpeechRecognitionText(
+      [committedTranscript, interim.join(" ")].filter(Boolean).join(interim.length ? " " : ""),
+    );
     inventorySpeechMessage = "Listening...";
     renderInventorySpeechAssistant();
   };

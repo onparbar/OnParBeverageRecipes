@@ -284,6 +284,8 @@ test("voice inventory reuses granted microphone access for later counts", () => 
   assert.match(dashboardSource, /let inventorySpeechMicrophoneAuthorized = false/);
   assert.match(dashboardSource, /if \(!inventorySpeechMicrophoneAuthorized\)/);
   assert.match(dashboardSource, /inventorySpeechMicrophoneAuthorized = true/);
+  assert.match(dashboardSource, /function cleanInventorySpeechRecognitionText/);
+  assert.match(dashboardSource, /const words = cleanInventorySpeechRecognitionText/);
 });
 
 test("inventory keeps advanced controls behind one row Edit action and retires Bubbly", () => {
