@@ -12626,9 +12626,44 @@ function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
   assistant.querySelector(".inventory-speech-apply")?.addEventListener("click", applyReviewedInventorySpeechChanges);
 }
 
-function startInventorySpeechRecognition() {
+async function startInventorySpeechRecognition() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition || inventorySpeechListening) return;
+
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
+    inventorySpeechMessage = "Microphone access is not available in this browser. Open the dashboard in Chrome or Safari.";
+    renderInventorySpeechAssistant();
+    return;
+  }
+
+  inventorySpeechListening = true;
+  inventorySpeechMessage = "Waiting for microphone access...";
+  renderInventorySpeechAssistant();
+
+  try {
+    const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    permissionStream.getTracks().forEach((track) => track.stop());
+  } catch (error) {
+    inventorySpeechListening = false;
+    if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
+      inventorySpeechMessage = "Microphone access was not allowed. Allow it for this site, then try again.";
+    } else if (error?.name === "NotFoundError") {
+      inventorySpeechMessage = "No microphone was found.";
+    } else if (error?.name === "NotReadableError") {
+      inventorySpeechMessage = "The microphone is busy. Close anything else using it, then try again.";
+    } else {
+      inventorySpeechMessage = "Microphone access could not start. Check the browser's site settings, then try again.";
+    }
+    renderInventorySpeechAssistant();
+    return;
+  }
+
+  if (!inventorySpeechListening) {
+    inventorySpeechMessage = "";
+    renderInventorySpeechAssistant();
+    return;
+  }
+
   inventorySpeechRecognition = new SpeechRecognition();
   inventorySpeechRecognition.lang = "en-US";
   inventorySpeechRecognition.continuous = true;
@@ -12655,7 +12690,6 @@ function startInventorySpeechRecognition() {
     inventorySpeechRecognition = null;
     renderInventorySpeechAssistant();
   };
-  inventorySpeechListening = true;
   inventorySpeechMessage = "Listening...";
   renderInventorySpeechAssistant();
   try {
@@ -12671,6 +12705,7 @@ function startInventorySpeechRecognition() {
 function stopInventorySpeechRecognition() {
   inventorySpeechRecognition?.stop();
   inventorySpeechListening = false;
+  renderInventorySpeechAssistant();
 }
 
 async function applyReviewedInventorySpeechChanges() {
