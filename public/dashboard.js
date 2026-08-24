@@ -647,6 +647,23 @@ const INVENTORY_CABINET_ORDER = [
   "Sour Mix",
 ];
 const DEFAULT_BATCH_LABEL = "12 gallon keg";
+const INVENTORY_PROVI_MAPPINGS = {
+  "non-alcoholic-beer": {
+    vendor: "Heidelberg",
+    syncVendor: "Provi",
+    productName: "Athletic Brewing Upside Dawn Golden Ale Non-Alcoholic Beer 12oz 24pk",
+    bottleOz: 12,
+    packSize: 24,
+    unitPrice: 0,
+    casePrice: 0,
+    distributorHints: KEG_PROVI_DISTRIBUTOR_HINTS.Heidelberg,
+    searchAliases: [
+      "Upside Dawn 24 pack",
+      "Athletic Upside Dawn",
+      "Athletic Brewing Upside Dawn Golden Ale",
+    ],
+  },
+};
 const PROOF_MAPPINGS = {
   "apple-schnapps": { vendor: "Proof", syncVendor: "Provi", productName: "Llord's Apple Schnapps 30 1L", bottleOz: 33.81, preferredSku: "615006", packSize: 12, casePrice: 44.47, unitPrice: 3.71, priceCheckedAt: "2026-08-14" },
   bitters: { vendor: "Proof", syncVendor: "Provi", productName: "Angostura Bitters Aromatic 16oz", bottleOz: 16, preferredSku: "38000", packSize: 12, casePrice: 287.9, unitPrice: 23.99, priceCheckedAt: "2026-08-14" },
@@ -4941,11 +4958,14 @@ function getWeeklyPlanInventoryItems({ live = false } = {}) {
         orderDisplay: String(Math.max(0, requiredBottles - onHand)),
       };
     })
-    .filter((snapshotItem) => (
-      !isFoodDepartmentOrderedInventoryItem(snapshotItem.name)
-      && toNumber(snapshotItem.parDisplay) > 0
-      && toNumber(snapshotItem.orderDisplay) > 0
-    ))
+    .filter((snapshotItem) => {
+      const currentItem = inventoryItems.find((item) => item.id === snapshotItem.id)
+        || inventoryItems.find((item) => item.name === snapshotItem.name);
+      return !currentItem?.excludeFromOrderList
+        && !isFoodDepartmentOrderedInventoryItem(snapshotItem.name)
+        && toNumber(snapshotItem.parDisplay) > 0
+        && toNumber(snapshotItem.orderDisplay) > 0;
+    })
     .map((snapshotItem) => {
       const item = inventoryItems.find((candidate) => candidate.id === snapshotItem.id)
         || inventoryItems.find((candidate) => candidate.name === snapshotItem.name);
@@ -5438,11 +5458,8 @@ function getLatestPriceTimestamp() {
 }
 
 function getWeeklyPlanMissingInventoryCount() {
-  if (getCurrentMondayInventorySnapshot(inventoryHistory, new Date())) return 0;
-  return inventoryItems.filter((item) => (
-    toNumber(item.parDisplay) > 0
-    && !Object.prototype.hasOwnProperty.call(inventoryOnHandOverrides, item.id)
-  )).length;
+  // A blank Inventory count intentionally means zero on hand.
+  return 0;
 }
 
 function getWeeklyPlanFreshness(plan) {
@@ -8481,6 +8498,45 @@ async function initializeSharedWeeklyUsageFromServiceComputer() {
   } finally {
     weeklyUsageSharedSaving = false;
     renderWeeklyUsage();
+  }
+}
+
+async function refreshSharedWeeklyUsageBeforeMondaySnapshot() {
+  try {
+    const state = await requestSharedWeeklyUsage();
+    if (!state.initialized) {
+      weeklyUsageSharedSaveError = "Shared Weekly Usage setup is incomplete.";
+      weeklyUsageSharedMessage = weeklyUsageSharedSaveError;
+      return false;
+    }
+
+    const sharedRevision = Number(state.revision) || 0;
+    const outboxBaseRevision = Number(weeklyUsageSharedOutbox?.baseRevision) || 0;
+    const supersededRecovery = Boolean(
+      weeklyUsageSharedOutbox
+      && (weeklyUsageSharedOutbox.conflict || sharedRevision > outboxBaseRevision),
+    );
+
+    if (!weeklyUsageSharedOutbox || supersededRecovery) {
+      clearTimeout(weeklyUsageSharedSaveTimer);
+      weeklyUsageSharedSaveTimer = null;
+      weeklyUsageSharedOutbox = null;
+      saveWeeklyUsageSharedOutbox();
+      applySharedWeeklyUsageState(state);
+      weeklyUsageSharedSaving = false;
+      weeklyUsageSharedSaveError = "";
+      weeklyUsageSharedMessage = supersededRecovery
+        ? "Using the newest shared Weekly Usage."
+        : "Shared Weekly Usage is current.";
+    } else {
+      weeklyUsageSharedRevision = sharedRevision;
+    }
+
+    return true;
+  } catch (error) {
+    weeklyUsageSharedSaveError = error.message || "Shared Weekly Usage could not be refreshed.";
+    weeklyUsageSharedMessage = weeklyUsageSharedSaveError;
+    return false;
   }
 }
 
@@ -13603,7 +13659,7 @@ function focusInventoryRealityItem(itemName) {
   input?.select?.();
 }
 
-function renderInventoryRealityCheck(model) {
+function renderInventoryRealityCheck(model, { scroll = false } = {}) {
   let panel = document.querySelector("#inventory-reality-check");
   if (!panel) {
     panel = document.createElement("section");
@@ -13647,7 +13703,7 @@ function renderInventoryRealityCheck(model) {
     button.addEventListener("click", () => focusInventoryRealityItem(button.dataset.inventoryRealityCorrect));
   });
   panel.querySelector("[data-inventory-reality-continue]")?.addEventListener("click", saveInventorySnapshot);
-  panel.scrollIntoView({ block: "start", behavior: "smooth" });
+  if (scroll) panel.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
 function toggleInventoryRowEdit(id) {
@@ -13708,7 +13764,7 @@ async function saveInventorySnapshot() {
       ? "Monday snapshot not saved: finish the required Inventory Reality Check items."
       : "Review the unusual counts before saving the Monday snapshot.";
     renderInventoryPanels();
-    renderInventoryRealityCheck(realityCheck);
+    renderInventoryRealityCheck(realityCheck, { scroll: true });
     return false;
   }
   document.querySelector("#inventory-reality-check")?.remove();
@@ -13716,7 +13772,13 @@ async function saveInventorySnapshot() {
   await recordCaptureEvent("monday_snapshot_attempt");
 
   setInventorySharedStatus("Checking Weekly Usage and PMB keg levels for the Monday snapshot...", true);
-  const usageResult = await runPmbWeeklyUsageSync();
+  const sharedUsageReady = await refreshSharedWeeklyUsageBeforeMondaySnapshot();
+  const usageResult = sharedUsageReady
+    ? await runPmbWeeklyUsageSync()
+    : {
+        ok: false,
+        error: weeklyUsageSharedSaveError || "Shared Weekly Usage could not be refreshed.",
+      };
   if (!usageResult?.ok || !await flushPendingSharedWeeklyUsageSave()) {
     await failCapture(usageResult?.error || weeklyUsageSharedSaveError || "Weekly Usage could not be saved.", "WEEKLY_USAGE_NOT_READY");
     return false;
@@ -16712,11 +16774,12 @@ function parseInventory(rows) {
       parDisplay,
       note,
       orderHoldReason: getInventoryOrderHoldReason(normalizedName, group, note),
-      excludeFromInventoryValue: normalizedName === "Non Alcoholic Beer",
+      excludeFromInventoryValue: ["Non Alcoholic Beer", "Blue Rasp Powder"].includes(normalizedName),
     };
 
     item.excludeFromOrderList = Boolean(
-      item.orderHoldReason || isFoodDepartmentOrderedInventoryItem(item.name),
+      normalizedName === "Blue Rasp Powder"
+      || item.orderHoldReason || isFoodDepartmentOrderedInventoryItem(item.name),
     );
 
     recalculateInventoryItem(item);
@@ -17098,7 +17161,7 @@ function ensureInventoryPlaceholder(items, config) {
     unitCost: config.unitCost || 0,
     parDisplay: inventoryParOverrides[id] ?? "0",
     note: config.note || "",
-    excludeFromOrderList: false,
+    excludeFromOrderList: Boolean(config.excludeFromOrderList),
     excludeFromInventoryValue: Boolean(config.excludeFromInventoryValue),
   };
 
@@ -17195,12 +17258,12 @@ function getRecipeFlavor(recipeTitle) {
 }
 
 function getVendorMapping(ingredientId) {
-  if (PROOF_MAPPINGS[ingredientId] || OHLQ_MAPPINGS[ingredientId]) {
-    return PROOF_MAPPINGS[ingredientId] || OHLQ_MAPPINGS[ingredientId] || null;
+  if (INVENTORY_PROVI_MAPPINGS[ingredientId] || PROOF_MAPPINGS[ingredientId] || OHLQ_MAPPINGS[ingredientId]) {
+    return INVENTORY_PROVI_MAPPINGS[ingredientId] || PROOF_MAPPINGS[ingredientId] || OHLQ_MAPPINGS[ingredientId] || null;
   }
 
   const fallbackId = slugify(normalizeIngredientAlias(clean(String(ingredientId).replace(/-/g, " "))));
-  return PROOF_MAPPINGS[fallbackId] || OHLQ_MAPPINGS[fallbackId] || null;
+  return INVENTORY_PROVI_MAPPINGS[fallbackId] || PROOF_MAPPINGS[fallbackId] || OHLQ_MAPPINGS[fallbackId] || null;
 }
 
 function normalizeIngredientAlias(name) {
