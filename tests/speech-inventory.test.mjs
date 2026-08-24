@@ -61,6 +61,39 @@ test("parses a natural quantity-first cooler walk with voice variants and a curr
   assert.equal(result.proposals.every((entry) => entry.status === "matched"), true);
 });
 
+test("separates adjacent Chrome speech products and matches the full strawberry cocktail", () => {
+  const keg = (id, name, aliases = []) => ({
+    id,
+    name,
+    aliases,
+    target: "keg",
+    wall: "Main",
+    group: `Main ${id}`,
+    unit: "kegs",
+    currentValue: "0",
+  });
+  const spokenItems = [
+    keg("michelob", "MICHELOB ULTRA 1", ["Michelob"]),
+    keg("miller", "MILLER LITE 1"),
+    keg("whiskey-smash", "WHISKEY SMASH (JIM BEAM) 1", ["Whiskey Smash"]),
+    keg("blueberry", "BLUEBERRY MARGARITA (JOSE CUERVO) 1", ["Blueberry Margarita"]),
+    keg("spiked-strawberry", "SPIKED STRAWBERRY LEMONADE (TITO'S) 1", ["Spiked Strawberry Lemonade"]),
+  ];
+  const result = parseInventoryTranscript(
+    "three mich club ultra i have three miller lite one whiskey smash one blueberry margarita one spiked strawberry lemonade",
+    spokenItems,
+  );
+
+  assert.deepEqual(result.proposals.map((entry) => [entry.matchedId, entry.quantity]), [
+    ["michelob", 3],
+    ["miller", 3],
+    ["whiskey-smash", 1],
+    ["blueberry", 1],
+    ["spiked-strawberry", 1],
+  ]);
+  assert.equal(result.proposals.every((entry) => entry.status === "matched"), true);
+});
+
 test("matches naturally spoken cocktail names without PMB spirit suffixes", () => {
   const cocktail = (id, name, aliases = []) => ({
     id,

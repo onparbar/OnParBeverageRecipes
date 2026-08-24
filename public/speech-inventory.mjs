@@ -19,6 +19,8 @@ export function normalizeSpeechInventoryText(value) {
     .replace(/\bdortmund+er\b/g, "dortmunder")
     .replace(/\bgarage\s+(?:rear|bear)\s+regular\b/g, "regular garage beer")
     .replace(/\bwashington\s+apple(?:\s+schnapps)+\b/g, "washington apple")
+    .replace(/\bmich(?:\s+club)?\s+ultra\b/g, "michelob ultra")
+    .replace(/\b(?:okay\s+)?i\s+have\b/g, " ")
     .replace(/\bwhiskey\s+smash\b(?!\s+jim\s+beam\b)/g, "whiskey smash jim beam")
     .replace(/\bspiked\s+strawberry\s+lemonade\b(?!\s+titos\b)/g, "spiked strawberry lemonade titos")
     .trim();
