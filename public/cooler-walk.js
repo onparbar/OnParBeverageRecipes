@@ -182,13 +182,12 @@
     }).join("");
   }
 
-  function getTranscriptField() {
-    return document.querySelector('[aria-label="Spoken inventory transcript"]');
+  function getTranscriptField(root = getRoot()) {
+    return root?.querySelector('[aria-label="Spoken inventory transcript"]') || null;
   }
 
   function getRoot() {
-    const field = getTranscriptField();
-    return field?.closest("details") || field?.parentElement || null;
+    return document.getElementById("keg-speech-assistant");
   }
 
   function installControls() {
@@ -277,8 +276,9 @@
       return;
     }
     if (button.textContent.trim().toLowerCase() === "review") {
-      const field = getTranscriptField();
-      if (field && getRoot()?.contains(button)) field.value = applyLearnedAliases(field.value);
+      const assistant = button.closest("#inventory-speech-assistant, #keg-speech-assistant");
+      const field = getTranscriptField(assistant);
+      if (field) field.value = applyLearnedAliases(field.value);
     }
   }, true);
 
@@ -296,7 +296,8 @@
     if (!selected || /^choose item$/i.test(selected)) return;
     const phrase = select.getAttribute("aria-label").replace(/^Matched product for\s+/i, "");
     const product = selected.split(" · ")[0].trim();
-    const transcript = getTranscriptField()?.value || phrase;
+    const assistant = select.closest("#inventory-speech-assistant, #keg-speech-assistant");
+    const transcript = getTranscriptField(assistant)?.value || phrase;
     if (saveAlias(phrase, product, contextFrom(transcript))) window.setTimeout(updateControls, 0);
   }, true);
 

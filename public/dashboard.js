@@ -12667,13 +12667,24 @@ async function startInventorySpeechRecognition() {
   inventorySpeechRecognition = new SpeechRecognition();
   inventorySpeechRecognition.lang = "en-US";
   inventorySpeechRecognition.continuous = true;
-  inventorySpeechRecognition.interimResults = false;
+  inventorySpeechRecognition.interimResults = true;
+  let committedTranscript = inventorySpeechTranscript.trim();
+  inventorySpeechRecognition.onstart = () => {
+    inventorySpeechMessage = "Listening...";
+    renderInventorySpeechAssistant();
+  };
   inventorySpeechRecognition.onresult = (event) => {
     const additions = [];
+    const interim = [];
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
-      if (event.results[index].isFinal) additions.push(event.results[index][0].transcript);
+      const words = event.results[index][0].transcript.trim();
+      if (!words) continue;
+      if (event.results[index].isFinal) additions.push(words);
+      else interim.push(words);
     }
-    if (additions.length) inventorySpeechTranscript = [inventorySpeechTranscript, ...additions].filter(Boolean).join(", ");
+    if (additions.length) committedTranscript = [committedTranscript, ...additions].filter(Boolean).join(", ");
+    inventorySpeechTranscript = [committedTranscript, interim.join(" ")].filter(Boolean).join(interim.length ? " " : "");
+    inventorySpeechMessage = "Listening...";
     renderInventorySpeechAssistant();
   };
   inventorySpeechRecognition.onerror = (event) => {
@@ -12681,16 +12692,23 @@ async function startInventorySpeechRecognition() {
       "not-allowed": "Microphone permission was not granted.",
       "service-not-allowed": "Voice input is not available in this browser.",
       "audio-capture": "No microphone was found.",
+      "no-speech": "I didn't hear anything. Try again, or type the count below.",
       network: "Voice input could not reach the speech service.",
     }[event.error] || "Voice input stopped. You can continue in the text box.";
     renderInventorySpeechAssistant();
   };
   inventorySpeechRecognition.onend = () => {
+    const endedWhileListening = inventorySpeechListening;
     inventorySpeechListening = false;
     inventorySpeechRecognition = null;
+    if (endedWhileListening && inventorySpeechMessage === "Listening...") {
+      inventorySpeechMessage = inventorySpeechTranscript.trim()
+        ? "Ready to review."
+        : "I didn't hear anything. Try again, or type the count below.";
+    }
     renderInventorySpeechAssistant();
   };
-  inventorySpeechMessage = "Listening...";
+  inventorySpeechMessage = "Starting microphone...";
   renderInventorySpeechAssistant();
   try {
     inventorySpeechRecognition.start();
@@ -12705,6 +12723,7 @@ async function startInventorySpeechRecognition() {
 function stopInventorySpeechRecognition() {
   inventorySpeechRecognition?.stop();
   inventorySpeechListening = false;
+  inventorySpeechMessage = inventorySpeechTranscript.trim() ? "Ready to review." : "Count stopped.";
   renderInventorySpeechAssistant();
 }
 
