@@ -15,9 +15,12 @@ export function normalizeSpeechInventoryText(value) {
     .toLowerCase()
     .replace(/[^a-z0-9.]+/g, " ")
     .replace(/\s+/g, " ")
+    .replace(/\btito\s+s\b/g, "titos")
+    .replace(/\b(?:course|cores)\b/g, "coors")
     .replace(/\b(?:scentsy|sensei|cincinnati)\s+light\b/g, "cincy light")
     .replace(/\bdortmund+er\b/g, "dortmunder")
-    .replace(/\bgarage\s+(?:rear|bear)\s+regular\b/g, "regular garage beer")
+    .replace(/\bgarage\s+(?:rear|bear|we\s+are)\s+regular\b/g, "regular garage beer")
+    .replace(/\bvoodoo\s+(?:ranger\s+)?juicy\s+hayes\b/g, "voodoo juicy haze")
     .replace(/\bwashington\s+apple(?:\s+schnapps)+\b/g, "washington apple")
     .replace(/\bmich(?:\s+club)?\s+ultra\b/g, "michelob ultra")
     .replace(/\b(?:okay\s+)?i\s+have\b/g, " ")
@@ -302,6 +305,8 @@ function matchProduct(productText, unit, catalog) {
   const candidates = catalog.flatMap((item) => {
     if (target && item.target !== target) return [];
     if (requestedWall && item.target === "keg" && normalizeSpeechInventoryText(item.wall) !== requestedWall) return [];
+    const canonicalName = normalizeSpeechInventoryText(item.name).replace(/\s+[123]$/, "").trim();
+    if (withoutWall === canonicalName) return [{ item, score: 2000 + canonicalName.length }];
     const score = Math.max(...item.aliases.map((alias) => {
       if (withoutWall === alias) return 1000 + alias.length;
       if (withoutWall.includes(alias) || alias.includes(withoutWall)) return 500 + Math.min(alias.length, withoutWall.length);

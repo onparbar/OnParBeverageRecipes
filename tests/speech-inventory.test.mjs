@@ -75,18 +75,29 @@ test("separates adjacent Chrome speech products and matches the full strawberry 
   const spokenItems = [
     keg("michelob", "MICHELOB ULTRA 1", ["Michelob"]),
     keg("miller", "MILLER LITE 1"),
+    keg("coors", "COORS LIGHT 1", ["Coors"]),
+    keg("garage", "GARAGE BEER 1"),
+    keg("blue-moon", "BLUE MOON 1"),
+    keg("voodoo-juicy", "VOODOO RANGER JUICY HAZE 1", ["Voodoo Juicy Haze"]),
+    keg("truth", "TRUTH 1"),
     keg("whiskey-smash", "WHISKEY SMASH (JIM BEAM) 1", ["Whiskey Smash"]),
     keg("blueberry", "BLUEBERRY MARGARITA (JOSE CUERVO) 1", ["Blueberry Margarita"]),
+    keg("spiked-pink", "SPIKED PINK LEMONADE (TITO'S) 1", ["Spiked Pink Lemonade", "Spiked Strawberry Lemonade"]),
     keg("spiked-strawberry", "SPIKED STRAWBERRY LEMONADE (TITO'S) 1", ["Spiked Strawberry Lemonade"]),
   ];
   const result = parseInventoryTranscript(
-    "three mich club ultra i have three miller lite one whiskey smash one blueberry margarita one spiked strawberry lemonade",
+    "three mich club ultra i have one course three miller lite one garage we are regular one blue moon one voodoo juicy hayes one truth one whiskey smash one blueberry margarita one spiked strawberry lemonade",
     spokenItems,
   );
 
   assert.deepEqual(result.proposals.map((entry) => [entry.matchedId, entry.quantity]), [
     ["michelob", 3],
+    ["coors", 1],
     ["miller", 3],
+    ["garage", 1],
+    ["blue-moon", 1],
+    ["voodoo-juicy", 1],
+    ["truth", 1],
     ["whiskey-smash", 1],
     ["blueberry", 1],
     ["spiked-strawberry", 1],
