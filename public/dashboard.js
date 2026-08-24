@@ -995,6 +995,7 @@ let inventorySpeechMessage = "";
 let inventorySpeechListening = false;
 let inventorySpeechApplying = false;
 let inventorySpeechRecognition = null;
+let inventorySpeechMicrophoneAuthorized = false;
 let inventorySpeechKegScope = "main";
 let inventorySpeechInventoryScope = "all";
 let inventorySourceRows = [];
@@ -12562,7 +12563,9 @@ function renderInventorySpeechAssistant() {
     const sourceItems = getInventorySpeechSourceItems().filter((item) => {
       if (!kegOnly) {
         return item.target === "inventory"
-          && (inventorySpeechInventoryScope !== "cabinet" || ["liquor cabinet", "mixer cabinet"].includes(String(item.group || "").trim().toLowerCase()));
+          && (inventorySpeechInventoryScope !== "cabinet"
+            || ["liquor cabinet", "mixer cabinet"].includes(String(item.group || "").trim().toLowerCase())
+            || item.id === "korbel-brut");
       }
       return item.target === "keg" && selectedWalls.has(String(item.wall || "").toLowerCase());
     });
@@ -12742,25 +12745,28 @@ async function startInventorySpeechRecognition() {
   }
 
   inventorySpeechListening = true;
-  inventorySpeechMessage = "Waiting for microphone access...";
-  renderInventorySpeechAssistant();
-
-  try {
-    const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    permissionStream.getTracks().forEach((track) => track.stop());
-  } catch (error) {
-    inventorySpeechListening = false;
-    if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
-      inventorySpeechMessage = "Microphone access was not allowed. Allow it for this site, then try again.";
-    } else if (error?.name === "NotFoundError") {
-      inventorySpeechMessage = "No microphone was found.";
-    } else if (error?.name === "NotReadableError") {
-      inventorySpeechMessage = "The microphone is busy. Close anything else using it, then try again.";
-    } else {
-      inventorySpeechMessage = "Microphone access could not start. Check the browser's site settings, then try again.";
-    }
+  if (!inventorySpeechMicrophoneAuthorized) {
+    inventorySpeechMessage = "Waiting for microphone access...";
     renderInventorySpeechAssistant();
-    return;
+
+    try {
+      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      permissionStream.getTracks().forEach((track) => track.stop());
+      inventorySpeechMicrophoneAuthorized = true;
+    } catch (error) {
+      inventorySpeechListening = false;
+      if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
+        inventorySpeechMessage = "Microphone access was not allowed. Allow it for this site, then try again.";
+      } else if (error?.name === "NotFoundError") {
+        inventorySpeechMessage = "No microphone was found.";
+      } else if (error?.name === "NotReadableError") {
+        inventorySpeechMessage = "The microphone is busy. Close anything else using it, then try again.";
+      } else {
+        inventorySpeechMessage = "Microphone access could not start. Check the browser's site settings, then try again.";
+      }
+      renderInventorySpeechAssistant();
+      return;
+    }
   }
 
   if (!inventorySpeechListening) {

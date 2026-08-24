@@ -34,3 +34,21 @@ test("separates Garage Beer Lime and Triple Jam in Chrome karaoke speech", () =>
     ],
   );
 });
+
+test("separates Garage Beer Lime and Angry Orchard in Chrome karaoke speech", () => {
+  const parsed = parseInventoryTranscript(
+    "one garage beer line and one angry orchard",
+    [
+      keg("garage-lime", "Garage Beer Lime 2", ["Garage Lime"]),
+      keg("angry-orchard", "Angry Orchard 2"),
+    ],
+  );
+
+  assert.deepEqual(
+    parsed.proposals.map(({ matchedId, quantity }) => ({ matchedId, quantity })),
+    [
+      { matchedId: "garage-lime", quantity: 1 },
+      { matchedId: "angry-orchard", quantity: 1 },
+    ],
+  );
+});

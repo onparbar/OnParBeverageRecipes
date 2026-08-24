@@ -277,6 +277,13 @@ test("voice inventory can focus matching on the liquor and mixer cabinets", () =
   assert.match(dashboardSource, /data-speech-inventory-scope="cabinet"/);
   assert.match(dashboardSource, /inventorySpeechInventoryScope !== "cabinet"/);
   assert.match(dashboardSource, /\["liquor cabinet", "mixer cabinet"\]\.includes/);
+  assert.match(dashboardSource, /item\.id === "korbel-brut"/);
+});
+
+test("voice inventory reuses granted microphone access for later counts", () => {
+  assert.match(dashboardSource, /let inventorySpeechMicrophoneAuthorized = false/);
+  assert.match(dashboardSource, /if \(!inventorySpeechMicrophoneAuthorized\)/);
+  assert.match(dashboardSource, /inventorySpeechMicrophoneAuthorized = true/);
 });
 
 test("inventory keeps advanced controls behind one row Edit action and retires Bubbly", () => {

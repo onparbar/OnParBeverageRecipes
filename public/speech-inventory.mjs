@@ -16,11 +16,18 @@ export function normalizeSpeechInventoryText(value) {
     .replace(/[^a-z0-9.]+/g, " ")
     .replace(/\s+/g, " ")
     .replace(/\btito\s+s\b/g, "titos")
+    .replace(/\babsolute\s+citron\b/g, "absolut citron")
+    .replace(/\bgym\s+beam\b/g, "jim beam")
+    .replace(/\bcream\s+to\s+cacao\b/g, "creme de cacao")
+    .replace(/\bsweet\s+and\s+sour\b/g, "sour mix")
+    .replace(/\b(?:corbell?|korbell?)\s+brew\b/g, "korbel brut")
+    .replace(/\bfor\s+(?=bacardi\b)/g, "four ")
     .replace(/\b(?:course|cores)\b/g, "coors")
     .replace(/\b(?:scentsy|sensei|cincinnati)\s+light\b/g, "cincy light")
     .replace(/\bdortmund+er\b/g, "dortmunder")
-.replace(/\bgarage\s+(?:rear|bear|we\s+are)\s+regular\b/g, "regular garage beer")
-.replace(/\bgarage\s+for\s+(?:your|you)\s+lime\b/g, "garage beer lime")
+    .replace(/\bgarage\s+(?:rear|bear|we\s+are)\s+regular\b/g, "regular garage beer")
+    .replace(/\bgarage\s+for\s+(?:your|you)\s+lime\b/g, "garage beer lime")
+    .replace(/\bgarage\s+beer\s+(?:line|lion)\b/g, "garage beer lime")
     .replace(/\bvoodoo\s+(?:ranger\s+)?juicy\s+hayes\b/g, "voodoo juicy haze")
     .replace(/\bwashington\s+apple(?:\s+schnapps)+\b/g, "washington apple")
     .replace(/\bmich(?:\s+club)?\s+ultra\b/g, "michelob ultra")
@@ -83,8 +90,26 @@ function catalogAliases(item) {
   if (normalizedName.includes("truly wild berry")) spokenAliases.push("truly");
   if (normalizedName.includes("astra red cream soda")) spokenAliases.push("astra");
   if (normalizedName.includes("boozy cucumber lemonade")) spokenAliases.push("boozy cucumber");
-  if (normalizedName.includes("apple") || normalizedName.includes("angry orchard")) spokenAliases.push("apple");
-  if (normalizedName.includes("angry orchard")) spokenAliases.push("apple cider");
+  if (normalizedName.includes("bulleit bourbon")) spokenAliases.push("bulleit", "bullet");
+  if (normalizedName === "crown royal") spokenAliases.push("crown");
+  if (normalizedName.includes("svedka blue raspberry")) spokenAliases.push("svedka");
+  if (normalizedName.includes("jose cuervo silver")) spokenAliases.push("jose", "cuervo");
+  if (normalizedName.includes("ketel one cucumber")) spokenAliases.push("ketel one");
+  if (normalizedName.includes("absolut citron")) spokenAliases.push("absolute citron");
+  if (normalizedName.includes("jack daniel")) spokenAliases.push("jack daniels");
+  if (normalizedName.includes("jim beam")) spokenAliases.push("gym beam");
+  if (normalizedName.includes("raspberry schnapps")) spokenAliases.push("raspberry");
+  if (normalizedName.includes("pomegranate schnapps")) spokenAliases.push("pomegranate");
+  if (normalizedName.includes("strawberry schnapps")) spokenAliases.push("strawberry");
+  if (normalizedName.includes("peach schnapps")) spokenAliases.push("peach");
+  if (normalizedName.includes("blueberry schnapps")) spokenAliases.push("blueberry");
+  if (normalizedName.includes("watermelon schnapps")) spokenAliases.push("watermelon");
+  if (normalizedName.includes("apple schnapps")) spokenAliases.push("apple");
+  if (normalizedName.includes("lime juice")) spokenAliases.push("lime");
+  if (normalizedName.includes("creme de cacao")) spokenAliases.push("cream to cacao", "cream de cacao");
+  if (normalizedName.includes("sour mix")) spokenAliases.push("sweet and sour");
+  if (normalizedName.includes("korbel brut")) spokenAliases.push("corbell brew", "korbel");
+  if (normalizedName.includes("angry orchard")) spokenAliases.push("apple", "apple cider");
   if (normalizedName.includes("sour monkey")) spokenAliases.push("sour mix");
   return [...new Set([...suppliedAliases, ...tapSuffixlessAliases, ...spokenAliases]
     .filter(Boolean))]
@@ -147,6 +172,25 @@ function findSpokenQuantityStart(value) {
   return null;
 }
 
+function findQuantityClauseStarts(value, catalog) {
+  const text = String(value || "");
+  const aliasRanges = findAliasOccurrences(text, catalog);
+  const tokens = [...text.matchAll(/[a-z0-9.]+/g)];
+  const starts = [];
+  let inQuantity = false;
+  tokens.forEach((token) => {
+    const protectedByProduct = aliasRanges.some((range) => token.index >= range.start && token.index < range.end);
+    const numeric = NUMBER_TOKENS.has(token[0]) || /^\d+(?:\.\d+)?$/.test(token[0]);
+    if (protectedByProduct || !numeric) {
+      inQuantity = false;
+      return;
+    }
+    if (!inQuantity) starts.push(token.index);
+    inQuantity = true;
+  });
+  return starts;
+}
+
 function findIncrementStart(value) {
   const match = String(value || "").match(/(?:^|\s)((?:(?:okay|ok|and|then)\s+)*(?:i\s+(?:need|want)\s+to\s+)?(?:oh\s+)?(?:whoops|oops)?\s*(?:please\s+)?(?:add\s+(?:another|one\s+more)|plus\s+(?:another|one)))\s*$/);
   if (!match) return null;
@@ -156,6 +200,20 @@ function findIncrementStart(value) {
 function splitQuantityFirstTranscript(transcript, catalog) {
   const text = normalizeSpeechInventoryText(transcript);
   const matches = findAliasOccurrences(text, catalog);
+  const quantityStarts = findQuantityClauseStarts(text, catalog);
+  if (quantityStarts.length >= 2 && quantityStarts[0] <= (matches[0]?.start ?? text.length)) {
+    const incrementStarts = matches.flatMap((match, index) => {
+      const gapStart = index ? matches[index - 1].end : 0;
+      const localStart = findIncrementStart(text.slice(gapStart, match.start));
+      return localStart === null ? [] : [gapStart + localStart];
+    });
+    const clauseStarts = [...new Set([...quantityStarts, ...incrementStarts])]
+      .sort((left, right) => left - right);
+    return clauseStarts.map((start, index) => text
+      .slice(start, clauseStarts[index + 1] ?? text.length)
+      .trim())
+      .filter(Boolean);
+  }
   if (matches.length < 2) return null;
   const starts = matches.map((match, index) => {
     const gapStart = index ? matches[index - 1].end : 0;
