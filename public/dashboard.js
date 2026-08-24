@@ -7324,6 +7324,23 @@ function renderKegLevels() {
     .map((wallName) => renderKegWallBlock(wallName, kegWallItems.filter((item) => item.wall === wallName)))
     .join("") + renderComingSoonBlock();
 
+  const cocktailsToMakePanel = kegSummary.querySelector(".cocktails-to-make-panel");
+  const speechPanel = kegWalls.querySelector("#keg-speech-assistant");
+  if (cocktailsToMakePanel && speechPanel) {
+    const cocktailCount = cocktailsToMakePanel.querySelector(".cocktails-to-make-panel__header strong")?.textContent?.trim() || "0";
+    const cocktailDetails = document.createElement("details");
+    const cocktailSummary = document.createElement("summary");
+    cocktailDetails.className = "inventory-speech keg-cocktails-to-make";
+    cocktailSummary.textContent = `Cocktails to make · ${cocktailCount}`;
+    cocktailDetails.append(cocktailSummary);
+    cocktailsToMakePanel.querySelector(".cocktails-to-make-panel__header")?.remove();
+    while (cocktailsToMakePanel.firstChild) {
+      cocktailDetails.append(cocktailsToMakePanel.firstChild);
+    }
+    cocktailsToMakePanel.remove();
+    speechPanel.insertAdjacentElement("afterend", cocktailDetails);
+  }
+
   renderInventorySpeechAssistant();
   bindKegLevelEvents();
 }

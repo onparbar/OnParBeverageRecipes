@@ -168,10 +168,12 @@
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
-  function applyLearnedAliases(transcript) {
+  function applyLearnedAliases(transcript, root = null) {
     const context = contextFrom(transcript);
+    const kegOnly = root?.id === "keg-speech-assistant";
     const aliases = loadAliases()
       .filter((entry) => entry.context === context || entry.context === "inventory")
+      .filter((entry) => !kegOnly || aliasCandidate(entry.alias).includes(" "))
       .sort((left, right) => right.alias.length - left.alias.length);
     if (!aliases.length) return transcript;
     return aliases.reduce((value, rule) => {
@@ -243,7 +245,7 @@
     const countSummary = `${counts.matched} heard${counts.unresolved ? ` · ${counts.unresolved} to review` : ""}`;
     const summary = walkActive
       ? countSummary
-      : lastWalkSummary || lastAliasMessage || "";
+      : lastWalkSummary || "";
     if (status && status.textContent !== summary) status.textContent = summary;
   }
 
@@ -278,13 +280,14 @@
     if (button.textContent.trim().toLowerCase() === "review") {
       const assistant = button.closest("#inventory-speech-assistant, #keg-speech-assistant");
       const field = getTranscriptField(assistant);
-      if (field) field.value = applyLearnedAliases(field.value);
+      if (field) field.value = applyLearnedAliases(field.value, assistant);
     }
   }, true);
 
   document.addEventListener("input", (event) => {
     if (!event.target.matches?.('[aria-label="Spoken inventory transcript"]')) return;
-    const expanded = applyLearnedAliases(event.target.value);
+    const assistant = event.target.closest("#inventory-speech-assistant, #keg-speech-assistant");
+    const expanded = applyLearnedAliases(event.target.value, assistant);
     if (expanded !== event.target.value) event.target.value = expanded;
     window.setTimeout(updateControls, 180);
   });
