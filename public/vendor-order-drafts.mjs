@@ -1,6 +1,12 @@
 import { groupWeeklyPlanOrdersByVendor } from "./weekly-action-plan.mjs";
 
 const CONFIGURED_VENDORS = new Set(["Bonbright", "Heidelberg", "Proof", "OHLQ"]);
+const VENDOR_ORDER_IDENTITY_FALLBACKS = new Map([
+  ["ohlq|jack-daniel-s", { vendorSku: "0066D", productName: "Jack Daniel's Old No. 7 1.75L", unitCost: 47 }],
+  ["ohlq|jack-daniel-s-whiskey", { vendorSku: "0066D", productName: "Jack Daniel's Old No. 7 1.75L", unitCost: 47 }],
+  ["ohlq|woodford-reserve", { vendorSku: "9674D", productName: "Woodford Reserve Bourbon 1.75L", unitCost: 66.74 }],
+  ["ohlq|woodford-reserve-bourbon", { vendorSku: "9674D", productName: "Woodford Reserve Bourbon 1.75L", unitCost: 66.74 }],
+]);
 const RETIRED_PRODUCT_PATTERN = /\b(?:breakfast stout|apple pucker)\b/i;
 
 function clean(value) {
@@ -34,6 +40,25 @@ function hash(value) {
 
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
+}
+
+export function resolveVendorOrderIdentity(item = {}, explicitVendor = "") {
+  const vendor = normalizeVendor(explicitVendor || item.vendor);
+  const names = unique([
+    item.vendorProductName,
+    item.productName,
+    item.orderProductName,
+    item.name,
+  ].map(clean));
+  const fallback = names
+    .map((name) => VENDOR_ORDER_IDENTITY_FALLBACKS.get(`${vendor.toLowerCase()}|${slug(name)}`))
+    .find(Boolean) || {};
+  return {
+    vendor,
+    vendorSku: clean(item.vendorSku || item.preferredSku || fallback.vendorSku),
+    productName: clean(item.vendorProductName || item.productName || fallback.productName || item.orderProductName || item.name),
+    unitCost: numberOrNull(item.unitCost ?? fallback.unitCost),
+  };
 }
 
 function issue(code, message) {
@@ -173,16 +198,18 @@ function buildDraftLine(item, vendor, sourceDate) {
   const casePackaged = Boolean(item.casePackaged);
   const packSize = Math.max(1, Number(item.packSize) || 1);
   const caseCount = casePackaged ? Number(item.caseCount) || 0 : null;
-  const unitCost = numberOrNull(item.unitCost);
-  const extendedCost = numberOrNull(item.estimatedCost);
+  const resolvedIdentity = resolveVendorOrderIdentity(item, vendor);
+  const unitCost = resolvedIdentity.unitCost;
+  const extendedCost = numberOrNull(item.estimatedCost)
+    ?? (unitCost !== null && quantity > 0 ? unitCost * quantity : null);
   const internalId = clean(item.id || item.internalId);
-  const vendorSku = clean(item.vendorSku || item.preferredSku);
-  const productName = clean(item.vendorProductName || item.productName || item.name);
+  const vendorSku = resolvedIdentity.vendorSku;
+  const productName = resolvedIdentity.productName;
   const blockers = [];
   const warnings = [];
 
   if (!internalId) blockers.push(issue("INTERNAL_ID_REQUIRED", "Internal product identity is missing."));
-  if (!vendorSku) blockers.push(issue("VENDOR_SKU_REQUIRED", "Vendor SKU is missing."));
+  if (vendor !== "Bonbright" && !vendorSku) blockers.push(issue("VENDOR_SKU_REQUIRED", "Vendor SKU is missing."));
   if (!productName) blockers.push(issue("PRODUCT_NAME_REQUIRED", "Vendor product name is missing."));
   if (RETIRED_PRODUCT_PATTERN.test(`${productName} ${item.name || ""}`)) {
     blockers.push(issue("RETIRED_PRODUCT", "Retired products cannot be included in an order draft."));
@@ -192,7 +219,7 @@ function buildDraftLine(item, vendor, sourceDate) {
   if (casePackaged && (!Number.isInteger(caseCount) || caseCount <= 0 || quantity !== caseCount * packSize)) {
     blockers.push(issue("CASE_ROUNDING_REQUIRED", "Case-packaged quantity does not match the saved case count and pack size."));
   }
-  if (item.hasKnownPrice === false || unitCost === null || unitCost <= 0 || extendedCost === null || extendedCost <= 0) {
+  if (unitCost === null || unitCost <= 0 || extendedCost === null || extendedCost <= 0) {
     blockers.push(issue("PRICE_REQUIRED", "A current unit and extended price are required."));
   }
   if (item.manualAdjustment) warnings.push(issue("MANUAL_ORDER_ADJUSTMENT", "Manager-adjusted quantity; review the saved reason before approval."));

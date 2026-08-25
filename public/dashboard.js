@@ -1311,7 +1311,11 @@ async function runOwnerLoginSync() {
     if (!usageSaved || !inventorySaved || !parInputsSaved) return;
     const mondaySnapshot = getCurrentMondayInventorySnapshot(inventoryHistory, new Date());
     const frozenKegPlan = mondaySnapshot?.kegPlanSnapshot;
-    if (frozenKegPlan && !getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations)) {
+    if (
+      frozenKegPlan
+      && !getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations)
+      && !clean(parAgentState?.recommendations?.weeklyPlanRecalledAt)
+    ) {
       await publishCurrentWeeklyPlanSnapshot();
     }
     renderDashboardOverview();
@@ -3014,6 +3018,10 @@ function bindEvents() {
     }
     const target = event.target.closest("[data-dashboard-target]");
     if (!target) return;
+    if (target.dataset.mondayRunStep) {
+      openMondayRunStep(target.dataset.mondayRunStep, target.dataset.dashboardTarget);
+      return;
+    }
     if (target.dataset.dashboardTarget === DASHBOARD_OVERVIEW_TARGETS.sharedDashboardSetup) {
       initializeSharedDashboardState();
       return;
@@ -5100,12 +5108,15 @@ function hydrateWeeklyPlanLiquorTapPricing(plan) {
   const pricedLiquorTapBottles = liquorTapBottles.map((item) => {
     if (item.hasKnownPrice !== false && toNumber(item.estimatedCost) > 0) return item;
     const ingredientId = slugify(normalizeIngredientAlias(item.name));
-    const unitCost = toNumber(priceOverrides[ingredientId]?.bottlePrice);
+    const vendorMapping = getVendorMapping(ingredientId);
+    const unitCost = toNumber(priceOverrides[ingredientId]?.bottlePrice || vendorMapping?.unitPrice);
     if (!unitCost) return item;
     if (item.hasKnownPrice === false) resolvedMissingPriceCount += 1;
     return {
       ...item,
-      vendor: item.vendor || getVendorMapping(ingredientId)?.vendor || "OHLQ",
+      vendor: item.vendor || vendorMapping?.vendor || "OHLQ",
+      vendorSku: item.vendorSku || vendorMapping?.preferredSku || "",
+      vendorProductName: item.vendorProductName || vendorMapping?.productName || item.name,
       unitCost,
       estimatedCost: toNumber(item.quantity) * unitCost,
       hasKnownPrice: true,
@@ -5159,6 +5170,69 @@ async function publishCurrentWeeklyPlanSnapshot() {
   } catch (error) {
     weeklyPlanRefreshMessage = error?.message || "The Monday plan could not be locked for the week.";
     return false;
+  }
+}
+
+async function recallCurrentWeeklyPlan() {
+  if (weeklyPlanUpdating || parAgentRunning) return;
+  const lockedPlan = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
+  const mondaySnapshot = getCurrentMondayInventorySnapshot(inventoryHistory, new Date());
+  if (!lockedPlan || !mondaySnapshot) {
+    weeklyPlanRefreshMessage = "The current locked plan or its Monday snapshot is unavailable.";
+    renderWeeklyPlan();
+    return;
+  }
+  if (!confirmDashboardAction(
+    "Recall this week's locked plan?",
+    [
+      "The saved Monday snapshot will remain and its counts will be restored for editing.",
+      "Order approvals, completion marks, and staff prep checkmarks for this plan will be cleared.",
+    ],
+    "Save & Lock Plan again before placing orders.",
+  )) return;
+
+  weeklyPlanUpdating = true;
+  weeklyPlanRefreshMessage = "Recalling the plan and restoring its saved counts...";
+  renderWeeklyPlan();
+
+  try {
+    const result = await requestParAgentState({
+      action: "recall-weekly-plan",
+      expectedRevision: parAgentState.revision,
+    });
+    applyParAgentState(result);
+
+    const inventoryState = await runSharedInventoryAction(
+      { action: "restore-snapshot", id: mondaySnapshot.id },
+      {
+        successMessage: "The Monday snapshot is restored for editing.",
+        rebuild: true,
+      },
+    );
+    if (!inventoryState) throw new Error("The plan was recalled, but its saved inventory counts could not be restored.");
+
+    const savedTapInputs = mondaySnapshot.kegPlanSnapshot?.tapInputs || [];
+    if (savedTapInputs.length) {
+      kegOnHandOverrides = Object.fromEntries(savedTapInputs.map((item) => [item.key, String(toNumber(item.backupKegs))]));
+      saveKegOnHandOverrides();
+      scheduleParAgentStateSync({ immediate: true });
+      if (!await flushPendingParAgentStateSync()) {
+        throw new Error("The plan was recalled, but its saved backup-keg counts did not finish syncing.");
+      }
+    }
+
+    await Promise.all([loadWeeklyOrderTracking(), loadDashboardStaffPrepPlan()]);
+    weeklyPlanRefreshMessage = "Plan recalled. Update the counts, then Save & Lock Plan again.";
+    parAgentError = "";
+    renderInventory();
+    renderKegLevels();
+  } catch (error) {
+    parAgentError = error?.message || "The Weekly Plan could not be recalled.";
+    weeklyPlanRefreshMessage = parAgentError;
+  } finally {
+    weeklyPlanUpdating = false;
+    renderWeeklyPlan();
+    renderDashboardOverview();
   }
 }
 
@@ -5857,17 +5931,19 @@ function getMondayRunModel(plan, freshness) {
 
 function renderMondayRun(run) {
   const progress = run.steps.length ? Math.round((run.completedCount / run.steps.length) * 100) : 0;
+  const continueStepId = run.complete ? "review" : run.nextStep.id;
+  const continueTarget = run.complete ? "weekly-plan" : run.nextStep.target;
   return `
     <section class="monday-run" aria-labelledby="monday-run-title">
       <header class="monday-run__header">
         <div><h2 id="monday-run-title">Monday Run</h2><span>${formatNumber(run.completedCount)} / ${formatNumber(run.steps.length)}</span></div>
-        <button class="${run.complete ? "ghost-button" : "primary-button"}" type="button" data-dashboard-target="${escapeHtml(run.nextStep.target)}">${run.complete ? "Review" : "Continue"}</button>
+        <button class="${run.complete ? "ghost-button" : "primary-button"}" type="button" data-monday-run-step="${escapeHtml(continueStepId)}" data-dashboard-target="${escapeHtml(continueTarget)}">${run.complete ? "Review" : "Continue"}</button>
       </header>
       <div class="monday-run__progress" role="progressbar" aria-label="Monday Run progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="--monday-run-progress: ${progress}%"></span></div>
       <ol class="monday-run__steps">
         ${run.steps.map((step, index) => `
           <li class="monday-run__step${step.complete ? " monday-run__step--done" : index === run.nextIndex ? " monday-run__step--current" : ""}">
-            <button type="button" data-dashboard-target="${escapeHtml(step.target)}"${index === run.nextIndex ? ' aria-current="step"' : ""}>
+            <button type="button" data-monday-run-step="${escapeHtml(step.id)}" data-dashboard-target="${escapeHtml(step.target)}"${index === run.nextIndex ? ' aria-current="step"' : ""}>
               <span>${formatNumber(index + 1)}</span>
               <strong>${escapeHtml(step.label)}</strong>
               <small>${escapeHtml(step.complete ? "Done" : step.status)}</small>
@@ -5881,16 +5957,40 @@ function renderMondayRun(run) {
 
 function renderMondayRunCompact(run) {
   const progress = run.steps.length ? Math.round((run.completedCount / run.steps.length) * 100) : 0;
+  const continueStepId = run.complete ? "review" : run.nextStep.id;
+  const continueTarget = run.complete ? "weekly-plan" : run.nextStep.target;
   return `
     <section class="monday-run monday-run--compact" aria-label="Monday Run">
       <header class="monday-run__header">
         <div><h2>Monday Run</h2><span>${formatNumber(run.completedCount)} / ${formatNumber(run.steps.length)}</span></div>
-        <button class="${run.complete ? "ghost-button" : "primary-button"}" type="button" data-dashboard-target="weekly-plan">${run.complete ? "Review" : "Continue"}</button>
+        <button class="${run.complete ? "ghost-button" : "primary-button"}" type="button" data-monday-run-step="${escapeHtml(continueStepId)}" data-dashboard-target="${escapeHtml(continueTarget)}">${run.complete ? "Review" : "Continue"}</button>
       </header>
       <p class="monday-run__current-step"><span>${run.complete ? "Complete" : "Next"}:</span> <strong>${escapeHtml(run.complete ? "Review this week" : run.nextStep.label)}</strong></p>
       <div class="monday-run__progress" role="progressbar" aria-label="Monday Run progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="--monday-run-progress: ${progress}%"></span></div>
     </section>
   `;
+}
+
+function openMondayRunStep(stepId, target) {
+  const targetTab = clean(target) || "weekly-plan";
+  switchTab(targetTab);
+  if (targetTab !== "weekly-plan") return;
+
+  const selector = {
+    plan: "#run-weekly-plan-agent",
+    orders: "#weekly-plan-orders",
+    prep: ".weekly-plan-column--prep",
+    review: ".weekly-plan-header",
+  }[stepId];
+  if (!selector) return;
+
+  requestAnimationFrame(() => {
+    const destination = weeklyPlan?.querySelector(selector);
+    destination?.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (destination instanceof HTMLButtonElement && !destination.disabled) {
+      destination.focus({ preventScroll: true });
+    }
+  });
 }
 
 function renderDashboardOverview() {
@@ -6874,7 +6974,7 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
             <form class="vendor-order-draft-card vendor-order-draft-card--${approved ? "approved" : draft.status}" data-vendor-order-draft="${escapeHtml(draft.vendor)}" data-vendor-order-draft-id="${escapeHtml(draft.id)}" data-vendor-order-draft-status="${escapeHtml(saved.status || draft.status)}">
               <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(draft.lineCount)} line${draft.lineCount === 1 ? "" : "s"} · ${money(draft.estimatedTotal)}</p></div><span>${approved ? "Approved" : draft.status === "blocked" ? "Blocked" : "Review"}</span></header>
               <div class="vendor-order-draft-lines">
-                ${draft.lines.map((line) => `<div><strong>${escapeHtml(line.productName)}</strong><span>${escapeHtml(line.vendorSku ? `SKU ${line.vendorSku}` : "SKU needed")} · ${line.requestedCases ? `${formatNumber(line.requestedCases)} case${line.requestedCases === 1 ? "" : "s"} / ` : ""}${formatNumber(line.requestedUnits)} unit${line.requestedUnits === 1 ? "" : "s"} · ${line.extendedCost ? money(line.extendedCost) : "Price needed"}</span><small>${escapeHtml(line.reason)}</small></div>`).join("")}
+                ${draft.lines.map((line) => `<div><strong>${escapeHtml(line.productName)}</strong><span>${escapeHtml(line.vendor === "Bonbright" ? "Text order" : line.vendorSku ? `SKU ${line.vendorSku}` : "SKU needed")} · ${line.requestedCases ? `${formatNumber(line.requestedCases)} case${line.requestedCases === 1 ? "" : "s"} / ` : ""}${formatNumber(line.requestedUnits)} unit${line.requestedUnits === 1 ? "" : "s"} · ${line.extendedCost ? money(line.extendedCost) : "Price needed"}</span><small>${escapeHtml(line.reason)}</small></div>`).join("")}
               </div>
               ${draft.blockers.length ? `<div class="vendor-order-draft-issues vendor-order-draft-issues--blocked"><strong>Approval blockers</strong>${draft.blockers.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
               ${draft.warnings.length ? `<div class="vendor-order-draft-issues"><strong>Review notes</strong>${draft.warnings.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
@@ -7239,13 +7339,14 @@ function renderWeeklyPlan() {
       </div>
       <div class="weekly-plan-actions">
         ${ORDER_REHEARSAL_AVAILABLE ? `<button class="ghost-button" id="toggle-order-rehearsal" type="button">${orderRehearsalMode ? "Exit Rehearsal" : "Rehearsal"}</button>` : ""}
+        ${planLocked ? `<button class="ghost-button" id="recall-weekly-plan" type="button"${weeklyPlanUpdating ? " disabled" : ""}>${weeklyPlanUpdating ? "Recalling..." : "Recall Plan"}</button>` : ""}
         ${requiresLateSnapshotReason ? `
           <label class="weekly-plan-late-reason">
             <span>Reason required</span>
             <input id="weekly-plan-late-reason" type="text" autocomplete="off" value="${escapeHtml(weeklyPlanOutsideMondayReason)}" placeholder="Why is this snapshot late?">
           </label>
         ` : ""}
-        <button class="primary-button" id="run-weekly-plan-agent" type="button"${parAgentRunning || weeklyPlanUpdating || planLocked || (requiresLateSnapshotReason && !clean(weeklyPlanOutsideMondayReason)) ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Saving & locking..." : planLocked ? "Plan locked through Sunday" : "Save & Lock Plan"}</button>
+        ${planLocked ? "" : `<button class="primary-button" id="run-weekly-plan-agent" type="button"${parAgentRunning || weeklyPlanUpdating || (requiresLateSnapshotReason && !clean(weeklyPlanOutsideMondayReason)) ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Saving & locking..." : "Save & Lock Plan"}</button>`}
       </div>
     </header>
     <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : ""))}</p>
@@ -7274,12 +7375,21 @@ function renderWeeklyPlan() {
         ${renderWeeklyPlanLiquorRefillRows(plan.orders.liquorTapBottles)}
       </section>
     </div>
-    ${orderRehearsalMode || !planLocked ? "" : renderOwnerWeeklyOrderTracking()}
-    ${orderRehearsalMode || planLocked ? renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel) : ""}
+    ${orderRehearsalMode
+      ? renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)
+      : planLocked
+        ? `<div id="weekly-plan-orders">${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)}${renderOwnerWeeklyOrderTracking()}</div>`
+        : ""}
     ${renderWeeklyPlanReview(plan)}
   `;
 
   document.querySelector("#run-weekly-plan-agent")?.addEventListener("click", runWeeklyPlanUpdate);
+  document.querySelector("#recall-weekly-plan")?.addEventListener("click", recallCurrentWeeklyPlan);
+  weeklyPlan.querySelectorAll("[data-monday-run-step]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openMondayRunStep(button.dataset.mondayRunStep, button.dataset.dashboardTarget);
+    });
+  });
   document.querySelector("#weekly-plan-late-reason")?.addEventListener("input", (event) => {
     weeklyPlanOutsideMondayReason = event.currentTarget.value;
     const saveButton = document.querySelector("#run-weekly-plan-agent");
@@ -11140,10 +11250,12 @@ async function runWeeklyPlanUpdate() {
   parAgentError = "";
   weeklyPlanRefreshMessage = "Saving the Monday snapshot and locking its order and cocktail plan...";
   renderWeeklyPlan();
+  let lockedSuccessfully = false;
 
   try {
-    if (!getCurrentMondayInventorySnapshot(inventoryHistory, new Date())) {
-      const snapshotSaved = await saveInventorySnapshot();
+    const replacingRecalledPlan = Boolean(clean(parAgentState?.recommendations?.weeklyPlanRecalledAt));
+    if (!getCurrentMondayInventorySnapshot(inventoryHistory, new Date()) || replacingRecalledPlan) {
+      const snapshotSaved = await saveInventorySnapshot({ replaceExisting: replacingRecalledPlan });
       if (!snapshotSaved) {
         throw new Error(inventorySharedMessage || "The Monday snapshot could not be saved.");
       }
@@ -11158,12 +11270,14 @@ async function runWeeklyPlanUpdate() {
     const summary = parAgentState?.recommendations?.summary || {};
     weeklyPlanRefreshMessage = `Monday plan locked for Thursday delivery from the saved snapshot: ${formatNumber(summary.tapCount || 0)} tap recommendation${toNumber(summary.tapCount) === 1 ? "" : "s"}, including saved keg levels, on-hand kegs, and cocktail prep, will stay fixed through Sunday.`;
     parAgentError = "";
+    lockedSuccessfully = true;
   } catch (error) {
     parAgentError = error.message || "Weekly Plan update failed.";
     weeklyPlanRefreshMessage = `${parAgentError} The last successful plan remains visible and is marked not ready.`;
   } finally {
     weeklyPlanUpdating = false;
     renderWeeklyPlan();
+    if (lockedSuccessfully) openMondayRunStep("orders", "weekly-plan");
   }
 }
 
@@ -13711,7 +13825,7 @@ function toggleInventoryRowEdit(id) {
   renderInventory();
 }
 
-async function saveInventorySnapshot() {
+async function saveInventorySnapshot({ replaceExisting = false } = {}) {
   const now = new Date();
   const easternWeekday = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
@@ -13743,7 +13857,7 @@ async function saveInventorySnapshot() {
       "All normal data checks will still run.",
     )) return false;
   }
-  if (getCurrentMondayInventorySnapshot(inventoryHistory, now)) {
+  if (getCurrentMondayInventorySnapshot(inventoryHistory, now) && !replaceExisting) {
     inventorySharedMessage = "This Monday snapshot is already saved.";
     renderInventoryPanels();
     return true;
@@ -13833,6 +13947,7 @@ async function saveInventorySnapshot() {
       summary,
       kegPlanSnapshot,
       reliableCapture: true,
+      replaceExisting,
       captureMetadata: {
         outsideMondayReason,
         sourceFreshness: {
@@ -17299,8 +17414,9 @@ function normalizeIngredientAlias(name) {
     /^crown royal regal apple$/.test(normalized) ||
     /^crown apple\b/.test(normalized)
   ) return "Crown Apple";
-  if (/^jack daniels fire$/.test(normalized)) return "Jack Daniel's Fire";
-  if (/^jack daniels$/.test(normalized)) return "Jack Daniel's";
+  if (/^jack daniel'?s fire(?: whiskey)?$/.test(normalized)) return "Jack Daniel's Fire";
+  if (/^jack daniel'?s(?: whiskey)?$/.test(normalized)) return "Jack Daniel's";
+  if (/^woodford reserve(?: bourbon)?$/.test(normalized)) return "Woodford Reserve";
   if (/^fireball(\s+cinnamon)?(\s+whisk(e)?y)?$/.test(normalized)) return "Fireball Cinnamon Whisky";
   if (/^svedka$/.test(normalized) || /^\d+\s+svedka blue raspberry$/.test(normalized) || /^svedka blue raspberry$/.test(normalized)) return "Svedka Blue Raspberry Vodka";
   if (/^gallon lemonade$/.test(normalized) || /^lemonade$/.test(normalized)) return "Lemonade";

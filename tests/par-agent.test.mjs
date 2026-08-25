@@ -299,7 +299,7 @@ test("standard Main beer orders one keg when connected plus on hand is below wee
 });
 
 test("named Main beers keep high coverage even below the usage threshold", () => {
-  ["Astra Red Cream Soda 1", "Blake's Triple Jam 1", "Guinness Draught 1"].forEach((name, index) => {
+  ["Astra Red Cream Soda 1", "Blake's Triple Jam 1"].forEach((name, index) => {
     const tap = {
       ...beerTap(name, 45 + index),
       key: `main-${45 + index}`,
@@ -313,11 +313,32 @@ test("named Main beers keep high coverage even below the usage threshold", () =>
       {},
     );
 
-    assert.equal(result.avgWeeklyKegs, name === "Guinness Draught 1" ? 0.47 : 0.4);
+    assert.equal(result.avgWeeklyKegs, 0.4);
     assert.equal(result.targetStockKegs, 2.5);
     assert.equal(result.orderQty, 1);
     assert.match(result.reason, /keep 2 unopened backup kegs/);
   });
+});
+
+test("Guinness uses the standard Main beer formula", () => {
+  const tap = {
+    ...beerTap("Guinness Draught 1", 47),
+    key: "main-47",
+    wall: "Main",
+  };
+  const result = buildRawRecommendation(
+    tap,
+    { fillLevelPercent: 100, rawKegSize: 1984, rawKegSizeDp: 0 },
+    [{ volumeOz: 793.6 }],
+    { onHandOverrides: { [tap.key]: 2 }, onDeckOverrides: {} },
+    {},
+  );
+
+  assert.equal(result.currentStockKegs, 3);
+  assert.equal(result.avgWeeklyKegs, 0.47);
+  assert.equal(result.targetStockKegs, 1.47);
+  assert.equal(result.orderQty, 0);
+  assert.doesNotMatch(result.reason, /keep 2 unopened backup kegs/);
 });
 
 test("uses the same tap keys as the browser for apostrophes and ampersands", () => {

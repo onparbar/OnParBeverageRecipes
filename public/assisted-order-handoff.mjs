@@ -121,10 +121,10 @@ function lineQuantity(line) {
   return "quantity unavailable";
 }
 
-function validateRequiredLineData(line, blockers) {
+function validateRequiredLineData(vendorKey, line, blockers) {
   const label = lineLabel(line);
   if (!line.internalItemId) addUnique(blockers, `${label}: internal identity is missing.`);
-  if (!line.vendorSku) addUnique(blockers, `${label}: vendor SKU is missing.`);
+  if (vendorKey !== "bonbright" && !line.vendorSku) addUnique(blockers, `${label}: vendor SKU is missing.`);
   if (!line.packSize) addUnique(blockers, `${label}: pack size is missing.`);
   if (
     !Number.isFinite(line.requestedUnits) &&
@@ -256,7 +256,7 @@ export function createAssistedOrderHandoff(draft = {}, context = {}) {
   if (context.stale === true) addUnique(blockers, "Order source data is stale.");
 
   for (const line of lines) {
-    if (!authoritative) validateRequiredLineData(line, blockers);
+    if (!authoritative) validateRequiredLineData(vendorKey, line, blockers);
     validateProductRules(vendorKey, line, blockers);
   }
 

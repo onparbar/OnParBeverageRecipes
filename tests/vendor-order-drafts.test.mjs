@@ -63,6 +63,59 @@ test("blocks stale source data and missing SKU or price instead of inferring val
   assert.equal(draft.canApprove, false);
 });
 
+test("allows Bonbright rep-text drafts without vendor SKUs", () => {
+  const plan = inventoryPlan({
+    id: "guinness",
+    name: "Guinness Draught",
+    orderCategory: "beerKegs",
+    lineType: "Beer keg",
+    casePackaged: false,
+    quantity: 1,
+    vendor: "Bonbright",
+    vendorSku: "",
+    vendorProductName: "Guinness Draught",
+    unitCost: 185,
+    estimatedCost: 185,
+    hasKnownPrice: true,
+  });
+  const draft = buildVendorOrderDrafts(plan, options).drafts[0];
+
+  assert.equal(draft.vendor, "Bonbright");
+  assert.equal(draft.canApprove, true);
+  assert.equal(draft.blockers.some((item) => item.code === "VENDOR_SKU_REQUIRED"), false);
+});
+
+test("recovers mapped OHLQ identity and pricing from physical tap product names", () => {
+  const plan = {
+    orders: {
+      beerKegs: [],
+      liquorTapBottles: [{
+        id: "patio-19-jack-daniels",
+        name: "Jack Daniel's Whiskey",
+        lineType: "Liquor tap bottle",
+        quantity: 2,
+        vendor: "OHLQ",
+        hasKnownPrice: false,
+      }, {
+        id: "patio-18-woodford-reserve",
+        name: "Woodford Reserve Bourbon",
+        lineType: "Liquor tap bottle",
+        quantity: 2,
+        vendor: "OHLQ",
+        hasKnownPrice: false,
+      }],
+      liquor: [],
+      mixers: [],
+      supplies: [],
+    },
+  };
+  const draft = buildVendorOrderDrafts(plan, options).drafts[0];
+
+  assert.deepEqual(draft.lines.map((line) => line.vendorSku), ["0066D", "9674D"]);
+  assert.deepEqual(draft.lines.map((line) => line.unitCost), [47, 66.74]);
+  assert.equal(draft.canApprove, true);
+});
+
 test("blocks duplicate vendor identities and generates stable idempotency keys", () => {
   const line = {
     id: "duplicate",

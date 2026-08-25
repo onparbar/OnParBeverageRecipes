@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   publishWeeklyPlanSnapshot,
   readParAgentState,
+  recallWeeklyPlanSnapshot,
   runParAgentUpdate,
   syncParAgentState,
 } from "../../../lib/par-agent.mjs";
@@ -92,6 +93,21 @@ export async function POST(request) {
         role,
         revision: state.revision,
         summary: "Locked the shared order and prep plan through Sunday.",
+      }).catch(() => {});
+      return jsonResponse(state);
+    }
+
+    if (action === "recall-weekly-plan") {
+      const state = await recallWeeklyPlanSnapshot({
+        expectedRevision: body.expectedRevision,
+        role,
+      });
+      recordDashboardActivity({
+        area: "Weekly Plan",
+        action: "recalled Monday plan",
+        role,
+        revision: state.revision,
+        summary: "Returned the locked order and prep plan to owner review; the Monday snapshot remains saved.",
       }).catch(() => {});
       return jsonResponse(state);
     }

@@ -274,7 +274,7 @@ test("stores a manager order adjustment, updates receiving, and invalidates appr
       orderQty: 1,
       orderProductName: "Guinness",
       vendor: "Bonbright",
-      vendorSku: "BB-GUINNESS",
+      vendorSku: "",
       vendorProductName: "Guinness",
       unitCost: 185,
       tapNumber: 1,

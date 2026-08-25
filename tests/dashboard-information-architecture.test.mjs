@@ -130,6 +130,9 @@ test("Dashboard owns the combined beverage pulse instead of duplicating it in We
 
 test("Weekly Plan uses one Monday lock action without print or CSV controls", () => {
   assert.match(dashboardSource, /Save & Lock Plan/);
+  assert.match(dashboardSource, /Recall Plan/);
+  assert.match(dashboardSource, /action: "recall-weekly-plan"/);
+  assert.match(dashboardSource, /id="weekly-plan-orders"/);
   assert.doesNotMatch(dashboardSource, /id="export-weekly-plan"/);
   assert.doesNotMatch(dashboardSource, /id="print-weekly-plan"/);
   assert.doesNotMatch(dashboardSource, /function exportWeeklyPlanCsv/);

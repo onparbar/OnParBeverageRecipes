@@ -58,6 +58,16 @@ test("formats the familiar Bonbright message without contact automation", () => 
   );
 });
 
+test("allows Bonbright rep-text handoffs without vendor SKUs", () => {
+  const order = createAssistedOrderHandoff(
+    validDraft({ lines: [validLine({ vendorSku: "" })] }),
+    readyContext,
+  );
+
+  assert.equal(order.status, "reviewed");
+  assert.doesNotMatch(order.blockers.join(" "), /vendor SKU is missing/);
+});
+
 test("enforces the Bonbright 9:00 AM through 7:30 PM Eastern window", () => {
   assert.equal(
     getBonbrightTextWindowStatus(new Date("2026-08-17T13:00:00Z")).allowed,
@@ -106,6 +116,7 @@ test("groups vendor orders and totals exact extended costs", () => {
 test("blocks stale plans and missing required line data without treating it as zero", () => {
   const order = createAssistedOrderHandoff(
     validDraft({
+      vendor: "Proof",
       sourceDataDate: "",
       lines: [{ name: "Unknown product", requestedCases: 1 }],
     }),
