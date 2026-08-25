@@ -5354,7 +5354,7 @@ async function saveWeeklyOrderPlaced(vendorId, ordered, orderedBy) {
 
 async function saveVendorOrderDraftAction(payload) {
   const adjusting = ["set-order-adjustment", "remove-order-adjustment"].includes(payload.action);
-  weeklyOrderTrackingMessage = payload.action === "approve-draft" ? "Approving vendor draft..." : adjusting ? "Saving order adjustment..." : "Saving vendor draft...";
+  weeklyOrderTrackingMessage = payload.action === "approve-draft" ? "Approving vendor draft..." : adjusting ? "Saving Weekly Plan changes..." : "Saving vendor draft...";
   try {
     const response = await fetch("/api/weekly-order-tracking", {
       method: "POST",
@@ -5367,7 +5367,7 @@ async function saveVendorOrderDraftAction(payload) {
     weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
     weeklyOrderTrackingMessage = payload.action === "approve-draft"
       ? "Vendor draft approved. Real vendor submission remains disabled."
-      : adjusting ? "Order adjustment saved for this week." : "Vendor draft saved for review.";
+      : adjusting ? "Weekly Plan updated." : "Vendor draft saved for review.";
     await loadParAgentState();
   } catch (error) {
     weeklyOrderTrackingMessage = error?.message || "The vendor draft could not be saved.";
@@ -6916,21 +6916,25 @@ function renderVendorOrderAdjustments() {
   const catalog = weeklyOrderTracking.adjustmentCatalog.filter((item) => item.orderable);
   if (!catalog.length) return "";
   const savedByCatalogId = new Map(weeklyOrderTracking.adjustments.map((item) => [item.catalogId, item]));
+  const vendors = [...new Set(catalog.map((item) => item.vendor))].sort((left, right) => left.localeCompare(right));
   return `
     <details class="vendor-order-adjustments" data-order-adjustment-panel>
       <summary>Adjust order</summary>
       <div class="vendor-order-adjustments__fields">
+        <label><span>Change</span><select data-order-adjustment-action><option value="add">Add something</option><option value="remove">Remove something</option></select></label>
+        <label><span>Vendor</span><select data-order-adjustment-vendor-filter><option value="">All vendors</option>${vendors.map((vendor) => `<option value="${escapeHtml(vendor)}">${escapeHtml(vendor)}</option>`).join("")}</select></label>
         <label><span>Product</span><select data-order-adjustment-product>${catalog.map((item) => {
           const saved = savedByCatalogId.get(item.catalogId);
-          return `<option value="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}" data-order-adjustment-default-quantity="${formatNumber(saved?.quantity ?? item.currentPlanQuantity ?? 1)}" data-order-adjustment-default-reason="${escapeHtml(saved?.reason || "")}" data-order-adjustment-quantity-unit="${escapeHtml(item.quantityUnit)}">${escapeHtml(`${item.vendor} · ${item.name}`)}</option>`;
+          const currentQuantity = saved?.quantity ?? item.currentPlanQuantity ?? 0;
+          const defaultQuantity = currentQuantity > 0 ? currentQuantity : 1;
+          return `<option value="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}" data-order-adjustment-current-quantity="${formatNumber(currentQuantity)}" data-order-adjustment-default-quantity="${formatNumber(defaultQuantity)}" data-order-adjustment-default-reason="${escapeHtml(saved?.reason || "")}" data-order-adjustment-quantity-unit="${escapeHtml(item.quantityUnit)}">${escapeHtml(`${item.vendor} · ${item.name}`)}</option>`;
         }).join("")}</select></label>
-        <label><span>Quantity</span><div class="vendor-order-adjustments__quantity"><input type="number" min="1" max="999" step="1" inputmode="numeric" data-order-adjustment-quantity-input><small data-order-adjustment-unit-label></small></div></label>
+        <label data-order-adjustment-quantity-field><span>Order quantity</span><div class="vendor-order-adjustments__quantity"><input type="number" min="1" max="999" step="1" inputmode="numeric" data-order-adjustment-quantity-input><small data-order-adjustment-unit-label></small></div></label>
         <label><span>Reason</span><input type="text" maxlength="240" data-order-adjustment-reason-input placeholder="St. Patrick's Day"></label>
         <label><span>Manager</span><input type="text" maxlength="80" autocomplete="name" data-order-adjustment-manager placeholder="Manager name"></label>
-        <button class="primary-button" type="button" data-order-adjustment-save>Save</button>
-        <button class="ghost-button" type="button" data-order-adjustment-exclude>Remove from order</button>
+        <button class="primary-button" type="button" data-order-adjustment-save>Save changes</button>
       </div>
-      ${weeklyOrderTracking.adjustments.length ? `<div class="vendor-order-adjustments__saved">${weeklyOrderTracking.adjustments.map((item) => `<div><span><strong>${escapeHtml(item.name)}</strong> · ${item.quantity === 0 ? "Removed this week" : `${formatNumber(item.quantity)} ${escapeHtml(item.quantityUnit)}`}</span><small>${escapeHtml(item.reason)} · ${escapeHtml(item.adjustedBy)}</small><button class="mini-button" type="button" data-order-adjustment-remove="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}">Use plan</button></div>`).join("")}</div>` : ""}
+      ${weeklyOrderTracking.adjustments.length ? `<div class="vendor-order-adjustments__saved">${weeklyOrderTracking.adjustments.map((item) => `<div><span><strong>${escapeHtml(item.name)}</strong> · ${item.quantity === 0 ? "Removed this week" : `${formatNumber(item.quantity)} ${escapeHtml(item.quantityUnit)}`}</span><small>${escapeHtml(item.reason)} · ${escapeHtml(item.adjustedBy)}</small><button class="mini-button" type="button" data-order-adjustment-remove="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}">Undo</button></div>`).join("")}</div>` : ""}
     </details>
   `;
 }
@@ -7075,8 +7079,11 @@ function bindOwnerWeeklyOrderTrackingEvents() {
   });
   if (orderRehearsalMode) return;
   const adjustmentPanel = document.querySelector("[data-order-adjustment-panel]");
+  const adjustmentAction = adjustmentPanel?.querySelector("[data-order-adjustment-action]");
+  const adjustmentVendor = adjustmentPanel?.querySelector("[data-order-adjustment-vendor-filter]");
   const adjustmentProduct = adjustmentPanel?.querySelector("[data-order-adjustment-product]");
   const adjustmentQuantity = adjustmentPanel?.querySelector("[data-order-adjustment-quantity-input]");
+  const adjustmentQuantityField = adjustmentPanel?.querySelector("[data-order-adjustment-quantity-field]");
   const adjustmentReason = adjustmentPanel?.querySelector("[data-order-adjustment-reason-input]");
   const adjustmentUnit = adjustmentPanel?.querySelector("[data-order-adjustment-unit-label]");
   const adjustmentManager = adjustmentPanel?.querySelector("[data-order-adjustment-manager]");
@@ -7086,16 +7093,39 @@ function bindOwnerWeeklyOrderTrackingEvents() {
     if (adjustmentQuantity) adjustmentQuantity.value = option.dataset.orderAdjustmentDefaultQuantity || "1";
     if (adjustmentReason) adjustmentReason.value = option.dataset.orderAdjustmentDefaultReason || "";
     if (adjustmentUnit) adjustmentUnit.textContent = option.dataset.orderAdjustmentQuantityUnit || "units";
+    const removing = adjustmentAction?.value === "remove";
+    if (adjustmentQuantityField) adjustmentQuantityField.hidden = removing;
+    if (adjustmentQuantity) adjustmentQuantity.disabled = removing;
   };
+  const syncAdjustmentProducts = () => {
+    if (!adjustmentProduct) return;
+    const selectedVendor = adjustmentVendor?.value || "";
+    const removing = adjustmentAction?.value === "remove";
+    const options = [...adjustmentProduct.options];
+    options.forEach((option) => {
+      const matchesVendor = !selectedVendor || option.dataset.orderAdjustmentVendor === selectedVendor;
+      const isOnOrder = Number(option.dataset.orderAdjustmentCurrentQuantity) > 0;
+      option.hidden = !matchesVendor || (removing && !isOnOrder);
+      option.disabled = option.hidden;
+    });
+    if (adjustmentProduct.selectedOptions[0]?.disabled) {
+      const firstAvailable = options.find((option) => !option.disabled);
+      if (firstAvailable) adjustmentProduct.value = firstAvailable.value;
+    }
+    syncAdjustmentFields();
+  };
+  adjustmentAction?.addEventListener("change", syncAdjustmentProducts);
+  adjustmentVendor?.addEventListener("change", syncAdjustmentProducts);
   adjustmentProduct?.addEventListener("change", syncAdjustmentFields);
-  syncAdjustmentFields();
+  syncAdjustmentProducts();
   adjustmentPanel?.querySelector("[data-order-adjustment-save]")?.addEventListener("click", async () => {
     const option = adjustmentProduct?.selectedOptions?.[0];
     const adjustedBy = clean(adjustmentManager?.value);
     const reason = clean(adjustmentReason?.value);
     const quantity = Number(adjustmentQuantity?.value);
-    if (!option || !Number.isInteger(quantity) || quantity <= 0 || !reason || !adjustedBy) {
-      weeklyOrderTrackingMessage = "Choose a product and enter its quantity, reason, and manager.";
+    const removing = adjustmentAction?.value === "remove";
+    if (!option || (!removing && (!Number.isInteger(quantity) || quantity <= 0)) || !reason || !adjustedBy) {
+      weeklyOrderTrackingMessage = `Choose a product and enter ${removing ? "the" : "its quantity,"} reason and manager.`;
       renderWeeklyPlan();
       return;
     }
@@ -7103,25 +7133,7 @@ function bindOwnerWeeklyOrderTrackingEvents() {
       action: "set-order-adjustment",
       catalogId: option.value,
       vendor: option.dataset.orderAdjustmentVendor,
-      quantity,
-      reason,
-      adjustedBy,
-    });
-  });
-  adjustmentPanel?.querySelector("[data-order-adjustment-exclude]")?.addEventListener("click", async () => {
-    const option = adjustmentProduct?.selectedOptions?.[0];
-    const adjustedBy = clean(adjustmentManager?.value);
-    const reason = clean(adjustmentReason?.value);
-    if (!option || !reason || !adjustedBy) {
-      weeklyOrderTrackingMessage = "Choose a product and enter the reason and manager.";
-      renderWeeklyPlan();
-      return;
-    }
-    await saveVendorOrderDraftAction({
-      action: "set-order-adjustment",
-      catalogId: option.value,
-      vendor: option.dataset.orderAdjustmentVendor,
-      quantity: 0,
+      quantity: removing ? 0 : quantity,
       reason,
       adjustedBy,
     });
