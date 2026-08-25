@@ -107,6 +107,19 @@ export function getLiquorCabinetWeeklyBottleNeeds({
   return needs;
 }
 
+export function getLiquorCabinetOrderQuantity({
+  parOrderQty = 0,
+  onHand = 0,
+  requiredBottles = 0,
+} = {}) {
+  const cabinetParShortage = Math.max(0, Math.floor(number(parOrderQty)));
+  const cocktailShortage = Math.max(
+    0,
+    Math.ceil(number(requiredBottles)) - Math.floor(number(onHand)),
+  );
+  return Math.max(cabinetParShortage, cocktailShortage);
+}
+
 function getCabinetAvailability({ recommendations, inventoryItems, recipes }) {
   const weeklyNeeds = getLiquorCabinetWeeklyBottleNeeds({ recommendations, inventoryItems, recipes });
   if (!weeklyNeeds) return new Map();

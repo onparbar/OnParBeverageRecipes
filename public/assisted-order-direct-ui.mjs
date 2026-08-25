@@ -5,7 +5,7 @@ import {
 } from "./assisted-order-handoff.mjs";
 
 const VENDOR_ACTIONS = Object.freeze({
-  heidelberg: { label: "Open BEES", vendor: "heidelberg" },
+  heidelberg: { label: "Build BEES cart", vendor: "heidelberg" },
   proof: { label: "Open Proof", vendor: "proof" },
   ohlq: { label: "Open OHLQ", vendor: "ohlq" },
 });

@@ -140,6 +140,7 @@ import {
 import { buildVendorOrderDrafts } from "./vendor-order-drafts.mjs";
 import { buildProofPrepOrderContext } from "./proof-prep-replacements.mjs";
 import {
+  getLiquorCabinetOrderQuantity,
   getLiquorCabinetWeeklyBottleNeeds,
   netLiquorTapRecommendations,
 } from "./liquor-cabinet-netting.mjs";
@@ -4963,7 +4964,11 @@ function getWeeklyPlanInventoryItems({ live = false } = {}) {
       const onHand = Math.max(0, Math.floor(toNumber(snapshotItem.onHandDisplay)));
       return {
         ...snapshotItem,
-        orderDisplay: String(Math.max(0, requiredBottles - onHand)),
+        orderDisplay: String(getLiquorCabinetOrderQuantity({
+          parOrderQty: snapshotItem.orderDisplay,
+          onHand,
+          requiredBottles,
+        })),
       };
     })
     .filter((snapshotItem) => {
@@ -7051,6 +7056,54 @@ function renderOwnerWeeklyOrderTracking() {
   `;
 }
 
+function buildBeesCartRequest(view) {
+  const order = view?.order;
+  return {
+    requestId: `${order.id}:${Date.now()}`,
+    orderId: order.id,
+    vendor: "heidelberg",
+    approved: order.actionsEnabled === true,
+    expectedTotal: order.expectedTotal,
+    lineCount: order.lineCount,
+    lines: (order.lines || []).map((line) => ({
+      internalItemId: line.internalItemId,
+      name: line.name,
+      vendorSku: line.vendorSku,
+      packSize: line.packSize,
+      requestedCases: line.requestedCases,
+      requestedUnits: line.requestedUnits,
+    })),
+  };
+}
+
+function sendBeesCartRequest(view) {
+  const payload = buildBeesCartRequest(view);
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener("message", receiveResponse);
+      reject(new Error("Install or enable the On Par BEES Cart Builder in Chrome."));
+    }, 1800);
+    function receiveResponse(event) {
+      if (
+        event.source !== window ||
+        event.origin !== window.location.origin ||
+        event.data?.source !== "onpar-bees-cart-builder" ||
+        event.data?.requestId !== payload.requestId
+      ) return;
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", receiveResponse);
+      if (event.data.type === "ONPAR_BEES_BUILD_ACCEPTED") resolve(event.data);
+      else reject(new Error(event.data.message || "The BEES cart helper could not start."));
+    }
+    window.addEventListener("message", receiveResponse);
+    window.postMessage({
+      source: "onpar-dashboard",
+      type: "ONPAR_BEES_BUILD_REQUEST",
+      payload,
+    }, window.location.origin);
+  });
+}
+
 function bindOwnerWeeklyOrderTrackingEvents() {
   document.querySelectorAll("[data-assisted-order-copy]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -7070,6 +7123,21 @@ function bindOwnerWeeklyOrderTrackingEvents() {
       if (!view?.order.actionsEnabled) return;
       if (view.order.rehearsal) {
         button.textContent = "Simulated";
+        return;
+      }
+      if (view.order.vendorKey === "heidelberg") {
+        const originalLabel = button.textContent;
+        button.disabled = true;
+        button.textContent = "Opening BEES...";
+        try {
+          await sendBeesCartRequest(view);
+          button.textContent = "Sent to BEES";
+          await saveVendorHandoffEvent(view, "opened_vendor");
+        } catch (error) {
+          button.disabled = false;
+          button.textContent = originalLabel;
+          weeklyOrderTrackingMessage = error.message;
+        }
         return;
       }
       if (!view.vendorPath) return;

@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "On Par BEES Cart Builder",
+  "version": "1.0.0",
+  "description": "Builds a review-only BEES cart from an approved On Par Heidelberg order.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": [
+    "https://onparbev.com/*",
+    "https://mybeesapp.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://onparbev.com/*"],
+      "js": ["dashboard-bridge.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://mybeesapp.com/*"],
+      "js": ["bees-cart.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  getLiquorCabinetOrderQuantity,
   getLiquorCabinetWeeklyBottleNeeds,
   netLiquorTapRecommendations,
 } from "../public/liquor-cabinet-netting.mjs";
@@ -115,4 +116,20 @@ test("calculates weekly liquor bottle needs without turning an unused par gap in
 
   assert.equal(needs.get("tito-s").requiredBottles, 2);
   assert.equal(needs.get("bulleit-bourbon").requiredBottles, 0);
+});
+
+test("preserves cabinet par replenishment separately from cocktail and tap needs", () => {
+  assert.equal(getLiquorCabinetOrderQuantity({
+    parOrderQty: 22,
+    onHand: 14,
+    requiredBottles: 6,
+  }), 22);
+});
+
+test("orders enough for cocktails when their shortage exceeds the cabinet par gap", () => {
+  assert.equal(getLiquorCabinetOrderQuantity({
+    parOrderQty: 2,
+    onHand: 2,
+    requiredBottles: 6,
+  }), 4);
 });
