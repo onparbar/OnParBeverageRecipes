@@ -653,6 +653,7 @@ const INVENTORY_PROVI_MAPPINGS = {
     vendor: "Heidelberg",
     syncVendor: "Provi",
     productName: "Athletic Brewing Upside Dawn Golden Ale Non-Alcoholic Beer 12oz 24pk",
+    preferredSku: "013452-C",
     bottleOz: 12,
     packSize: 24,
     unitPrice: 0,
@@ -4975,9 +4976,7 @@ function getWeeklyPlanInventoryItems({ live = false } = {}) {
       const currentItem = inventoryItems.find((item) => item.id === snapshotItem.id)
         || inventoryItems.find((item) => item.name === snapshotItem.name);
       return !currentItem?.excludeFromOrderList
-        && !isFoodDepartmentOrderedInventoryItem(snapshotItem.name)
-        && toNumber(snapshotItem.parDisplay) > 0
-        && toNumber(snapshotItem.orderDisplay) > 0;
+        && !isFoodDepartmentOrderedInventoryItem(snapshotItem.name);
     })
     .map((snapshotItem) => {
       const item = inventoryItems.find((candidate) => candidate.id === snapshotItem.id)
@@ -4998,6 +4997,7 @@ function getWeeklyPlanInventoryItems({ live = false } = {}) {
         estimatedCost: item?.excludeFromInventoryValue ? 0 : orderUnits * unitCost,
         unitCost: item?.excludeFromInventoryValue ? 0 : unitCost,
         hasKnownPrice: Boolean(item?.excludeFromInventoryValue) || unitCost > 0,
+        excludeFromOrderCost: Boolean(item?.excludeFromInventoryValue),
         onHand: toNumber(snapshotItem.onHandDisplay),
         par: toNumber(snapshotItem.parDisplay),
         hasCurrentCount: true,

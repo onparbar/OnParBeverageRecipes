@@ -167,6 +167,34 @@ function normalizeInventoryOrders(items) {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function normalizeInventoryOrderCatalog(items) {
+  return items
+    .map((item) => {
+      const group = clean(item.group);
+      const orderCategory = group === "Liquor Cabinet"
+        ? "liquor"
+        : group === "Mixer Cabinet"
+          ? "mixers"
+          : "supplies";
+      return {
+        id: clean(item.id),
+        name: clean(item.name),
+        vendor: clean(item.vendor),
+        vendorSku: clean(item.vendorSku || item.preferredSku),
+        vendorProductName: clean(item.vendorProductName || item.productName || item.name),
+        lineType: orderCategory === "liquor" ? "Liquor bottle" : orderCategory === "mixers" ? "Mixer" : "Supply",
+        orderCategory,
+        casePackaged: Boolean(item.casePackaged),
+        packSize: Math.max(1, number(item.packSize) || 1),
+        unitCost: Math.max(0, number(item.unitCost)),
+        hasKnownPrice: item.hasKnownPrice === true,
+        excludeFromOrderCost: Boolean(item.excludeFromOrderCost),
+      };
+    })
+    .filter((item) => item.id && item.name && item.vendor)
+    .sort((a, b) => a.vendor.localeCompare(b.vendor) || a.name.localeCompare(b.name));
+}
+
 function normalizeExcludedInventory(items) {
   return items
     .filter((item) => clean(item.orderHoldReason || item.exclusionReason))
@@ -675,6 +703,7 @@ export function createWeeklyPlanSnapshot({
     version: 3,
     generatedAt: normalizedGeneratedAt,
     publishedAt: clean(publishedAt),
+    orderCatalog: normalizeInventoryOrderCatalog(inventoryItems),
     plan: buildWeeklyActionPlan({ inventoryItems, recommendations }),
   };
 }

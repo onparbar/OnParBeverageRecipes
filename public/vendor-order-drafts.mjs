@@ -118,7 +118,8 @@ function applyManualOrderAdjustments(plan = {}, catalog = [], adjustments = []) 
     const casePackaged = Boolean(source.casePackaged ?? existing?.casePackaged);
     const packSize = Math.max(1, Number(source.packSize ?? existing?.packSize) || 1);
     const requestedUnits = casePackaged ? quantity * packSize : quantity;
-    const unitCost = numberOrNull(source.unitCost ?? existing?.unitCost);
+    const excludeFromOrderCost = Boolean(source.excludeFromOrderCost ?? existing?.excludeFromOrderCost);
+    const unitCost = excludeFromOrderCost ? 0 : numberOrNull(source.unitCost ?? existing?.unitCost);
     const originalQuantity = existing
       ? casePackaged ? Number(existing.caseCount) || 0 : Number(existing.quantity) || 0
       : Number(source.currentPlanQuantity) || 0;
@@ -139,8 +140,9 @@ function applyManualOrderAdjustments(plan = {}, catalog = [], adjustments = []) 
       packSize,
       caseCount: casePackaged ? quantity : null,
       unitCost,
-      estimatedCost: unitCost === null ? null : requestedUnits * unitCost,
-      hasKnownPrice: unitCost !== null && unitCost > 0,
+      estimatedCost: excludeFromOrderCost ? 0 : unitCost === null ? null : requestedUnits * unitCost,
+      hasKnownPrice: excludeFromOrderCost || (unitCost !== null && unitCost > 0),
+      excludeFromOrderCost,
       reasons: [
         `Manager adjustment: ${reason}.`,
         `Weekly Plan quantity: ${originalQuantity} ${unitLabel}.`,
@@ -199,8 +201,9 @@ function buildDraftLine(item, vendor, sourceDate) {
   const packSize = Math.max(1, Number(item.packSize) || 1);
   const caseCount = casePackaged ? Number(item.caseCount) || 0 : null;
   const resolvedIdentity = resolveVendorOrderIdentity(item, vendor);
-  const unitCost = resolvedIdentity.unitCost;
-  const extendedCost = numberOrNull(item.estimatedCost)
+  const excludeFromOrderCost = Boolean(item.excludeFromOrderCost);
+  const unitCost = excludeFromOrderCost ? 0 : resolvedIdentity.unitCost;
+  const extendedCost = excludeFromOrderCost ? 0 : numberOrNull(item.estimatedCost)
     ?? (unitCost !== null && quantity > 0 ? unitCost * quantity : null);
   const internalId = clean(item.id || item.internalId);
   const vendorSku = resolvedIdentity.vendorSku;
@@ -219,7 +222,7 @@ function buildDraftLine(item, vendor, sourceDate) {
   if (casePackaged && (!Number.isInteger(caseCount) || caseCount <= 0 || quantity !== caseCount * packSize)) {
     blockers.push(issue("CASE_ROUNDING_REQUIRED", "Case-packaged quantity does not match the saved case count and pack size."));
   }
-  if (unitCost === null || unitCost <= 0 || extendedCost === null || extendedCost <= 0) {
+  if (!excludeFromOrderCost && (unitCost === null || unitCost <= 0 || extendedCost === null || extendedCost <= 0)) {
     blockers.push(issue("PRICE_REQUIRED", "A current unit and extended price are required."));
   }
   if (item.manualAdjustment) warnings.push(issue("MANUAL_ORDER_ADJUSTMENT", "Manager-adjusted quantity; review the saved reason before approval."));
@@ -241,6 +244,7 @@ function buildDraftLine(item, vendor, sourceDate) {
     packSize,
     unitCost,
     extendedCost,
+    excludeFromOrderCost,
     reason: getLineReason(item),
     manualAdjustment: Boolean(item.manualAdjustment),
     manualAdjustmentReason: clean(item.manualAdjustmentReason),
@@ -408,7 +412,9 @@ export function buildVendorOrderDrafts(plan = {}, {
       confirmationRecipient: clean(confirmationRecipient),
       lineCount: lines.length,
       estimatedTotal,
-      hasCompletePricing: group.hasCompletePricing !== false && lines.every((line) => line.unitCost > 0 && line.extendedCost > 0),
+      hasCompletePricing: group.hasCompletePricing !== false && lines.every((line) => (
+        line.excludeFromOrderCost || (line.unitCost > 0 && line.extendedCost > 0)
+      )),
       substitutionsAllowed: false,
       lines,
       blockers: unique(blockers.map((entry) => `${entry.code}|${entry.message}`)).map((entry) => {

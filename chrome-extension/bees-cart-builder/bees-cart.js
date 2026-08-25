@@ -149,7 +149,11 @@ function renderOverlay(state, message) {
 }
 
 async function saveState(state) {
-  await chrome.storage.session.set({ [ORDER_KEY]: state });
+  const response = await chrome.runtime.sendMessage({
+    type: "SAVE_BEES_CART_STATE",
+    state,
+  });
+  if (!response?.ok) throw new Error(response?.message || "Could not save the temporary BEES cart state.");
 }
 
 async function addExactMatch(state, lineIndex) {
@@ -252,8 +256,9 @@ async function runSearch(state) {
 let running = false;
 async function start() {
   if (running) return;
-  const stored = await chrome.storage.session.get(ORDER_KEY);
-  const state = stored[ORDER_KEY];
+  const response = await chrome.runtime.sendMessage({ type: "GET_BEES_CART_STATE" });
+  if (!response?.ok) throw new Error(response?.message || "Could not load the temporary BEES cart state.");
+  const state = response.state;
   if (!state || !["pending", "working"].includes(state.status)) return;
   running = true;
   state.status = "working";
@@ -269,8 +274,8 @@ async function start() {
   }
 }
 
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "session" && changes[ORDER_KEY]?.newValue?.status === "pending") start();
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "BEES_CART_START") void start();
 });
 
-start();
+void start();

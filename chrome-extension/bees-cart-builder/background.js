@@ -33,8 +33,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         startedAt: new Date().toISOString(),
       };
       await chrome.storage.session.set({ [ORDER_KEY]: state });
-      await focusBees();
+      const tab = await focusBees();
+      if (tab?.id) {
+        await chrome.tabs.sendMessage(tab.id, { type: "BEES_CART_START" }).catch(() => {});
+      }
       sendResponse({ ok: true, message: "BEES opened. The cart builder is working." });
+    })().catch((error) => sendResponse({ ok: false, message: error.message }));
+    return true;
+  }
+
+  if (message?.type === "GET_BEES_CART_STATE") {
+    (async () => {
+      const stored = await chrome.storage.session.get(ORDER_KEY);
+      sendResponse({ ok: true, state: stored[ORDER_KEY] || null });
+    })().catch((error) => sendResponse({ ok: false, message: error.message }));
+    return true;
+  }
+
+  if (message?.type === "SAVE_BEES_CART_STATE") {
+    (async () => {
+      await chrome.storage.session.set({ [ORDER_KEY]: message.state });
+      sendResponse({ ok: true });
     })().catch((error) => sendResponse({ ok: false, message: error.message }));
     return true;
   }
