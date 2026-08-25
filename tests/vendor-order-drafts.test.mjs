@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { buildWeeklyActionPlan } from "../public/weekly-action-plan.mjs";
 import {
+  buildUnifiedVendorOrderModel,
   buildVendorOrderDrafts,
   getDisabledVendorOrderAdapter,
 } from "../public/vendor-order-drafts.mjs";
@@ -44,6 +45,41 @@ test("uses the Weekly Plan par order and preserves existing case rounding", () =
   assert.equal(line.requestedCases, 1);
   assert.equal(line.packSize, 12);
   assert.match(line.reason, /0 on hand against a par of 12/);
+  assert.equal(line.blockers.length, 0);
+});
+
+test("adds a missing Jack Fire line required by Apple Jack to an older locked order", () => {
+  const result = buildUnifiedVendorOrderModel({
+    orders: {
+      beerKegs: [],
+      liquorTapBottles: [],
+      liquor: [],
+      mixers: [],
+      supplies: [],
+    },
+  }, {
+    ...options,
+    orderPolicy: {
+      version: 2,
+      cocktailIngredientMinimumOrders: [{
+        id: "jack-daniel-s-fire",
+        name: "Jack Daniel's Fire",
+        vendor: "OHLQ",
+        quantity: 1,
+        unitCost: 47,
+        onHand: 3,
+        par: 0,
+        reason: "Cocktail prep needs 4 bottles; 3 counted on hand.",
+      }],
+    },
+  });
+  const draft = result.drafts.find((item) => item.vendor === "OHLQ");
+  const line = draft.lines.find((item) => item.internalId === "jack-daniel-s-fire");
+
+  assert.equal(line.requestedUnits, 1);
+  assert.equal(line.vendorSku, "4982D");
+  assert.equal(line.extendedCost, 47);
+  assert.match(line.reason, /Cocktail prep needs 4 bottles/);
   assert.equal(line.blockers.length, 0);
 });
 

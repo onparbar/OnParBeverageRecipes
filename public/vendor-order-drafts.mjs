@@ -4,6 +4,7 @@ const CONFIGURED_VENDORS = new Set(["Bonbright", "Heidelberg", "Proof", "OHLQ"])
 const VENDOR_ORDER_IDENTITY_FALLBACKS = new Map([
   ["ohlq|jack-daniel-s", { vendorSku: "0066D", productName: "Jack Daniel's Old No. 7 1.75L", unitCost: 47 }],
   ["ohlq|jack-daniel-s-whiskey", { vendorSku: "0066D", productName: "Jack Daniel's Old No. 7 1.75L", unitCost: 47 }],
+  ["ohlq|jack-daniel-s-fire", { vendorSku: "4982D", productName: "Jack Daniel's Tennessee Fire 1.75L", unitCost: 47 }],
   ["ohlq|woodford-reserve", { vendorSku: "9674D", productName: "Woodford Reserve Bourbon 1.75L", unitCost: 66.74 }],
   ["ohlq|woodford-reserve-bourbon", { vendorSku: "9674D", productName: "Woodford Reserve Bourbon 1.75L", unitCost: 66.74 }],
 ]);
@@ -51,18 +52,110 @@ export function normalizeVendorOrderPolicy(policy = {}) {
       unitCost: Math.max(0, numberOrNull(item?.unitCost) || 0),
     }))
     .filter((item) => item.id && item.name && item.vendorSku && item.unitCost > 0);
+  const cocktailIngredientMinimumOrders = (Array.isArray(policy?.cocktailIngredientMinimumOrders)
+    ? policy.cocktailIngredientMinimumOrders
+    : [])
+    .slice(0, 100)
+    .map((item) => {
+      const packSize = Math.max(1, Math.floor(numberOrNull(item?.packSize) || 1));
+      const requestedQuantity = Math.max(0, Math.ceil(numberOrNull(item?.quantity) || 0));
+      const quantity = item?.casePackaged && requestedQuantity > 0
+        ? Math.ceil(requestedQuantity / packSize) * packSize
+        : requestedQuantity;
+      const unitCost = numberOrNull(item?.unitCost);
+      return {
+        id: clean(item?.id).slice(0, 160),
+        name: clean(item?.name).slice(0, 240),
+        vendor: normalizeVendor(item?.vendor),
+        vendorSku: clean(item?.vendorSku).slice(0, 120),
+        vendorProductName: clean(item?.vendorProductName || item?.name).slice(0, 240),
+        orderCategory: "liquor",
+        lineType: "Liquor bottle",
+        quantity,
+        casePackaged: Boolean(item?.casePackaged),
+        packSize,
+        unitCost,
+        estimatedCost: unitCost === null ? null : quantity * unitCost,
+        hasKnownPrice: item?.hasKnownPrice === true || (unitCost !== null && unitCost > 0),
+        excludeFromOrderCost: Boolean(item?.excludeFromOrderCost),
+        onHand: Math.max(0, numberOrNull(item?.onHand) || 0),
+        par: Math.max(0, numberOrNull(item?.par) || 0),
+        reason: clean(item?.reason).slice(0, 500) || "Required for this week's cocktail prep.",
+      };
+    })
+    .filter((item) => item.id && item.name && item.vendor && item.quantity > 0);
   return {
-    version: 1,
+    version: 2,
     proofMinimum: proofMinimum !== null && proofMinimum >= 0 ? proofMinimum : 350,
     proofPrepRequirement: PROOF_PREP_REQUIREMENTS.has(requirement) ? requirement : "unknown",
     proofMinimumCandidates,
+    cocktailIngredientMinimumOrders,
   };
+}
+
+function applyCocktailIngredientMinimumOrders(plan = {}, minimumOrders = []) {
+  if (!minimumOrders.length) return plan;
+  const orders = { ...(plan?.orders || {}) };
+  ORDER_COLLECTIONS.forEach((collection) => {
+    orders[collection] = Array.isArray(orders[collection])
+      ? orders[collection].map((item) => ({ ...item }))
+      : [];
+  });
+
+  minimumOrders.forEach((minimum) => {
+    const collection = "liquor";
+    const existingIndex = orders[collection].findIndex((item) => (
+      (clean(minimum.id) && clean(item.id || item.internalId) === clean(minimum.id))
+      || (clean(minimum.vendorSku) && clean(item.vendorSku || item.preferredSku) === clean(minimum.vendorSku))
+      || clean(item.vendorProductName || item.productName || item.name).toLowerCase()
+        === clean(minimum.vendorProductName || minimum.name).toLowerCase()
+    ));
+    const existing = existingIndex >= 0 ? orders[collection][existingIndex] : null;
+    const quantity = Math.max(Number(existing?.quantity) || 0, Number(minimum.quantity) || 0);
+    const casePackaged = Boolean(existing?.casePackaged ?? minimum.casePackaged);
+    const packSize = Math.max(1, Number(existing?.packSize ?? minimum.packSize) || 1);
+    const unitCost = numberOrNull(existing?.unitCost ?? minimum.unitCost);
+    const excludeFromOrderCost = Boolean(existing?.excludeFromOrderCost ?? minimum.excludeFromOrderCost);
+    const reasons = unique([
+      ...(Array.isArray(existing?.reasons) ? existing.reasons : []),
+      minimum.reason,
+    ].map(clean));
+    const line = {
+      ...minimum,
+      ...(existing || {}),
+      id: clean(existing?.id || existing?.internalId || minimum.id),
+      internalId: clean(existing?.internalId || existing?.id || minimum.id),
+      name: clean(existing?.name || minimum.name),
+      vendor: normalizeVendor(existing?.vendor || minimum.vendor),
+      vendorSku: clean(existing?.vendorSku || existing?.preferredSku || minimum.vendorSku),
+      vendorProductName: clean(existing?.vendorProductName || existing?.productName || minimum.vendorProductName || minimum.name),
+      lineType: "Liquor bottle",
+      orderCategory: collection,
+      quantity,
+      casePackaged,
+      packSize,
+      caseCount: casePackaged ? Math.ceil(quantity / packSize) : 0,
+      unitCost,
+      estimatedCost: excludeFromOrderCost ? 0 : unitCost === null ? null : quantity * unitCost,
+      hasKnownPrice: excludeFromOrderCost || (unitCost !== null && unitCost > 0),
+      excludeFromOrderCost,
+      reasons,
+    };
+    if (existingIndex >= 0) orders[collection][existingIndex] = line;
+    else orders[collection].push(line);
+  });
+
+  return { ...plan, orders };
 }
 
 export function buildUnifiedVendorOrderModel(plan, options = {}) {
   const { snapshot = null, orderPolicy = null, ...draftOptions } = options;
   const policy = normalizeVendorOrderPolicy(orderPolicy || snapshot?.orderPolicy);
-  return buildVendorOrderDrafts(plan, {
+  const ingredientSafePlan = applyCocktailIngredientMinimumOrders(
+    plan,
+    policy.cocktailIngredientMinimumOrders,
+  );
+  return buildVendorOrderDrafts(ingredientSafePlan, {
     ...draftOptions,
     generatedAt: clean(draftOptions.generatedAt || snapshot?.generatedAt),
     sourceDate: clean(draftOptions.sourceDate || snapshot?.publishedAt),

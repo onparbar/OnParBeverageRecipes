@@ -437,6 +437,31 @@ test("zero-par inventory is omitted from orders and review warnings", () => {
   assert.deepEqual(plan.review.excludedInventory, []);
 });
 
+test("a verified cocktail ingredient shortage remains orderable when its cabinet par is zero", () => {
+  const plan = buildWeeklyActionPlan({
+    inventoryItems: [{
+      id: "jack-daniel-s-fire",
+      name: "Jack Daniel's Fire",
+      group: "Liquor Cabinet",
+      par: 0,
+      onHand: 3,
+      orderUnits: 1,
+      cocktailPrepRequiredBottles: 4,
+      cocktailPrepShortageUnits: 1,
+      vendor: "OHLQ",
+      vendorSku: "4982D",
+      vendorProductName: "Jack Daniel's Tennessee Fire 1.75L",
+      unitCost: 47,
+      estimatedCost: 47,
+      hasKnownPrice: true,
+    }],
+  });
+
+  assert.equal(plan.orders.liquor.length, 1);
+  assert.equal(plan.orders.liquor[0].quantity, 1);
+  assert.match(plan.orders.liquor[0].reasons[0], /Cocktail prep needs 4 bottles; 3 counted on hand/);
+});
+
 test("vendor orders keep Bonbright and Heidelberg in separate groups", () => {
   const plan = buildWeeklyActionPlan({
     recommendations: [

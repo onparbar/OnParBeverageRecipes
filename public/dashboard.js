@@ -4966,13 +4966,21 @@ function getWeeklyPlanInventoryItems({ live = false } = {}) {
       if (!/liquor/i.test(clean(snapshotItem.group)) || !liquorBottleNeeds) return snapshotItem;
       const requiredBottles = liquorBottleNeeds.get(clean(snapshotItem.id))?.requiredBottles || 0;
       const onHand = Math.max(0, Math.floor(toNumber(snapshotItem.onHandDisplay)));
+      const cocktailPrepShortageUnits = Math.max(0, requiredBottles - onHand);
+      const packSize = normalizePackSize(snapshotItem.packSize || 1);
+      const requestedOrderUnits = getLiquorCabinetOrderQuantity({
+        parOrderQty: snapshotItem.orderDisplay,
+        onHand,
+        requiredBottles,
+      });
+      const orderUnits = snapshotItem.casePackaged && requestedOrderUnits > 0
+        ? Math.ceil(requestedOrderUnits / packSize) * packSize
+        : requestedOrderUnits;
       return {
         ...snapshotItem,
-        orderDisplay: String(getLiquorCabinetOrderQuantity({
-          parOrderQty: snapshotItem.orderDisplay,
-          onHand,
-          requiredBottles,
-        })),
+        orderDisplay: String(orderUnits),
+        cocktailPrepRequiredBottles: requiredBottles,
+        cocktailPrepShortageUnits,
       };
     })
     .filter((snapshotItem) => {
@@ -5005,6 +5013,8 @@ function getWeeklyPlanInventoryItems({ live = false } = {}) {
         par: toNumber(snapshotItem.parDisplay),
         hasCurrentCount: true,
         orderHoldReason: "",
+        cocktailPrepRequiredBottles: toNumber(snapshotItem.cocktailPrepRequiredBottles),
+        cocktailPrepShortageUnits: toNumber(snapshotItem.cocktailPrepShortageUnits),
       };
     });
 }
@@ -6905,18 +6915,50 @@ function renderWeeklyPlanReview(plan) {
 }
 
 function getCurrentVendorOrderPolicy(plan, snapshot = null) {
-  if (snapshot?.orderPolicy) return normalizeVendorOrderPolicy(snapshot.orderPolicy);
+  if (toNumber(snapshot?.orderPolicy?.version) >= 2) {
+    return normalizeVendorOrderPolicy(snapshot.orderPolicy);
+  }
+  const savedInventoryItems = getWeeklyPlanInventoryItems();
   const proofPrep = buildProofPrepOrderContext({
     cocktails: plan?.prep?.cocktails,
     recipes,
     inventoryItems,
-    savedInventoryItems: getWeeklyPlanInventoryItems(),
+    savedInventoryItems,
     recipeAliases: Object.fromEntries([...MENU_ORDER, ...NEW_RECIPE_ORDER]),
   });
+  const cocktailIngredientMinimumOrders = savedInventoryItems
+    .filter((item) => toNumber(item.cocktailPrepShortageUnits) > 0)
+    .map((item) => {
+      const packSize = normalizePackSize(item.packSize || 1);
+      const shortageUnits = Math.ceil(toNumber(item.cocktailPrepShortageUnits));
+      const quantity = item.casePackaged
+        ? Math.ceil(shortageUnits / packSize) * packSize
+        : shortageUnits;
+      return {
+        id: item.id,
+        name: item.name,
+        vendor: item.vendor,
+        vendorSku: item.vendorSku,
+        vendorProductName: item.vendorProductName,
+        orderCategory: "liquor",
+        lineType: "Liquor bottle",
+        quantity,
+        casePackaged: item.casePackaged,
+        packSize,
+        unitCost: item.unitCost,
+        estimatedCost: quantity * toNumber(item.unitCost),
+        hasKnownPrice: item.hasKnownPrice,
+        excludeFromOrderCost: item.excludeFromOrderCost,
+        onHand: item.onHand,
+        par: item.par,
+        reason: `Cocktail prep needs ${formatNumber(item.cocktailPrepRequiredBottles)} bottle${toNumber(item.cocktailPrepRequiredBottles) === 1 ? "" : "s"}; ${formatNumber(item.onHand)} counted on hand.`,
+      };
+    });
   return normalizeVendorOrderPolicy({
     proofMinimum: 350,
     proofMinimumCandidates: proofPrep.candidates,
     proofPrepRequirement: proofPrep.requirement,
+    cocktailIngredientMinimumOrders,
   });
 }
 

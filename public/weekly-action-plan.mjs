@@ -138,32 +138,41 @@ function aggregateTapActions(
 function normalizeInventoryOrders(items) {
   return items
     .filter((item) => number(item.orderUnits) > 0)
-    .map((item) => ({
-      category: item.group === "Liquor Cabinet"
+    .map((item) => {
+      const cocktailPrepRequiredBottles = number(item.cocktailPrepRequiredBottles);
+      const cocktailPrepShortageUnits = number(item.cocktailPrepShortageUnits);
+      return {
+        category: item.group === "Liquor Cabinet"
         ? "liquor"
         : item.group === "Mixer Cabinet"
           ? "mixers"
           : "supplies",
-      id: clean(item.id),
-      name: clean(item.name),
-      vendorSku: clean(item.vendorSku || item.preferredSku),
-      vendorProductName: clean(item.vendorProductName || item.productName || item.name),
-      quantity: number(item.orderUnits),
-      casePackaged: Boolean(item.casePackaged),
-      packSize: Math.max(1, number(item.packSize) || 1),
-      caseCount: item.casePackaged
-        ? Math.ceil(number(item.orderUnits) / Math.max(1, number(item.packSize) || 1))
-        : 0,
-      vendor: clean(item.vendor),
-      estimatedCost: number(item.estimatedCost),
-      unitCost: number(item.unitCost),
-      hasKnownPrice: item.hasKnownPrice === undefined
-        ? number(item.unitCost) > 0 || number(item.estimatedCost) > 0
-        : Boolean(item.hasKnownPrice),
-      onHand: number(item.onHand),
-      par: number(item.par),
-      hasCurrentCount: item.hasCurrentCount !== false,
-    }))
+        id: clean(item.id),
+        name: clean(item.name),
+        vendorSku: clean(item.vendorSku || item.preferredSku),
+        vendorProductName: clean(item.vendorProductName || item.productName || item.name),
+        quantity: number(item.orderUnits),
+        casePackaged: Boolean(item.casePackaged),
+        packSize: Math.max(1, number(item.packSize) || 1),
+        caseCount: item.casePackaged
+          ? Math.ceil(number(item.orderUnits) / Math.max(1, number(item.packSize) || 1))
+          : 0,
+        vendor: clean(item.vendor),
+        estimatedCost: number(item.estimatedCost),
+        unitCost: number(item.unitCost),
+        hasKnownPrice: item.hasKnownPrice === undefined
+          ? number(item.unitCost) > 0 || number(item.estimatedCost) > 0
+          : Boolean(item.hasKnownPrice),
+        onHand: number(item.onHand),
+        par: number(item.par),
+        hasCurrentCount: item.hasCurrentCount !== false,
+        cocktailPrepRequiredBottles,
+        cocktailPrepShortageUnits,
+        reasons: cocktailPrepShortageUnits > 0
+          ? [`Cocktail prep needs ${cocktailPrepRequiredBottles} bottle${cocktailPrepRequiredBottles === 1 ? "" : "s"}; ${number(item.onHand)} counted on hand.`]
+          : [],
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -454,7 +463,9 @@ export function evaluateWeeklyPlanReadiness({
 
 export function buildWeeklyActionPlan({ inventoryItems = [], recommendations = [] } = {}) {
   const orderingInventoryItems = inventoryItems.filter((item) => (
-    !Object.hasOwn(item || {}, "par") || number(item.par) > 0
+    !Object.hasOwn(item || {}, "par")
+    || number(item.par) > 0
+    || number(item.cocktailPrepShortageUnits) > 0
   ));
   const inventoryOrders = normalizeInventoryOrders(
     orderingInventoryItems.filter((item) => !clean(item.orderHoldReason || item.exclusionReason)),
