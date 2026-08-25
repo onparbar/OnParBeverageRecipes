@@ -25,6 +25,53 @@ function normalizeVendor(value) {
   return vendor;
 }
 
+const PROOF_PREP_REQUIREMENTS = new Set(["required", "not-required", "unknown"]);
+
+export function normalizeVendorOrderPolicy(policy = {}) {
+  const requirement = clean(policy?.proofPrepRequirement).toLowerCase();
+  const proofMinimum = numberOrNull(policy?.proofMinimum);
+  const proofMinimumCandidates = (Array.isArray(policy?.proofMinimumCandidates)
+    ? policy.proofMinimumCandidates
+    : [])
+    .slice(0, 100)
+    .map((item) => ({
+      id: clean(item?.id).slice(0, 160),
+      name: clean(item?.name).slice(0, 240),
+      vendor: "Proof",
+      vendorSku: clean(item?.vendorSku).slice(0, 120),
+      vendorProductName: clean(item?.vendorProductName || item?.name).slice(0, 240),
+      casePackaged: true,
+      shelfStable: true,
+      packSize: Math.max(1, Math.floor(numberOrNull(item?.packSize) || 1)),
+      projectedPrepUseUnits: Math.max(0, Math.ceil(numberOrNull(item?.projectedPrepUseUnits) || 0)),
+      projectedPrepUseOz: Math.max(0, numberOrNull(item?.projectedPrepUseOz) || 0),
+      onHandUnits: Math.max(0, numberOrNull(item?.onHandUnits) || 0),
+      parUnits: Math.max(0, numberOrNull(item?.parUnits) || 0),
+      replacementNeedUnits: Math.max(0, Math.ceil(numberOrNull(item?.replacementNeedUnits) || 0)),
+      unitCost: Math.max(0, numberOrNull(item?.unitCost) || 0),
+    }))
+    .filter((item) => item.id && item.name && item.vendorSku && item.unitCost > 0);
+  return {
+    version: 1,
+    proofMinimum: proofMinimum !== null && proofMinimum >= 0 ? proofMinimum : 350,
+    proofPrepRequirement: PROOF_PREP_REQUIREMENTS.has(requirement) ? requirement : "unknown",
+    proofMinimumCandidates,
+  };
+}
+
+export function buildUnifiedVendorOrderModel(plan, options = {}) {
+  const { snapshot = null, orderPolicy = null, ...draftOptions } = options;
+  const policy = normalizeVendorOrderPolicy(orderPolicy || snapshot?.orderPolicy);
+  return buildVendorOrderDrafts(plan, {
+    ...draftOptions,
+    generatedAt: clean(draftOptions.generatedAt || snapshot?.generatedAt),
+    sourceDate: clean(draftOptions.sourceDate || snapshot?.publishedAt),
+    proofMinimum: policy.proofMinimum,
+    proofPrepRequirement: policy.proofPrepRequirement,
+    proofMinimumCandidates: policy.proofMinimumCandidates,
+  });
+}
+
 function slug(value) {
   return clean(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }

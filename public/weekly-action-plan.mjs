@@ -694,6 +694,7 @@ function upgradeWeeklyPlanPrepLabels(snapshot, recommendations) {
 export function createWeeklyPlanSnapshot({
   generatedAt,
   inventoryItems = [],
+  orderPolicy = null,
   recommendations = [],
   publishedAt = new Date().toISOString(),
 } = {}) {
@@ -704,6 +705,7 @@ export function createWeeklyPlanSnapshot({
     generatedAt: normalizedGeneratedAt,
     publishedAt: clean(publishedAt),
     orderCatalog: normalizeInventoryOrderCatalog(inventoryItems),
+    ...(orderPolicy && typeof orderPolicy === "object" ? { orderPolicy } : {}),
     plan: buildWeeklyActionPlan({ inventoryItems, recommendations }),
   };
 }

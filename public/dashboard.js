@@ -137,7 +137,10 @@ import {
   getComingSoonKindLabel,
   mergeRequiredComingSoonItems,
 } from "./coming-soon-items.mjs";
-import { buildVendorOrderDrafts } from "./vendor-order-drafts.mjs";
+import {
+  buildUnifiedVendorOrderModel,
+  normalizeVendorOrderPolicy,
+} from "./vendor-order-drafts.mjs";
 import { buildProofPrepOrderContext } from "./proof-prep-replacements.mjs";
 import {
   getLiquorCabinetOrderQuantity,
@@ -5154,6 +5157,12 @@ async function publishCurrentWeeklyPlanSnapshot() {
   const mondaySnapshot = getCurrentMondayInventorySnapshot(inventoryHistory, new Date());
   if (!mondaySnapshot?.kegPlanSnapshot || !parAgentState?.initialized) return false;
   try {
+    const savedInventoryItems = getWeeklyPlanInventoryItems();
+    const savedRecommendations = getWeeklyPlanRecommendations();
+    const savedPlan = buildWeeklyActionPlan({
+      inventoryItems: savedInventoryItems,
+      recommendations: savedRecommendations,
+    });
     const recommendationPricing = getWeeklyPlanRecommendations().map((item) => ({
       key: item.key,
       vendor: item.vendor,
@@ -5164,7 +5173,8 @@ async function publishCurrentWeeklyPlanSnapshot() {
     const result = await requestParAgentState({
       action: "publish-weekly-plan",
       expectedRevision: parAgentState.revision,
-      inventoryItems: getWeeklyPlanInventoryItems(),
+      inventoryItems: savedInventoryItems,
+      orderPolicy: getCurrentVendorOrderPolicy(savedPlan),
       recommendationPricing,
       kegPlanSnapshot: mondaySnapshot.kegPlanSnapshot,
     });
@@ -5253,6 +5263,7 @@ function normalizeWeeklyOrderTracking(result = {}) {
     receivedCount: toNumber(result?.receivedCount),
     notReceivedCount: toNumber(result?.notReceivedCount),
     notReceivedItems: Array.isArray(result?.notReceivedItems) ? result.notReceivedItems : [],
+    orderPolicy: normalizeVendorOrderPolicy(result?.orderPolicy),
     stateRevision: toNumber(result?.stateRevision),
     message: clean(result?.message),
   };
@@ -5331,7 +5342,7 @@ async function refreshDashboardStaffPrepPlan() {
 }
 
 async function saveWeeklyOrderPlaced(vendorId, ordered, orderedBy) {
-  weeklyOrderTrackingMessage = "Saving who placed the order...";
+  weeklyOrderTrackingMessage = "Saving order status...";
   try {
     const response = await fetch("/api/weekly-order-tracking", {
       method: "POST",
@@ -5348,7 +5359,7 @@ async function saveWeeklyOrderPlaced(vendorId, ordered, orderedBy) {
     const result = await parseJsonResponse(response);
     if (!response.ok) throw new Error(result?.error || "The ordered-by update could not be saved.");
     weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
-    weeklyOrderTrackingMessage = "Ordered-by confirmation saved.";
+    weeklyOrderTrackingMessage = ordered ? "Order marked as placed." : "Order placement cleared.";
     await loadParAgentState();
   } catch (error) {
     weeklyOrderTrackingMessage = error?.message || "The ordered-by update could not be saved.";
@@ -5359,7 +5370,8 @@ async function saveWeeklyOrderPlaced(vendorId, ordered, orderedBy) {
 
 async function saveVendorOrderDraftAction(payload) {
   const adjusting = ["set-order-adjustment", "remove-order-adjustment"].includes(payload.action);
-  weeklyOrderTrackingMessage = payload.action === "approve-draft" ? "Approving vendor draft..." : adjusting ? "Saving Weekly Plan changes..." : "Saving vendor draft...";
+  const approving = ["approve-draft", "review-and-approve"].includes(payload.action);
+  weeklyOrderTrackingMessage = approving ? "Reviewing vendor order..." : adjusting ? "Saving Weekly Plan changes..." : "Saving vendor draft...";
   try {
     const response = await fetch("/api/weekly-order-tracking", {
       method: "POST",
@@ -5370,8 +5382,8 @@ async function saveVendorOrderDraftAction(payload) {
     const result = await parseJsonResponse(response);
     if (!response.ok) throw new Error(result?.error || "The vendor draft could not be saved.");
     weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
-    weeklyOrderTrackingMessage = payload.action === "approve-draft"
-      ? "Vendor draft approved. Real vendor submission remains disabled."
+    weeklyOrderTrackingMessage = approving
+      ? "Vendor order approved and ready for handoff."
       : adjusting ? "Weekly Plan updated." : "Vendor draft saved for review.";
     await loadParAgentState();
   } catch (error) {
@@ -6892,23 +6904,30 @@ function renderWeeklyPlanReview(plan) {
   `;
 }
 
-function getVendorOrderDraftModel(plan, freshness) {
-  if (orderRehearsalMode) return buildOrderRehearsalModel();
-  const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
+function getCurrentVendorOrderPolicy(plan, snapshot = null) {
+  if (snapshot?.orderPolicy) return normalizeVendorOrderPolicy(snapshot.orderPolicy);
   const proofPrep = buildProofPrepOrderContext({
     cocktails: plan?.prep?.cocktails,
     recipes,
     inventoryItems,
+    savedInventoryItems: getWeeklyPlanInventoryItems(),
     recipeAliases: Object.fromEntries([...MENU_ORDER, ...NEW_RECIPE_ORDER]),
   });
-  return buildVendorOrderDrafts(plan, {
+  return normalizeVendorOrderPolicy({
+    proofMinimum: 350,
     proofMinimumCandidates: proofPrep.candidates,
     proofPrepRequirement: proofPrep.requirement,
-    generatedAt: snapshot?.generatedAt || "",
-    sourceDate: snapshot?.publishedAt || "",
+  });
+}
+
+function getVendorOrderDraftModel(plan, freshness) {
+  if (orderRehearsalMode) return buildOrderRehearsalModel();
+  const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
+  return buildUnifiedVendorOrderModel(plan, {
+    snapshot,
+    orderPolicy: getCurrentVendorOrderPolicy(plan, snapshot),
     freshness: freshness.readiness,
     budgetLimit: null,
-    proofMinimum: 350,
     now: new Date(),
     confirmationRecipient: "samantha@onparbar.com",
     manualAdjustments: weeklyOrderTracking.adjustments,
@@ -6950,7 +6969,7 @@ function renderAssistedOrderPanel(draft, saved) {
   const disabled = !view.order.actionsEnabled;
   return `
     <section class="assisted-order-handoff${orderRehearsalMode ? " assisted-order-handoff--rehearsal" : ""}" data-assisted-order-id="${escapeHtml(view.order.id)}">
-      <div class="assisted-order-handoff__header"><strong>Assisted order</strong><span class="assisted-order-handoff__status assisted-order-handoff__status--${escapeHtml(view.order.status)}">${escapeHtml(view.statusLabel)}</span></div>
+      <div class="assisted-order-handoff__header"><strong>Place order</strong><span class="assisted-order-handoff__status assisted-order-handoff__status--${escapeHtml(view.order.status)}">${escapeHtml(view.statusLabel)}</span></div>
       <span class="assisted-order-handoff__summary">${formatNumber(view.order.lineCount)} line${view.order.lineCount === 1 ? "" : "s"} · ${money(view.order.expectedTotal)}</span>
       <div class="assisted-order-handoff__actions">
         <button class="assisted-order-handoff__button" type="button" data-assisted-order-copy="${escapeHtml(view.order.id)}"${disabled ? " disabled" : ""}>${escapeHtml(view.copyLabel)}</button>
@@ -6961,97 +6980,83 @@ function renderAssistedOrderPanel(draft, saved) {
   `;
 }
 
+function getVendorWorkflowState(draft, saved, vendor) {
+  const items = vendor?.items || [];
+  const receivedCount = items.filter((item) => item.status === "received").length;
+  const exceptionCount = items.filter((item) => ["partial", "not-received"].includes(item.status)).length;
+  const pendingCount = items.filter((item) => item.status === "pending").length;
+  const handedOff = Boolean(saved.copiedAt || saved.openedAt || ["opened_vendor", "manually_completed"].includes(saved.status));
+  if (draft.blockers.length) return { label: "Needs attention", step: 1, receivedCount, exceptionCount, pendingCount, handedOff };
+  if (!saved.approvedAt) return { label: "Review", step: 1, receivedCount, exceptionCount, pendingCount, handedOff };
+  if (!vendor?.ordered) return { label: handedOff ? "Confirm placed" : "Place order", step: handedOff ? 3 : 2, receivedCount, exceptionCount, pendingCount, handedOff };
+  if (exceptionCount) return { label: "Delivery issue", step: 4, receivedCount, exceptionCount, pendingCount, handedOff };
+  if (pendingCount) return { label: "Awaiting delivery", step: 4, receivedCount, exceptionCount, pendingCount, handedOff };
+  return { label: "Received", step: 4, receivedCount, exceptionCount, pendingCount, handedOff };
+}
+
+function renderVendorWorkflowProgress(workflow) {
+  return `<div class="vendor-order-progress" aria-label="${escapeHtml(workflow.label)}">${["Review", "Order", "Placed", "Received"].map((label, index) => `<span class="${index + 1 < workflow.step ? "is-complete" : index + 1 === workflow.step ? "is-current" : ""}">${escapeHtml(label)}</span>`).join("")}</div>`;
+}
+
 function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) {
   const model = providedModel || getVendorOrderDraftModel(plan, freshness);
   currentVendorOrderDraftViews = new Map();
   const savedDrafts = orderRehearsalMode ? model.savedDrafts : weeklyOrderTracking.drafts;
   const savedById = new Map((savedDrafts || []).map((draft) => [draft.id, draft]));
+  const vendorsByName = new Map((weeklyOrderTracking.vendors || []).map((vendor) => [vendor.vendor, vendor]));
+  const defaultManager = clean((savedDrafts || []).find((draft) => draft.approvedBy || draft.createdBy)?.approvedBy
+    || (savedDrafts || []).find((draft) => draft.approvedBy || draft.createdBy)?.createdBy);
   if (!model.drafts.length) return weeklyOrderTracking.adjustments.length ? renderVendorOrderAdjustments() : "";
   return `
     <section class="vendor-order-drafts${orderRehearsalMode ? " vendor-order-drafts--rehearsal" : ""}" aria-labelledby="vendor-order-drafts-title">
       <header class="vendor-order-drafts__header">
-        <div><p class="eyebrow">${orderRehearsalMode ? "Rehearsal · no live actions" : "Approval required"}</p><h2 id="vendor-order-drafts-title">${orderRehearsalMode ? "Order Rehearsal" : "Vendor Order Drafts"}</h2><p>${orderRehearsalMode ? "Fixture data only." : "Due Tuesday by 4 PM · no substitutions."}</p></div>
-        <div><strong>${escapeHtml(model.schedule.label)}</strong><span>${money(model.weeklyTotal)} known total</span></div>
+        <div><p class="eyebrow">${orderRehearsalMode ? "Rehearsal" : "This week"}</p><h2 id="vendor-order-drafts-title">${orderRehearsalMode ? "Order Rehearsal" : "Place Orders"}</h2></div>
+        <div><strong>${formatNumber(model.drafts.reduce((total, draft) => total + draft.lineCount, 0))} items</strong><span>${money(model.weeklyTotal)}</span></div>
       </header>
-      <p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage || "Draft only · vendor submission disabled.")}</p>
+      ${weeklyOrderTrackingMessage ? `<p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage)}</p>` : ""}
       ${renderVendorOrderAdjustments()}
       <div class="vendor-order-drafts__grid">
         ${model.drafts.map((draft) => {
           const saved = savedById.get(draft.id) || {};
           const approved = Boolean(saved.approvedAt);
+          const vendor = vendorsByName.get(draft.vendor);
+          const workflow = getVendorWorkflowState(draft, saved, vendor);
+          const manager = clean(saved.approvedBy || saved.createdBy || defaultManager);
+          const missingItems = (vendor?.items || []).filter((item) => ["partial", "not-received"].includes(item.status));
           return `
             <form class="vendor-order-draft-card vendor-order-draft-card--${approved ? "approved" : draft.status}" data-vendor-order-draft="${escapeHtml(draft.vendor)}" data-vendor-order-draft-id="${escapeHtml(draft.id)}" data-vendor-order-draft-status="${escapeHtml(saved.status || draft.status)}">
-              <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(draft.lineCount)} line${draft.lineCount === 1 ? "" : "s"} · ${money(draft.estimatedTotal)}</p></div><span>${approved ? "Approved" : draft.status === "blocked" ? "Blocked" : "Review"}</span></header>
-              <div class="vendor-order-draft-lines">
+              <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(draft.lineCount)} item${draft.lineCount === 1 ? "" : "s"} · ${money(draft.estimatedTotal)}</p></div><span>${escapeHtml(workflow.label)}</span></header>
+              ${renderVendorWorkflowProgress(workflow)}
+              <details class="vendor-order-draft-lines"${!approved || draft.blockers.length ? " open" : ""}>
+                <summary>${approved ? "View order" : `Review ${formatNumber(draft.lineCount)} item${draft.lineCount === 1 ? "" : "s"}`}</summary>
                 ${draft.lines.map((line) => `<div><strong>${escapeHtml(line.productName)}</strong><span>${escapeHtml(line.vendor === "Bonbright" ? "Text order" : line.vendorSku ? `SKU ${line.vendorSku}` : "SKU needed")} · ${line.requestedCases ? `${formatNumber(line.requestedCases)} case${line.requestedCases === 1 ? "" : "s"} / ` : ""}${formatNumber(line.requestedUnits)} unit${line.requestedUnits === 1 ? "" : "s"} · ${line.extendedCost ? money(line.extendedCost) : "Price needed"}</span><small>${escapeHtml(line.reason)}</small></div>`).join("")}
-              </div>
+              </details>
               ${draft.blockers.length ? `<div class="vendor-order-draft-issues vendor-order-draft-issues--blocked"><strong>Approval blockers</strong>${draft.blockers.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
-              ${draft.warnings.length ? `<div class="vendor-order-draft-issues"><strong>Review notes</strong>${draft.warnings.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
-              <div class="vendor-order-draft-fields">
-                <label><span>Manager</span><input type="text" maxlength="80" autocomplete="name" data-order-draft-manager value="${escapeHtml(saved.approvedBy || saved.createdBy || "")}" placeholder="Manager name"${approved ? " disabled" : ""}></label>
-              </div>
-              <label class="vendor-order-draft-confirm"><input type="checkbox" data-order-draft-confirm${approved ? " checked disabled" : ""}><span>I confirm ${escapeHtml(draft.vendor)}, ${money(draft.estimatedTotal)}, and ${formatNumber(draft.lineCount)} order lines.</span></label>
-              <div class="vendor-order-draft-actions">
-                <button class="ghost-button" type="button" data-order-draft-create${approved ? " disabled" : ""}>${saved.createdAt ? "Refresh draft" : "Create draft"}</button>
-                <button class="primary-button" type="submit"${approved || draft.blockers.length ? " disabled" : ""}>${approved ? `Approved by ${escapeHtml(saved.approvedBy)}` : "Approve draft"}</button>
-              </div>
-              <p class="vendor-order-draft-adapter">${orderRehearsalMode ? "Simulation only · no external actions" : `Submission adapter: disabled · Confirmation: ${escapeHtml(draft.confirmationRecipient)}`}</p>
-              ${renderAssistedOrderPanel(draft, saved)}
+              ${!approved && draft.warnings.length ? `<div class="vendor-order-draft-issues"><strong>Review</strong>${draft.warnings.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
+              ${!approved ? `
+                <div class="vendor-order-draft-fields"><label><span>Reviewed by</span><input type="text" maxlength="80" autocomplete="name" data-order-draft-manager value="${escapeHtml(manager)}" placeholder="Manager name"></label></div>
+                <label class="vendor-order-draft-confirm"><input type="checkbox" data-order-draft-confirm><span>Confirm ${escapeHtml(draft.vendor)} · ${money(draft.estimatedTotal)} · ${formatNumber(draft.lineCount)} items</span></label>
+                <div class="vendor-order-draft-actions"><button class="primary-button" type="submit"${draft.blockers.length ? " disabled" : ""}>Review &amp; approve</button></div>
+              ` : ""}
+              ${approved ? renderAssistedOrderPanel(draft, saved) : ""}
+              ${approved && !vendor?.ordered ? `
+                <div class="vendor-order-place">
+                  <button class="primary-button" type="button" data-weekly-order-place data-weekly-order-vendor-id="${escapeHtml(vendor?.id || "")}" data-weekly-ordered-by="${escapeHtml(manager)}" data-weekly-order-vendor="${escapeHtml(draft.vendor)}"${!vendor?.id || !workflow.handedOff ? " disabled" : ""}>Mark order placed</button>
+                  ${workflow.handedOff ? "" : "<small>Use the order action above first.</small>"}
+                </div>
+              ` : ""}
+              ${vendor?.ordered ? `
+                <div class="vendor-order-completion">
+                  <strong>Order placed</strong>
+                  <span>${escapeHtml(vendor.orderedBy)}${vendor.orderedAt ? ` · ${escapeHtml(formatUpdatedAt(vendor.orderedAt))}` : ""}</span>
+                  <b>${workflow.exceptionCount ? `${formatNumber(workflow.exceptionCount)} delivery issue${workflow.exceptionCount === 1 ? "" : "s"}` : workflow.pendingCount ? "Awaiting delivery" : "Delivery complete"}</b>
+                  ${missingItems.length ? `<small>${missingItems.map((item) => escapeHtml(item.name)).join(" · ")}</small>` : ""}
+                </div>
+              ` : ""}
             </form>
           `;
         }).join("")}
       </div>
-    </section>
-  `;
-}
-
-function renderOwnerWeeklyOrderTracking() {
-  if (!weeklyOrderTracking.available) {
-    return `
-      <section class="weekly-order-tracking" aria-labelledby="weekly-order-tracking-title">
-        <div class="weekly-plan-column__header">
-          <h2 id="weekly-order-tracking-title">Order &amp; Delivery Tracking</h2>
-        </div>
-        <p class="weekly-plan-empty">${escapeHtml(weeklyOrderTrackingMessage || "Order tracking will be available after the Monday plan is published.")}</p>
-      </section>
-    `;
-  }
-  const vendorCards = weeklyOrderTracking.vendors.map((vendor) => `
-    <article class="weekly-order-vendor-card">
-      <form class="weekly-order-placed-form" data-weekly-order-vendor-id="${escapeHtml(vendor.id)}">
-        <div>
-          <h3>${escapeHtml(vendor.vendor)} Order</h3>
-          <p>${formatNumber(vendor.items?.length || 0)} delivery line${vendor.items?.length === 1 ? "" : "s"}</p>
-        </div>
-        <label class="weekly-order-check"><input type="checkbox" data-weekly-order-placed${vendor.ordered ? " checked" : ""}><span>Order placed</span></label>
-        <label><span>Ordered by</span><input type="text" maxlength="80" autocomplete="name" data-weekly-ordered-by value="${escapeHtml(vendor.orderedBy)}" placeholder="Manager name"></label>
-        <button class="ghost-button" type="submit">Save</button>
-      </form>
-      ${vendor.ordered ? `<p class="weekly-order-placed-meta">Ordered by ${escapeHtml(vendor.orderedBy)}${vendor.orderedAt ? ` · ${escapeHtml(formatUpdatedAt(vendor.orderedAt))}` : ""}</p>` : ""}
-      <div class="weekly-order-receipt-list">
-        ${(vendor.items || []).map((item) => `
-          <div class="weekly-order-receipt weekly-order-receipt--${escapeHtml(item.status || "pending")}">
-            <div><strong>${escapeHtml(item.name)}</strong><span>${formatNumber(item.quantity)} ${escapeHtml(item.unit)}</span></div>
-            <b>${item.status === "received"
-              ? `All received by ${escapeHtml(item.handledBy)}`
-              : item.status === "partial"
-                ? `${formatNumber(item.receivedQuantity)} of ${formatNumber(item.quantity)} received · ${escapeHtml(item.handledBy)}`
-                : item.status === "not-received"
-                  ? `0 of ${formatNumber(item.quantity)} received · ${escapeHtml(item.handledBy)}`
-                  : "Awaiting delivery check"}</b>
-          </div>
-        `).join("")}
-      </div>
-    </article>
-  `).join("");
-  return `
-    <section class="weekly-order-tracking" aria-labelledby="weekly-order-tracking-title">
-      <div class="weekly-plan-column__header">
-        <h2 id="weekly-order-tracking-title">Order &amp; Delivery Tracking</h2>
-      </div>
-      ${weeklyOrderTracking.notReceivedCount ? `<p class="weekly-order-tracking__summary">${formatNumber(weeklyOrderTracking.notReceivedCount)} line${weeklyOrderTracking.notReceivedCount === 1 ? "" : "s"} short or missing</p>` : ""}
-      ${weeklyOrderTrackingMessage ? `<p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage)}</p>` : ""}
-      <div class="weekly-order-vendor-grid">${vendorCards || '<p class="weekly-plan-empty">There are no active vendor orders in this plan.</p>'}</div>
     </section>
   `;
 }
@@ -7222,36 +7227,28 @@ function bindOwnerWeeklyOrderTrackingEvents() {
       });
     });
   });
-  document.querySelectorAll(".weekly-order-placed-form").forEach((form) => {
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const ordered = Boolean(form.querySelector("[data-weekly-order-placed]")?.checked);
-      const orderedByInput = form.querySelector("[data-weekly-ordered-by]");
-      const orderedBy = clean(orderedByInput?.value);
-      if (ordered && !orderedBy) {
-        weeklyOrderTrackingMessage = "Enter who placed the order before checking it off.";
-        orderedByInput?.setCustomValidity("Enter who placed the order.");
-        orderedByInput?.reportValidity();
-        orderedByInput?.focus();
-        return;
-      }
-      orderedByInput?.setCustomValidity("");
-      form.querySelectorAll("input, button").forEach((control) => { control.disabled = true; });
-      await saveWeeklyOrderPlaced(form.dataset.weeklyOrderVendorId, ordered, orderedBy);
+  document.querySelectorAll("[data-weekly-order-place]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const vendor = clean(button.dataset.weeklyOrderVendor);
+      const orderedBy = clean(button.dataset.weeklyOrderedBy);
+      if (!button.dataset.weeklyOrderVendorId || !orderedBy) return;
+      if (!confirmDashboardAction(
+        `Mark the ${vendor} order as placed?`,
+        ["This confirms the reviewed order was submitted outside the dashboard."],
+      )) return;
+      button.disabled = true;
+      await saveWeeklyOrderPlaced(button.dataset.weeklyOrderVendorId, true, orderedBy);
     });
   });
   document.querySelectorAll("[data-vendor-order-draft]").forEach((form) => {
     const vendor = form.dataset.vendorOrderDraft;
     const managerInput = form.querySelector("[data-order-draft-manager]");
-    form.querySelector("[data-order-draft-create]")?.addEventListener("click", async () => {
-      const createdBy = clean(managerInput?.value);
-      if (!createdBy) {
-        managerInput?.setCustomValidity("Enter the manager creating this draft.");
-        managerInput?.reportValidity();
-        return;
-      }
-      managerInput?.setCustomValidity("");
-      await saveVendorOrderDraftAction({ action: "create-draft", vendor, createdBy });
+    managerInput?.addEventListener("change", () => {
+      const manager = clean(managerInput.value);
+      if (!manager) return;
+      document.querySelectorAll("[data-order-draft-manager]").forEach((input) => {
+        if (!clean(input.value)) input.value = manager;
+      });
     });
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -7268,7 +7265,15 @@ function bindOwnerWeeklyOrderTrackingEvents() {
         renderWeeklyPlan();
         return;
       }
-      await saveVendorOrderDraftAction({ action: "approve-draft", vendor, approvedBy, confirmed: true });
+      const plan = getWeeklyPlanModel();
+      const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
+      await saveVendorOrderDraftAction({
+        action: "review-and-approve",
+        vendor,
+        approvedBy,
+        confirmed: true,
+        orderPolicy: getCurrentVendorOrderPolicy(plan, snapshot),
+      });
     });
   });
 }
@@ -7395,12 +7400,18 @@ function renderWeeklyPlan() {
   const plan = getWeeklyPlanModel();
   const freshness = getWeeklyPlanFreshness(plan);
   const vendorOrderModel = getVendorOrderDraftModel(plan, freshness);
-  const deferredOrderLineCount = sum(vendorOrderModel.deferredOrders?.map((item) => item.lineCount) || []);
-  const deferredOrderCost = sum(vendorOrderModel.deferredOrders?.map((item) => item.estimatedTotal) || []);
+  const activeOrderLines = vendorOrderModel.drafts.flatMap((draft) => draft.lines || []);
+  const activeMissingPriceCount = activeOrderLines.filter((line) => (
+    !line.excludeFromOrderCost && !(toNumber(line.unitCost) > 0)
+  )).length;
   const summary = {
     ...plan.summary,
-    orderLineCount: Math.max(0, toNumber(plan.summary.orderLineCount) - deferredOrderLineCount),
-    estimatedKnownPurchaseCost: Math.max(0, toNumber(plan.summary.estimatedKnownPurchaseCost) - deferredOrderCost),
+    orderLineCount: activeOrderLines.length,
+    beerKegTotal: sum(activeOrderLines.filter((line) => line.lineType === "Beer keg").map((line) => toNumber(line.requestedUnits))),
+    liquorTapBottleTotal: sum(activeOrderLines.filter((line) => line.lineType === "Liquor tap bottle").map((line) => toNumber(line.requestedUnits))),
+    estimatedKnownPurchaseCost: vendorOrderModel.weeklyTotal,
+    missingPriceCount: activeMissingPriceCount,
+    estimatedPurchaseCostComplete: activeMissingPriceCount === 0,
   };
   const planLocked = Boolean(getCurrentWeeklyPlanSnapshot(recommendations, new Date()));
   const requiresLateSnapshotReason = !planLocked && !isEasternMonday();
@@ -7443,11 +7454,11 @@ function renderWeeklyPlan() {
       <div class="${summary.estimatedPurchaseCostComplete ? "" : "weekly-plan-stat--warning"}"><span>Purchase estimate</span><strong>${money(summary.estimatedKnownPurchaseCost)}</strong>${summary.missingPriceCount ? `<small>${formatNumber(summary.missingPriceCount)} missing price${summary.missingPriceCount === 1 ? "" : "s"}</small>` : ""}</div>
     </div>
     ${priceNote ? `<p class="weekly-plan-cost-note">${escapeHtml(priceNote)}</p>` : ""}
-    <div class="weekly-plan-columns">
-      <section class="weekly-plan-column">
+    <div class="weekly-plan-columns${planLocked ? " weekly-plan-columns--locked" : ""}">
+      ${planLocked ? "" : `<section class="weekly-plan-column">
         <div class="weekly-plan-column__header"><h2>Order This Week</h2></div>
         ${renderWeeklyPlanByVendor(plan, vendorOrderModel.deferredOrders)}
-      </section>
+      </section>`}
       <section class="weekly-plan-column weekly-plan-column--prep">
         <div class="weekly-plan-column__header"><h2>Cocktails To Make</h2></div>
         ${renderWeeklyPlanCocktailRows(plan.prep.cocktails)}
@@ -7458,7 +7469,7 @@ function renderWeeklyPlan() {
     ${orderRehearsalMode
       ? renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)
       : planLocked
-        ? `<div id="weekly-plan-orders">${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)}${renderOwnerWeeklyOrderTracking()}</div>`
+        ? `<div id="weekly-plan-orders">${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)}</div>`
         : ""}
     ${renderWeeklyPlanReview(plan)}
   `;

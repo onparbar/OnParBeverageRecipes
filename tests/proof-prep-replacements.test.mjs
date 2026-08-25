@@ -81,6 +81,33 @@ test("defers a sub-minimum Proof order when inventory covers prep even if prep w
   assert.equal(context.candidates[0].replacementNeedUnits, 10);
 });
 
+test("uses the saved Monday count after current inventory fields are cleared", () => {
+  const context = buildProofPrepOrderContext({
+    cocktails: [{ name: "Apple Jack", quantity: 1 }],
+    recipes: [{ title: "Apple Jack", ingredients: [{ name: "Apple Schnapps", oz: 270 }] }],
+    inventoryItems: [{
+      id: "apple-schnapps",
+      name: "Apple Schnapps",
+      casePackaged: true,
+      packSize: 12,
+      caseCost: 44.52,
+      matchedSku: "615006",
+      onHandDisplay: "",
+      parDisplay: "0",
+      vendorProduct: { vendor: "Proof", productName: "Llord's Apple Schnapps 30 1L", bottleOz: 33.814 },
+    }],
+    savedInventoryItems: [{
+      id: "apple-schnapps",
+      name: "Apple Schnapps",
+      onHand: 17,
+      par: 0,
+    }],
+  });
+
+  assert.equal(context.requirement, "not-required");
+  assert.deepEqual(context.candidates, []);
+});
+
 test("keeps Proof under review when a required inventory count is blank", () => {
   const context = buildProofPrepOrderContext({
     cocktails: [{ name: "House Margarita", quantity: 1 }],

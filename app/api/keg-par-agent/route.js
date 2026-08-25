@@ -83,6 +83,7 @@ export async function POST(request) {
       const state = await publishWeeklyPlanSnapshot({
         expectedRevision: body.expectedRevision,
         inventoryItems: body.inventoryItems,
+        orderPolicy: body.orderPolicy,
         recommendationPricing: body.recommendationPricing,
         kegPlanSnapshot: body.kegPlanSnapshot,
         role,

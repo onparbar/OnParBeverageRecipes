@@ -46,6 +46,35 @@ function getProofInventoryItem(ingredient, inventoryItems) {
   }) || null;
 }
 
+function getSavedInventoryItem(item, savedInventoryItems) {
+  const itemId = clean(item?.id);
+  const itemKey = key(item?.name);
+  return savedInventoryItems.find((savedItem) => (
+    (itemId && clean(savedItem?.id) === itemId)
+    || (itemKey && key(savedItem?.name) === itemKey)
+  )) || null;
+}
+
+function getSavedInventoryValue(item, displayField, valueField) {
+  const displayValue = item?.[displayField];
+  if (clean(displayValue) !== "") return displayValue;
+  const value = item?.[valueField];
+  return clean(value) === "" ? "" : value;
+}
+
+function applySavedInventoryCounts(inventoryItems = [], savedInventoryItems = []) {
+  if (!savedInventoryItems.length) return inventoryItems;
+  return inventoryItems.map((item) => {
+    const savedItem = getSavedInventoryItem(item, savedInventoryItems);
+    if (!savedItem) return item;
+    return {
+      ...item,
+      onHandDisplay: getSavedInventoryValue(savedItem, "onHandDisplay", "onHand"),
+      parDisplay: getSavedInventoryValue(savedItem, "parDisplay", "par"),
+    };
+  });
+}
+
 function getProjectedProofUsage({
   cocktails = [],
   recipes = [],
@@ -78,7 +107,14 @@ function getProjectedProofUsage({
 }
 
 export function buildProofPrepOrderContext(options = {}) {
-  const { projectedOzById, unresolvedRecipe } = getProjectedProofUsage(options);
+  const inventoryItems = applySavedInventoryCounts(
+    Array.isArray(options.inventoryItems) ? options.inventoryItems : [],
+    Array.isArray(options.savedInventoryItems) ? options.savedInventoryItems : [],
+  );
+  const { projectedOzById, unresolvedRecipe } = getProjectedProofUsage({
+    ...options,
+    inventoryItems,
+  });
   let unresolvedInventory = false;
   let prepPurchaseRequired = false;
 
