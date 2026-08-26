@@ -6,6 +6,7 @@ import {
   buildUnifiedVendorOrderModel,
   buildVendorOrderDrafts,
   getDisabledVendorOrderAdapter,
+  getVendorOrderScheduleStatus,
 } from "../public/vendor-order-drafts.mjs";
 
 const monday = new Date("2026-08-10T10:00:00");
@@ -36,6 +37,18 @@ function inventoryPlan(overrides = {}) {
     }],
   });
 }
+
+test("warns after the ordering cutoff without blocking the draft", () => {
+  const now = new Date("2026-08-12T10:00:00");
+  const schedule = getVendorOrderScheduleStatus(now);
+  const draft = buildVendorOrderDrafts(inventoryPlan(), { ...options, now }).drafts[0];
+
+  assert.equal(schedule.status, "past-cutoff");
+  assert.equal(schedule.blockers.length, 0);
+  assert.ok(schedule.warnings.some((item) => item.code === "ORDER_CUTOFF_PASSED"));
+  assert.equal(draft.canApprove, true);
+  assert.ok(draft.warnings.some((item) => item.code === "ORDER_CUTOFF_PASSED"));
+});
 
 test("uses the Weekly Plan par order and preserves existing case rounding", () => {
   const result = buildVendorOrderDrafts(inventoryPlan(), options);

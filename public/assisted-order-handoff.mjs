@@ -353,7 +353,9 @@ export function createAuthoritativeAssistedOrderHandoff(
     id: cleanText(draft.id) || handoff.id,
     status,
     preview: handoff.blockers.length > 0,
-    actionsEnabled: rehearsal || ["reviewed", "opened_vendor"].includes(status),
+    actionsEnabled: rehearsal
+      ? handoff.blockers.length === 0
+      : ["reviewed", "opened_vendor"].includes(status),
     rehearsal,
     proofFee: draft.proofFee || null,
   };

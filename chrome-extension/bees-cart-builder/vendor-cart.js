@@ -93,7 +93,15 @@ async function finish(state, status = "ready", message = "Cart ready for your re
   };
   state.status = status;
   renderOverlay(state, message);
-  await chrome.runtime.sendMessage({ type: "VENDOR_CART_FINISHED", result });
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "VENDOR_CART_FINISHED", result });
+    if (!response?.ok) throw new Error("The final cart status could not be saved.");
+  } catch {
+    renderOverlay(
+      state,
+      `${message} Reload the extension before starting another cart.`,
+    );
+  }
 }
 
 function searchInput() {
@@ -217,6 +225,18 @@ async function waitForResults(timeout = 10000) {
 }
 
 let running = false;
+function startSafely() {
+  void start().catch((error) => {
+    const vendor = currentVendor();
+    const label = VENDOR_CONFIG[vendor]?.label || "Vendor";
+    renderOverlay({
+      lines: [],
+      results: [{ name: label, status: "unmatched", message: error.message }],
+      status: "needs_review",
+    }, `The ${label} cart could not start. Reload this page and try again.`);
+  });
+}
+
 async function start() {
   if (running) return;
   const response = await chrome.runtime.sendMessage({ type: "GET_VENDOR_CART_STATE" });
@@ -264,7 +284,7 @@ async function start() {
 }
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type === "VENDOR_CART_START") void start();
+  if (message?.type === "VENDOR_CART_START") startSafely();
 });
 
-void start();
+startSafely();

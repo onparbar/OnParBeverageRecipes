@@ -6963,9 +6963,8 @@ function getCurrentVendorOrderPolicy(plan, snapshot = null) {
 }
 
 function getVendorOrderDraftModel(plan, freshness) {
-  if (orderRehearsalMode) return buildOrderRehearsalModel();
   const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
-  return buildUnifiedVendorOrderModel(plan, {
+  const model = buildUnifiedVendorOrderModel(plan, {
     snapshot,
     orderPolicy: getCurrentVendorOrderPolicy(plan, snapshot),
     freshness: freshness.readiness,
@@ -6975,6 +6974,7 @@ function getVendorOrderDraftModel(plan, freshness) {
     manualAdjustments: weeklyOrderTracking.adjustments,
     manualCatalog: weeklyOrderTracking.adjustmentCatalog,
   });
+  return orderRehearsalMode ? buildOrderRehearsalModel(model) : model;
 }
 
 function renderVendorOrderAdjustments() {
@@ -7022,6 +7022,15 @@ function renderAssistedOrderPanel(draft, saved) {
   `;
 }
 
+function confirmLateVendorOrder(view) {
+  if (!view?.lateOrderWarning) return true;
+  return confirmDashboardAction(
+    "The ordering window has passed.",
+    [view.lateOrderWarning],
+    "Continue only if the vendor can still accept this order.",
+  );
+}
+
 function getVendorWorkflowState(draft, saved, vendor) {
   const items = vendor?.items || [];
   const receivedCount = items.filter((item) => item.status === "received").length;
@@ -7060,7 +7069,7 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
   currentVendorOrderDraftViews = new Map();
   const savedDrafts = orderRehearsalMode ? model.savedDrafts : weeklyOrderTracking.drafts;
   const savedById = new Map((savedDrafts || []).map((draft) => [draft.id, draft]));
-  const vendorsByName = new Map((weeklyOrderTracking.vendors || []).map((vendor) => [vendor.vendor, vendor]));
+  const vendorsByName = new Map((orderRehearsalMode ? [] : weeklyOrderTracking.vendors || []).map((vendor) => [vendor.vendor, vendor]));
   const defaultManager = clean((savedDrafts || []).find((draft) => draft.approvedBy || draft.createdBy)?.approvedBy
     || (savedDrafts || []).find((draft) => draft.approvedBy || draft.createdBy)?.createdBy);
   if (!model.drafts.length) return weeklyOrderTracking.adjustments.length ? renderVendorOrderAdjustments() : "";
@@ -7105,13 +7114,13 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
                 <div class="vendor-order-draft-actions"><button class="primary-button" type="submit"${draft.blockers.length ? " disabled" : ""}>Review &amp; approve</button></div>
               ` : ""}
               ${approved ? renderAssistedOrderPanel(draft, saved) : ""}
-              ${approved && !vendor?.ordered ? `
+              ${approved && !orderRehearsalMode && !vendor?.ordered ? `
                 <div class="vendor-order-place">
                   <button class="primary-button" type="button" data-weekly-order-place data-weekly-order-vendor-id="${escapeHtml(vendor?.id || "")}" data-weekly-ordered-by="${escapeHtml(manager)}" data-weekly-order-vendor="${escapeHtml(draft.vendor)}"${!vendor?.id || !workflow.handedOff ? " disabled" : ""}>Mark order placed</button>
                   ${workflow.handedOff ? "" : "<small>Use the order action above first.</small>"}
                 </div>
               ` : ""}
-              ${vendor?.ordered ? `
+              ${!orderRehearsalMode && vendor?.ordered ? `
                 <div class="vendor-order-completion">
                   <strong>Order placed</strong>
                   <span>${escapeHtml(vendor.orderedBy)}${vendor.orderedAt ? ` · ${escapeHtml(formatUpdatedAt(vendor.orderedAt))}` : ""}</span>
@@ -7136,6 +7145,7 @@ function buildVendorCartRequest(view) {
     orderId: order.id,
     vendor: order.vendorKey,
     approved: order.actionsEnabled === true,
+    rehearsal: order.rehearsal === true,
     expectedTotal: order.expectedTotal,
     lineCount: order.lineCount,
     lines: (order.lines || []).map((line) => ({
@@ -7182,31 +7192,26 @@ function bindOwnerWeeklyOrderTrackingEvents() {
     button.addEventListener("click", async () => {
       const view = currentVendorOrderDraftViews.get(button.dataset.assistedOrderCopy);
       if (!view?.order.actionsEnabled) return;
-      if (view.order.rehearsal) {
-        button.textContent = "Simulated";
-        return;
-      }
+      if (!view.order.rehearsal && !confirmLateVendorOrder(view)) return;
       await copyAssistedOrderText(view.copyText);
-      await saveVendorHandoffEvent(view, "copied");
+      if (view.order.rehearsal) button.textContent = "Copied";
+      else await saveVendorHandoffEvent(view, "copied");
     });
   });
   document.querySelectorAll("[data-assisted-order-open]").forEach((button) => {
     button.addEventListener("click", async () => {
       const view = currentVendorOrderDraftViews.get(button.dataset.assistedOrderOpen);
       if (!view?.order.actionsEnabled) return;
-      if (view.order.rehearsal) {
-        button.textContent = "Simulated";
-        return;
-      }
+      if (!view.order.rehearsal && !confirmLateVendorOrder(view)) return;
       if (CART_BUILDER_VENDORS.has(view.order.vendorKey)) {
         const vendorLabel = view.order.vendorKey === "heidelberg" ? "BEES" : view.order.vendor;
         const originalLabel = button.textContent;
         button.disabled = true;
-        button.textContent = `Opening ${vendorLabel}...`;
+        button.textContent = view.order.rehearsal ? `Filling ${vendorLabel} rehearsal...` : `Opening ${vendorLabel}...`;
         try {
           await sendVendorCartRequest(view);
-          button.textContent = `Sent to ${vendorLabel}`;
-          await saveVendorHandoffEvent(view, "opened_vendor");
+          button.textContent = view.order.rehearsal ? `${vendorLabel} rehearsal ready` : `Sent to ${vendorLabel}`;
+          if (!view.order.rehearsal) await saveVendorHandoffEvent(view, "opened_vendor");
         } catch (error) {
           button.disabled = false;
           button.textContent = originalLabel;
@@ -7541,7 +7546,7 @@ function renderWeeklyPlan() {
         <p>${escapeHtml(updatedText)}</p>
       </div>
       <div class="weekly-plan-actions">
-        ${ORDER_REHEARSAL_AVAILABLE ? `<button class="ghost-button" id="toggle-order-rehearsal" type="button">${orderRehearsalMode ? "Exit Rehearsal" : "Rehearsal"}</button>` : ""}
+        ${ORDER_REHEARSAL_AVAILABLE && (planLocked || orderRehearsalMode) ? `<button class="ghost-button" id="toggle-order-rehearsal" type="button">${orderRehearsalMode ? "Exit Rehearsal" : "Rehearsal"}</button>` : ""}
         ${planLocked ? `<button class="ghost-button" id="recall-weekly-plan" type="button"${weeklyPlanUpdating ? " disabled" : ""}>${weeklyPlanUpdating ? "Recalling..." : "Recall Plan"}</button>` : ""}
         ${requiresLateSnapshotReason ? `
           <label class="weekly-plan-late-reason">
@@ -7601,7 +7606,7 @@ function renderWeeklyPlan() {
   document.querySelector("#toggle-order-rehearsal")?.addEventListener("click", () => {
     orderRehearsalMode = !orderRehearsalMode;
     weeklyOrderTrackingMessage = orderRehearsalMode
-      ? "Rehearsal uses isolated fixture data."
+      ? "Rehearsal uses the latest locked Weekly Plan and never submits orders."
       : "Live Weekly Plan restored.";
     renderWeeklyPlan();
   });

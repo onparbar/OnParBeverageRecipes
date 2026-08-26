@@ -22,9 +22,14 @@ export function buildAssistedOrderView(draft, saved = {}, options = {}) {
   const order = createAuthoritativeAssistedOrderHandoff(draft, saved, options);
   const vendorAction = VENDOR_ACTIONS[order.vendorKey] || null;
   const rehearsal = order.rehearsal === true;
+  const rehearsalVendorActionLabel = vendorAction
+    ? vendorAction.label.replace(/^Build (.+) cart$/, "Fill $1 rehearsal cart")
+    : null;
+  const lateOrderWarning = (draft?.warnings || [])
+    .find((item) => item?.code === "ORDER_CUTOFF_PASSED")?.message || "";
   let note = "Approve the draft first.";
   if (order.preview) note = "Resolve the draft blockers first.";
-  else if (rehearsal) note = "Simulation only. Nothing leaves the dashboard.";
+  else if (rehearsal) note = "Fills the vendor cart for review only. Nothing is submitted.";
   else if (order.status === "manually_completed") note = "Marked completed.";
   else if (order.actionsEnabled && order.vendorKey === "bonbright") {
     note = getBonbrightTextWindowStatus(options.now).label;
@@ -34,15 +39,14 @@ export function buildAssistedOrderView(draft, saved = {}, options = {}) {
     order,
     statusLabel: statusLabel(order),
     copyLabel: rehearsal
-      ? "Simulate copy"
+      ? "Copy rehearsal list"
       : order.vendorKey === "bonbright" ? "Copy TJ message" : "Copy order list",
     copyText: formatVendorHandoff(order),
-    vendorActionLabel: vendorAction
-      ? rehearsal ? `Simulate ${vendorAction.label.replace(/^Open\s+/, "")}` : vendorAction.label
-      : null,
+    vendorActionLabel: rehearsal ? rehearsalVendorActionLabel : vendorAction?.label || null,
     vendorPath: vendorAction && order.actionsEnabled && !rehearsal
       ? `/api/vendor-handoff?vendor=${encodeURIComponent(vendorAction.vendor)}`
       : null,
+    lateOrderWarning,
     note,
   };
 }

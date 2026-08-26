@@ -322,8 +322,8 @@ export function getVendorOrderScheduleStatus(now = new Date()) {
   return {
     status: "past-cutoff",
     label: "Tuesday 4:00 PM cutoff passed",
-    blockers: [issue("ORDER_CUTOFF_PASSED", "The Tuesday 4:00 PM order cutoff has passed. Confirm the vendor can still accept this order.")],
-    warnings: [],
+    blockers: [],
+    warnings: [issue("ORDER_CUTOFF_PASSED", "The Tuesday 4:00 PM order cutoff has passed. Confirm the vendor can still accept this order before continuing.")],
   };
 }
 

@@ -1,5 +1,25 @@
 const ORDER_KEY = "onParVendorPendingOrder";
 const RESULT_KEY = "onParVendorLastResult";
+const TEMP_STATE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const temporaryStorage = chrome.storage.local;
+
+// Session storage can be unavailable in some restored vendor-tab contexts.
+// Keep the temporary handoff in extension-private local storage. Vendor pages
+// can reach it only through the validated runtime messages below.
+
+async function clearExpiredTemporaryState() {
+  const stored = await temporaryStorage.get([ORDER_KEY, RESULT_KEY]);
+  const now = Date.now();
+  const expiredKeys = [ORDER_KEY, RESULT_KEY].filter((key) => {
+    const value = stored[key];
+    if (!value) return false;
+    const timestamp = Date.parse(value.completedAt || value.startedAt || "");
+    return !Number.isFinite(timestamp) || now - timestamp > TEMP_STATE_MAX_AGE_MS;
+  });
+  if (expiredKeys.length) await temporaryStorage.remove(expiredKeys);
+}
+
+void clearExpiredTemporaryState().catch(() => {});
 const VENDORS = Object.freeze({
   heidelberg: {
     label: "BEES",
@@ -52,7 +72,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         searchCursor: 0,
         startedAt: new Date().toISOString(),
       };
-      await chrome.storage.session.set({ [ORDER_KEY]: state });
+        await temporaryStorage.set({ [ORDER_KEY]: state });
+        await temporaryStorage.remove(RESULT_KEY);
       const tab = await focusVendor(state.vendor);
       if (tab?.id) {
         await chrome.tabs.sendMessage(tab.id, { type: "VENDOR_CART_START" }).catch(() => {});
@@ -64,7 +85,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message?.type === "GET_VENDOR_CART_STATE") {
     (async () => {
-      const stored = await chrome.storage.session.get(ORDER_KEY);
+        const stored = await temporaryStorage.get(ORDER_KEY);
       sendResponse({ ok: true, state: stored[ORDER_KEY] || null });
     })().catch((error) => sendResponse({ ok: false, message: error.message }));
     return true;
@@ -72,7 +93,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message?.type === "SAVE_VENDOR_CART_STATE") {
     (async () => {
-      await chrome.storage.session.set({ [ORDER_KEY]: message.state });
+        await temporaryStorage.set({ [ORDER_KEY]: message.state });
       sendResponse({ ok: true });
     })().catch((error) => sendResponse({ ok: false, message: error.message }));
     return true;
@@ -80,8 +101,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message?.type === "VENDOR_CART_FINISHED") {
     (async () => {
-      await chrome.storage.session.set({ [RESULT_KEY]: message.result });
-      await chrome.storage.session.remove(ORDER_KEY);
+        await temporaryStorage.set({ [RESULT_KEY]: message.result });
+        await temporaryStorage.remove(ORDER_KEY);
       await broadcastResult(message.result);
       sendResponse({ ok: true });
     })().catch((error) => sendResponse({ ok: false, message: error.message }));
