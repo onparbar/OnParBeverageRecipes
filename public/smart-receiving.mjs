@@ -58,6 +58,20 @@ function getVendorMatches(query, vendors) {
   });
 }
 
+function inferVendorFromProducts(query, vendors) {
+  const ranked = vendors
+    .map((vendor) => ({
+      vendor,
+      matches: (Array.isArray(vendor.items) ? vendor.items : []).filter((item) => (
+        getProductAliases(item).some((alias) => alias.length >= 3 && query.includes(alias))
+      )).length,
+    }))
+    .filter((entry) => entry.matches > 0)
+    .sort((left, right) => right.matches - left.matches);
+  if (!ranked.length || (ranked[1] && ranked[1].matches === ranked[0].matches)) return null;
+  return ranked[0].vendor;
+}
+
 function getProductAliases(item) {
   const full = normalize(item?.name);
   const withoutParenthetical = normalize(String(item?.name || "").replace(/\([^)]*\)/g, " "));
@@ -107,54 +121,108 @@ function findProductMatch(clause, items) {
   return { status: "matched", item: ranked[0].item };
 }
 
-function getQuantityWithoutProduct(clause, item) {
+function getQuantitiesWithoutProduct(clause, item) {
   let quantityText = normalize(clause);
   const aliases = getProductAliases(item).sort((left, right) => right.length - left.length);
   const directAlias = aliases.find((alias) => quantityText.includes(alias));
   if (directAlias) quantityText = quantityText.replace(directAlias, " ");
-  const match = quantityText.match(/\b\d+\b/);
-  return match ? Number(match[0]) : null;
+  return [...quantityText.matchAll(/\b\d+\b/g)].map((match) => Number(match[0]));
 }
 
-function splitExceptionClauses(query) {
-  const exceptMatch = query.match(/\bexcept\b(.+)$/);
-  const missingMatch = query.match(/\bmissing\b(.+)$/);
-  const withoutMatch = query.match(/\bwithout\b(.+)$/);
-  const source = exceptMatch?.[1] || missingMatch?.[1] || withoutMatch?.[1] || query;
-  return source
-    .split(/\s*(?:,|;|\band\b)\s*/)
+function splitNarrativeClauses(value) {
+  return clean(value)
+    .replace(/[.;:\n]+/g, " | ")
+    .replace(/[\u2013\u2014-]+/g, " | ")
+    .split(/\s*(?:\||\bexcept\b|\bbut\b|\bhowever\b|\band\b|\bthen\b|\balso\b)\s*/i)
     .map(clean)
-    .filter(Boolean)
-    .filter((clause) => /\b(?:\d+|no|none|missing|short|only|didnt|get|got|received)\b/.test(clause));
+    .filter(Boolean);
 }
 
-function buildExceptionProposal(clause, item) {
+function explicitReceivedQuantity(clause, item) {
+  const normalizedClause = normalize(clause);
+  const actionMatch = normalizedClause.match(/\b(?:did get|got|received|accepted|came with|delivered)\s+(\d+)\b/);
+  if (actionMatch) return Number(actionMatch[1]);
+  for (const alias of getProductAliases(item).sort((left, right) => right.length - left.length)) {
+    const aliasIndex = normalizedClause.indexOf(alias);
+    if (aliasIndex < 0) continue;
+    const beforeProduct = normalizedClause.slice(0, aliasIndex);
+    const quantityMatch = beforeProduct.match(/(\d+)\s*(?:bottles?|cases?|kegs?|units?|of)?\s*$/);
+    if (quantityMatch) return Number(quantityMatch[1]);
+  }
+  return null;
+}
+
+function buildLineProposal(clause, item) {
   const orderedQuantity = Number(item.quantity) || 0;
-  const statedQuantity = getQuantityWithoutProduct(clause, item);
-  const noneReceived = /\b(?:no|none|didnt get|did not get)\b/.test(clause);
-  const receivedMode = /\b(?:only got|got only|only received|received only)\b/.test(clause);
-  let receivedQuantity;
-  if (noneReceived) {
+  const normalizedClause = normalize(clause);
+  const quantities = getQuantitiesWithoutProduct(clause, item);
+  const statedQuantity = quantities[0] ?? null;
+  const actualQuantity = explicitReceivedQuantity(clause, item);
+  const rejected = /\b(?:bad|broken|damaged|leaking|rejected|spoiled|unusable|wrong product)\b/.test(normalizedClause);
+  const unavailable = /\b(?:out of stock|unavailable|not available|didnt get|did not get|not delivered|never arrived|missing)\b/.test(normalizedClause);
+  const short = /\b(?:short|shorted|missing)\b/.test(normalizedClause);
+  const noneReceived = /\b(?:no|none|nothing|didnt get|did not get|never arrived|not delivered)\b/.test(normalizedClause);
+  const actualMode = /\b(?:did get|got|received|accepted|came with|delivered|only got|only received)\b/.test(normalizedClause);
+  const extraMode = /\b(?:extra|more than|instead of|plan said|ordered only|overage)\b/.test(normalizedClause);
+  let receivedQuantity = orderedQuantity;
+  let reason = "";
+  let handled = false;
+
+  if (rejected) {
     receivedQuantity = 0;
-  } else if (receivedMode) {
-    receivedQuantity = statedQuantity;
-  } else {
-    const missingQuantity = statedQuantity ?? 1;
-    receivedQuantity = orderedQuantity - missingQuantity;
+    reason = /\bbad\b/.test(normalizedClause) ? "Rejected: product was bad" : "Rejected at delivery";
+    handled = true;
+  } else if (unavailable) {
+    const missingQuantity = statedQuantity ?? orderedQuantity;
+    receivedQuantity = noneReceived ? 0 : Math.max(0, orderedQuantity - missingQuantity);
+    reason = /\bout of stock\b/.test(normalizedClause) ? "Out of stock" : "Missing from delivery";
+    handled = true;
+  } else if (short) {
+    receivedQuantity = Math.max(0, orderedQuantity - (statedQuantity ?? 1));
+    reason = `Received ${receivedQuantity} of ${orderedQuantity}`;
+    handled = true;
+  } else if (actualMode && actualQuantity !== null) {
+    receivedQuantity = actualQuantity;
+    handled = true;
+  } else if (extraMode && actualQuantity !== null) {
+    receivedQuantity = actualQuantity;
+    handled = true;
   }
-  if (!Number.isInteger(receivedQuantity) || receivedQuantity < 0 || receivedQuantity > orderedQuantity) {
-    return null;
+
+  if (!Number.isInteger(receivedQuantity) || receivedQuantity < 0 || receivedQuantity > 9999) {
+    return { line: null, handled };
   }
-  return {
+
+  const status = receivedQuantity > orderedQuantity
+    ? "extra"
+    : receivedQuantity >= orderedQuantity
+      ? "received"
+      : receivedQuantity > 0
+        ? "partial"
+        : rejected ? "rejected" : "not-received";
+  if (!reason && status === "extra") reason = `Received ${receivedQuantity}; ordered ${orderedQuantity}`;
+  if (!reason && status === "partial") reason = `Received ${receivedQuantity} of ${orderedQuantity}`;
+
+  return { handled, line: {
     itemId: clean(item.id),
     name: clean(item.name),
     quantity: orderedQuantity,
     unit: clean(item.unit),
     receivedQuantity,
-    status: receivedQuantity >= orderedQuantity
-      ? "received"
-      : receivedQuantity > 0 ? "partial" : "not-received",
-  };
+    status,
+    reason,
+  } };
+}
+
+function isGenericDeliveryClause(clause) {
+  const normalizedClause = normalize(clause);
+  return /\b(?:everything|all)\s+(?:came|arrived|was delivered|received)\b/.test(normalizedClause)
+    || /\b(?:full|complete)\s+(?:delivery|order)\b/.test(normalizedClause)
+    || /\b(?:delivery|order)\s+(?:came|arrived)\b/.test(normalizedClause);
+}
+
+function clauseNeedsProductClarification(clause) {
+  return /\b(?:out of stock|unavailable|not delivered|missing|short|shorted|rejected|bad|damaged|broken|extra)\b/.test(normalize(clause));
 }
 
 export function parseSmartReceivingTranscript(rawTranscript, orderTracking = {}) {
@@ -169,9 +237,13 @@ export function parseSmartReceivingTranscript(rawTranscript, orderTracking = {})
   }
 
   const vendorMatches = getVendorMatches(query, vendors);
+  const orderedVendors = vendors.filter((entry) => entry.ordered);
   const vendor = vendorMatches.length === 1
     ? vendorMatches[0]
-    : vendorMatches.length === 0 && vendors.length === 1 ? vendors[0] : null;
+    : vendorMatches.length === 0
+      ? inferVendorFromProducts(query, orderedVendors)
+        || (orderedVendors.length === 1 ? orderedVendors[0] : null)
+      : null;
   if (!vendor) {
     return {
       status: "needs-clarification",
@@ -187,8 +259,8 @@ export function parseSmartReceivingTranscript(rawTranscript, orderTracking = {})
   if (!items.length) {
     return { status: "blocked", question: `${clean(vendor.vendor)} has no current delivery lines.`, proposal: null };
   }
-  const fullDelivery = /\b(?:everything|all)\s+(?:came|arrived|received)\b|\b(?:full|complete)\s+(?:delivery|order)\b/.test(query);
-  const hasException = /\b(?:except|missing|short|without|didnt get|did not get|only got|only received)\b/.test(query);
+  const fullDelivery = /\b(?:everything|all)\s+(?:came|arrived|was delivered|received)\b|\b(?:full|complete)\s+(?:delivery|order)\b/.test(query);
+  const hasException = /\b(?:except|missing|short|without|out of stock|unavailable|rejected|bad|damaged|broken|didnt get|did not get|only got|only received|extra)\b/.test(query);
   if (!fullDelivery && !hasException) {
     return {
       status: "needs-clarification",
@@ -204,16 +276,16 @@ export function parseSmartReceivingTranscript(rawTranscript, orderTracking = {})
     unit: clean(item.unit),
     receivedQuantity: Number(item.quantity) || 0,
     status: "received",
+    reason: "",
   }));
 
-  if (hasException) {
-    const clauses = splitExceptionClauses(query);
-    if (!clauses.length) {
-      return { status: "needs-clarification", question: "Which product was short or missing?", proposal: null };
-    }
-    for (const clause of clauses) {
-      const match = findProductMatch(clause, items);
-      if (match.status !== "matched") {
+  const noteClauses = [];
+  const clauses = splitNarrativeClauses(transcript);
+  for (const clause of clauses) {
+    if (isGenericDeliveryClause(clause)) continue;
+    const match = findProductMatch(clause, items);
+    if (match.status !== "matched") {
+      if (clauseNeedsProductClarification(clause)) {
         return {
           status: "needs-clarification",
           question: match.status === "ambiguous"
@@ -222,17 +294,22 @@ export function parseSmartReceivingTranscript(rawTranscript, orderTracking = {})
           proposal: null,
         };
       }
-      const exception = buildExceptionProposal(clause, match.item);
-      if (!exception) {
-        return {
-          status: "needs-clarification",
-          question: `How many ${clean(match.item.name)} units were received?`,
-          proposal: null,
-        };
-      }
-      const index = proposals.findIndex((entry) => entry.itemId === exception.itemId);
-      proposals[index] = exception;
+      const normalizedClause = normalize(clause);
+      const mentionsVendorOnly = Object.values(VENDOR_ALIASES).flat().some((alias) => normalizedClause === normalize(alias));
+      if (!mentionsVendorOnly) noteClauses.push(clause);
+      continue;
     }
+    const result = buildLineProposal(clause, match.item);
+    if (!result.line) {
+      return {
+        status: "needs-clarification",
+        question: `How many ${clean(match.item.name)} units were received?`,
+        proposal: null,
+      };
+    }
+    const index = proposals.findIndex((entry) => entry.itemId === result.line.itemId);
+    proposals[index] = result.line;
+    if (!result.handled) noteClauses.push(clause);
   }
 
   return {
@@ -243,6 +320,7 @@ export function parseSmartReceivingTranscript(rawTranscript, orderTracking = {})
       vendorId: clean(vendor.id),
       vendor: clean(vendor.vendor),
       lines: proposals,
+      note: clean(noteClauses.join("; ")),
     },
   };
 }

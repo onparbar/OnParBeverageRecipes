@@ -7547,6 +7547,7 @@ function renderWeeklyPlan() {
       </div>
       <div class="weekly-plan-actions">
         ${ORDER_REHEARSAL_AVAILABLE && (planLocked || orderRehearsalMode) ? `<button class="ghost-button" id="toggle-order-rehearsal" type="button">${orderRehearsalMode ? "Exit Rehearsal" : "Rehearsal"}</button>` : ""}
+        ${orderRehearsalMode ? `<a class="ghost-button" href="/staff?rehearsal=1" target="_blank" rel="noopener">Open Staff Rehearsal</a>` : ""}
         ${planLocked ? `<button class="ghost-button" id="recall-weekly-plan" type="button"${weeklyPlanUpdating ? " disabled" : ""}>${weeklyPlanUpdating ? "Recalling..." : "Recall Plan"}</button>` : ""}
         ${requiresLateSnapshotReason ? `
           <label class="weekly-plan-late-reason">

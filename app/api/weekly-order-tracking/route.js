@@ -6,6 +6,7 @@ import {
   buildWeeklyOrderTracking,
 } from "../../../lib/weekly-order-tracking.mjs";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
+import { applyReceiptInventoryContributions } from "../../../lib/inventory-contributions.mjs";
 
 export const runtime = "nodejs";
 
@@ -84,6 +85,16 @@ export async function POST(request) {
       expectedRevision: state.revision,
       role,
     });
+    const savedTracking = buildWeeklyOrderTracking(saved.recommendations);
+    let inventoryUpdate = null;
+    if (["set-receipts", "set-receipt"].includes(body.action)) {
+      const vendorId = body.vendorId || savedTracking?.vendors?.find((vendor) => vendor.items.some((item) => item.id === body.itemId))?.id;
+      try {
+        inventoryUpdate = await applyReceiptInventoryContributions(savedTracking, vendorId, role);
+      } catch (error) {
+        inventoryUpdate = { warning: error?.message || "Delivery saved, but cabinet inventory needs review." };
+      }
+    }
     if (["create-draft", "approve-draft", "review-and-approve", "record-handoff", "set-ordered", "set-order-adjustment", "set-order-adjustments", "remove-order-adjustment"].includes(body.action)) {
       const trackedVendor = String(
         body.vendor
@@ -124,6 +135,7 @@ export async function POST(request) {
       message: "Weekly order tracking saved.",
       stateRevision: saved.revision,
       ...buildWeeklyOrderTracking(saved.recommendations),
+      inventoryUpdate,
     });
   } catch (error) {
     return errorResponse(error);

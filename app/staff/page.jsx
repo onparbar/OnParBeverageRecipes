@@ -9,6 +9,13 @@ export default function StaffRecipePage() {
   return (
     <div className="shell staff-recipe-shell" data-staff-dashboard="true">
       <link rel="stylesheet" href="/smart-receiving.css" />
+      <section className="staff-rehearsal-banner" id="staff-rehearsal-banner" hidden aria-live="polite">
+        <div>
+          <strong>Staff Rehearsal</strong>
+          <span>Try the latest Weekly Plan. Nothing here changes live records.</span>
+        </div>
+        <a className="logout-link" href="/staff">Exit rehearsal</a>
+      </section>
       <header className="topbar">
         <div>
           <p className="staff-view-mark">Staff View</p>
@@ -118,6 +125,10 @@ export default function StaffRecipePage() {
                 <input id="smart-receiving-name" type="text" maxLength="80" autoComplete="name" placeholder="Employee name" />
               </label>
             </div>
+            <label className="smart-receiving__note-field">
+              <span>Delivery note</span>
+              <textarea id="smart-receiving-note" rows="2" maxLength="1200" autoComplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="Anything the manager should know"></textarea>
+            </label>
             <div className="smart-receiving__actions">
               <button className="ghost-button" id="smart-receiving-review" type="button">Review</button>
               <button className="primary-button" id="smart-receiving-apply" type="button" disabled>Apply reviewed delivery</button>

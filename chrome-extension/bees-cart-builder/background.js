@@ -43,10 +43,27 @@ async function focusVendor(vendor) {
   if (!config) throw new Error("That vendor cart is not supported.");
   const tabs = await chrome.tabs.query({ url: config.urls });
   const tab = tabs.find((item) => item.id);
-  if (!tab) return chrome.tabs.create({ url: config.home, active: true });
+  if (!tab) {
+    return {
+      tab: await chrome.tabs.create({ url: config.home, active: true }),
+      notifyExistingPage: false,
+    };
+  }
   await chrome.tabs.update(tab.id, { active: true });
   if (tab.windowId) await chrome.windows.update(tab.windowId, { focused: true });
-  return tab;
+  if (["proof", "ohlq"].includes(vendor)) {
+    const currentUrl = String(tab.url || "").replace(/\/+$/, "");
+    const homeUrl = config.home.replace(/\/+$/, "");
+    if (currentUrl === homeUrl) {
+      await chrome.tabs.reload(tab.id);
+      return { tab, notifyExistingPage: false };
+    }
+    return {
+      tab: await chrome.tabs.update(tab.id, { url: config.home }),
+      notifyExistingPage: false,
+    };
+  }
+  return { tab, notifyExistingPage: true };
 }
 
 async function broadcastResult(result) {
@@ -74,9 +91,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       };
         await temporaryStorage.set({ [ORDER_KEY]: state });
         await temporaryStorage.remove(RESULT_KEY);
-      const tab = await focusVendor(state.vendor);
-      if (tab?.id) {
-        await chrome.tabs.sendMessage(tab.id, { type: "VENDOR_CART_START" }).catch(() => {});
+      const focused = await focusVendor(state.vendor);
+      if (focused.notifyExistingPage && focused.tab?.id) {
+        await chrome.tabs.sendMessage(focused.tab.id, { type: "VENDOR_CART_START" }).catch(() => {});
       }
       sendResponse({ ok: true, message: `${config.label} opened. The cart builder is working.` });
     })().catch((error) => sendResponse({ ok: false, message: error.message }));

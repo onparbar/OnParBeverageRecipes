@@ -51,6 +51,7 @@ const orderSummary = document.querySelector("#staff-order-summary");
 const orderList = document.querySelector("#staff-order-list");
 const smartReceivingTranscript = document.querySelector("#smart-receiving-transcript");
 const smartReceivingName = document.querySelector("#smart-receiving-name");
+const smartReceivingNote = document.querySelector("#smart-receiving-note");
 const smartReceivingSpeak = document.querySelector("#smart-receiving-speak");
 const smartReceivingReview = document.querySelector("#smart-receiving-review");
 const smartReceivingApply = document.querySelector("#smart-receiving-apply");
@@ -230,9 +231,37 @@ async function fetchSharedRecipeUpdates() {
   }
 }
 
+function isStaffRehearsalMode() {
+  return new URLSearchParams(window.location.search).get("rehearsal") === "1";
+}
+
+if (isStaffRehearsalMode()) {
+  const banner = document.querySelector("#staff-rehearsal-banner");
+  if (banner) banner.hidden = false;
+  document.body.classList.add("staff-rehearsal-mode");
+  const liveFetch = window.fetch.bind(window);
+  window.fetch = (input, options = {}) => {
+    const method = clean(options.method || (typeof input === "object" ? input?.method : "GET")).toUpperCase();
+    const inputUrl = typeof input === "string" ? input : input?.url || "";
+    const pathname = new URL(inputUrl, window.location.origin).pathname;
+    if (!["GET", "HEAD"].includes(method) && pathname.startsWith("/api/")) {
+      return Promise.resolve(new Response(JSON.stringify({
+        error: "Staff Rehearsal does not save live changes.",
+        code: "STAFF_REHEARSAL_READ_ONLY",
+      }), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }
+    return liveFetch(input, options);
+  };
+}
+
 async function fetchStaffPrepPlan() {
   try {
-    const response = await fetch("/api/staff-prep-plan", {
+    const response = await fetch(isStaffRehearsalMode()
+      ? "/api/staff-prep-plan?rehearsal=1"
+      : "/api/staff-prep-plan", {
       cache: "no-store",
       credentials: "same-origin",
       headers: { Accept: "application/json" },
@@ -411,6 +440,12 @@ function renderWeeklyOrderTracking() {
       : "The manager has not recorded who placed this order yet.";
     header.append(heading, ordered);
     section.append(header);
+    if (vendor.deliveryNote) {
+      const note = document.createElement("p");
+      note.className = "staff-order-delivery-note";
+      note.textContent = vendor.deliveryNote;
+      section.append(note);
+    }
     (vendor.items || []).forEach((item) => section.append(createOrderReceiptItem(item)));
     orderList.append(section);
   });
@@ -462,7 +497,6 @@ function createOrderReceiptItem(item) {
   const quantityInput = document.createElement("input");
   quantityInput.type = "number";
   quantityInput.min = "0";
-  quantityInput.max = String(number(item.quantity));
   quantityInput.step = "1";
   quantityInput.inputMode = "numeric";
   quantityInput.value = String(item.status === "pending" || item.status === "received"
@@ -513,8 +547,8 @@ function createOrderReceiptItem(item) {
       ? "received"
       : receivedQuantity > 0 ? "partial" : "not-received";
     const handledBy = clean(nameInput.value);
-    if (!Number.isInteger(receivedQuantity) || receivedQuantity < 0 || receivedQuantity > number(item.quantity)) {
-      rowStatus.textContent = `Enter a whole quantity from 0 to ${formatNumber(item.quantity)}.`;
+    if (!Number.isInteger(receivedQuantity) || receivedQuantity < 0 || receivedQuantity > 9999) {
+      rowStatus.textContent = "Enter a whole quantity from 0 to 9,999.";
       rowStatus.dataset.state = "error";
       quantityInput.focus();
       return;
@@ -578,17 +612,57 @@ function renderSmartReceivingProposal(proposal) {
   if (!smartReceivingReviewList) return;
   smartReceivingReviewList.replaceChildren();
   const list = document.createElement("ul");
-  proposal.lines.forEach((line) => {
+  const exceptions = proposal.lines.filter((line) => line.status !== "received");
+  exceptions.forEach((line) => {
     const row = document.createElement("li");
-    if (line.status !== "received") row.dataset.state = "short";
+    row.dataset.state = line.status === "extra" ? "extra" : "short";
     const name = document.createElement("strong");
     name.textContent = line.name;
-    const quantity = document.createElement("span");
-    quantity.textContent = `${formatNumber(line.receivedQuantity)} of ${formatNumber(line.quantity)} ${clean(line.unit)}`;
-    row.append(name, quantity);
+    const controls = document.createElement("span");
+    controls.className = "smart-receiving__review-controls";
+    const quantity = document.createElement("input");
+    quantity.type = "number";
+    quantity.min = "0";
+    quantity.max = "9999";
+    quantity.step = "1";
+    quantity.value = String(line.receivedQuantity);
+    quantity.setAttribute("aria-label", `Quantity received for ${line.name}`);
+    const reason = document.createElement("select");
+    reason.setAttribute("aria-label", `Delivery result for ${line.name}`);
+    [["short", "Short"], ["out-of-stock", "Out of stock"], ["rejected", "Rejected"], ["extra", "Extra"], ["received", "Received"]].forEach(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      option.selected = line.reason === value || (line.reason === "missing" && value === "short");
+      reason.append(option);
+    });
+    const update = () => {
+      line.receivedQuantity = Math.max(0, Math.round(number(quantity.value)));
+      line.reason = reason.value;
+      line.status = line.receivedQuantity > line.quantity ? "extra"
+        : line.reason === "rejected" && line.receivedQuantity === 0 ? "rejected"
+          : line.receivedQuantity >= line.quantity ? "received"
+            : line.receivedQuantity > 0 ? "partial" : "not-received";
+      row.dataset.state = line.status === "extra" ? "extra" : "short";
+    };
+    quantity.addEventListener("input", update);
+    reason.addEventListener("change", update);
+    controls.append(quantity, reason);
+    row.append(name, controls);
     list.append(row);
   });
-  smartReceivingReviewList.append(list);
+  if (exceptions.length) smartReceivingReviewList.append(list);
+  const receivedCount = proposal.lines.length - exceptions.length;
+  if (receivedCount) {
+    const received = document.createElement("details");
+    received.className = "smart-receiving__received";
+    const summary = document.createElement("summary");
+    summary.textContent = `${formatNumber(receivedCount)} received as ordered`;
+    const names = document.createElement("p");
+    names.textContent = proposal.lines.filter((line) => line.status === "received").map((line) => line.name).join(", ");
+    received.append(summary, names);
+    smartReceivingReviewList.append(received);
+  }
 }
 
 function reviewSmartReceivingTranscript() {
@@ -599,6 +673,9 @@ function reviewSmartReceivingTranscript() {
     return;
   }
   smartReceivingProposal = result.proposal;
+  if (result.proposal.note && smartReceivingNote) {
+    smartReceivingNote.value = [clean(smartReceivingNote.value), result.proposal.note].filter(Boolean).join("; ");
+  }
   renderSmartReceivingProposal(result.proposal);
   smartReceivingApply.disabled = false;
   const shortCount = result.proposal.lines.filter((line) => line.status !== "received").length;
@@ -673,7 +750,9 @@ async function applySmartReceivingProposal() {
           itemId: line.itemId,
           status: line.status,
           receivedQuantity: line.receivedQuantity,
+          reason: line.reason,
         })),
+        note: clean(smartReceivingNote?.value),
       }),
     });
     const result = await parseJsonResponse(response);
@@ -681,10 +760,14 @@ async function applySmartReceivingProposal() {
     const savedLineCount = smartReceivingProposal.lines.length;
     orderTracking = normalizeOrderTracking(result);
     smartReceivingTranscript.value = "";
+    if (smartReceivingNote) smartReceivingNote.value = "";
     clearSmartReceivingProposal();
     renderWeeklyOrderTracking();
     renderStaffOverview();
-    setSmartReceivingStatus(`${formatNumber(savedLineCount)} delivery lines saved.`);
+    const inventoryMessage = result?.inventoryUpdate?.warning
+      ? result.inventoryUpdate.warning
+      : result?.inventoryUpdate ? " Cabinet inventory updated." : "";
+    setSmartReceivingStatus(`${formatNumber(savedLineCount)} delivery lines saved.${inventoryMessage}`, result?.inventoryUpdate?.warning ? "error" : "");
   } catch (error) {
     smartReceivingApply.disabled = false;
     setSmartReceivingStatus(error?.message || "The reviewed delivery could not be saved.", "error");
@@ -816,6 +899,24 @@ function createStaffPrepItem(item) {
     ].filter(Boolean);
   meta.textContent = labelDetails.join(" · ");
   details.append(meta);
+  let actualQuantityInput = null;
+  if (isLiquorRefill) {
+    const actualField = document.createElement("label");
+    actualField.className = "staff-prep-name-field";
+    const actualLabel = document.createElement("span");
+    actualLabel.textContent = "Bottles actually added";
+    actualQuantityInput = document.createElement("input");
+    actualQuantityInput.type = "number";
+    actualQuantityInput.min = "1";
+    actualQuantityInput.max = "99";
+    actualQuantityInput.step = "1";
+    actualQuantityInput.inputMode = "numeric";
+    actualQuantityInput.autoComplete = "off";
+    actualQuantityInput.dataset.lpignore = "true";
+    actualQuantityInput.value = String(Math.max(1, Number(item.actualQuantity ?? item.quantity) || 1));
+    actualField.append(actualLabel, actualQuantityInput);
+    details.append(actualField);
+  }
   if (item.completed && item.completedAt) {
     const completion = document.createElement("small");
     completion.textContent = `Completed ${formatCompletionTime(item.completedAt)}`;
@@ -860,6 +961,14 @@ function createStaffPrepItem(item) {
       preparedInput.focus();
       return;
     }
+    const actualQuantity = isLiquorRefill ? Number(actualQuantityInput?.value) : null;
+    if (checkbox.checked && isLiquorRefill
+      && (!Number.isInteger(actualQuantity) || actualQuantity < 1 || actualQuantity > 99)) {
+      rowStatus.textContent = "Enter the number of bottles actually added.";
+      rowStatus.dataset.state = "error";
+      actualQuantityInput?.focus();
+      return;
+    }
     saveButton.disabled = true;
     checkbox.disabled = true;
     preparedInput.disabled = true;
@@ -867,6 +976,21 @@ function createStaffPrepItem(item) {
     rowStatus.textContent = "";
     delete rowStatus.dataset.state;
     try {
+      if (isStaffRehearsalMode()) {
+        const collection = isLiquorRefill ? prepPlan.liquorRefills : prepPlan.items;
+        const rehearsalItem = collection.find((entry) => entry.id === item.id);
+        if (rehearsalItem) {
+          rehearsalItem.completed = checkbox.checked;
+          rehearsalItem.preparedBy = checkbox.checked ? preparedBy : "";
+          rehearsalItem.completedAt = checkbox.checked ? new Date().toISOString() : "";
+          rehearsalItem.updatedAt = rehearsalItem.completedAt;
+          if (isLiquorRefill) rehearsalItem.actualQuantity = actualQuantity;
+        }
+        prepPlan.completedCount = prepPlan.items.filter((entry) => entry.completed).length;
+        prepPlan.liquorRefillCompletedCount = prepPlan.liquorRefills.filter((entry) => entry.completed).length;
+        renderStaffPrepPlan();
+        return;
+      }
       const response = await fetch("/api/staff-prep-plan", {
         method: "POST",
         credentials: "same-origin",
@@ -875,6 +999,7 @@ function createStaffPrepItem(item) {
           generatedAt: prepPlan.generatedAt,
           itemId: item.id,
           completed: checkbox.checked,
+          actualQuantity: isLiquorRefill ? actualQuantity : undefined,
           preparedBy,
         }),
       });
@@ -893,6 +1018,10 @@ function createStaffPrepItem(item) {
       };
       renderStaffPrepPlan();
       renderStaffOverview();
+      if (result?.inventoryUpdate?.warning) {
+        prepStatusPanel.textContent = result.inventoryUpdate.warning;
+        prepStatusPanel.dataset.state = "error";
+      }
     } catch (error) {
       saveButton.disabled = false;
       checkbox.disabled = false;

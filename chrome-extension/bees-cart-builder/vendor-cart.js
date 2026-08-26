@@ -56,6 +56,7 @@ function renderOverlay(state, message) {
   }
   const added = (state.results || []).filter((result) => result.status === "added").length;
   const missed = (state.results || []).filter((result) => result.status !== "added");
+  const finished = ["ready", "needs_review", "cancelled"].includes(state.status);
   host.shadowRoot.innerHTML = `
     <style>
       .card{background:#fffaf0;border:2px solid #2d7568;border-radius:18px;box-shadow:0 16px 44px #17342f33;padding:18px}
@@ -68,10 +69,10 @@ function renderOverlay(state, message) {
       <p>${escapeHtml(message)}</p>
       <p class="count">${added} of ${state.lines.length} added</p>
       ${missed.length ? `<ul>${missed.map((item) => `<li class="warn">${escapeHtml(item.name)}: ${escapeHtml(item.message)}</li>`).join("")}</ul>` : ""}
-      <button type="button" data-onpar-stop>${state.status === "ready" ? "Close" : "Stop"}</button>
+      <button type="button" data-onpar-stop>${finished ? "Close" : "Stop"}</button>
     </div>`;
   host.shadowRoot.querySelector("[data-onpar-stop]")?.addEventListener("click", async () => {
-    if (state.status !== "ready") await finish(state, "cancelled", "Stopped before checkout.");
+    if (!finished) await finish(state, "cancelled", "Stopped before checkout.");
     host.remove();
   }, { once: true });
 }
@@ -122,6 +123,13 @@ function setInputValue(input, value) {
   input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function vendorSearchUrl(vendor, term) {
+  if (!["proof", "ohlq"].includes(vendor)) return "";
+  const url = new URL("/search", location.origin);
+  url.searchParams.set(vendor === "ohlq" ? "keyword" : "text", term);
+  return url.href;
+}
+
 function addButtons() {
   return [...document.querySelectorAll('button, input[type="button"], input[type="submit"]')].filter((button) => {
     const label = clean(button.textContent || button.value);
@@ -146,7 +154,7 @@ function candidateForButton(button) {
 
 function lineScore(candidate, line) {
   const sku = canonical(line.vendorSku);
-  if (sku && candidate.text.includes(sku)) return 1000;
+  if (sku) return candidate.text.includes(sku) ? 1000 : 0;
   const tokens = canonical(line.name).split(" ").filter((token) => token.length > 1);
   if (!tokens.length || !tokens.every((token) => candidate.text.includes(token))) return 0;
   return tokens.length;
@@ -175,6 +183,25 @@ function setQuantity(control, quantity) {
   return true;
 }
 
+function cartLinkSnapshot() {
+  return [...document.querySelectorAll('a[href*="cart" i], a[href*="basket" i]')]
+    .filter(visible)
+    .map((link) => clean(link.textContent))
+    .join("|");
+}
+
+async function waitForAddConfirmation(previousCart, timeout = 8000) {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    const pageText = clean(document.body?.innerText);
+    const currentCart = cartLinkSnapshot();
+    if (/added to (?:cart|basket)|cart updated/i.test(pageText)) return true;
+    if (currentCart && previousCart && currentCart !== previousCart) return true;
+    await delay(200);
+  }
+  return false;
+}
+
 async function addExactMatch(state, lineIndex) {
   const line = state.lines[lineIndex];
   const matches = exactMatches(line);
@@ -193,20 +220,29 @@ async function addExactMatch(state, lineIndex) {
   if (!setQuantity(match.quantity, line.quantity)) {
     return { lineIndex, name: line.name, status: "unmatched", message: "The requested quantity is not available in the vendor control." };
   }
-  await delay(120);
+  await delay(750);
+  const previousCart = cartLinkSnapshot();
   match.button.click();
-  await delay(650);
+  if (!await waitForAddConfirmation(previousCart)) {
+    return { lineIndex, name: line.name, status: "unmatched", message: "The vendor did not confirm that this item was added." };
+  }
+  await delay(250);
   return { lineIndex, name: line.name, status: "added", quantity: line.quantity, message: "Added" };
 }
 
 async function submitSearch(state, lineIndex) {
-  const input = searchInput();
-  if (!input) return false;
   const line = state.lines[lineIndex];
   const term = line.vendorSku || line.name;
   state.phase = "search-results";
   state.searchCursor = lineIndex;
   await saveState(state);
+  const destination = vendorSearchUrl(state.vendor, term);
+  if (destination) {
+    location.assign(destination);
+    return true;
+  }
+  const input = searchInput();
+  if (!input) return false;
   setInputValue(input, term);
   const form = input.closest("form");
   if (form?.requestSubmit) form.requestSubmit();
@@ -274,7 +310,17 @@ async function start() {
       state.phase = "start";
       await saveState(state);
     }
-    await finish(state);
+    const missed = state.results.filter((result) => result.status !== "added");
+    if (missed.length) {
+      const added = state.results.length - missed.length;
+      await finish(
+        state,
+        "needs_review",
+        `${added} of ${state.lines.length} added. Review the listed items before continuing. Nothing was submitted.`,
+      );
+    } else {
+      await finish(state);
+    }
   } catch (error) {
     state.results.push({ name: VENDOR_CONFIG[vendor].label, status: "unmatched", message: error.message });
     await finish(state, "needs_review", `${VENDOR_CONFIG[vendor].label} changed before the cart could be completed. Review the listed items manually.`);

@@ -8,6 +8,8 @@ import {
   applyStaffPrepPlanUpdate,
   buildStaffPrepPlan,
 } from "../../../lib/staff-prep-plan.mjs";
+import { applyPrepInventoryContributions } from "../../../lib/inventory-contributions.mjs";
+import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 
 export const runtime = "nodejs";
 
@@ -59,11 +61,20 @@ function errorResponse(error) {
 
 export async function GET(request) {
   try {
-    await requireDashboardRequestRole(request);
+    const role = await requireDashboardRequestRole(request);
     const state = await readParAgentState();
-    const recommendations = getCurrentRecommendations(state);
+    const rehearsal = role === "owner"
+      && new URL(request.url).searchParams.get("rehearsal") === "1";
+    const recommendations = rehearsal && state?.recommendations
+      ? { ...state.recommendations, prepChecklist: {} }
+      : getCurrentRecommendations(state);
     if (!state.initialized || !recommendations) return jsonResponse(unavailablePlan(state));
-    return jsonResponse({ available: true, message: "", ...buildStaffPrepPlan(recommendations) });
+    return jsonResponse({
+      available: true,
+      message: "",
+      rehearsal,
+      ...buildStaffPrepPlan(recommendations),
+    });
   } catch (error) {
     return errorResponse(error);
   }
@@ -77,9 +88,12 @@ export async function POST(request) {
     if (!state.initialized || !recommendations) {
       return jsonResponse(unavailablePlan(state), 409);
     }
+    const body = await getBody(request);
+    const priorPlan = buildStaffPrepPlan(recommendations);
+    const target = [...priorPlan.items, ...priorPlan.liquorRefills].find((item) => item.id === String(body.itemId || ""));
     const updatedRecommendations = applyStaffPrepPlanUpdate(
       recommendations,
-      await getBody(request),
+      body,
     );
     const nextRevision = Number(state.revision) + 1;
     const saved = await writeParAgentState({
@@ -92,9 +106,43 @@ export async function POST(request) {
       expectedRevision: state.revision,
       role,
     });
+    let inventoryUpdate = null;
+    const requestedActualQuantity = Number(body.actualQuantity ?? target?.quantity);
+    const actualQuantityChanged = target?.kind === "liquor-refill"
+      && body.completed === true
+      && target.completed === true
+      && requestedActualQuantity !== Number(target.actualQuantity);
+    if (target && (target.completed !== body.completed || actualQuantityChanged)) {
+      try {
+        inventoryUpdate = await applyPrepInventoryContributions({
+          target,
+          generatedAt: recommendations.generatedAt,
+          completed: body.completed,
+          actualQuantity: body.actualQuantity,
+          role,
+        });
+        const isLiquorRefill = target.kind === "liquor-refill";
+        recordDashboardActivity({
+          area: "Inventory",
+          action: body.completed
+            ? (isLiquorRefill ? "added liquor to keg" : "consumed cocktail ingredients")
+            : (isLiquorRefill ? "reopened liquor refill" : "restored cocktail ingredients"),
+          role,
+          revision: saved.revision,
+          summary: `${target.displayName || target.name} inventory movement recorded from the staff prep checklist.`,
+        }).catch(() => {});
+      } catch (error) {
+        inventoryUpdate = {
+          warning: error?.message || (target.kind === "liquor-refill"
+            ? "The refill was saved, but cabinet inventory needs review."
+            : "The cocktail was saved, but ingredient inventory needs review."),
+        };
+      }
+    }
     return jsonResponse({
       available: true,
       message: "Preparation checklist saved.",
+      inventoryUpdate,
       ...buildStaffPrepPlan(saved.recommendations),
     });
   } catch (error) {
