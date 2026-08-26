@@ -6,8 +6,8 @@ import {
 
 const VENDOR_ACTIONS = Object.freeze({
   heidelberg: { label: "Build BEES cart", vendor: "heidelberg" },
-  proof: { label: "Open Proof", vendor: "proof" },
-  ohlq: { label: "Open OHLQ", vendor: "ohlq" },
+  proof: { label: "Build Proof cart", vendor: "proof" },
+  ohlq: { label: "Build OHLQ cart", vendor: "ohlq" },
 });
 
 function statusLabel(order) {

@@ -256,7 +256,7 @@ test("orders a beer keg only when total stock is below average weekly usage plus
   assert.match(atTarget.reason, /covers 0\.5\/week plus 0\.5 keg/);
 });
 
-test("Main beer keeps one extra keg and can recommend two for a high-usage tap", () => {
+test("high-usage Main beer uses weekly average plus one unopened backup keg", () => {
   const tap = {
     ...beerTap("MILLER LITE 1", 22),
     key: "main-22",
@@ -272,9 +272,10 @@ test("Main beer keeps one extra keg and can recommend two for a high-usage tap",
 
   assert.equal(result.currentStockKegs, 0.1);
   assert.equal(result.avgWeeklyKegs, 0.8);
-  assert.equal(result.targetStockKegs, 2.1);
-  assert.equal(result.orderQty, 2);
-  assert.match(result.reason, /keep 2 unopened backup kegs/);
+  assert.equal(result.targetStockKegs, 1.8);
+  assert.equal(result.orderQty, 1);
+  assert.match(result.reason, /0\.8\/week plus 1 keg/);
+  assert.doesNotMatch(result.reason, /High-coverage/);
 });
 
 test("standard Main beer orders one keg when connected plus on hand is below weekly average plus one backup", () => {
@@ -298,7 +299,7 @@ test("standard Main beer orders one keg when connected plus on hand is below wee
   assert.equal(result.orderQty, 1);
 });
 
-test("named Main beers keep high coverage even below the usage threshold", () => {
+test("formerly high-coverage Main beers use the standard formula", () => {
   ["Astra Red Cream Soda 1", "Blake's Triple Jam 1"].forEach((name, index) => {
     const tap = {
       ...beerTap(name, 45 + index),
@@ -314,10 +315,43 @@ test("named Main beers keep high coverage even below the usage threshold", () =>
     );
 
     assert.equal(result.avgWeeklyKegs, 0.4);
-    assert.equal(result.targetStockKegs, 2.5);
-    assert.equal(result.orderQty, 1);
-    assert.match(result.reason, /keep 2 unopened backup kegs/);
+    assert.equal(result.currentStockKegs, 1.5);
+    assert.equal(result.targetStockKegs, 1.4);
+    assert.equal(result.orderQty, 0);
+    assert.doesNotMatch(result.reason, /High-coverage/);
   });
+});
+
+test("uses the latest six saved PMB weeks for shared usage averages", () => {
+  const tap = {
+    ...beerTap("COORS LIGHT 1", 25),
+    key: "main-25",
+    wall: "Main",
+  };
+  const result = buildRawRecommendation(
+    tap,
+    { fillLevelPercent: 100, rawKegSize: 1984, rawKegSizeDp: 0 },
+    [],
+    { onHandOverrides: {}, onDeckOverrides: {} },
+    {},
+    {
+      displayUnit: "kegs",
+      average: 4,
+      history: [
+        { value: 0.6 },
+        { value: 0.5 },
+        { value: null },
+        { value: 0.4 },
+        { value: 0.3 },
+        { value: 0.2 },
+        { value: 5 },
+      ],
+    },
+  );
+
+  assert.equal(result.avgWeeklyKegs, 0.4);
+  assert.equal(result.targetStockKegs, 1.4);
+  assert.equal(result.orderQty, 1);
 });
 
 test("Guinness uses the standard Main beer formula", () => {
@@ -370,7 +404,7 @@ test("counts saved on-hand kegs for Vodka Cran", () => {
   assert.equal(result.orderQty, 0);
 });
 
-test("uses the saved Weekly Usage average instead of a separate recent PMB average", () => {
+test("uses the latest saved Weekly Usage values instead of the stored all-history average", () => {
   const tap = cocktailTap("BLUE DOT (SVEDKA) 1", 57);
   const result = buildRawRecommendation(
     tap,
@@ -386,7 +420,7 @@ test("uses the saved Weekly Usage average instead of a separate recent PMB avera
     },
   );
 
-  assert.equal(result.avgWeeklyKegs, 0.214);
+  assert.equal(result.avgWeeklyKegs, 0.213);
   assert.equal(result.targetStockKegs, 0.46);
   assert.deepEqual(result.weeklyKegs, [0.23, 0.25, 0.16]);
 });

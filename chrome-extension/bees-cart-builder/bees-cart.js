@@ -1,4 +1,3 @@
-const ORDER_KEY = "onParBeesPendingOrder";
 const QUICK_ORDER_PATH = "/globalrecommendation/entire/order";
 const SEARCH_PATH = "/catalogsearch/result/";
 const OVERLAY_ID = "onpar-bees-cart-builder";
@@ -150,7 +149,7 @@ function renderOverlay(state, message) {
 
 async function saveState(state) {
   const response = await chrome.runtime.sendMessage({
-    type: "SAVE_BEES_CART_STATE",
+    type: "SAVE_VENDOR_CART_STATE",
     state,
   });
   if (!response?.ok) throw new Error(response?.message || "Could not save the temporary BEES cart state.");
@@ -192,7 +191,7 @@ async function finish(state, status = "ready", message = "Cart ready for your re
   };
   state.status = status;
   renderOverlay(state, message);
-  chrome.runtime.sendMessage({ type: "BEES_CART_FINISHED", result });
+  chrome.runtime.sendMessage({ type: "VENDOR_CART_FINISHED", result });
 }
 
 async function runQuickOrder(state) {
@@ -256,10 +255,10 @@ async function runSearch(state) {
 let running = false;
 async function start() {
   if (running) return;
-  const response = await chrome.runtime.sendMessage({ type: "GET_BEES_CART_STATE" });
+  const response = await chrome.runtime.sendMessage({ type: "GET_VENDOR_CART_STATE" });
   if (!response?.ok) throw new Error(response?.message || "Could not load the temporary BEES cart state.");
   const state = response.state;
-  if (!state || !["pending", "working"].includes(state.status)) return;
+  if (!state || state.vendor !== "heidelberg" || !["pending", "working"].includes(state.status)) return;
   running = true;
   state.status = "working";
   await saveState(state);
@@ -275,7 +274,7 @@ async function start() {
 }
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type === "BEES_CART_START") void start();
+  if (message?.type === "VENDOR_CART_START") void start();
 });
 
 void start();

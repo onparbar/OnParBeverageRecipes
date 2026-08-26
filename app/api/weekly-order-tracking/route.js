@@ -84,7 +84,7 @@ export async function POST(request) {
       expectedRevision: state.revision,
       role,
     });
-    if (["create-draft", "approve-draft", "review-and-approve", "record-handoff", "set-ordered", "set-order-adjustment", "remove-order-adjustment"].includes(body.action)) {
+    if (["create-draft", "approve-draft", "review-and-approve", "record-handoff", "set-ordered", "set-order-adjustment", "set-order-adjustments", "remove-order-adjustment"].includes(body.action)) {
       const trackedVendor = String(
         body.vendor
         || priorTracking?.vendors?.find((vendor) => vendor.id === body.vendorId)?.vendor
@@ -92,7 +92,7 @@ export async function POST(request) {
       ).slice(0, 80);
       const action = ["approve-draft", "review-and-approve"].includes(body.action)
         ? "approved vendor draft"
-        : body.action === "set-order-adjustment"
+        : ["set-order-adjustment", "set-order-adjustments"].includes(body.action)
           ? "adjusted vendor order"
           : body.action === "remove-order-adjustment"
             ? "removed vendor order adjustment"

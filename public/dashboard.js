@@ -5379,7 +5379,7 @@ async function saveWeeklyOrderPlaced(vendorId, ordered, orderedBy) {
 }
 
 async function saveVendorOrderDraftAction(payload) {
-  const adjusting = ["set-order-adjustment", "remove-order-adjustment"].includes(payload.action);
+  const adjusting = ["set-order-adjustment", "set-order-adjustments", "remove-order-adjustment"].includes(payload.action);
   const approving = ["approve-draft", "review-and-approve"].includes(payload.action);
   weeklyOrderTrackingMessage = approving ? "Reviewing vendor order..." : adjusting ? "Saving Weekly Plan changes..." : "Saving vendor draft...";
   try {
@@ -7040,6 +7040,21 @@ function renderVendorWorkflowProgress(workflow) {
   return `<div class="vendor-order-progress" aria-label="${escapeHtml(workflow.label)}">${["Review", "Order", "Placed", "Received"].map((label, index) => `<span class="${index + 1 < workflow.step ? "is-complete" : index + 1 === workflow.step ? "is-current" : ""}">${escapeHtml(label)}</span>`).join("")}</div>`;
 }
 
+function findDraftLineAdjustmentCatalogItem(line, vendor) {
+  const internalId = clean(line?.internalId || line?.id);
+  const vendorSku = clean(line?.vendorSku);
+  const productName = clean(line?.productName || line?.name).toLowerCase();
+  return weeklyOrderTracking.adjustmentCatalog.find((item) => (
+    item.vendor === vendor
+    && Number(item.currentPlanQuantity) > 0
+    && (
+      (internalId && clean(item.internalId) === internalId)
+      || (vendorSku && clean(item.vendorSku) === vendorSku)
+      || clean(item.vendorProductName || item.name).toLowerCase() === productName
+    )
+  )) || null;
+}
+
 function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) {
   const model = providedModel || getVendorOrderDraftModel(plan, freshness);
   currentVendorOrderDraftViews = new Map();
@@ -7065,17 +7080,26 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
           const workflow = getVendorWorkflowState(draft, saved, vendor);
           const manager = clean(saved.approvedBy || saved.createdBy || defaultManager);
           const missingItems = (vendor?.items || []).filter((item) => ["partial", "not-received"].includes(item.status));
+          const removableLineCount = approved
+            ? 0
+            : draft.lines.filter((line) => findDraftLineAdjustmentCatalogItem(line, draft.vendor)).length;
           return `
             <form class="vendor-order-draft-card vendor-order-draft-card--${approved ? "approved" : draft.status}" data-vendor-order-draft="${escapeHtml(draft.vendor)}" data-vendor-order-draft-id="${escapeHtml(draft.id)}" data-vendor-order-draft-status="${escapeHtml(saved.status || draft.status)}">
               <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(draft.lineCount)} item${draft.lineCount === 1 ? "" : "s"} · ${money(draft.estimatedTotal)}</p></div><span>${escapeHtml(workflow.label)}</span></header>
               ${renderVendorWorkflowProgress(workflow)}
               <details class="vendor-order-draft-lines"${!approved || draft.blockers.length ? " open" : ""}>
                 <summary>${approved ? "View order" : `Review ${formatNumber(draft.lineCount)} item${draft.lineCount === 1 ? "" : "s"}`}</summary>
-                ${draft.lines.map((line) => `<div><strong>${escapeHtml(line.productName)}</strong><span>${escapeHtml(line.vendor === "Bonbright" ? "Text order" : line.vendorSku ? `SKU ${line.vendorSku}` : "SKU needed")} · ${line.requestedCases ? `${formatNumber(line.requestedCases)} case${line.requestedCases === 1 ? "" : "s"} / ` : ""}${formatNumber(line.requestedUnits)} unit${line.requestedUnits === 1 ? "" : "s"} · ${line.extendedCost ? money(line.extendedCost) : "Price needed"}</span><small>${escapeHtml(line.reason)}</small></div>`).join("")}
+                ${draft.lines.map((line) => {
+                  const catalogItem = approved ? null : findDraftLineAdjustmentCatalogItem(line, draft.vendor);
+                  const lineDetails = `${line.vendor === "Bonbright" ? "Text order" : line.vendorSku ? `SKU ${line.vendorSku}` : "SKU needed"} · ${line.requestedCases ? `${formatNumber(line.requestedCases)} case${line.requestedCases === 1 ? "" : "s"} / ` : ""}${formatNumber(line.requestedUnits)} unit${line.requestedUnits === 1 ? "" : "s"} · ${line.extendedCost ? money(line.extendedCost) : "Price needed"}`;
+                  const copy = `<span class="vendor-order-draft-line__copy"><strong>${escapeHtml(line.productName)}</strong><span>${escapeHtml(lineDetails)}</span></span>`;
+                  return `<div class="vendor-order-draft-line">${catalogItem ? `<label class="vendor-order-draft-line__select"><input type="checkbox" data-order-draft-remove-line value="${escapeHtml(catalogItem.catalogId)}" aria-label="Remove ${escapeHtml(line.productName)} from this order">${copy}</label>` : copy}<small>${escapeHtml(line.reason)}</small></div>`;
+                }).join("")}
               </details>
               ${draft.blockers.length ? `<div class="vendor-order-draft-issues vendor-order-draft-issues--blocked"><strong>Approval blockers</strong>${draft.blockers.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
               ${!approved && draft.warnings.length ? `<div class="vendor-order-draft-issues"><strong>Review</strong>${draft.warnings.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
               ${!approved ? `
+                ${removableLineCount ? `<div class="vendor-order-draft-bulk"><label><input type="checkbox" data-order-draft-select-all><span>Select all</span></label><button class="mini-button" type="button" data-order-draft-remove-selected disabled>Remove selected</button></div>` : ""}
                 <div class="vendor-order-draft-fields"><label><span>Reviewed by</span><input type="text" maxlength="80" autocomplete="name" data-order-draft-manager value="${escapeHtml(manager)}" placeholder="Manager name"></label></div>
                 <label class="vendor-order-draft-confirm"><input type="checkbox" data-order-draft-confirm><span>Confirm ${escapeHtml(draft.vendor)} · ${money(draft.estimatedTotal)} · ${formatNumber(draft.lineCount)} items</span></label>
                 <div class="vendor-order-draft-actions"><button class="primary-button" type="submit"${draft.blockers.length ? " disabled" : ""}>Review &amp; approve</button></div>
@@ -7103,12 +7127,14 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
   `;
 }
 
-function buildBeesCartRequest(view) {
+const CART_BUILDER_VENDORS = new Set(["heidelberg", "proof", "ohlq"]);
+
+function buildVendorCartRequest(view) {
   const order = view?.order;
   return {
     requestId: `${order.id}:${Date.now()}`,
     orderId: order.id,
-    vendor: "heidelberg",
+    vendor: order.vendorKey,
     approved: order.actionsEnabled === true,
     expectedTotal: order.expectedTotal,
     lineCount: order.lineCount,
@@ -7123,29 +7149,29 @@ function buildBeesCartRequest(view) {
   };
 }
 
-function sendBeesCartRequest(view) {
-  const payload = buildBeesCartRequest(view);
+function sendVendorCartRequest(view) {
+  const payload = buildVendorCartRequest(view);
   return new Promise((resolve, reject) => {
     const timeout = window.setTimeout(() => {
       window.removeEventListener("message", receiveResponse);
-      reject(new Error("Install or enable the On Par BEES Cart Builder in Chrome."));
+      reject(new Error("Install or enable the On Par Vendor Cart Builder in Chrome."));
     }, 1800);
     function receiveResponse(event) {
       if (
         event.source !== window ||
         event.origin !== window.location.origin ||
-        event.data?.source !== "onpar-bees-cart-builder" ||
+        event.data?.source !== "onpar-vendor-cart-builder" ||
         event.data?.requestId !== payload.requestId
       ) return;
       window.clearTimeout(timeout);
       window.removeEventListener("message", receiveResponse);
-      if (event.data.type === "ONPAR_BEES_BUILD_ACCEPTED") resolve(event.data);
-      else reject(new Error(event.data.message || "The BEES cart helper could not start."));
+      if (event.data.type === "ONPAR_VENDOR_CART_BUILD_ACCEPTED") resolve(event.data);
+      else reject(new Error(event.data.message || "The vendor cart helper could not start."));
     }
     window.addEventListener("message", receiveResponse);
     window.postMessage({
       source: "onpar-dashboard",
-      type: "ONPAR_BEES_BUILD_REQUEST",
+      type: "ONPAR_VENDOR_CART_BUILD_REQUEST",
       payload,
     }, window.location.origin);
   });
@@ -7172,13 +7198,14 @@ function bindOwnerWeeklyOrderTrackingEvents() {
         button.textContent = "Simulated";
         return;
       }
-      if (view.order.vendorKey === "heidelberg") {
+      if (CART_BUILDER_VENDORS.has(view.order.vendorKey)) {
+        const vendorLabel = view.order.vendorKey === "heidelberg" ? "BEES" : view.order.vendor;
         const originalLabel = button.textContent;
         button.disabled = true;
-        button.textContent = "Opening BEES...";
+        button.textContent = `Opening ${vendorLabel}...`;
         try {
-          await sendBeesCartRequest(view);
-          button.textContent = "Sent to BEES";
+          await sendVendorCartRequest(view);
+          button.textContent = `Sent to ${vendorLabel}`;
           await saveVendorHandoffEvent(view, "opened_vendor");
         } catch (error) {
           button.disabled = false;
@@ -7292,6 +7319,49 @@ function bindOwnerWeeklyOrderTrackingEvents() {
         if (!clean(input.value)) input.value = manager;
       });
     });
+    const removableLines = [...form.querySelectorAll("[data-order-draft-remove-line]")];
+    const selectAll = form.querySelector("[data-order-draft-select-all]");
+    const removeSelected = form.querySelector("[data-order-draft-remove-selected]");
+    const syncBulkRemoval = () => {
+      const selectedCount = removableLines.filter((input) => input.checked).length;
+      if (selectAll) {
+        selectAll.checked = removableLines.length > 0 && selectedCount === removableLines.length;
+        selectAll.indeterminate = selectedCount > 0 && selectedCount < removableLines.length;
+      }
+      if (removeSelected) {
+        removeSelected.disabled = selectedCount === 0;
+        removeSelected.textContent = selectedCount ? `Remove selected (${selectedCount})` : "Remove selected";
+      }
+    };
+    selectAll?.addEventListener("change", () => {
+      removableLines.forEach((input) => { input.checked = selectAll.checked; });
+      syncBulkRemoval();
+    });
+    removableLines.forEach((input) => input.addEventListener("change", syncBulkRemoval));
+    removeSelected?.addEventListener("click", async () => {
+      const adjustedBy = clean(managerInput?.value);
+      const selected = removableLines.filter((input) => input.checked);
+      if (!adjustedBy) {
+        managerInput?.setCustomValidity("Enter the manager adjusting this order.");
+        managerInput?.reportValidity();
+        return;
+      }
+      managerInput?.setCustomValidity("");
+      if (!selected.length) return;
+      removeSelected.disabled = true;
+      await saveVendorOrderDraftAction({
+        action: "set-order-adjustments",
+        vendor,
+        adjustedBy,
+        adjustments: selected.map((input) => ({
+          catalogId: input.value,
+          vendor,
+          quantity: 0,
+          reason: "Removed during draft review.",
+        })),
+      });
+    });
+    syncBulkRemoval();
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const approvedBy = clean(managerInput?.value);

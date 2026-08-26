@@ -1,12 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "On Par BEES Cart Builder",
-  "version": "1.0.0",
-  "description": "Builds a review-only BEES cart from an approved On Par Heidelberg order.",
+  "name": "On Par Vendor Cart Builder",
+  "version": "1.1.0",
+  "description": "Builds review-only BEES, Proof, and OHLQ carts from approved On Par orders.",
   "permissions": ["storage", "tabs"],
   "host_permissions": [
     "https://onparbev.com/*",
-    "https://mybeesapp.com/*"
+    "https://mybeesapp.com/*",
+    "https://*.sgproof.com/*",
+    "https://*.ohlq.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -20,6 +22,11 @@
     {
       "matches": ["https://mybeesapp.com/*"],
       "js": ["bees-cart.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.sgproof.com/*", "https://*.ohlq.com/*"],
+      "js": ["vendor-cart.js"],
       "run_at": "document_idle"
     }
   ]
