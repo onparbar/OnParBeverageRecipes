@@ -4,6 +4,13 @@ const VENDOR_CONFIG = Object.freeze({
   ohlq: { label: "OHLQ", hostname: /(?:^|\.)ohlq\.com$/i },
 });
 const OHLQ_CATALOG_PATH = "/Previously-Purchased";
+const OHLQ_PRODUCT_IDS = Object.freeze({
+  "0066D": "66345753724699",
+  "0068B": "111805928192876",
+  "0893L": "180221973987424",
+  "1497D": "273340084659512",
+  "9674D": "103610807059918",
+});
 
 function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -219,6 +226,14 @@ function exactOhlqRows(line) {
   return ohlqCatalogRows().filter((entry) => pattern.test(entry.text));
 }
 
+function ohlqProductId(line) {
+  return OHLQ_PRODUCT_IDS[clean(line.vendorSku).toUpperCase()] || "";
+}
+
+function ohlqProductUrl(productId) {
+  return new URL(`/product-detail/id=${encodeURIComponent(productId)}`, location.origin).href;
+}
+
 function ohlqDaysControl() {
   return [...document.querySelectorAll("select")].find((select) => {
     const options = [...select.options].map((option) => clean(option.textContent));
@@ -275,11 +290,59 @@ async function finishOhlqStaged(state, confirmed) {
   state.phase = "ohlq-complete";
   delete state.ohlqStaged;
   delete state.ohlqCartBefore;
+  if (state.ohlqDirectQueue?.length) {
+    state.phase = "ohlq-direct";
+    state.ohlqDirectCursor = Number.isInteger(state.ohlqDirectCursor) ? state.ohlqDirectCursor : 0;
+    await saveState(state);
+    location.assign(ohlqProductUrl(state.ohlqDirectQueue[state.ohlqDirectCursor].productId));
+    return;
+  }
+  await saveState(state);
+  await finishFromResults(state);
+}
+
+async function runOhlqDirect(state) {
+  const queue = Array.isArray(state.ohlqDirectQueue) ? state.ohlqDirectQueue : [];
+  const cursor = Number.isInteger(state.ohlqDirectCursor) ? state.ohlqDirectCursor : 0;
+  const current = queue[cursor];
+  if (!current) {
+    delete state.ohlqDirectQueue;
+    delete state.ohlqDirectCursor;
+    state.phase = "ohlq-complete";
+    await saveState(state);
+    await finishFromResults(state);
+    return;
+  }
+
+  const destination = ohlqProductUrl(current.productId);
+  if (location.href.replace(/\/+$/, "") !== destination.replace(/\/+$/, "")) {
+    await saveState(state);
+    location.assign(destination);
+    return;
+  }
+
+  await waitForResults();
+  addResultOnce(state, await addExactMatch(state, current.lineIndex));
+  state.ohlqDirectCursor = cursor + 1;
+  await saveState(state);
+  const next = queue[state.ohlqDirectCursor];
+  if (next) {
+    location.assign(ohlqProductUrl(next.productId));
+    return;
+  }
+  delete state.ohlqDirectQueue;
+  delete state.ohlqDirectCursor;
+  state.phase = "ohlq-complete";
   await saveState(state);
   await finishFromResults(state);
 }
 
 async function runOhlqCatalog(state) {
+  if (state.phase === "ohlq-direct") {
+    await runOhlqDirect(state);
+    return;
+  }
+
   if (state.phase === "ohlq-adding") {
     const confirmed = await waitForAddConfirmation(state.ohlqCartBefore, 5000);
     await finishOhlqStaged(state, confirmed);
@@ -312,9 +375,15 @@ async function runOhlqCatalog(state) {
   }
 
   const staged = [];
+  const directQueue = [];
   state.lines.forEach((line, lineIndex) => {
     const matches = exactOhlqRows(line);
     if (matches.length !== 1) {
+      const productId = matches.length === 0 ? ohlqProductId(line) : "";
+      if (productId) {
+        directQueue.push({ lineIndex, productId });
+        return;
+      }
       addResultOnce(state, {
         lineIndex,
         name: line.name,
@@ -337,7 +406,16 @@ async function runOhlqCatalog(state) {
     staged.push({ lineIndex });
   });
 
+  state.ohlqDirectQueue = directQueue;
+  state.ohlqDirectCursor = 0;
+
   if (!staged.length) {
+    if (directQueue.length) {
+      state.phase = "ohlq-direct";
+      await saveState(state);
+      location.assign(ohlqProductUrl(directQueue[0].productId));
+      return;
+    }
     await finishFromResults(state);
     return;
   }

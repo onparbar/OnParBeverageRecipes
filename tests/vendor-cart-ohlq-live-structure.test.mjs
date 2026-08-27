@@ -16,3 +16,11 @@ test("OHLQ exact matches use the live purchased-product cards", () => {
   assert.match(vendorCart, /exactOhlqRows\(line\)/);
   assert.match(vendorCart, /await delay\(1500\)/);
 });
+
+test("older verified OHLQ items use exact product pages without substitutions", () => {
+  assert.match(vendorCart, /"0068B": "111805928192876"/);
+  assert.match(vendorCart, /"0893L": "180221973987424"/);
+  assert.match(vendorCart, /"9674D": "103610807059918"/);
+  assert.match(vendorCart, /state\.ohlqDirectQueue/);
+  assert.match(vendorCart, /location\.assign\(ohlqProductUrl/);
+});
