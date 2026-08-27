@@ -66,6 +66,26 @@ async function focusVendor(vendor) {
   return { tab, notifyExistingPage: true };
 }
 
+async function waitForTabComplete(tabId, timeout = 15000) {
+  const current = await chrome.tabs.get(tabId).catch(() => null);
+  if (current?.status === "complete") return;
+  await new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      clearTimeout(timer);
+      resolve();
+    };
+    const onUpdated = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === "complete") finish();
+    };
+    const timer = setTimeout(finish, timeout);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+  });
+}
+
 async function broadcastResult(result) {
   const tabs = await chrome.tabs.query({ url: "https://onparbev.com/*" });
   await Promise.all(tabs.map((tab) => (
@@ -75,9 +95,9 @@ async function broadcastResult(result) {
   )));
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "START_VENDOR_CART") {
-    (async () => {
+    return (async () => {
       const config = VENDORS[message.payload?.vendor];
       if (!config) throw new Error("That vendor cart is not supported.");
       const state = {
@@ -89,41 +109,36 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         searchCursor: 0,
         startedAt: new Date().toISOString(),
       };
-        await temporaryStorage.set({ [ORDER_KEY]: state });
-        await temporaryStorage.remove(RESULT_KEY);
+      await temporaryStorage.set({ [ORDER_KEY]: state });
+      await temporaryStorage.remove(RESULT_KEY);
       const focused = await focusVendor(state.vendor);
-      if (focused.notifyExistingPage && focused.tab?.id) {
+      if (focused.tab?.id) {
+        await waitForTabComplete(focused.tab.id);
         await chrome.tabs.sendMessage(focused.tab.id, { type: "VENDOR_CART_START" }).catch(() => {});
       }
-      sendResponse({ ok: true, message: `${config.label} opened. The cart builder is working.` });
-    })().catch((error) => sendResponse({ ok: false, message: error.message }));
-    return true;
+      return { ok: true, message: `${config.label} opened. The cart builder is working.` };
+    })().catch((error) => ({ ok: false, message: error.message }));
   }
 
   if (message?.type === "GET_VENDOR_CART_STATE") {
-    (async () => {
-        const stored = await temporaryStorage.get(ORDER_KEY);
-      sendResponse({ ok: true, state: stored[ORDER_KEY] || null });
-    })().catch((error) => sendResponse({ ok: false, message: error.message }));
-    return true;
+    return temporaryStorage.get(ORDER_KEY)
+      .then((stored) => ({ ok: true, state: stored[ORDER_KEY] || null }))
+      .catch((error) => ({ ok: false, message: error.message }));
   }
 
   if (message?.type === "SAVE_VENDOR_CART_STATE") {
-    (async () => {
-        await temporaryStorage.set({ [ORDER_KEY]: message.state });
-      sendResponse({ ok: true });
-    })().catch((error) => sendResponse({ ok: false, message: error.message }));
-    return true;
+    return temporaryStorage.set({ [ORDER_KEY]: message.state })
+      .then(() => ({ ok: true }))
+      .catch((error) => ({ ok: false, message: error.message }));
   }
 
   if (message?.type === "VENDOR_CART_FINISHED") {
-    (async () => {
-        await temporaryStorage.set({ [RESULT_KEY]: message.result });
-        await temporaryStorage.remove(ORDER_KEY);
+    return (async () => {
+      await temporaryStorage.set({ [RESULT_KEY]: message.result });
+      await temporaryStorage.remove(ORDER_KEY);
       await broadcastResult(message.result);
-      sendResponse({ ok: true });
-    })().catch((error) => sendResponse({ ok: false, message: error.message }));
-    return true;
+      return { ok: true };
+    })().catch((error) => ({ ok: false, message: error.message }));
   }
   return false;
 });

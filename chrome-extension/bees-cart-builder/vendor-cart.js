@@ -204,7 +204,9 @@ async function waitForAddConfirmation(previousCart, timeout = 8000) {
 }
 
 function ohlqCatalogRows() {
-  return [...document.querySelectorAll("tr")]
+  const productCards = [...document.querySelectorAll(".product-item--minimal-previously-purchased")];
+  const rows = productCards.length ? productCards : [...document.querySelectorAll("tr")];
+  return rows
     .map((row) => ({ row, quantity: quantityControl(row), text: clean(row.innerText) }))
     .filter((entry) => entry.quantity && /(?:^|\s)[0-9]{4}[a-z](?:\s|$)/i.test(entry.text));
 }
@@ -302,6 +304,7 @@ async function runOhlqCatalog(state) {
     state.phase = "ohlq-filtered";
     await saveState(state);
     applyFilters.click();
+    await delay(1500);
   }
 
   if (!await waitForOhlqCatalog()) {
