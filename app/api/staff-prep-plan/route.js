@@ -58,8 +58,11 @@ function unavailablePlan(state) {
 }
 
 function errorResponse(error) {
+  const inventoryMappingNeedsReview = error?.code === "INVENTORY_IDENTITY_REVIEW_REQUIRED";
   return jsonResponse({
-    error: error?.message || "The weekly cocktail prep checklist could not be updated.",
+    error: inventoryMappingNeedsReview
+      ? "This cocktail could not be checked off right now. Its inventory setup needs manager review."
+      : error?.message || "The weekly cocktail prep checklist could not be updated.",
     code: error?.code || "STAFF_PREP_PLAN_ERROR",
   }, error?.status || 500);
 }

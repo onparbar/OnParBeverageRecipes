@@ -15,7 +15,7 @@ const NUMBER_WORDS = Object.freeze({
 });
 
 const VENDOR_ALIASES = Object.freeze({
-  bonbright: ["bonbright", "bon bright", "tj"],
+  bonbright: ["bonbright", "bon bright", "bomb right", "bomb bright", "tj"],
   heidelberg: ["heidelberg", "heildelberg", "heidleberg", "bees"],
   proof: ["proof", "sg proof"],
   ohlq: ["ohlq", "oh l q", "ohio liquor"],
@@ -129,13 +129,40 @@ function getQuantitiesWithoutProduct(clause, item) {
   return [...quantityText.matchAll(/\b\d+\b/g)].map((match) => Number(match[0]));
 }
 
+function hasFullDeliveryStatement(value) {
+  const normalizedValue = normalize(value);
+  return /\b(?:everything|all)(?:\s+[a-z0-9]+){0,8}\s+(?:came|arrived|was delivered|received)\b/.test(normalizedValue)
+    || /\b(?:full|complete)\s+(?:delivery|order)\b/.test(normalizedValue)
+    || /\b(?:delivery|order)\s+(?:came|arrived)\b/.test(normalizedValue);
+}
+
 function splitNarrativeClauses(value) {
-  return clean(value)
+  const tokens = clean(value)
     .replace(/[.;:\n]+/g, " | ")
     .replace(/[\u2013\u2014-]+/g, " | ")
-    .split(/\s*(?:\||\bexcept\b|\bbut\b|\bhowever\b|\band\b|\bthen\b|\balso\b)\s*/i)
+    .split(/\s*(\||\bexcept(?:\s+for)?\b|\bwithout\b|\bbut\b|\bhowever\b|\band\b|\bthen\b|\balso\b)\s*/i)
     .map(clean)
     .filter(Boolean);
+  const clauses = [];
+  let previousWasFullDelivery = false;
+  let exceptionMode = false;
+
+  tokens.forEach((token) => {
+    const connector = normalize(token);
+    if (/^(?:\||except(?: for)?|without|but|however|and|then|also)$/.test(connector)) {
+      if (/^(?:except(?: for)?|without)$/.test(connector)) exceptionMode = true;
+      else if (/^(?:but|however)$/.test(connector)) exceptionMode = previousWasFullDelivery;
+      return;
+    }
+
+    const clause = clean(token);
+    const positiveReceipt = /^(?:i\s+)?(?:did get|got|received|accepted|came with|delivered)\b/.test(normalize(clause));
+    if (positiveReceipt) exceptionMode = false;
+    clauses.push(exceptionMode ? `not delivered ${clause}` : clause);
+    previousWasFullDelivery = hasFullDeliveryStatement(clause);
+  });
+
+  return clauses;
 }
 
 function explicitReceivedQuantity(clause, item) {
@@ -174,7 +201,9 @@ function buildLineProposal(clause, item) {
     handled = true;
   } else if (unavailable) {
     const missingQuantity = statedQuantity ?? orderedQuantity;
-    receivedQuantity = noneReceived ? 0 : Math.max(0, orderedQuantity - missingQuantity);
+    receivedQuantity = noneReceived && statedQuantity === null
+      ? 0
+      : Math.max(0, orderedQuantity - missingQuantity);
     reason = /\bout of stock\b/.test(normalizedClause) ? "Out of stock" : "Missing from delivery";
     handled = true;
   } else if (short) {
@@ -215,10 +244,7 @@ function buildLineProposal(clause, item) {
 }
 
 function isGenericDeliveryClause(clause) {
-  const normalizedClause = normalize(clause);
-  return /\b(?:everything|all)\s+(?:came|arrived|was delivered|received)\b/.test(normalizedClause)
-    || /\b(?:full|complete)\s+(?:delivery|order)\b/.test(normalizedClause)
-    || /\b(?:delivery|order)\s+(?:came|arrived)\b/.test(normalizedClause);
+  return hasFullDeliveryStatement(clause);
 }
 
 function clauseNeedsProductClarification(clause) {
@@ -259,7 +285,7 @@ export function parseSmartReceivingTranscript(rawTranscript, orderTracking = {})
   if (!items.length) {
     return { status: "blocked", question: `${clean(vendor.vendor)} has no current delivery lines.`, proposal: null };
   }
-  const fullDelivery = /\b(?:everything|all)\s+(?:came|arrived|was delivered|received)\b|\b(?:full|complete)\s+(?:delivery|order)\b/.test(query);
+  const fullDelivery = hasFullDeliveryStatement(query);
   const hasException = /\b(?:except|missing|short|without|out of stock|unavailable|rejected|bad|damaged|broken|didnt get|did not get|only got|only received|extra)\b/.test(query);
   if (!fullDelivery && !hasException) {
     return {

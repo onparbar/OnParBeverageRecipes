@@ -7,6 +7,8 @@ import {
 } from "../lib/inventory-store.mjs";
 import {
   assertInventoryContributionPlan,
+  findCatalogItem,
+  isInventoryRecipeIngredient,
 } from "../lib/inventory-contributions.mjs";
 import {
   executeInventoryBackedOperation,
@@ -20,6 +22,29 @@ function initializedInventory() {
   state.current.onHandOverrides = { titos: "10" };
   return state;
 }
+
+test("cocktail prep inventory excludes recipe calculations but keeps real ingredients", () => {
+  [
+    { name: "Tito's", raw: "Tito's=6 bottles (1.75L)", oz: 355 },
+    { name: "Strawberry Lemonade", raw: "8 Gallons Strawberry Lemonade", oz: 1024 },
+  ].forEach((ingredient) => assert.equal(isInventoryRecipeIngredient(ingredient), true));
+
+  [
+    "Price we're charging",
+    "Profit per oz",
+    "Profit margin",
+    "Cost for 1.5 oz of liquor",
+    "How many oz per shot",
+  ].forEach((label) => assert.equal(isInventoryRecipeIngredient({ name: label, raw: label }), false));
+});
+
+test("cocktail ingredients prefer the canonical inventory item when duplicate names exist", () => {
+  const catalog = [
+    { id: "titos-1-75l", name: "Tito's 1.75L" },
+    { id: "titos", name: "Tito's" },
+  ];
+  assert.equal(findCatalogItem(catalog, { name: "Tito's" })?.id, "titos");
+});
 
 test("inventory contribution retries do not subtract twice", () => {
   const payload = {
