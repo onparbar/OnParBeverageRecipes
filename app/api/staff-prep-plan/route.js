@@ -8,7 +8,12 @@ import {
   applyStaffPrepPlanUpdate,
   buildStaffPrepPlan,
 } from "../../../lib/staff-prep-plan.mjs";
-import { applyPrepInventoryContributions } from "../../../lib/inventory-contributions.mjs";
+import {
+  applyInventoryContributionPlan,
+  assertInventoryContributionPlan,
+  planPrepInventoryContributions,
+} from "../../../lib/inventory-contributions.mjs";
+import { executeInventoryBackedOperation } from "../../../lib/inventory-backed-operation.mjs";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 
 export const runtime = "nodejs";
@@ -95,50 +100,52 @@ export async function POST(request) {
       recommendations,
       body,
     );
-    const nextRevision = Number(state.revision) + 1;
-    const saved = await writeParAgentState({
-      ...state,
-      recommendations: {
-        ...updatedRecommendations,
-        publishedStateRevision: nextRevision,
-      },
-    }, {
-      expectedRevision: state.revision,
-      role,
-    });
-    let inventoryUpdate = null;
     const requestedActualQuantity = Number(body.actualQuantity ?? target?.quantity);
     const actualQuantityChanged = target?.kind === "liquor-refill"
       && body.completed === true
       && target.completed === true
       && requestedActualQuantity !== Number(target.actualQuantity);
-    if (target && (target.completed !== body.completed || actualQuantityChanged)) {
-      try {
-        inventoryUpdate = await applyPrepInventoryContributions({
-          target,
-          generatedAt: recommendations.generatedAt,
-          completed: body.completed,
-          actualQuantity: body.actualQuantity,
+    const stateChanged = target && (target.completed !== body.completed || actualQuantityChanged);
+    const inventoryPlan = await planPrepInventoryContributions({
+      target,
+      generatedAt: recommendations.generatedAt,
+      completed: body.completed,
+      actualQuantity: body.actualQuantity,
+    });
+    const isLiquorRefill = target.kind === "liquor-refill";
+    const actor = String(body.preparedBy || role).replace(/\s+/g, " ").trim().slice(0, 80);
+    const quantity = isLiquorRefill
+      ? Math.max(1, Number(body.actualQuantity ?? target.actualQuantity ?? target.quantity) || 1)
+      : Math.max(1, Number(target.quantity) || 1);
+    const { saved, inventoryUpdate } = await executeInventoryBackedOperation({
+      plan: inventoryPlan,
+      assertPlan: assertInventoryContributionPlan,
+      persist: async () => {
+        if (!stateChanged) return state;
+        const nextRevision = Number(state.revision) + 1;
+        return writeParAgentState({
+          ...state,
+          recommendations: {
+            ...updatedRecommendations,
+            publishedStateRevision: nextRevision,
+          },
+        }, {
+          expectedRevision: state.revision,
           role,
         });
-        const isLiquorRefill = target.kind === "liquor-refill";
-        recordDashboardActivity({
-          area: "Inventory",
-          action: body.completed
-            ? (isLiquorRefill ? "added liquor to keg" : "consumed cocktail ingredients")
-            : (isLiquorRefill ? "reopened liquor refill" : "restored cocktail ingredients"),
-          role,
-          revision: saved.revision,
-          summary: `${target.displayName || target.name} inventory movement recorded from the staff prep checklist.`,
-        }).catch(() => {});
-      } catch (error) {
-        inventoryUpdate = {
-          warning: error?.message || (target.kind === "liquor-refill"
-            ? "The refill was saved, but cabinet inventory needs review."
-            : "The cocktail was saved, but ingredient inventory needs review."),
-        };
-      }
-    }
+      },
+      applyInventory: (plan) => applyInventoryContributionPlan(plan, role),
+      recordActivity: (savedState) => recordDashboardActivity({
+        area: "Inventory",
+        action: body.completed
+          ? (isLiquorRefill ? "added liquor to keg" : "consumed cocktail ingredients")
+          : (isLiquorRefill ? "reopened liquor refill" : "restored cocktail ingredients"),
+        role,
+        revision: savedState.revision,
+        summary: `${target.displayName || target.name}: ${body.completed ? `${quantity} ${isLiquorRefill ? "bottles" : "batches"} completed` : "reopened"} by ${actor} for Weekly Plan ${recommendations.generatedAt}.`,
+        dedupe: true,
+      }),
+    });
     return jsonResponse({
       available: true,
       message: "Preparation checklist saved.",

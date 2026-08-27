@@ -6,7 +6,12 @@ import {
   buildWeeklyOrderTracking,
 } from "../../../lib/weekly-order-tracking.mjs";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
-import { applyReceiptInventoryContributions } from "../../../lib/inventory-contributions.mjs";
+import {
+  applyInventoryContributionPlan,
+  assertInventoryContributionPlan,
+  planReceiptInventoryContributions,
+} from "../../../lib/inventory-contributions.mjs";
+import { executeInventoryBackedOperation } from "../../../lib/inventory-backed-operation.mjs";
 
 export const runtime = "nodejs";
 
@@ -69,31 +74,82 @@ export async function POST(request) {
     }
     const body = await getBody(request);
     const priorTracking = buildWeeklyOrderTracking(state.recommendations);
-    const updatedRecommendations = applyWeeklyOrderTrackingUpdate(
+    let effectiveBody = body;
+    let updatedRecommendations = applyWeeklyOrderTrackingUpdate(
       state.recommendations,
-      body,
+      effectiveBody,
       { role },
     );
-    const nextRevision = Number(state.revision) + 1;
-    const saved = await writeParAgentState({
-      ...state,
-      recommendations: {
-        ...updatedRecommendations,
-        publishedStateRevision: nextRevision,
-      },
-    }, {
-      expectedRevision: state.revision,
-      role,
-    });
-    const savedTracking = buildWeeklyOrderTracking(saved.recommendations);
-    let inventoryUpdate = null;
+    let inventoryPlan = null;
+    let blockedItems = [];
+    let receiptVendorId = "";
     if (["set-receipts", "set-receipt"].includes(body.action)) {
-      const vendorId = body.vendorId || savedTracking?.vendors?.find((vendor) => vendor.items.some((item) => item.id === body.itemId))?.id;
-      try {
-        inventoryUpdate = await applyReceiptInventoryContributions(savedTracking, vendorId, role);
-      } catch (error) {
-        inventoryUpdate = { warning: error?.message || "Delivery saved, but cabinet inventory needs review." };
+      const proposedTracking = buildWeeklyOrderTracking(updatedRecommendations);
+      receiptVendorId = body.vendorId || proposedTracking?.vendors?.find((vendor) => vendor.items.some((item) => item.id === body.itemId))?.id;
+      const proposedPlan = await planReceiptInventoryContributions(proposedTracking, receiptVendorId);
+      if (proposedPlan.unmatched.length && body.action === "set-receipts") {
+        const blockedIds = new Set(proposedPlan.unmatched.map((item) => item.id).filter(Boolean));
+        const safeReceipts = (Array.isArray(body.receipts) ? body.receipts : [])
+          .filter((receipt) => !blockedIds.has(String(receipt?.itemId || "")));
+        if (!safeReceipts.length) assertInventoryContributionPlan(proposedPlan);
+        blockedItems = proposedPlan.unmatched;
+        effectiveBody = { ...body, receipts: safeReceipts };
+        updatedRecommendations = applyWeeklyOrderTrackingUpdate(
+          state.recommendations,
+          effectiveBody,
+          { role },
+        );
+        inventoryPlan = await planReceiptInventoryContributions(
+          buildWeeklyOrderTracking(updatedRecommendations),
+          receiptVendorId,
+        );
+      } else {
+        inventoryPlan = proposedPlan;
       }
+      assertInventoryContributionPlan(inventoryPlan);
+    }
+    const persist = async () => {
+      const nextRevision = Number(state.revision) + 1;
+      return writeParAgentState({
+        ...state,
+        recommendations: {
+          ...updatedRecommendations,
+          publishedStateRevision: nextRevision,
+        },
+      }, {
+        expectedRevision: state.revision,
+        role,
+      });
+    };
+    let saved;
+    let inventoryUpdate = null;
+    if (inventoryPlan) {
+      const trackedVendor = priorTracking?.vendors?.find((vendor) => vendor.id === receiptVendorId);
+      const actor = String(body.handledBy || role).replace(/\s+/g, " ").trim().slice(0, 80);
+      const result = await executeInventoryBackedOperation({
+        plan: inventoryPlan,
+        assertPlan: assertInventoryContributionPlan,
+        persist,
+        applyInventory: (plan) => applyInventoryContributionPlan(plan, role),
+        recordActivity: (savedState) => recordDashboardActivity({
+          area: "Orders",
+          action: "received vendor delivery",
+          role,
+          revision: savedState.revision,
+          summary: `${String(trackedVendor?.vendor || "Vendor").slice(0, 80)} delivery reviewed by ${actor} for Weekly Plan ${priorTracking.generatedAt}; ${body.action === "set-receipts" ? (effectiveBody.receipts?.length || 0) : 1} lines updated.`,
+          dedupe: true,
+        }),
+      });
+      saved = result.saved;
+      inventoryUpdate = {
+        ...result.inventoryUpdate,
+        ...(blockedItems.length ? {
+          blockedItems,
+          warning: `Review the inventory match for: ${blockedItems.map((item) => item.name).join(", ")}. Other delivery lines were saved.`,
+        } : {}),
+      };
+    } else {
+      saved = await persist();
     }
     if (["create-draft", "approve-draft", "review-and-approve", "record-handoff", "set-ordered", "set-order-adjustment", "set-order-adjustments", "remove-order-adjustment"].includes(body.action)) {
       const trackedVendor = String(
@@ -112,23 +168,14 @@ export async function POST(request) {
           : body.action === "record-handoff"
             ? body.event === "opened_vendor" ? "opened vendor handoff" : "copied vendor handoff"
             : body.ordered === true ? "completed vendor order" : "updated vendor order";
-      recordDashboardActivity({
+      await recordDashboardActivity({
         area: "Orders",
         action,
         role,
         revision: saved.revision,
-        summary: `${trackedVendor} assisted-order record updated; real submission remains manual.`,
-      }).catch(() => {});
-    }
-    if (body.action === "set-receipts") {
-      const trackedVendor = priorTracking?.vendors?.find((vendor) => vendor.id === body.vendorId);
-      recordDashboardActivity({
-        area: "Orders",
-        action: "received vendor delivery",
-        role,
-        revision: saved.revision,
-        summary: `${String(trackedVendor?.vendor || "Vendor").slice(0, 80)} delivery reviewed; ${Array.isArray(body.receipts) ? body.receipts.length : 0} lines updated.`,
-      }).catch(() => {});
+        summary: `${trackedVendor} ${action} for Weekly Plan ${priorTracking.generatedAt}; real submission remains manual.`,
+        dedupe: body.action !== "set-ordered",
+      });
     }
     return jsonResponse({
       available: true,

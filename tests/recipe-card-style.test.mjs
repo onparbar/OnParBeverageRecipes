@@ -169,7 +169,7 @@ test("employee prep and recipe cards have a phone-specific layout", () => {
   assert.match(mobileStyles, /\.staff-order-full-receipt \{[^}]*min-height: 48px/s);
   assert.match(mobileStyles, /\.staff-order-quantity-field input \{[^}]*width: 92px/s);
   assert.match(mobileStyles, /\.staff-section-tabs \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/s);
-  assert.match(staffDashboardSource, /fullReceipt\.checked = item\.status === "pending" \|\| item\.status === "received"/);
+  assert.match(staffDashboardSource, /fullReceipt\.checked = item\.status === "received"/);
   assert.match(mobileStyles, /\.staff-recipe-card \.recipe-table-wrap \{[^}]*overflow-x: visible/s);
   assert.match(mobileStyles, /\.staff-recipe-table th:nth-child\(2\),\s*\.staff-recipe-table td:nth-child\(2\) \{\s*width: 56%/s);
   assert.match(stylesheet, /\.staff-recipe-add--bottle-size \{\s*white-space: nowrap/s);

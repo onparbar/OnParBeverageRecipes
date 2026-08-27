@@ -151,21 +151,21 @@ test("an employee can record a partial bottle delivery", () => {
   assert.equal(plan.notReceivedItems[0].name, "Crown Apple");
 });
 
-test("receipt quantities cannot exceed the amount ordered", () => {
+test("receipt quantities preserve documented over-deliveries", () => {
   const base = recommendations();
   const item = buildWeeklyOrderTracking(base, clock()).vendors[1].items[0];
 
-  assert.throws(
-    () => applyWeeklyOrderTrackingUpdate(base, {
-      action: "set-receipt",
-      generatedAt,
-      itemId: item.id,
-      status: "partial",
-      receivedQuantity: 3,
-      handledBy: "Jordan",
-    }, { role: "employee", now: clock }),
-    (error) => error.code === "RECEIVED_QUANTITY_INVALID",
-  );
+  const updated = applyWeeklyOrderTrackingUpdate(base, {
+    action: "set-receipt",
+    generatedAt,
+    itemId: item.id,
+    status: "partial",
+    receivedQuantity: 3,
+    handledBy: "Jordan",
+  }, { role: "employee", now: clock });
+  const saved = buildWeeklyOrderTracking(updated, clock()).vendors[1].items[0];
+
+  assert.equal(saved.receivedQuantity, 3);
 });
 
 test("receipt tracking requires the current plan and the employee name", () => {

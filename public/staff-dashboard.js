@@ -483,7 +483,7 @@ function createOrderReceiptItem(item) {
   fullReceiptLabel.className = "staff-order-full-receipt";
   const fullReceipt = document.createElement("input");
   fullReceipt.type = "checkbox";
-  fullReceipt.checked = item.status === "pending" || item.status === "received";
+  fullReceipt.checked = item.status === "received";
   const fullReceiptText = document.createElement("span");
   fullReceiptText.textContent = "Received full order";
   fullReceiptLabel.append(fullReceipt, fullReceiptText);
@@ -499,9 +499,10 @@ function createOrderReceiptItem(item) {
   quantityInput.min = "0";
   quantityInput.step = "1";
   quantityInput.inputMode = "numeric";
-  quantityInput.value = String(item.status === "pending" || item.status === "received"
-    ? number(item.quantity)
-    : number(item.receivedQuantity));
+  quantityInput.value = item.status === "pending"
+    ? ""
+    : String(item.status === "received" ? number(item.quantity) : number(item.receivedQuantity));
+  quantityInput.placeholder = "0";
   quantityInput.disabled = fullReceipt.checked;
   const quantityTotal = document.createElement("small");
   quantityTotal.textContent = `of ${formatNumber(item.quantity)} ${clean(item.unit)}`;
@@ -542,6 +543,12 @@ function createOrderReceiptItem(item) {
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!fullReceipt.checked && String(quantityInput.value).trim() === "") {
+      rowStatus.textContent = "Enter the quantity received or choose Received full order.";
+      rowStatus.dataset.state = "error";
+      quantityInput.focus();
+      return;
+    }
     const receivedQuantity = fullReceipt.checked ? number(item.quantity) : Number(quantityInput.value);
     const status = fullReceipt.checked
       ? "received"
