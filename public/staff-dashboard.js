@@ -92,12 +92,28 @@ let tapSheets = { available: false, updatedAt: "", onDeckAvailable: false, walls
 let activeTapSheetWall = "main";
 let smartReceivingProposal = null;
 let smartReceivingRecognition = null;
+const STAFF_FETCH_TIMEOUT_MS = 8000;
 
 initStaffRecipes();
 
+async function fetchStaffResource(input, options = {}) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), STAFF_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("The staff dashboard took too long to respond. Reload to try again.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 async function initStaffRecipes() {
   try {
-    const sessionResponse = await fetch("/api/session", {
+    const sessionResponse = await fetchStaffResource("/api/session", {
       cache: "no-store",
       credentials: "same-origin",
       headers: { Accept: "application/json" },
@@ -121,7 +137,7 @@ async function initStaffRecipes() {
       return;
     }
 
-    const [activeCsv, newCsv, sharedResult, prepResult, orderResult, tapSheetResult] = await Promise.all([
+    const [activeCsvResult, newCsvResult, sharedLoadResult, prepLoadResult, orderLoadResult, tapSheetLoadResult] = await Promise.allSettled([
       fetchStaffRecipeCsv("active"),
       fetchStaffRecipeCsv("new"),
       fetchSharedRecipeUpdates(),
@@ -129,10 +145,22 @@ async function initStaffRecipes() {
       fetchWeeklyOrderTracking(),
       fetchStaffTapSheets(),
     ]);
-    recipes = buildRecipeCollection(activeCsv, newCsv, sharedResult.recipes);
-    prepPlan = prepResult;
-    orderTracking = orderResult;
-    tapSheets = tapSheetResult;
+    const recipesAvailable = activeCsvResult.status === "fulfilled" && newCsvResult.status === "fulfilled";
+    const sharedResult = sharedLoadResult.status === "fulfilled"
+      ? sharedLoadResult.value
+      : { available: false, recipes: null };
+    recipes = recipesAvailable
+      ? buildRecipeCollection(activeCsvResult.value, newCsvResult.value, sharedResult.recipes)
+      : [];
+    prepPlan = prepLoadResult.status === "fulfilled"
+      ? prepLoadResult.value
+      : { ...prepPlan, message: "The weekly prep checklist is unavailable. Reload to try again." };
+    orderTracking = orderLoadResult.status === "fulfilled"
+      ? orderLoadResult.value
+      : { ...orderTracking, message: "The delivery checklist is unavailable. Reload to try again." };
+    tapSheets = tapSheetLoadResult.status === "fulfilled"
+      ? tapSheetLoadResult.value
+      : { ...tapSheets, message: "Tap sheets are unavailable. Reload to try again." };
     populateCategoryFilter();
     bindStaffRecipeEvents();
     renderStaffPrepPlan();
@@ -140,9 +168,12 @@ async function initStaffRecipes() {
     renderStaffTapSheets();
     renderStaffRecipes();
     renderStaffOverview();
-    statusPanel.textContent = sharedResult.available
-      ? "Current shared recipe updates are included."
-      : "Core recipes are available. Shared recipe updates could not be checked right now.";
+    statusPanel.textContent = recipesAvailable
+      ? (sharedResult.available
+        ? "Current shared recipe updates are included."
+        : "Core recipes are available. Shared recipe updates could not be checked right now.")
+      : "Recipes could not be loaded. Reload to try again.";
+    if (!recipesAvailable) statusPanel.dataset.state = "error";
   } catch (error) {
     statusPanel.textContent = error?.message || "Recipes could not be loaded.";
     statusPanel.dataset.state = "error";
@@ -160,6 +191,15 @@ async function initStaffRecipes() {
     orderList.replaceChildren(createEmptyState("Ask a manager to check the dashboard service."));
     recipeGrid.setAttribute("aria-busy", "false");
     recipeGrid.replaceChildren(createEmptyState("Recipe data is unavailable. Ask a manager to check the dashboard service."));
+    if (overviewWeek) overviewWeek.textContent = error?.message || "This week's plan could not be loaded. Reload to try again.";
+    if (overviewPrepValue) overviewPrepValue.textContent = "—";
+    if (overviewPrepDetail) overviewPrepDetail.textContent = "Unavailable";
+    if (overviewLiquorValue) overviewLiquorValue.textContent = "—";
+    if (overviewLiquorDetail) overviewLiquorDetail.textContent = "Unavailable";
+    if (overviewOrderValue) overviewOrderValue.textContent = "—";
+    if (overviewOrderDetail) overviewOrderDetail.textContent = "Unavailable";
+    if (overviewRecipeValue) overviewRecipeValue.textContent = "—";
+    if (overviewRecipeDetail) overviewRecipeDetail.textContent = "Unavailable";
   }
 }
 
@@ -222,7 +262,7 @@ function lockStaffRecipesForBrowserProfile(storageUnavailable) {
 }
 
 async function fetchStaffRecipeCsv(set) {
-  const response = await fetch(`/api/recipe-data?set=${encodeURIComponent(set)}`, {
+  const response = await fetchStaffResource(`/api/recipe-data?set=${encodeURIComponent(set)}`, {
     cache: "no-store",
     credentials: "same-origin",
     headers: { Accept: "text/csv" },
@@ -233,7 +273,7 @@ async function fetchStaffRecipeCsv(set) {
 
 async function fetchSharedRecipeUpdates() {
   try {
-    const response = await fetch("/api/recipe-data?set=shared", {
+    const response = await fetchStaffResource("/api/recipe-data?set=shared", {
       cache: "no-store",
       credentials: "same-origin",
       headers: { Accept: "application/json" },
@@ -274,7 +314,7 @@ if (isStaffRehearsalMode()) {
 
 async function fetchStaffPrepPlan() {
   try {
-    const response = await fetch(isStaffRehearsalMode()
+    const response = await fetchStaffResource(isStaffRehearsalMode()
       ? "/api/staff-prep-plan?rehearsal=1"
       : "/api/staff-prep-plan", {
       cache: "no-store",
@@ -311,7 +351,7 @@ async function fetchStaffPrepPlan() {
 
 async function fetchWeeklyOrderTracking() {
   try {
-    const response = await fetch("/api/weekly-order-tracking", {
+    const response = await fetchStaffResource("/api/weekly-order-tracking", {
       cache: "no-store",
       credentials: "same-origin",
       headers: { Accept: "application/json" },
@@ -334,7 +374,7 @@ async function fetchWeeklyOrderTracking() {
 
 async function fetchStaffTapSheets() {
   try {
-    const response = await fetch("/api/staff-tap-sheets", {
+    const response = await fetchStaffResource("/api/staff-tap-sheets", {
       cache: "no-store",
       credentials: "same-origin",
       headers: { Accept: "application/json" },
