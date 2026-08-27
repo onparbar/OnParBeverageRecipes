@@ -76,7 +76,7 @@ test("staff bundle communicates only with session, sanitized recipes, prep, and 
 test("staff page loads only its dedicated bundle", async () => {
   const page = await readProjectFile("app/staff/page.jsx");
   assert.match(page, /import Script from "next\/script"/);
-  assert.match(page, /src="\/staff-dashboard\.js"/);
+  assert.match(page, /src="\/staff-dashboard\.js\?v=[^"]+"/);
   assert.match(page, /strategy="afterInteractive"/);
   assert.equal(page.includes("/dashboard.js"), false);
   assert.equal(page.includes("Beverage Ops"), false);
