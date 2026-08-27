@@ -7,6 +7,7 @@ import {
 } from "../lib/inventory-store.mjs";
 import {
   assertInventoryContributionPlan,
+  buildRecipeInventoryContributions,
   findCatalogItem,
   isInventoryRecipeIngredient,
 } from "../lib/inventory-contributions.mjs";
@@ -44,6 +45,25 @@ test("cocktail ingredients prefer the canonical inventory item when duplicate na
     { id: "titos", name: "Tito's" },
   ];
   assert.equal(findCatalogItem(catalog, { name: "Tito's" })?.id, "titos");
+});
+
+test("cocktail prep deducts only tracked on-hand ingredients using the requested bottle size", () => {
+  const catalog = [
+    { id: "titos", name: "Tito's", baseline: 4 },
+    { id: "titos-1-75l", name: "Tito's 1.75L", baseline: 10 },
+  ];
+  const recipe = {
+    ingredients: [
+      { name: "Tito's", raw: "Tito's=6 bottles (1.75L)", oz: 355 },
+      { name: "Strawberry Lemonade", raw: "8 Gallons Strawberry Lemonade", oz: 1024 },
+      { name: "Profit margin", raw: "Profit margin", oz: 91.7 },
+    ],
+  };
+
+  assert.deepEqual(buildRecipeInventoryContributions(recipe, catalog, {
+    batchSizeOz: 1379,
+    quantity: 1,
+  }), [{ id: "titos-1-75l", quantity: -6, baseline: 10 }]);
 });
 
 test("inventory contribution retries do not subtract twice", () => {
