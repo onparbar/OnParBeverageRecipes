@@ -151,13 +151,16 @@ function quantityControl(root) {
 
 function candidateForButton(button) {
   let root = button.parentElement;
+  let fallback = null;
   for (let depth = 0; root && depth < 8; depth += 1, root = root.parentElement) {
     const text = clean(root.innerText);
-    if (text.length > 10 && text.length < 2200 && (quantityControl(root) || depth >= 2)) {
-      return { root, button, quantity: quantityControl(root), text: canonical(text) };
-    }
+    if (text.length <= 10 || text.length >= 2200) continue;
+    const quantity = quantityControl(root);
+    const candidate = { root, button, quantity, text: canonical(text) };
+    if (quantity) return candidate;
+    if (!fallback && depth >= 2) fallback = candidate;
   }
-  return null;
+  return fallback;
 }
 
 function lineScore(candidate, line) {

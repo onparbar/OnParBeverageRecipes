@@ -24,3 +24,9 @@ test("older verified OHLQ items use exact product pages without substitutions", 
   assert.match(vendorCart, /state\.ohlqDirectQueue/);
   assert.match(vendorCart, /location\.assign\(ohlqProductUrl/);
 });
+
+test("exact product pages prefer the ancestor that owns the quantity control", () => {
+  assert.match(vendorCart, /let fallback = null/);
+  assert.match(vendorCart, /if \(quantity\) return candidate/);
+  assert.match(vendorCart, /return fallback/);
+});
