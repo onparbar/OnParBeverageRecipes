@@ -3,6 +3,7 @@ const VENDOR_CONFIG = Object.freeze({
   proof: { label: "Proof", hostname: /(?:^|\.)sgproof\.com$/i },
   ohlq: { label: "OHLQ", hostname: /(?:^|\.)ohlq\.com$/i },
 });
+const OHLQ_CATALOG_PATH = "/Previously-Purchased";
 
 function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -124,9 +125,9 @@ function setInputValue(input, value) {
 }
 
 function vendorSearchUrl(vendor, term) {
-  if (!["proof", "ohlq"].includes(vendor)) return "";
+  if (vendor !== "proof") return "";
   const url = new URL("/search", location.origin);
-  url.searchParams.set(vendor === "ohlq" ? "keyword" : "text", term);
+  url.searchParams.set("text", term);
   return url.href;
 }
 
@@ -200,6 +201,163 @@ async function waitForAddConfirmation(previousCart, timeout = 8000) {
     await delay(200);
   }
   return false;
+}
+
+function ohlqCatalogRows() {
+  return [...document.querySelectorAll("tr")]
+    .map((row) => ({ row, quantity: quantityControl(row), text: clean(row.innerText) }))
+    .filter((entry) => entry.quantity && /(?:^|\s)[0-9]{4}[a-z](?:\s|$)/i.test(entry.text));
+}
+
+function exactOhlqRows(line) {
+  const sku = clean(line.vendorSku).toUpperCase();
+  if (!/^[A-Z0-9]+$/.test(sku)) return [];
+  const escapedSku = sku.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`(?:^|\\s)${escapedSku}(?:\\s|$)`, "i");
+  return ohlqCatalogRows().filter((entry) => pattern.test(entry.text));
+}
+
+function ohlqDaysControl() {
+  return [...document.querySelectorAll("select")].find((select) => {
+    const options = [...select.options].map((option) => clean(option.textContent));
+    return ["15", "30", "60", "90"].every((days) => options.includes(days));
+  }) || null;
+}
+
+function buttonWithExactLabel(label) {
+  return [...document.querySelectorAll('button, input[type="button"], input[type="submit"]')]
+    .find((button) => visible(button) && clean(button.textContent || button.value).toLowerCase() === label.toLowerCase()) || null;
+}
+
+async function waitForOhlqCatalog(timeout = 12000) {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    if (ohlqCatalogRows().length) return true;
+    await delay(250);
+  }
+  return false;
+}
+
+function addResultOnce(state, result) {
+  const priorIndex = state.results.findIndex((entry) => entry.lineIndex === result.lineIndex);
+  if (priorIndex >= 0) state.results[priorIndex] = result;
+  else state.results.push(result);
+}
+
+async function finishFromResults(state) {
+  const missed = state.results.filter((result) => result.status !== "added");
+  if (missed.length) {
+    const added = state.results.filter((result) => result.status === "added").length;
+    await finish(
+      state,
+      "needs_review",
+      `${added} of ${state.lines.length} added. Review the listed items before continuing. Nothing was submitted.`,
+    );
+    return;
+  }
+  await finish(state);
+}
+
+async function finishOhlqStaged(state, confirmed) {
+  const staged = Array.isArray(state.ohlqStaged) ? state.ohlqStaged : [];
+  staged.forEach(({ lineIndex }) => {
+    const line = state.lines[lineIndex];
+    addResultOnce(state, {
+      lineIndex,
+      name: line.name,
+      status: confirmed ? "added" : "unmatched",
+      ...(confirmed ? { quantity: line.quantity } : {}),
+      message: confirmed ? "Added" : "OHLQ did not confirm that this item was added.",
+    });
+  });
+  state.phase = "ohlq-complete";
+  delete state.ohlqStaged;
+  delete state.ohlqCartBefore;
+  await saveState(state);
+  await finishFromResults(state);
+}
+
+async function runOhlqCatalog(state) {
+  if (state.phase === "ohlq-adding") {
+    const confirmed = await waitForAddConfirmation(state.ohlqCartBefore, 5000);
+    await finishOhlqStaged(state, confirmed);
+    return;
+  }
+
+  if (location.pathname.toLowerCase() !== OHLQ_CATALOG_PATH.toLowerCase()) {
+    state.phase = "ohlq-catalog";
+    await saveState(state);
+    location.assign(new URL(OHLQ_CATALOG_PATH, location.origin).href);
+    return;
+  }
+
+  if (state.phase !== "ohlq-filtered") {
+    const daysControl = ohlqDaysControl();
+    const applyFilters = buttonWithExactLabel("Apply Filters");
+    if (!daysControl || !applyFilters) throw new Error("The OHLQ purchased-product filters were unavailable.");
+    const ninetyDays = [...daysControl.options].find((option) => clean(option.textContent) === "90");
+    if (!ninetyDays) throw new Error("The OHLQ 90-day purchased-product filter was unavailable.");
+    daysControl.value = ninetyDays.value;
+    daysControl.dispatchEvent(new Event("change", { bubbles: true }));
+    state.phase = "ohlq-filtered";
+    await saveState(state);
+    applyFilters.click();
+  }
+
+  if (!await waitForOhlqCatalog()) {
+    throw new Error("OHLQ did not load the purchased-product catalog.");
+  }
+
+  const staged = [];
+  state.lines.forEach((line, lineIndex) => {
+    const matches = exactOhlqRows(line);
+    if (matches.length !== 1) {
+      addResultOnce(state, {
+        lineIndex,
+        name: line.name,
+        status: "unmatched",
+        message: matches.length > 1
+          ? "More than one exact OHLQ item ID matched. Review manually."
+          : "This exact OHLQ item ID was not in the 90-day purchased catalog. Review manually.",
+      });
+      return;
+    }
+    const match = matches[0];
+    if (/out of stock|unavailable/i.test(match.row.innerText)) {
+      addResultOnce(state, { lineIndex, name: line.name, status: "unmatched", message: "The product is unavailable." });
+      return;
+    }
+    if (!setQuantity(match.quantity, line.quantity)) {
+      addResultOnce(state, { lineIndex, name: line.name, status: "unmatched", message: "The requested quantity is not available in the OHLQ control." });
+      return;
+    }
+    staged.push({ lineIndex });
+  });
+
+  if (!staged.length) {
+    await finishFromResults(state);
+    return;
+  }
+
+  const addButton = buttonWithExactLabel("Add to Cart");
+  if (!addButton) {
+    staged.forEach(({ lineIndex }) => addResultOnce(state, {
+      lineIndex,
+      name: state.lines[lineIndex].name,
+      status: "unmatched",
+      message: "The OHLQ Add to Cart control was unavailable.",
+    }));
+    await finishFromResults(state);
+    return;
+  }
+
+  state.ohlqStaged = staged;
+  state.ohlqCartBefore = cartLinkSnapshot();
+  state.phase = "ohlq-adding";
+  await saveState(state);
+  addButton.click();
+  const confirmed = await waitForAddConfirmation(state.ohlqCartBefore);
+  await finishOhlqStaged(state, confirmed);
 }
 
 async function addExactMatch(state, lineIndex) {
@@ -290,6 +448,10 @@ async function start() {
   state.searchCursor = Number.isInteger(state.searchCursor) ? state.searchCursor : 0;
   await saveState(state);
   try {
+    if (vendor === "ohlq") {
+      await runOhlqCatalog(state);
+      return;
+    }
     while (state.searchCursor < state.lines.length) {
       const lineIndex = state.searchCursor;
       const line = state.lines[lineIndex];
@@ -310,17 +472,7 @@ async function start() {
       state.phase = "start";
       await saveState(state);
     }
-    const missed = state.results.filter((result) => result.status !== "added");
-    if (missed.length) {
-      const added = state.results.length - missed.length;
-      await finish(
-        state,
-        "needs_review",
-        `${added} of ${state.lines.length} added. Review the listed items before continuing. Nothing was submitted.`,
-      );
-    } else {
-      await finish(state);
-    }
+    await finishFromResults(state);
   } catch (error) {
     state.results.push({ name: VENDOR_CONFIG[vendor].label, status: "unmatched", message: error.message });
     await finish(state, "needs_review", `${VENDOR_CONFIG[vendor].label} changed before the cart could be completed. Review the listed items manually.`);

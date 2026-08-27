@@ -33,7 +33,7 @@ const VENDORS = Object.freeze({
   },
   ohlq: {
     label: "OHLQ",
-    home: "https://portal.ohlq.com/",
+    home: "https://portal.ohlq.com/Previously-Purchased",
     urls: ["https://*.ohlq.com/*"],
   },
 });
