@@ -3,12 +3,45 @@ const VENDOR_CONFIG = Object.freeze({
   proof: { label: "Proof", hostname: /(?:^|\.)sgproof\.com$/i },
   ohlq: { label: "OHLQ", hostname: /(?:^|\.)ohlq\.com$/i },
 });
+const PROOF_PRODUCT_IDENTITIES = Object.freeze({
+  "615006": { include: ["llords", "apple", "schnapps"] },
+  "38000": { include: ["angostura", "bitters", "16"] },
+  "301977": { include: ["dekuyper", "blueberry", "schnapps"] },
+  "614536": { include: ["llords", "creme", "cacao"] },
+  "472535": { include: ["finest", "call", "lemon", "juice"] },
+  "437071": { include: ["finest", "call", "lime", "juice"] },
+  "697774": { include: ["korbel", "brut", "250", "years"] },
+  "437102": { include: ["master", "mixes", "mint", "syrup"] },
+  "25213": { include: ["dekuyper", "peachtree"] },
+  "186701": { include: ["dekuyper", "pomegranate"] },
+  "293371": { include: ["dekuyper", "razzmatazz"] },
+  "220898": { include: ["dekuyper", "strawberry", "pucker"] },
+  "33497": { include: ["dekuyper", "triple", "sec"] },
+  "49357": { include: ["dekuyper", "watermelon", "pucker"] },
+});
 const OHLQ_CATALOG_PATH = "/Previously-Purchased";
 const OHLQ_PRODUCT_IDS = Object.freeze({
   "0066D": "66345753724699",
   "0068B": "111805928192876",
+    "0069L": "143304623839284",
+    "3024D": "97663185316991",
+    "4982D": "199012596936030",
+    "6060D": "24866493326551",
+    "6765D": "167097883074878",
+  "0281D": "13705430644522",
+  "0439D": "107287394991507",
   "0893L": "180221973987424",
+  "1327D": "146084707599901",
   "1497D": "273340084659512",
+  "1499L": "208260884030338",
+  "1755D": "84429962128508",
+  "2375D": "98148290645302",
+  "2410D": "150306335296910",
+  "3907D": "117964430056456",
+  "4116D": "208788558080955",
+  "8780B": "6528257933874",
+  "8867B": "182281370012392",
+  "8894D": "157055177947678",
   "9674D": "103610807059918",
 });
 
@@ -145,8 +178,52 @@ function addButtons() {
   });
 }
 
+function quantityControls(root) {
+  return [...root.querySelectorAll('input[type="number"], input[inputmode="numeric"], select[name*="quantity" i], select[id*="quantity" i]')].filter(visible);
+}
+
 function quantityControl(root) {
-  return [...root.querySelectorAll('input[type="number"], input[inputmode="numeric"], select[name*="quantity" i], select[id*="quantity" i]')].find(visible) || null;
+  return quantityControls(root)[0] || null;
+}
+
+function quantityControlText(control, root) {
+  const parts = [
+    control.getAttribute("aria-label"),
+    control.getAttribute("name"),
+    control.getAttribute("id"),
+    control.getAttribute("placeholder"),
+    control.getAttribute("data-testid"),
+  ];
+  if (control.labels) parts.push(...[...control.labels].map((label) => label.textContent));
+
+  let ancestor = control.parentElement;
+  while (ancestor && ancestor !== root) {
+    if (quantityControls(ancestor).length === 1) {
+      parts.push(
+        ancestor.getAttribute("aria-label"),
+        ancestor.getAttribute("data-testid"),
+        ancestor.textContent,
+      );
+    }
+    ancestor = ancestor.parentElement;
+  }
+
+  return parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function quantityControlForKind(root, quantityKind) {
+  if (!["cases", "units"].includes(quantityKind)) return null;
+  const kindPattern = quantityKind === "cases" ? /\bcases?\b/i : /\bunits?\b/i;
+  const otherPattern = quantityKind === "cases" ? /\bunits?\b/i : /\bcases?\b/i;
+  const controls = quantityControls(root);
+  const matches = controls.filter((control) => kindPattern.test(quantityControlText(control, root)));
+  if (matches.length === 1) return matches[0];
+
+  if (controls.length === 1) {
+    const rootText = String(root?.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    if (kindPattern.test(rootText) && !otherPattern.test(rootText)) return controls[0];
+  }
+  return null;
 }
 
 function candidateForButton(button) {
@@ -165,7 +242,12 @@ function candidateForButton(button) {
 
 function lineScore(candidate, line) {
   const sku = canonical(line.vendorSku);
-  if (sku) return candidate.text.includes(sku) ? 1000 : 0;
+  if (sku) {
+    if (candidate.text.includes(sku)) return 1000;
+    const proofIdentity = PROOF_PRODUCT_IDENTITIES[clean(line.vendorSku)];
+    if (proofIdentity?.include.every((token) => candidate.text.includes(canonical(token)))) return 900;
+    return 0;
+  }
   const tokens = canonical(line.name).split(" ").filter((token) => token.length > 1);
   if (!tokens.length || !tokens.every((token) => candidate.text.includes(token))) return 0;
   return tokens.length;
@@ -459,8 +541,13 @@ async function addExactMatch(state, lineIndex) {
   if (match.button.disabled || /out of stock|unavailable/i.test(match.root.innerText)) {
     return { lineIndex, name: line.name, status: "unmatched", message: "The product is unavailable." };
   }
-  if (!setQuantity(match.quantity, line.quantity)) {
-    return { lineIndex, name: line.name, status: "unmatched", message: "The requested quantity is not available in the vendor control." };
+  const requestedQuantityControl = quantityControlForKind(match.root, line.quantityKind);
+  if (!requestedQuantityControl) {
+    const label = line.quantityKind === "cases" ? "case" : "unit";
+    return { lineIndex, name: line.name, status: "unmatched", message: `Could not identify one ${label} quantity control safely.` };
+  }
+  if (!setQuantity(requestedQuantityControl, line.quantity)) {
+    return { lineIndex, name: line.name, status: "unmatched", message: "The requested quantity is not available in the matching vendor control." };
   }
   await delay(750);
   const previousCart = cartLinkSnapshot();
@@ -469,7 +556,10 @@ async function addExactMatch(state, lineIndex) {
     return { lineIndex, name: line.name, status: "unmatched", message: "The vendor did not confirm that this item was added." };
   }
   await delay(250);
-  return { lineIndex, name: line.name, status: "added", quantity: line.quantity, message: "Added" };
+  const quantityLabel = line.quantityKind === "cases"
+    ? `${line.quantity} ${line.quantity === 1 ? "case" : "cases"}`
+    : `${line.quantity} ${line.quantity === 1 ? "unit" : "units"}`;
+  return { lineIndex, name: line.name, status: "added", quantity: line.quantity, quantityKind: line.quantityKind, message: `Added ${quantityLabel}` };
 }
 
 async function submitSearch(state, lineIndex) {

@@ -9,6 +9,7 @@ const VENDOR_ORDER_IDENTITY_FALLBACKS = new Map([
   ["ohlq|woodford-reserve-bourbon", { vendorSku: "9674D", productName: "Woodford Reserve Bourbon 1.75L", unitCost: 66.74 }],
 ]);
 const RETIRED_PRODUCT_PATTERN = /\b(?:breakfast stout|apple pucker)\b/i;
+const PROOF_INDIVIDUAL_UNIT_SKUS = new Set(["437102"]);
 
 function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -35,44 +36,52 @@ export function normalizeVendorOrderPolicy(policy = {}) {
     ? policy.proofMinimumCandidates
     : [])
     .slice(0, 100)
-    .map((item) => ({
-      id: clean(item?.id).slice(0, 160),
-      name: clean(item?.name).slice(0, 240),
-      vendor: "Proof",
-      vendorSku: clean(item?.vendorSku).slice(0, 120),
-      vendorProductName: clean(item?.vendorProductName || item?.name).slice(0, 240),
-      casePackaged: true,
-      shelfStable: true,
-      packSize: Math.max(1, Math.floor(numberOrNull(item?.packSize) || 1)),
-      projectedPrepUseUnits: Math.max(0, Math.ceil(numberOrNull(item?.projectedPrepUseUnits) || 0)),
-      projectedPrepUseOz: Math.max(0, numberOrNull(item?.projectedPrepUseOz) || 0),
-      onHandUnits: Math.max(0, numberOrNull(item?.onHandUnits) || 0),
-      parUnits: Math.max(0, numberOrNull(item?.parUnits) || 0),
-      replacementNeedUnits: Math.max(0, Math.ceil(numberOrNull(item?.replacementNeedUnits) || 0)),
-      unitCost: Math.max(0, numberOrNull(item?.unitCost) || 0),
-    }))
+    .map((item) => {
+      const vendorSku = clean(item?.vendorSku).slice(0, 120);
+      return {
+        id: clean(item?.id).slice(0, 160),
+        name: clean(item?.name).slice(0, 240),
+        vendor: "Proof",
+        vendorSku,
+        vendorProductName: clean(item?.vendorProductName || item?.name).slice(0, 240),
+        casePackaged: !PROOF_INDIVIDUAL_UNIT_SKUS.has(vendorSku) && item?.casePackaged !== false,
+        shelfStable: true,
+        packSize: Math.max(1, Math.floor(numberOrNull(item?.packSize) || 1)),
+        projectedPrepUseUnits: Math.max(0, Math.ceil(numberOrNull(item?.projectedPrepUseUnits) || 0)),
+        projectedPrepUseOz: Math.max(0, numberOrNull(item?.projectedPrepUseOz) || 0),
+        onHandUnits: Math.max(0, numberOrNull(item?.onHandUnits) || 0),
+        parUnits: Math.max(0, numberOrNull(item?.parUnits) || 0),
+        replacementNeedUnits: Math.max(0, Math.ceil(numberOrNull(item?.replacementNeedUnits) || 0)),
+        unitCost: Math.max(0, numberOrNull(item?.unitCost) || 0),
+      };
+    })
     .filter((item) => item.id && item.name && item.vendorSku && item.unitCost > 0);
   const cocktailIngredientMinimumOrders = (Array.isArray(policy?.cocktailIngredientMinimumOrders)
     ? policy.cocktailIngredientMinimumOrders
     : [])
     .slice(0, 100)
     .map((item) => {
+      const vendor = normalizeVendor(item?.vendor);
+      const vendorSku = clean(item?.vendorSku).slice(0, 120);
       const packSize = Math.max(1, Math.floor(numberOrNull(item?.packSize) || 1));
       const requestedQuantity = Math.max(0, Math.ceil(numberOrNull(item?.quantity) || 0));
-      const quantity = item?.casePackaged && requestedQuantity > 0
+      const casePackaged = vendor === "Proof" && PROOF_INDIVIDUAL_UNIT_SKUS.has(vendorSku)
+        ? false
+        : Boolean(item?.casePackaged);
+      const quantity = casePackaged && requestedQuantity > 0
         ? Math.ceil(requestedQuantity / packSize) * packSize
         : requestedQuantity;
       const unitCost = numberOrNull(item?.unitCost);
       return {
         id: clean(item?.id).slice(0, 160),
         name: clean(item?.name).slice(0, 240),
-        vendor: normalizeVendor(item?.vendor),
-        vendorSku: clean(item?.vendorSku).slice(0, 120),
+        vendor,
+        vendorSku,
         vendorProductName: clean(item?.vendorProductName || item?.name).slice(0, 240),
         orderCategory: "liquor",
         lineType: "Liquor bottle",
         quantity,
-        casePackaged: Boolean(item?.casePackaged),
+        casePackaged,
         packSize,
         unitCost,
         estimatedCost: unitCost === null ? null : quantity * unitCost,

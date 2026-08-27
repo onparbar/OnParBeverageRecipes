@@ -5,11 +5,19 @@ const OVERLAY_ID = "onpar-bees-cart-builder";
 const PRODUCT_IDENTITIES = Object.freeze({
   "mich ultra": { include: ["michelob", "ultra"] },
   "michelob ultra": { include: ["michelob", "ultra"] },
+  "busch light": { include: ["busch", "light"] },
+  "bud light": { include: ["bud", "light"] },
   "angry orchard": { include: ["angry", "orchard"] },
   "upside dawn": { include: ["athletic", "upside", "dawn"] },
   "non alcoholic beer": { include: ["athletic", "upside", "dawn"] },
   "truth": { include: ["rhinegeist", "truth"] },
   "cincy light": { include: ["rhinegeist", "cincy", "light"] },
+  "summer ale": { include: ["samuel", "adams", "summer", "ale"] },
+  "kona big wave": { include: ["kona", "big", "wave"] },
+  "stella artois": { include: ["stella", "artois"] },
+  "truly wild berry": { include: ["truly", "wild", "berry"] },
+  "budweiser": { include: ["budweiser"] },
+  "yuengling": { include: ["yuengling", "traditional", "lager"] },
   "triple jam": { include: ["blake", "triple", "jam"] },
   "triple jam cider": { include: ["blake", "triple", "jam"] },
   "garage beer regular": { include: ["garage", "beer"], exclude: ["lime"] },
@@ -23,7 +31,7 @@ const PRODUCT_IDENTITIES = Object.freeze({
   "two hearted ipa": { include: ["two", "hearted"] },
   "guinness": { include: ["guinness", "draught"] },
   "modelo": { include: ["modelo"] },
-  "octoberfest": { include: ["octoberfest"] },
+  "octoberfest": { include: ["samuel", "adams", "octoberfest"] },
 });
 
 function clean(value) {

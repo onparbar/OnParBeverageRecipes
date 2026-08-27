@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "On Par Vendor Cart Builder",
-  "version": "1.2.1",
+  "version": "1.2.3",
   "description": "Builds review-only BEES, Proof, and OHLQ carts from approved On Par orders.",
   "permissions": ["storage", "tabs"],
   "host_permissions": [

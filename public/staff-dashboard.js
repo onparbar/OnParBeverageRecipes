@@ -184,6 +184,21 @@ function inspectStaffBrowserProfile() {
 }
 
 function lockStaffRecipesForBrowserProfile(storageUnavailable) {
+  if (overviewWeek) {
+    overviewWeek.textContent = storageUnavailable
+      ? "Safari storage is unavailable. Use a regular staff browser profile."
+      : "Open Staff View from the owner dashboard or use a separate staff browser profile.";
+  }
+  [overviewPrepValue, overviewLiquorValue, overviewOrderValue, overviewRecipeValue]
+    .filter(Boolean)
+    .forEach((element) => {
+      element.textContent = "—";
+    });
+  [overviewPrepDetail, overviewLiquorDetail, overviewOrderDetail, overviewRecipeDetail]
+    .filter(Boolean)
+    .forEach((element) => {
+      element.textContent = "";
+    });
   statusPanel.dataset.state = "error";
   prepStatusPanel.dataset.state = "error";
   prepStatusPanel.textContent = "The staff prep checklist is locked in this browser profile.";

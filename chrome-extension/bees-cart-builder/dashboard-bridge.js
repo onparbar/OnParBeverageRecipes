@@ -25,7 +25,12 @@ function validateOrder(payload) {
   const lines = payload.lines.map((line) => {
     const requestedCases = positiveInteger(line.requestedCases);
     const requestedUnits = positiveInteger(line.requestedUnits);
-    const quantity = vendor === "ohlq" ? requestedUnits : requestedCases || requestedUnits;
+    const quantityKind = vendor === "ohlq"
+      ? "units"
+      : requestedCases
+        ? "cases"
+        : "units";
+    const quantity = quantityKind === "cases" ? requestedCases : requestedUnits;
     const name = clean(line.name);
     const vendorSku = clean(line.vendorSku);
     if (!name || !quantity) throw new Error("A vendor line is missing its product or quantity.");
@@ -36,6 +41,9 @@ function validateOrder(payload) {
       vendorSku,
       packSize: clean(line.packSize),
       quantity,
+      quantityKind,
+      requestedCases,
+      requestedUnits,
     };
   });
   return {
