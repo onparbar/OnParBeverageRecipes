@@ -18,7 +18,15 @@ const VENDOR_ALIASES = Object.freeze({
   bonbright: ["bonbright", "bon bright", "bomb right", "bomb bright", "tj"],
   heidelberg: ["heidelberg", "heildelberg", "heidleberg", "bees"],
   proof: ["proof", "sg proof"],
-  ohlq: ["ohlq", "oh l q", "ohio liquor"],
+  ohlq: [
+    "ohlq",
+    "oh l q",
+    "ohio liquor",
+    "belmont party supply",
+    "belmont",
+    "party supply",
+    "wholesale",
+  ],
 });
 
 const PRODUCT_STOP_WORDS = new Set([
@@ -50,9 +58,23 @@ function vendorAliasKey(vendor) {
   return Object.keys(VENDOR_ALIASES).find((key) => normalized.includes(key)) || normalized;
 }
 
+function getVendorIntentKeys(query) {
+  const normalizedQuery = normalize(query);
+  const keys = new Set();
+  if (/\b(?:all\s+)?beer\s+deliver(?:y|ies)\b/.test(normalizedQuery)) {
+    keys.add("bonbright");
+    keys.add("heidelberg");
+  }
+  if (/\b(?:all\s+)?mixers?\b/.test(normalizedQuery)) keys.add("proof");
+  if (/\b(?:all\s+)?(?:liquor|alcohol)\b/.test(normalizedQuery)) keys.add("ohlq");
+  return keys;
+}
+
 function getVendorMatches(query, vendors) {
+  const intentKeys = getVendorIntentKeys(query);
   return vendors.filter((vendor) => {
     const normalizedVendor = normalize(vendor.vendor);
+    if (intentKeys.has(vendorAliasKey(vendor.vendor))) return true;
     const aliases = VENDOR_ALIASES[vendorAliasKey(vendor.vendor)] || [normalizedVendor];
     return [normalizedVendor, ...aliases].some((alias) => query.includes(normalize(alias)));
   });
@@ -131,9 +153,13 @@ function getQuantitiesWithoutProduct(clause, item) {
 
 function hasFullDeliveryStatement(value) {
   const normalizedValue = normalize(value);
+  if (/\b(?:not|isnt|wasnt)\s+(?:everythings?|everything(?:\s+is)?|all(?:\s+is)?)\s+here\b/.test(normalizedValue)) return false;
   return /\b(?:everything|all)(?:\s+[a-z0-9]+){0,8}\s+(?:came|arrived|was delivered|received)\b/.test(normalizedValue)
     || /\b(?:full|complete)\s+(?:delivery|order)\b/.test(normalizedValue)
-    || /\b(?:delivery|order)\s+(?:came|arrived)\b/.test(normalizedValue);
+    || /\b(?:delivery|order)\s+(?:came|arrived)\b/.test(normalizedValue)
+    || /\b(?:everythings?|everything\s+is|all(?:\s+is)?)\s+here\b/.test(normalizedValue)
+    || /\ball\s+(?:beer\s+deliver(?:y|ies)|mixers?|liquor|alcohol)\b/.test(normalizedValue)
+    || /\b(?:beer\s+deliver(?:y|ies)|mixers?|liquor|alcohol)(?:\s+(?:delivery|order))?(?:\s+all)?\s+(?:came|arrived|were delivered|was delivered|received|are here|is here)\b/.test(normalizedValue);
 }
 
 function splitNarrativeClauses(value) {
@@ -262,35 +288,56 @@ export function parseSmartReceivingTranscript(rawTranscript, orderTracking = {})
     return { status: "blocked", question: "There is no current vendor order to receive.", proposal: null };
   }
 
-  const vendorMatches = getVendorMatches(query, vendors);
+  const vendorIntentKeys = getVendorIntentKeys(query);
+  const matchedVendors = getVendorMatches(query, vendors);
+  const vendorMatches = vendorIntentKeys.size
+    ? matchedVendors.filter((vendor) => vendor.ordered)
+    : matchedVendors;
   const orderedVendors = vendors.filter((entry) => entry.ordered);
-  const vendor = vendorMatches.length === 1
-    ? vendorMatches[0]
-    : vendorMatches.length === 0
-      ? inferVendorFromProducts(query, orderedVendors)
-        || (orderedVendors.length === 1 ? orderedVendors[0] : null)
-      : null;
-  if (!vendor) {
+  if (vendorIntentKeys.size && !vendorMatches.length) {
     return {
-      status: "needs-clarification",
-      question: vendorMatches.length > 1 ? "Which vendor delivery is this?" : "Which vendor arrived?",
+      status: "blocked",
+      question: "There is no currently ordered delivery for that vendor group.",
       proposal: null,
     };
   }
-  if (!vendor.ordered) {
-    return { status: "blocked", question: `${clean(vendor.vendor)} is not marked as ordered yet.`, proposal: null };
+  const inferredVendor = vendorMatches.length === 0
+    ? inferVendorFromProducts(query, orderedVendors)
+      || (orderedVendors.length === 1 ? orderedVendors[0] : null)
+    : null;
+  const targetVendors = vendorMatches.length ? vendorMatches : inferredVendor ? [inferredVendor] : [];
+  if (!targetVendors.length) {
+    return {
+      status: "needs-clarification",
+      question: "Which vendor arrived?",
+      proposal: null,
+    };
+  }
+  const unorderedVendor = targetVendors.find((vendor) => !vendor.ordered);
+  if (unorderedVendor) {
+    return { status: "blocked", question: `${clean(unorderedVendor.vendor)} is not marked as ordered yet.`, proposal: null };
   }
 
-  const items = Array.isArray(vendor.items) ? vendor.items : [];
-  if (!items.length) {
-    return { status: "blocked", question: `${clean(vendor.vendor)} has no current delivery lines.`, proposal: null };
+  const vendorCatalog = targetVendors.map((vendor) => ({
+    vendor,
+    items: (Array.isArray(vendor.items) ? vendor.items : []).map((item) => ({
+      ...item,
+      receivingVendorId: clean(vendor.id),
+      receivingVendor: clean(vendor.vendor),
+    })),
+  }));
+  const emptyVendor = vendorCatalog.find((entry) => !entry.items.length)?.vendor;
+  if (emptyVendor) {
+    return { status: "blocked", question: `${clean(emptyVendor.vendor)} has no current delivery lines.`, proposal: null };
   }
+  const items = vendorCatalog.flatMap((entry) => entry.items);
+  const vendorLabel = targetVendors.map((vendor) => clean(vendor.vendor)).join(" + ");
   const fullDelivery = hasFullDeliveryStatement(query);
   const hasException = /\b(?:except|missing|short|without|out of stock|unavailable|rejected|bad|damaged|broken|didnt get|did not get|only got|only received|extra)\b/.test(query);
   if (!fullDelivery && !hasException) {
     return {
       status: "needs-clarification",
-      question: `Did the entire ${clean(vendor.vendor)} order arrive?`,
+      question: `Did the entire ${vendorLabel} order${targetVendors.length === 1 ? "" : "s"} arrive?`,
       proposal: null,
     };
   }
@@ -303,6 +350,8 @@ export function parseSmartReceivingTranscript(rawTranscript, orderTracking = {})
     receivedQuantity: Number(item.quantity) || 0,
     status: "received",
     reason: "",
+    vendorId: item.receivingVendorId,
+    vendor: item.receivingVendor,
   }));
 
   const noteClauses = [];
@@ -315,8 +364,8 @@ export function parseSmartReceivingTranscript(rawTranscript, orderTracking = {})
         return {
           status: "needs-clarification",
           question: match.status === "ambiguous"
-            ? `Which ${clean(vendor.vendor)} product did you mean?`
-            : `Which ${clean(vendor.vendor)} product did "${clean(clause)}" mean?`,
+            ? `Which product did you mean?`
+            : `Which ${vendorLabel} product did "${clean(clause)}" mean?`,
           proposal: null,
         };
       }
@@ -333,19 +382,34 @@ export function parseSmartReceivingTranscript(rawTranscript, orderTracking = {})
         proposal: null,
       };
     }
-    const index = proposals.findIndex((entry) => entry.itemId === result.line.itemId);
-    proposals[index] = result.line;
+    const line = {
+      ...result.line,
+      vendorId: match.item.receivingVendorId,
+      vendor: match.item.receivingVendor,
+    };
+    const index = proposals.findIndex((entry) => (
+      entry.itemId === line.itemId && entry.vendorId === line.vendorId
+    ));
+    proposals[index] = line;
     if (!result.handled) noteClauses.push(clause);
   }
+
+  const batches = vendorCatalog.map(({ vendor }) => ({
+    generatedAt: clean(orderTracking.generatedAt),
+    vendorId: clean(vendor.id),
+    vendor: clean(vendor.vendor),
+    lines: proposals.filter((line) => line.vendorId === clean(vendor.id)),
+  }));
 
   return {
     status: "ready",
     question: "",
     proposal: {
       generatedAt: clean(orderTracking.generatedAt),
-      vendorId: clean(vendor.id),
-      vendor: clean(vendor.vendor),
+      vendorId: batches.length === 1 ? batches[0].vendorId : "",
+      vendor: vendorLabel,
       lines: proposals,
+      batches,
       note: clean(noteClauses.join("; ")),
     },
   };

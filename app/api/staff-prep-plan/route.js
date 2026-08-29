@@ -97,29 +97,58 @@ export async function POST(request) {
       return jsonResponse(unavailablePlan(state), 409);
     }
     const body = await getBody(request);
-    const priorPlan = buildStaffPrepPlan(recommendations);
-    const target = [...priorPlan.items, ...priorPlan.liquorRefills].find((item) => item.id === String(body.itemId || ""));
-    const updatedRecommendations = applyStaffPrepPlanUpdate(
-      recommendations,
-      body,
-    );
-    const requestedActualQuantity = Number(body.actualQuantity ?? target?.quantity);
-    const actualQuantityChanged = target?.kind === "liquor-refill"
-      && body.completed === true
-      && target.completed === true
-      && requestedActualQuantity !== Number(target.actualQuantity);
-    const stateChanged = target && (target.completed !== body.completed || actualQuantityChanged);
-    const inventoryPlan = await planPrepInventoryContributions({
-      target,
-      generatedAt: recommendations.generatedAt,
-      completed: body.completed,
-      actualQuantity: body.actualQuantity,
+    const rawUpdates = Array.isArray(body.updates) ? body.updates : [body];
+    if (rawUpdates.length < 1 || rawUpdates.length > 100) {
+      return jsonResponse({ error: "Choose between 1 and 100 checklist items to save." }, 400);
+    }
+    const sharedPreparedBy = String(body.preparedBy || "").replace(/\s+/g, " ").trim().slice(0, 80);
+    const updatesByItem = new Map();
+    rawUpdates.forEach((update) => {
+      if (!update || typeof update !== "object") return;
+      const itemId = String(update.itemId || "");
+      updatesByItem.set(itemId, {
+        ...update,
+        itemId,
+        generatedAt: String(body.generatedAt || update.generatedAt || ""),
+        preparedBy: String(update.preparedBy || sharedPreparedBy).replace(/\s+/g, " ").trim().slice(0, 80),
+      });
     });
-    const isLiquorRefill = target.kind === "liquor-refill";
-    const actor = String(body.preparedBy || role).replace(/\s+/g, " ").trim().slice(0, 80);
-    const quantity = isLiquorRefill
-      ? Math.max(1, Number(body.actualQuantity ?? target.actualQuantity ?? target.quantity) || 1)
-      : Math.max(1, Number(target.quantity) || 1);
+    const updates = [...updatesByItem.values()];
+    if (!updates.length) return jsonResponse({ error: "Choose at least one checklist item to save." }, 400);
+
+    let updatedRecommendations = recommendations;
+    const inventoryPlans = [];
+    const changes = [];
+    for (const update of updates) {
+      const currentPlan = buildStaffPrepPlan(updatedRecommendations);
+      const target = [...currentPlan.items, ...currentPlan.liquorRefills]
+        .find((item) => item.id === update.itemId);
+      const nextRecommendations = applyStaffPrepPlanUpdate(updatedRecommendations, update);
+      const requestedActualQuantity = Number(update.actualQuantity ?? target?.quantity);
+      const actualQuantityChanged = target?.kind === "liquor-refill"
+        && update.completed === true
+        && target.completed === true
+        && requestedActualQuantity !== Number(target.actualQuantity);
+      const stateChanged = Boolean(target)
+        && (target.completed !== update.completed || actualQuantityChanged);
+      inventoryPlans.push(await planPrepInventoryContributions({
+        target,
+        generatedAt: recommendations.generatedAt,
+        completed: update.completed,
+        actualQuantity: update.actualQuantity,
+      }));
+      changes.push({ target, update, stateChanged });
+      updatedRecommendations = nextRecommendations;
+    }
+
+    const inventoryPlan = {
+      sources: inventoryPlans.flatMap((plan) => Array.isArray(plan?.sources) ? plan.sources : []),
+      unmatched: inventoryPlans.flatMap((plan) => Array.isArray(plan?.unmatched) ? plan.unmatched : []),
+    };
+    const stateChanged = changes.some((change) => change.stateChanged);
+    const actor = sharedPreparedBy || String(updates[0]?.preparedBy || role).replace(/\s+/g, " ").trim().slice(0, 80);
+    const completedChanges = changes.filter((change) => change.stateChanged && change.update.completed).length;
+    const reopenedChanges = changes.filter((change) => change.stateChanged && !change.update.completed).length;
     const { saved, inventoryUpdate } = await executeInventoryBackedOperation({
       plan: inventoryPlan,
       assertPlan: assertInventoryContributionPlan,
@@ -140,18 +169,16 @@ export async function POST(request) {
       applyInventory: (plan) => applyInventoryContributionPlan(plan, role),
       recordActivity: (savedState) => recordDashboardActivity({
         area: "Inventory",
-        action: body.completed
-          ? (isLiquorRefill ? "added liquor to keg" : "consumed cocktail ingredients")
-          : (isLiquorRefill ? "reopened liquor refill" : "restored cocktail ingredients"),
+        action: "updated staff prep checklist",
         role,
         revision: savedState.revision,
-        summary: `${target.displayName || target.name}: ${body.completed ? `${quantity} ${isLiquorRefill ? "bottles" : "batches"} completed` : "reopened"} by ${actor} for Weekly Plan ${recommendations.generatedAt}.`,
+        summary: `${completedChanges} completed and ${reopenedChanges} reopened by ${actor} for Weekly Plan ${recommendations.generatedAt}.`,
         dedupe: true,
       }),
     });
     return jsonResponse({
       available: true,
-      message: "Preparation checklist saved.",
+      message: `${updates.length} checklist item${updates.length === 1 ? "" : "s"} saved.`,
       inventoryUpdate,
       ...buildStaffPrepPlan(saved.recommendations),
     });

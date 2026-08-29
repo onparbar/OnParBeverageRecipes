@@ -92,6 +92,10 @@ let tapSheets = { available: false, updatedAt: "", onDeckAvailable: false, walls
 let activeTapSheetWall = "main";
 let smartReceivingProposal = null;
 let smartReceivingRecognition = null;
+let staffPrepDrafts = new Map();
+let staffPrepBatchName = "";
+let staffPrepBatchSaving = false;
+let staffPrepBatchViews = [];
 const STAFF_FETCH_TIMEOUT_MS = 8000;
 
 initStaffRecipes();
@@ -679,7 +683,7 @@ function renderSmartReceivingProposal(proposal) {
     const row = document.createElement("li");
     row.dataset.state = line.status === "extra" ? "extra" : "short";
     const name = document.createElement("strong");
-    name.textContent = line.name;
+    name.textContent = proposal.batches?.length > 1 ? `${line.vendor}: ${line.name}` : line.name;
     const controls = document.createElement("span");
     controls.className = "smart-receiving__review-controls";
     const quantity = document.createElement("input");
@@ -721,7 +725,10 @@ function renderSmartReceivingProposal(proposal) {
     const summary = document.createElement("summary");
     summary.textContent = `${formatNumber(receivedCount)} received as ordered`;
     const names = document.createElement("p");
-    names.textContent = proposal.lines.filter((line) => line.status === "received").map((line) => line.name).join(", ");
+    names.textContent = proposal.lines
+      .filter((line) => line.status === "received")
+      .map((line) => proposal.batches?.length > 1 ? `${line.vendor}: ${line.name}` : line.name)
+      .join(", ");
     received.append(summary, names);
     smartReceivingReviewList.append(received);
   }
@@ -796,40 +803,54 @@ async function applySmartReceivingProposal() {
   smartReceivingApply.disabled = true;
   smartReceivingReview.disabled = true;
   smartReceivingSpeak.disabled = true;
-  setSmartReceivingStatus("Saving reviewed delivery...");
+  const receiptBatches = Array.isArray(smartReceivingProposal.batches) && smartReceivingProposal.batches.length
+    ? smartReceivingProposal.batches
+    : [{
+      generatedAt: smartReceivingProposal.generatedAt,
+      vendorId: smartReceivingProposal.vendorId,
+      vendor: smartReceivingProposal.vendor,
+      lines: smartReceivingProposal.lines,
+    }];
+  setSmartReceivingStatus(`Saving ${receiptBatches.length === 1 ? "reviewed delivery" : `${formatNumber(receiptBatches.length)} reviewed deliveries`}...`);
   try {
-    const response = await fetch("/api/weekly-order-tracking", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "set-receipts",
-        generatedAt: smartReceivingProposal.generatedAt,
-        vendorId: smartReceivingProposal.vendorId,
-        handledBy,
-        confirmed: true,
-        receipts: smartReceivingProposal.lines.map((line) => ({
-          itemId: line.itemId,
-          status: line.status,
-          receivedQuantity: line.receivedQuantity,
-          reason: line.reason,
-        })),
-        note: clean(smartReceivingNote?.value),
-      }),
-    });
-    const result = await parseJsonResponse(response);
-    if (!response.ok) throw new Error(result?.error || "The reviewed delivery could not be saved.");
-    const savedLineCount = smartReceivingProposal.lines.length;
+    let result = null;
+    const inventoryWarnings = [];
+    let savedLineCount = 0;
+    for (const batch of receiptBatches) {
+      const response = await fetch("/api/weekly-order-tracking", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "set-receipts",
+          generatedAt: batch.generatedAt,
+          vendorId: batch.vendorId,
+          handledBy,
+          confirmed: true,
+          receipts: batch.lines.map((line) => ({
+            itemId: line.itemId,
+            status: line.status,
+            receivedQuantity: line.receivedQuantity,
+            reason: line.reason,
+          })),
+          note: clean(smartReceivingNote?.value),
+        }),
+      });
+      result = await parseJsonResponse(response);
+      if (!response.ok) throw new Error(`${batch.vendor}: ${result?.error || "The reviewed delivery could not be saved."}`);
+      if (result?.inventoryUpdate?.warning) inventoryWarnings.push(result.inventoryUpdate.warning);
+      savedLineCount += batch.lines.length;
+    }
     orderTracking = normalizeOrderTracking(result);
     smartReceivingTranscript.value = "";
     if (smartReceivingNote) smartReceivingNote.value = "";
     clearSmartReceivingProposal();
     renderWeeklyOrderTracking();
     renderStaffOverview();
-    const inventoryMessage = result?.inventoryUpdate?.warning
-      ? result.inventoryUpdate.warning
+    const inventoryMessage = inventoryWarnings.length
+      ? inventoryWarnings.join(" ")
       : result?.inventoryUpdate ? " Cabinet inventory updated." : "";
-    setSmartReceivingStatus(`${formatNumber(savedLineCount)} delivery lines saved.${inventoryMessage}`, result?.inventoryUpdate?.warning ? "error" : "");
+    setSmartReceivingStatus(`${formatNumber(savedLineCount)} delivery lines saved.${inventoryMessage}`, inventoryWarnings.length ? "error" : "");
   } catch (error) {
     smartReceivingApply.disabled = false;
     setSmartReceivingStatus(error?.message || "The reviewed delivery could not be saved.", "error");
@@ -856,6 +877,7 @@ function bindSmartReceivingEvents() {
 }
 
 function renderStaffPrepPlan() {
+  staffPrepBatchViews = [];
   prepList.replaceChildren();
   liquorList.replaceChildren();
   prepList.setAttribute("aria-busy", "false");
@@ -888,20 +910,186 @@ function renderStaffPrepPlan() {
     : "No liquor to add this week.";
 
   if (prepPlan.items.length) {
+    prepList.append(createStaffPrepBatchControls());
     prepPlan.items.forEach((item) => prepList.append(createStaffPrepItem(item)));
   } else {
     prepList.append(createEmptyState("No cocktails need to be made this week."));
   }
   if (liquorRefills.length) {
+    liquorList.append(createStaffPrepBatchControls());
     liquorRefills.forEach((item) => liquorList.append(createStaffPrepItem(item)));
   } else {
     liquorList.append(createEmptyState("No liquor needs to be added to kegs this week."));
+  }
+  updateStaffPrepBatchControls();
+}
+
+function createStaffPrepBatchControls() {
+  const form = document.createElement("form");
+  form.className = "staff-prep-batch";
+
+  const copy = document.createElement("div");
+  copy.className = "staff-prep-batch__copy";
+  const title = document.createElement("strong");
+  title.textContent = "Save several at once";
+  const hint = document.createElement("span");
+  hint.textContent = "Check every completed item, enter your name once, then save.";
+  copy.append(title, hint);
+
+  const nameField = document.createElement("label");
+  nameField.className = "staff-prep-name-field";
+  const nameLabel = document.createElement("span");
+  nameLabel.textContent = "Completed by";
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.maxLength = 80;
+  nameInput.autoComplete = "name";
+  nameInput.placeholder = "Employee name";
+  nameInput.value = staffPrepBatchName;
+  nameField.append(nameLabel, nameInput);
+
+  const saveButton = document.createElement("button");
+  saveButton.className = "primary-button staff-prep-batch__save";
+  saveButton.type = "submit";
+  saveButton.textContent = "Save selected";
+
+  const status = document.createElement("p");
+  status.className = "staff-prep-batch__status";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+
+  const view = { form, nameInput, saveButton, status };
+  staffPrepBatchViews.push(view);
+  nameInput.addEventListener("input", () => {
+    staffPrepBatchName = nameInput.value;
+    staffPrepBatchViews.forEach((otherView) => {
+      if (otherView.nameInput !== nameInput) otherView.nameInput.value = nameInput.value;
+    });
+  });
+  form.addEventListener("submit", saveStaffPrepBatch);
+  form.append(copy, nameField, saveButton, status);
+  return form;
+}
+
+function updateStaffPrepBatchControls({ message = "", state = "" } = {}) {
+  const count = staffPrepDrafts.size;
+  staffPrepBatchViews.forEach((view) => {
+    view.form.setAttribute("aria-busy", String(staffPrepBatchSaving));
+    view.nameInput.disabled = staffPrepBatchSaving;
+    view.saveButton.disabled = staffPrepBatchSaving || count === 0;
+    view.saveButton.textContent = staffPrepBatchSaving
+      ? "Saving..."
+      : count > 0
+        ? `Save ${count} change${count === 1 ? "" : "s"}`
+        : "Save selected";
+    view.status.textContent = message || (count > 0
+      ? `${count} change${count === 1 ? "" : "s"} ready to save.`
+      : "Select completed items below.");
+    if (state) view.status.dataset.state = state;
+    else delete view.status.dataset.state;
+  });
+}
+
+function setStaffPrepItemInputsDisabled(disabled) {
+  [...prepList.querySelectorAll("[data-staff-prep-item-input]"), ...liquorList.querySelectorAll("[data-staff-prep-item-input]")]
+    .forEach((input) => { input.disabled = disabled; });
+}
+
+async function saveStaffPrepBatch(event) {
+  event.preventDefault();
+  if (staffPrepBatchSaving || staffPrepDrafts.size === 0) return;
+  const preparedBy = clean(staffPrepBatchName);
+  if (!preparedBy) {
+    updateStaffPrepBatchControls({ message: "Enter your name before saving the selected items.", state: "error" });
+    event.currentTarget.querySelector("input[type='text']")?.focus();
+    return;
+  }
+
+  const updates = [...staffPrepDrafts.values()];
+  const invalidLiquor = updates.find((update) => update.completed
+    && update.actualQuantity !== undefined
+    && (!Number.isInteger(update.actualQuantity) || update.actualQuantity < 1 || update.actualQuantity > 99));
+  if (invalidLiquor) {
+    updateStaffPrepBatchControls({ message: "Enter a valid bottle quantity for every selected liquor refill.", state: "error" });
+    return;
+  }
+
+  staffPrepBatchSaving = true;
+  setStaffPrepItemInputsDisabled(true);
+  updateStaffPrepBatchControls({ message: "Saving all selected items..." });
+  try {
+    if (isStaffRehearsalMode()) {
+      const timestamp = new Date().toISOString();
+      updates.forEach((update) => {
+        const item = [...prepPlan.items, ...prepPlan.liquorRefills]
+          .find((entry) => entry.id === update.itemId);
+        if (!item) return;
+        item.completed = update.completed;
+        item.preparedBy = update.completed ? preparedBy : "";
+        item.completedAt = update.completed ? (item.completedAt || timestamp) : "";
+        item.updatedAt = update.completed ? timestamp : "";
+        if (item.kind === "liquor-refill" && update.completed) item.actualQuantity = update.actualQuantity;
+      });
+      prepPlan.completedCount = prepPlan.items.filter((entry) => entry.completed).length;
+      prepPlan.liquorRefillCompletedCount = prepPlan.liquorRefills.filter((entry) => entry.completed).length;
+      staffPrepDrafts.clear();
+      staffPrepBatchName = preparedBy;
+      staffPrepBatchSaving = false;
+      renderStaffPrepPlan();
+      renderStaffOverview();
+      prepStatusPanel.textContent = `${updates.length} item${updates.length === 1 ? "" : "s"} saved in rehearsal by ${preparedBy}.`;
+      liquorStatusPanel.textContent = prepStatusPanel.textContent;
+      return;
+    }
+
+    const response = await fetchStaffResource("/api/staff-prep-plan", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        generatedAt: prepPlan.generatedAt,
+        preparedBy,
+        updates,
+      }),
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) throw new Error(result?.error || "The selected checklist updates could not be saved.");
+    prepPlan = {
+      available: result.available === true,
+      generatedAt: clean(result.generatedAt),
+      items: Array.isArray(result.items) ? result.items : [],
+      liquorRefills: Array.isArray(result.liquorRefills) ? result.liquorRefills : [],
+      completedCount: number(result.completedCount),
+      totalCount: number(result.totalCount),
+      liquorRefillCompletedCount: number(result.liquorRefillCompletedCount),
+      liquorRefillTotalCount: number(result.liquorRefillTotalCount),
+      message: clean(result.message),
+    };
+    staffPrepDrafts.clear();
+    staffPrepBatchName = preparedBy;
+    staffPrepBatchSaving = false;
+    renderStaffPrepPlan();
+    renderStaffOverview();
+    prepStatusPanel.textContent = `${updates.length} item${updates.length === 1 ? "" : "s"} saved by ${preparedBy}.`;
+    liquorStatusPanel.textContent = prepStatusPanel.textContent;
+    if (result?.inventoryUpdate?.warning) {
+      prepStatusPanel.textContent = result.inventoryUpdate.warning;
+      prepStatusPanel.dataset.state = "error";
+    }
+  } catch (error) {
+    staffPrepBatchSaving = false;
+    setStaffPrepItemInputsDisabled(false);
+    updateStaffPrepBatchControls({
+      message: error?.message || "The selected checklist updates could not be saved.",
+      state: "error",
+    });
   }
 }
 
 function createStaffPrepItem(item) {
   const form = document.createElement("form");
   form.className = `staff-prep-item${item.completed ? " is-complete" : ""}`;
+  form.dataset.staffPrepItemId = item.id;
   const isLiquorRefill = item.kind === "liquor-refill";
   const recipe = isLiquorRefill ? null : findStaffRecipeForPrepItem(item);
 
@@ -910,6 +1098,7 @@ function createStaffPrepItem(item) {
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = item.completed === true;
+  checkbox.dataset.staffPrepItemInput = "true";
   const checkText = document.createElement("span");
   checkText.textContent = item.completed
     ? (isLiquorRefill ? "Added" : "Prepared")
@@ -975,126 +1164,46 @@ function createStaffPrepItem(item) {
     actualQuantityInput.inputMode = "numeric";
     actualQuantityInput.autoComplete = "off";
     actualQuantityInput.dataset.lpignore = "true";
+    actualQuantityInput.dataset.staffPrepItemInput = "true";
     actualQuantityInput.value = String(Math.max(1, Number(item.actualQuantity ?? item.quantity) || 1));
     actualField.append(actualLabel, actualQuantityInput);
     details.append(actualField);
   }
-  if (item.completed && item.completedAt) {
+  if (item.completed) {
     const completion = document.createElement("small");
-    completion.textContent = `Completed ${formatCompletionTime(item.completedAt)}`;
+    completion.textContent = [
+      clean(item.preparedBy) ? `${isLiquorRefill ? "Added" : "Prepared"} by ${clean(item.preparedBy)}` : "",
+      item.completedAt ? `Completed ${formatCompletionTime(item.completedAt)}` : "",
+    ].filter(Boolean).join(" · ");
     details.append(completion);
   }
 
-  const preparedField = document.createElement("label");
-  preparedField.className = "staff-prep-name-field";
-  const fieldLabel = document.createElement("span");
-  fieldLabel.textContent = isLiquorRefill ? "Added by" : "Prepared by";
-  const preparedInput = document.createElement("input");
-  preparedInput.type = "text";
-  preparedInput.maxLength = 80;
-  preparedInput.autoComplete = "name";
-  preparedInput.placeholder = "Employee name";
-  preparedInput.value = clean(item.preparedBy);
-  preparedField.append(fieldLabel, preparedInput);
-
-  const saveButton = document.createElement("button");
-  saveButton.className = "primary-button staff-prep-save";
-  saveButton.type = "submit";
-  saveButton.textContent = "Save";
-  const rowStatus = document.createElement("p");
-  rowStatus.className = "staff-prep-item__status";
-  rowStatus.setAttribute("role", "status");
-  rowStatus.setAttribute("aria-live", "polite");
-
-  checkbox.addEventListener("change", () => {
+  const updateDraft = () => {
+    const actualQuantity = isLiquorRefill ? Number(actualQuantityInput?.value) : undefined;
+    const completionChanged = checkbox.checked !== (item.completed === true);
+    const actualQuantityChanged = isLiquorRefill
+      && checkbox.checked
+      && actualQuantity !== Number(item.actualQuantity ?? item.quantity);
+    if (completionChanged || actualQuantityChanged) {
+      staffPrepDrafts.set(item.id, {
+        itemId: item.id,
+        completed: checkbox.checked,
+        ...(isLiquorRefill ? { actualQuantity } : {}),
+      });
+    } else {
+      staffPrepDrafts.delete(item.id);
+    }
+    form.classList.toggle("is-complete", checkbox.checked);
+    form.classList.toggle("has-unsaved-change", completionChanged || actualQuantityChanged);
     checkText.textContent = checkbox.checked
       ? (isLiquorRefill ? "Added" : "Prepared")
       : (isLiquorRefill ? "Check off when added" : "Check off when prepared");
-    if (checkbox.checked && !clean(preparedInput.value)) preparedInput.focus();
-  });
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const preparedBy = clean(preparedInput.value);
-    if (checkbox.checked && !preparedBy) {
-      rowStatus.textContent = isLiquorRefill
-        ? "Enter who added the liquor before checking it off."
-        : "Enter who prepared this cocktail before checking it off.";
-      rowStatus.dataset.state = "error";
-      preparedInput.focus();
-      return;
-    }
-    const actualQuantity = isLiquorRefill ? Number(actualQuantityInput?.value) : null;
-    if (checkbox.checked && isLiquorRefill
-      && (!Number.isInteger(actualQuantity) || actualQuantity < 1 || actualQuantity > 99)) {
-      rowStatus.textContent = "Enter the number of bottles actually added.";
-      rowStatus.dataset.state = "error";
-      actualQuantityInput?.focus();
-      return;
-    }
-    saveButton.disabled = true;
-    checkbox.disabled = true;
-    preparedInput.disabled = true;
-    saveButton.textContent = "Saving...";
-    rowStatus.textContent = "";
-    delete rowStatus.dataset.state;
-    try {
-      if (isStaffRehearsalMode()) {
-        const collection = isLiquorRefill ? prepPlan.liquorRefills : prepPlan.items;
-        const rehearsalItem = collection.find((entry) => entry.id === item.id);
-        if (rehearsalItem) {
-          rehearsalItem.completed = checkbox.checked;
-          rehearsalItem.preparedBy = checkbox.checked ? preparedBy : "";
-          rehearsalItem.completedAt = checkbox.checked ? new Date().toISOString() : "";
-          rehearsalItem.updatedAt = rehearsalItem.completedAt;
-          if (isLiquorRefill) rehearsalItem.actualQuantity = actualQuantity;
-        }
-        prepPlan.completedCount = prepPlan.items.filter((entry) => entry.completed).length;
-        prepPlan.liquorRefillCompletedCount = prepPlan.liquorRefills.filter((entry) => entry.completed).length;
-        renderStaffPrepPlan();
-        return;
-      }
-      const response = await fetch("/api/staff-prep-plan", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: JSON.stringify({
-          generatedAt: prepPlan.generatedAt,
-          itemId: item.id,
-          completed: checkbox.checked,
-          actualQuantity: isLiquorRefill ? actualQuantity : undefined,
-          preparedBy,
-        }),
-      });
-      const result = await parseJsonResponse(response);
-      if (!response.ok) throw new Error(result?.error || "The checklist update could not be saved.");
-      prepPlan = {
-        available: result.available === true,
-        generatedAt: clean(result.generatedAt),
-        items: Array.isArray(result.items) ? result.items : [],
-        liquorRefills: Array.isArray(result.liquorRefills) ? result.liquorRefills : [],
-        completedCount: number(result.completedCount),
-        totalCount: number(result.totalCount),
-        liquorRefillCompletedCount: number(result.liquorRefillCompletedCount),
-        liquorRefillTotalCount: number(result.liquorRefillTotalCount),
-        message: clean(result.message),
-      };
-      renderStaffPrepPlan();
-      renderStaffOverview();
-      if (result?.inventoryUpdate?.warning) {
-        prepStatusPanel.textContent = result.inventoryUpdate.warning;
-        prepStatusPanel.dataset.state = "error";
-      }
-    } catch (error) {
-      saveButton.disabled = false;
-      checkbox.disabled = false;
-      preparedInput.disabled = false;
-      saveButton.textContent = "Save";
-      rowStatus.textContent = error?.message || "The checklist update could not be saved.";
-      rowStatus.dataset.state = "error";
-    }
-  });
+    updateStaffPrepBatchControls();
+  };
+  checkbox.addEventListener("change", updateDraft);
+  actualQuantityInput?.addEventListener("input", updateDraft);
 
-  form.append(checkLabel, details, preparedField, saveButton, rowStatus);
+  form.append(checkLabel, details);
   if (recipePanel) form.append(recipePanel);
   return form;
 }

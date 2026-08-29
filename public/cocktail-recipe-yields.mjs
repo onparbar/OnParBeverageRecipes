@@ -6,7 +6,7 @@ const recipeYieldDefinitions = [
   },
   {
     sourceTitle: "Apple Jack (Whiskey)",
-    yieldOz: 1530,
+    yieldOz: 1516,
     aliases: [],
   },
   {

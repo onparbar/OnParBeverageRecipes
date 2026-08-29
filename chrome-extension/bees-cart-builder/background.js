@@ -132,6 +132,29 @@ chrome.runtime.onMessage.addListener((message) => {
       .catch((error) => ({ ok: false, message: error.message }));
   }
 
+  if (message?.type === "GET_OHLQ_DELIVERY_PREFERENCE") {
+    return temporaryStorage
+      .get(RESULT_KEY)
+      .then((stored) => {
+        const result = stored[RESULT_KEY];
+        const preference = result?.vendor === "ohlq" ? result.deliveryPreference : null;
+        const date = typeof preference?.date === "string" ? preference.date : "";
+        const time = preference?.time === "09:00" ? preference.time : "";
+        return {
+          ok: true,
+          preference:
+            /^\d{4}-\d{2}-\d{2}$/.test(date) && time
+              ? { date, time }
+              : null,
+        };
+      })
+      .catch((error) => ({
+        ok: false,
+        preference: null,
+        message: error.message,
+      }));
+  }
+
   if (message?.type === "VENDOR_CART_FINISHED") {
     return (async () => {
       await temporaryStorage.set({ [RESULT_KEY]: message.result });

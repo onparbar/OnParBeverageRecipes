@@ -348,14 +348,37 @@ export function isRecommendationSourceRevisionCurrent(
     && currentRevision === sourceRevision + 1;
 }
 
+const OPERATING_WEEK_TIME_ZONE = "America/New_York";
+const OPERATING_WEEK_ROLLOVER_HOUR = 7;
+const OPERATING_WEEK_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: OPERATING_WEEK_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  hourCycle: "h23",
+});
+
 function getMondayWeekStartTime(value) {
   const time = parseTime(value);
   if (!time) return 0;
-  const date = new Date(time);
-  const daysSinceMonday = (date.getDay() + 6) % 7;
-  date.setDate(date.getDate() - daysSinceMonday);
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
+  const parts = Object.fromEntries(
+    OPERATING_WEEK_DATE_FORMATTER
+      .formatToParts(new Date(time))
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+  const easternDate = new Date(Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+  ));
+  if (!Number.isFinite(easternDate.getTime())) return 0;
+  const day = easternDate.getUTCDay();
+  const beforeMondayRollover = day === 1 && Number(parts.hour) < OPERATING_WEEK_ROLLOVER_HOUR;
+  const daysSinceMonday = beforeMondayRollover ? 7 : (day + 6) % 7;
+  easternDate.setUTCDate(easternDate.getUTCDate() - daysSinceMonday);
+  return easternDate.getTime();
 }
 
 export function isRecommendationForOperatingWeek(generatedAt, now = new Date()) {

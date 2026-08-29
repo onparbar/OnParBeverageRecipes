@@ -84,7 +84,7 @@ test("staff page loads only its dedicated bundle", async () => {
   assert.equal(page.includes("Pricing"), false);
   assert.match(page, /Cocktails to make/);
   assert.match(page, /Orders to receive/);
-  assert.match(await readProjectFile("public/staff-dashboard.js"), /Prepared by/);
+  assert.match(await readProjectFile("public/staff-dashboard.js"), /Completed by/);
   assert.match(await readProjectFile("public/staff-dashboard.js"), /Quantity received/);
 });
 

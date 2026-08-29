@@ -5314,13 +5314,21 @@ async function refreshWeeklyOrderTracking() {
   }
 }
 
+let dashboardFinishWeekActor = "";
+let dashboardFinishWeekSaving = false;
+let dashboardFinishWeekMessage = "";
+
 function normalizeDashboardStaffPrepPlan(result = {}) {
   return {
     available: result?.available === true,
     generatedAt: clean(result?.generatedAt),
     items: Array.isArray(result?.items) ? result.items : [],
+    liquorRefills: Array.isArray(result?.liquorRefills) ? result.liquorRefills : [],
     completedCount: toNumber(result?.completedCount),
     totalCount: toNumber(result?.totalCount),
+    liquorRefillCompletedCount: toNumber(result?.liquorRefillCompletedCount),
+    liquorRefillTotalCount: toNumber(result?.liquorRefillTotalCount),
+    message: clean(result?.message),
   };
 }
 
@@ -5348,6 +5356,256 @@ async function refreshDashboardStaffPrepPlan() {
     if (refreshed) renderDashboardOverview();
   } finally {
     dashboardStaffPrepRefreshRunning = false;
+  }
+}
+
+function getFinishWeekProgress() {
+  const deliveryItems = weeklyOrderTracking.available
+    ? weeklyOrderTracking.vendors.flatMap((vendor) => Array.isArray(vendor.items) ? vendor.items : [])
+    : [];
+  const deliveryReviewedCount = deliveryItems.filter((item) => clean(item.status) !== "pending").length;
+  const deliveryTotalCount = deliveryItems.length;
+  const cocktailCompletedCount = toNumber(dashboardStaffPrepPlan.completedCount);
+  const cocktailTotalCount = toNumber(dashboardStaffPrepPlan.totalCount);
+  const liquorCompletedCount = toNumber(dashboardStaffPrepPlan.liquorRefillCompletedCount);
+  const liquorTotalCount = toNumber(dashboardStaffPrepPlan.liquorRefillTotalCount);
+  const sections = [
+    {
+      id: "deliveries",
+      label: "Deliveries",
+      complete: weeklyOrderTracking.available && deliveryReviewedCount >= deliveryTotalCount,
+      completedCount: deliveryReviewedCount,
+      totalCount: deliveryTotalCount,
+    },
+    {
+      id: "cocktails",
+      label: "Cocktails",
+      complete: dashboardStaffPrepPlan.available && cocktailCompletedCount >= cocktailTotalCount,
+      completedCount: cocktailCompletedCount,
+      totalCount: cocktailTotalCount,
+    },
+    {
+      id: "liquor",
+      label: "Liquor",
+      complete: dashboardStaffPrepPlan.available && liquorCompletedCount >= liquorTotalCount,
+      completedCount: liquorCompletedCount,
+      totalCount: liquorTotalCount,
+    },
+  ];
+  const remainingCount = sections.reduce((sum, section) => (
+    sum + (section.complete ? 0 : Math.max(1, section.totalCount - section.completedCount))
+  ), 0);
+  return {
+    sections,
+    complete: sections.every((section) => section.complete),
+    remainingCount,
+  };
+}
+
+function renderFinishWeekChecklistItems(items, kind) {
+  if (!items.length) return '<p class="finish-week-empty">Nothing scheduled. This part is complete automatically.</p>';
+  return items.map((item) => {
+    const completed = item.completed === true;
+    const isLiquor = kind === "liquor";
+    const taps = Array.isArray(item.tapNumbers) && item.tapNumbers.length
+      ? `Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.join(", ")}`
+      : "";
+    return `
+      <div class="finish-week-item${completed ? " is-complete" : ""}">
+        <label>
+          <input type="checkbox" data-finish-prep-item="${escapeHtml(item.id)}" data-finish-prep-kind="${escapeHtml(kind)}" data-completed="${completed}"${completed ? " checked" : ""}>
+          <span>
+            <strong>${escapeHtml(item.displayName || item.name)}</strong>
+            <small>${escapeHtml([isLiquor ? `${formatNumber(item.quantity)} bottle${toNumber(item.quantity) === 1 ? "" : "s"}` : `${formatNumber(item.quantity)} batch${toNumber(item.quantity) === 1 ? "" : "es"}`, taps].filter(Boolean).join(" · "))}</small>
+          </span>
+        </label>
+        ${isLiquor ? `
+          <label class="finish-week-quantity">
+            <span>Bottles added</span>
+            <input type="number" min="1" max="99" step="1" data-finish-liquor-quantity="${escapeHtml(item.id)}" value="${escapeHtml(String(item.actualQuantity || item.quantity || 1))}">
+          </label>
+        ` : ""}
+      </div>
+    `;
+  }).join("");
+}
+
+function renderFinishWeekDeliveries() {
+  if (!weeklyOrderTracking.available) {
+    return '<p class="finish-week-empty">Delivery tracking will appear after the order plan is published.</p>';
+  }
+  if (!weeklyOrderTracking.vendors.length) {
+    return '<p class="finish-week-empty">No deliveries are expected. This part is complete automatically.</p>';
+  }
+  return weeklyOrderTracking.vendors.map((vendor) => `
+    <div class="finish-week-vendor">
+      <h4>${escapeHtml(vendor.vendor)}</h4>
+      ${(vendor.items || []).map((item) => {
+        const reviewed = clean(item.status) !== "pending";
+        const result = reviewed
+          ? item.status === "received"
+            ? "Received"
+            : `${formatNumber(item.receivedQuantity)} of ${formatNumber(item.quantity)} reviewed`
+          : `${formatNumber(item.quantity)} ${clean(item.unit) || "items"}`;
+        return `
+          <label class="finish-week-item${reviewed ? " is-complete" : ""}">
+            <input type="checkbox" data-finish-delivery-item="${escapeHtml(item.id)}" data-vendor-id="${escapeHtml(vendor.id)}" data-quantity="${escapeHtml(String(item.quantity || 0))}" data-completed="${reviewed}"${reviewed ? " checked disabled" : ""}>
+            <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(result)}</small></span>
+          </label>
+        `;
+      }).join("")}
+    </div>
+  `).join("");
+}
+
+function renderWeeklyPlanFinishWeek(planLocked) {
+  if (!planLocked) return "";
+  const progress = getFinishWeekProgress();
+  const cocktails = Array.isArray(dashboardStaffPrepPlan.items) ? dashboardStaffPrepPlan.items : [];
+  const liquor = Array.isArray(dashboardStaffPrepPlan.liquorRefills) ? dashboardStaffPrepPlan.liquorRefills : [];
+  return `
+    <section class="finish-week-panel" id="weekly-plan-finish-week" aria-labelledby="finish-week-title">
+      <header class="finish-week-header">
+        <div>
+          <p class="eyebrow">Shared with Staff View</p>
+          <h2 id="finish-week-title">Finish the Week</h2>
+          <p>Check off deliveries, prepared cocktails, and liquor added to taps. Both views update together.</p>
+        </div>
+        <strong class="finish-week-state${progress.complete ? " is-complete" : ""}">${progress.complete ? "Complete" : `${formatNumber(progress.remainingCount)} left`}</strong>
+      </header>
+      <div class="finish-week-progress" aria-label="Finish the Week progress">
+        ${progress.sections.map((section) => `
+          <div class="${section.complete ? "is-complete" : ""}">
+            <span>${escapeHtml(section.label)}</span>
+            <strong>${formatNumber(section.completedCount)} / ${formatNumber(section.totalCount)}</strong>
+          </div>
+        `).join("")}
+      </div>
+      <div class="finish-week-checklists">
+        <section>
+          <h3>Deliveries Received</h3>
+          <p>Check an item only when the full planned quantity arrived. Use Staff View for shortages, rejections, or extras.</p>
+          <div class="finish-week-list">${renderFinishWeekDeliveries()}</div>
+        </section>
+        <section>
+          <h3>Cocktails Prepared</h3>
+          <p>Completing a batch subtracts its mapped ingredients from on-hand inventory.</p>
+          <div class="finish-week-list">${renderFinishWeekChecklistItems(cocktails, "cocktail")}</div>
+        </section>
+        <section>
+          <h3>Liquor Added</h3>
+          <p>Enter the actual bottles added before checking off the refill.</p>
+          <div class="finish-week-list">${renderFinishWeekChecklistItems(liquor, "liquor")}</div>
+        </section>
+      </div>
+      <footer class="finish-week-actions">
+        <label>
+          <span>Completed by</span>
+          <input id="weekly-plan-finish-actor" type="text" maxlength="80" autocomplete="name" value="${escapeHtml(dashboardFinishWeekActor)}" placeholder="Manager name">
+        </label>
+        <button class="primary-button" id="weekly-plan-finish-save" type="button"${dashboardFinishWeekSaving ? " disabled" : ""}>${dashboardFinishWeekSaving ? "Saving..." : "Save selected"}</button>
+        <p id="weekly-plan-finish-status" role="status" aria-live="polite"${dashboardFinishWeekMessage ? "" : " hidden"}>${escapeHtml(dashboardFinishWeekMessage)}</p>
+      </footer>
+    </section>
+  `;
+}
+
+async function saveWeeklyPlanFinishWeek() {
+  if (dashboardFinishWeekSaving) return;
+  const actorInput = document.querySelector("#weekly-plan-finish-actor");
+  const status = document.querySelector("#weekly-plan-finish-status");
+  dashboardFinishWeekActor = clean(actorInput?.value);
+  if (!dashboardFinishWeekActor) {
+    if (status) {
+      status.hidden = false;
+      status.textContent = "Enter the manager completing these items.";
+      status.dataset.state = "error";
+    }
+    actorInput?.focus();
+    return;
+  }
+
+  const prepUpdates = [...document.querySelectorAll("[data-finish-prep-item]")]
+    .filter((input) => input.checked !== (input.dataset.completed === "true"))
+    .map((input) => ({
+      itemId: input.dataset.finishPrepItem,
+      completed: input.checked,
+      ...(input.dataset.finishPrepKind === "liquor" && input.checked ? {
+        actualQuantity: toNumber(document.querySelector(`[data-finish-liquor-quantity="${CSS.escape(input.dataset.finishPrepItem)}"]`)?.value),
+      } : {}),
+    }));
+  const deliveriesByVendor = new Map();
+  [...document.querySelectorAll("[data-finish-delivery-item]")]
+    .filter((input) => input.checked && input.dataset.completed !== "true")
+    .forEach((input) => {
+      const vendorId = input.dataset.vendorId;
+      if (!deliveriesByVendor.has(vendorId)) deliveriesByVendor.set(vendorId, []);
+      deliveriesByVendor.get(vendorId).push({
+        itemId: input.dataset.finishDeliveryItem,
+        status: "received",
+        receivedQuantity: toNumber(input.dataset.quantity),
+        reason: "",
+      });
+    });
+  if (!prepUpdates.length && !deliveriesByVendor.size) {
+    if (status) {
+      status.hidden = false;
+      status.textContent = "Select at least one new completion to save.";
+      delete status.dataset.state;
+    }
+    return;
+  }
+
+  dashboardFinishWeekSaving = true;
+  dashboardFinishWeekMessage = "Saving shared checklist changes...";
+  renderWeeklyPlan();
+  const warnings = [];
+  try {
+    if (prepUpdates.length) {
+      const response = await fetch("/api/staff-prep-plan", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          generatedAt: dashboardStaffPrepPlan.generatedAt,
+          preparedBy: dashboardFinishWeekActor,
+          updates: prepUpdates,
+        }),
+      });
+      const result = await parseJsonResponse(response);
+      if (!response.ok) throw new Error(result?.error || "The prep checklist could not be saved.");
+      dashboardStaffPrepPlan = normalizeDashboardStaffPrepPlan(result);
+      if (result?.inventoryUpdate?.warning) warnings.push(result.inventoryUpdate.warning);
+    }
+    for (const [vendorId, receipts] of deliveriesByVendor) {
+      const response = await fetch("/api/weekly-order-tracking", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "set-receipts",
+          generatedAt: weeklyOrderTracking.generatedAt,
+          vendorId,
+          handledBy: dashboardFinishWeekActor,
+          confirmed: true,
+          receipts,
+        }),
+      });
+      const result = await parseJsonResponse(response);
+      if (!response.ok) throw new Error(result?.error || "The delivery checklist could not be saved.");
+      weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
+      if (result?.inventoryUpdate?.warning) warnings.push(result.inventoryUpdate.warning);
+    }
+    await loadParAgentState();
+    dashboardFinishWeekMessage = warnings.length
+      ? warnings.join(" ")
+      : "Finish the Week updated for both admin and staff views.";
+  } catch (error) {
+    dashboardFinishWeekMessage = error?.message || "The selected checklist changes could not be saved.";
+  } finally {
+    dashboardFinishWeekSaving = false;
+    renderWeeklyPlan();
+    renderDashboardOverview();
   }
 }
 
@@ -5851,6 +6109,17 @@ function getMondayRunModel(plan, freshness) {
     || inventoryActionOutbox.length > 0;
   const mondaySnapshotSaved = Boolean(getCurrentMondayInventorySnapshot(inventoryHistory, new Date()));
   const planLocked = hasPublishedWeeklyPlanRecommendations();
+  const lockedPlanCapturedSetup = planLocked;
+  const finishWeek = getFinishWeekProgress();
+  const pmbFeedsReady = kegFeed.status === "online" && pricingFeed.status === "online";
+  const weeklyUsageCaptured = freshness.latestCompletedUsageSaved === true && !weeklyUsageSharedSaveError;
+  const pmbRefreshPending = unifiedPmbRefreshRunning
+    || kegFeed.status === "loading"
+    || pricingFeed.status === "loading"
+    || weeklyUsageSyncLoading
+    || weeklyUsageSharedSaving
+    || weeklyUsageSharedPendingWrites
+    || Boolean(weeklyUsageSharedSaveTimer);
   const vendorOrders = Array.isArray(weeklyOrderTracking.vendors) ? weeklyOrderTracking.vendors : [];
   const outstandingVendorCount = vendorOrders.filter((vendor) => vendor?.ordered !== true).length;
   const orderLineCount = toNumber(plan?.summary?.orderLineCount);
@@ -5872,30 +6141,27 @@ function getMondayRunModel(plan, freshness) {
   const steps = [
     {
       id: "pmb",
-      label: "Check PMB",
-      target: "keg-levels",
-      complete: kegFeed.status === "online" && pricingFeed.status === "online",
-      status: kegFeed.status === "loading" || pricingFeed.status === "loading" ? "Checking" : "Ready",
-    },
-    {
-      id: "usage",
-      label: "Capture usage",
-      target: "weekly-usage",
-      complete: freshness.latestCompletedUsageSaved === true && !weeklyUsageSharedSaveError,
-      status: weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites || weeklyUsageSharedSaveTimer
-        ? "Saving"
-        : freshness.latestCompletedUsageSaved
-          ? "Saved"
-          : "Refresh",
+      label: "Refresh PMB & capture usage",
+      target: "dashboard",
+      complete: lockedPlanCapturedSetup || (pmbFeedsReady && weeklyUsageCaptured),
+      status: pmbRefreshPending
+        ? "Refreshing"
+        : !pmbFeedsReady
+          ? "Refresh PMB"
+          : weeklyUsageCaptured
+            ? "Ready"
+            : "Capture usage",
     },
     {
       id: "inventory",
       label: "Count inventory",
       target: "inventory",
-      complete: inventorySharedInitialized
+      complete: lockedPlanCapturedSetup || (
+        inventorySharedInitialized
         && inventoryMissingCount === 0
         && !inventorySaving
-        && !inventorySharedSaveError,
+        && !inventorySharedSaveError
+      ),
       status: inventorySaving
         ? "Saving"
         : inventoryMissingCount > 0
@@ -5925,24 +6191,22 @@ function getMondayRunModel(plan, freshness) {
             : "Review",
     },
     {
-      id: "prep",
-      label: "Prep cocktails",
-      target: "weekly-plan",
-      complete: prepComplete,
-      status: prepComplete
-        ? cocktailBatchTotal > 0 ? "Prepped" : "None needed"
-        : !planLocked
-          ? "After plan"
-          : dashboardStaffPrepPlan.available
-            ? `${formatNumber(Math.max(0, dashboardStaffPrepPlan.totalCount - dashboardStaffPrepPlan.completedCount))} left`
-            : "Review",
-    },
-    {
       id: "print",
       label: "Print tap sheets",
       target: "print",
       complete: tapSheets.length > 0 && tapSheetsToPrint === 0,
       status: tapSheetsToPrint > 0 ? `${formatNumber(tapSheetsToPrint)} left` : tapSheets.length ? "Current" : "Review",
+    },
+    {
+      id: "finish",
+      label: "Finish the week",
+      target: "weekly-plan",
+      complete: planLocked && finishWeek.complete,
+      status: !planLocked
+        ? "After plan"
+        : finishWeek.complete
+          ? "Complete"
+          : `${formatNumber(finishWeek.remainingCount)} left`,
     },
   ];
   const completedCount = steps.filter((step) => step.complete).length;
@@ -5999,6 +6263,10 @@ function renderMondayRunCompact(run) {
 }
 
 function openMondayRunStep(stepId, target) {
+  if (stepId === "pmb") {
+    void runUnifiedPmbRefresh();
+    return;
+  }
   const targetTab = clean(target) || "weekly-plan";
   switchTab(targetTab);
   if (targetTab !== "weekly-plan") return;
@@ -6007,6 +6275,7 @@ function openMondayRunStep(stepId, target) {
     plan: "#run-weekly-plan-agent",
     orders: "#weekly-plan-orders",
     prep: ".weekly-plan-column--prep",
+    finish: "#weekly-plan-finish-week",
     review: ".weekly-plan-header",
   }[stepId];
   if (!selector) return;
@@ -6084,7 +6353,12 @@ function renderDashboardOverview() {
     warning: overview.alertCounts.warning + tapPrintAlerts.length + missingPriceAlerts.length,
   };
   const mondayRun = getMondayRunModel(plan, freshness);
-  const briefing = buildThirtySecondBriefing({ overview, plan, mondayRun });
+  const briefing = buildThirtySecondBriefing({
+    overview,
+    mondayRun,
+    staffPrepPlan: dashboardStaffPrepPlan,
+    orders: weeklyOrderTracking,
+  });
 
   dashboardOverview.innerHTML = `
     <header class="dashboard-overview-hero dashboard-overview-hero--${escapeHtml(overview.status)}">
@@ -6110,6 +6384,11 @@ function renderDashboardOverview() {
           <button class="thirty-second-briefing__line thirty-second-briefing__line--${escapeHtml(item.tone)}" type="button" data-dashboard-target="${escapeHtml(item.target || "dashboard")}">
             <strong>${escapeHtml(item.text)}</strong>
             ${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}
+            ${Array.isArray(item.bullets) && item.bullets.length ? `
+              <span class="thirty-second-briefing__bullets">
+                ${item.bullets.map((bullet) => `<span>${escapeHtml(bullet)}</span>`).join("")}
+              </span>
+            ` : ""}
           </button>
         `).join("")}
       </div>
@@ -7146,6 +7425,7 @@ function buildVendorCartRequest(view) {
     vendor: order.vendorKey,
     approved: order.actionsEnabled === true,
     rehearsal: order.rehearsal === true,
+    operatingWeekReference: order.operatingWeekReference,
     expectedTotal: order.expectedTotal,
     lineCount: order.lineCount,
     lines: (order.lines || []).map((line) => ({
@@ -7560,6 +7840,7 @@ function renderWeeklyPlan() {
     </header>
     <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : ""))}</p>
     ${renderMondayRun(mondayRun)}
+    ${renderWeeklyPlanFinishWeek(planLocked)}
     ${renderWeeklyPlanReadiness(freshness.readiness)}
     ${renderWeeklyPlanProvenance(freshness)}
     <div class="weekly-plan-stats">
@@ -7594,6 +7875,10 @@ function renderWeeklyPlan() {
 
   document.querySelector("#run-weekly-plan-agent")?.addEventListener("click", runWeeklyPlanUpdate);
   document.querySelector("#recall-weekly-plan")?.addEventListener("click", recallCurrentWeeklyPlan);
+  document.querySelector("#weekly-plan-finish-save")?.addEventListener("click", saveWeeklyPlanFinishWeek);
+  document.querySelector("#weekly-plan-finish-actor")?.addEventListener("input", (event) => {
+    dashboardFinishWeekActor = event.currentTarget.value;
+  });
   weeklyPlan.querySelectorAll("[data-monday-run-step]").forEach((button) => {
     button.addEventListener("click", () => {
       openMondayRunStep(button.dataset.mondayRunStep, button.dataset.dashboardTarget);

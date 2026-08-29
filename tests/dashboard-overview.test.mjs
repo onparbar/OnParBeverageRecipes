@@ -379,8 +379,22 @@ test("one PMB connection alert replaces duplicate keg-level and pricing failures
   assert.equal(pmbAlerts[0].severity, "critical");
   assert.match(pmbAlerts[0].message, /keg levels and tap pricing/i);
   assert.deepEqual(pmbAlerts[0].details, ["Could not connect to PMB."]);
-  assert.equal(pmbAlerts[0].action.label, "Retry PMB Connection");
+  assert.equal(pmbAlerts[0].action.label, "Refresh PMB");
+  assert.equal(pmbAlerts[0].action.target, DASHBOARD_OVERVIEW_TARGETS.refreshPmb);
   assert.equal(overview.planNumbersAvailable, false);
+});
+
+test("mixed PMB verification failures share one refresh action", () => {
+  const signals = readySignals();
+  signals.pmb.kegLevels = { status: "offline", error: "Could not connect to PMB." };
+  signals.pmb.pricing = { status: "not-checked" };
+
+  const overview = buildDashboardOverview(signals, { now });
+  const pmbAlerts = overview.alerts.filter((item) => item.id.startsWith("pmb-"));
+
+  assert.equal(pmbAlerts.length, 1);
+  assert.equal(pmbAlerts[0].id, "pmb-connection-offline");
+  assert.equal(pmbAlerts[0].action.target, DASHBOARD_OVERVIEW_TARGETS.refreshPmb);
 });
 
 test("a pricing-only PMB failure keeps its specific alert", () => {
@@ -391,8 +405,10 @@ test("a pricing-only PMB failure keeps its specific alert", () => {
   };
 
   const overview = buildDashboardOverview(signals, { now });
+  const pricingAlert = overview.alerts.find((item) => item.id === "pmb-pricing-offline");
 
-  assert.ok(overview.alerts.some((item) => item.id === "pmb-pricing-offline"));
+  assert.ok(pricingAlert);
+  assert.equal(pricingAlert.action.target, DASHBOARD_OVERVIEW_TARGETS.refreshPmb);
   assert.ok(!overview.alerts.some((item) => item.id === "pmb-connection-offline"));
 });
 
@@ -425,8 +441,9 @@ test("timestamps use the supplied clock to identify stale plan and PMB signals",
   const ids = overview.alerts.map((item) => item.id);
 
   assert.ok(ids.includes("weekly-plan-age-stale"));
-  assert.ok(ids.includes("pmb-keg-levels-stale"));
-  assert.ok(ids.includes("pmb-pricing-stale"));
+  assert.ok(ids.includes("pmb-connection-offline"));
+  assert.equal(ids.includes("pmb-keg-levels-stale"), false);
+  assert.equal(ids.includes("pmb-pricing-stale"), false);
   assert.ok(ids.includes("weekly-usage-stale"));
   assert.equal(overview.planNumbersAvailable, false);
 });
@@ -467,8 +484,81 @@ test("a delivery item marked not received creates an owner dashboard alert", () 
 
   assert.equal(alert.severity, "critical");
   assert.match(alert.title, /1 ordered item was short or not received/);
-  assert.match(alert.details[0], /Heidelberg.*Bud Light.*0 of 2 kegs received.*2 missing.*Jordan/);
-  assert.equal(alert.action.target, DASHBOARD_OVERVIEW_TARGETS.weeklyPlan);
+  assert.equal(alert.message, "");
+  assert.deepEqual(alert.details, ["Bud Light"]);
+  assert.equal(alert.action, undefined);
+});
+
+test("delivery exceptions group a fully missed vendor order and summarize partial receipts", () => {
+  const signals = readySignals();
+  const proofTripleSec = {
+    id: "proof-triple-sec",
+    vendor: "Proof Wine & Spirits",
+    name: "Triple Sec",
+    quantity: 1,
+    receivedQuantity: 0,
+    status: "not-received",
+  };
+  const proofBitters = {
+    id: "proof-bitters",
+    vendor: "Proof Wine & Spirits",
+    name: "Bitters",
+    quantity: 1,
+    receivedQuantity: 0,
+    status: "rejected",
+  };
+  const voodoo = {
+    id: "heidelberg-voodoo",
+    vendor: "Heidelberg",
+    name: "Voodoo Ranger IPA",
+    quantity: 1,
+    receivedQuantity: 0,
+    status: "not-received",
+  };
+  const limeJuice = {
+    id: "food-lime",
+    vendor: "Food",
+    name: "Lime Juice",
+    quantity: 1,
+    receivedQuantity: 0,
+    status: "rejected",
+  };
+  const crownApple = {
+    id: "ohlq-crown-apple",
+    vendor: "OHLQ",
+    name: "Crown Apple",
+    quantity: 3,
+    receivedQuantity: 2,
+    status: "partial",
+  };
+
+  signals.orders = {
+    vendors: [
+      { vendor: "Proof Wine & Spirits", items: [proofTripleSec, proofBitters] },
+      {
+        vendor: "Heidelberg",
+        items: [voodoo, { id: "heidelberg-other", status: "received", receivedQuantity: 1 }],
+      },
+      {
+        vendor: "Food",
+        items: [limeJuice, { id: "food-other", status: "received", receivedQuantity: 1 }],
+      },
+      {
+        vendor: "OHLQ",
+        items: [crownApple, { id: "ohlq-other", status: "received", receivedQuantity: 1 }],
+      },
+    ],
+    notReceivedItems: [proofTripleSec, proofBitters, voodoo, limeJuice, crownApple],
+  };
+
+  const overview = buildDashboardOverview(signals);
+  const alert = overview.alerts.find((item) => item.id === "weekly-order-not-received");
+  assert.deepEqual(alert.details, [
+    "Entire planned Proof order",
+    "Voodoo Ranger IPA",
+    "Lime Juice",
+    "Crown Apple (2 out of 3 received)",
+  ]);
 });
 
 test("a locked Monday plan keeps its numbers when later keg levels are unavailable", () => {
@@ -553,9 +643,10 @@ test("the view model fails closed when no source signals have been checked", () 
   assert.equal(overview.planNumbersAvailable, false);
   assert.ok(ids.includes("shared-state-unavailable"));
   assert.ok(ids.includes("weekly-plan-unchecked"));
-  assert.ok(ids.includes("pmb-keg-levels-unchecked"));
+  assert.ok(ids.includes("pmb-connection-offline"));
+  assert.equal(ids.includes("pmb-keg-levels-unchecked"), false);
   assert.ok(ids.includes("weekly-usage-unavailable"));
-  assert.ok(ids.includes("pmb-pricing-unchecked"));
+  assert.equal(ids.includes("pmb-pricing-unchecked"), false);
   assert.equal(overview.kpis.find((item) => item.id === "items-to-order")?.value, "—");
 });
 

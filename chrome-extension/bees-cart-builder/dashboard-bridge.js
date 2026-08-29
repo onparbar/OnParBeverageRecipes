@@ -50,6 +50,7 @@ function validateOrder(payload) {
     requestId: clean(payload.requestId),
     orderId: clean(payload.orderId),
     vendor,
+    operatingWeekReference: clean(payload.operatingWeekReference),
     expectedTotal: Number(payload.expectedTotal) || 0,
     lineCount: lines.length,
     lines,

@@ -81,6 +81,56 @@ function joinLabels(values) {
   return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
 }
 
+function deliveryExceptionKey(item) {
+  const id = clean(item?.id);
+  if (id) return `id:${id}`;
+  return `name:${clean(item?.vendor).toLowerCase()}|${clean(item?.name).toLowerCase()}`;
+}
+
+function conciseDeliveryVendor(value) {
+  const vendor = clean(value);
+  if (/\bproof\b/i.test(vendor)) return "Proof";
+  return vendor;
+}
+
+function buildDeliveryExceptionDetails(orders = {}, notReceivedItems = []) {
+  const vendors = Array.isArray(orders?.vendors)
+    ? orders.vendors.filter((vendor) => vendor && typeof vendor === "object")
+    : [];
+  const groupedItemKeys = new Set();
+  const groupedDetails = [];
+
+  vendors.forEach((vendor) => {
+    const items = Array.isArray(vendor.items)
+      ? vendor.items.filter((item) => item && typeof item === "object")
+      : [];
+    const entireOrderMissing = items.length > 0 && items.every((item) => (
+      ["not-received", "rejected"].includes(clean(item.status).toLowerCase())
+      && nonNegativeNumber(item.receivedQuantity) === 0
+    ));
+    if (!entireOrderMissing) return;
+
+    const vendorName = conciseDeliveryVendor(vendor.vendor);
+    if (!vendorName) return;
+    groupedDetails.push(`Entire planned ${vendorName} order`);
+    items.forEach((item) => groupedItemKeys.add(deliveryExceptionKey(item)));
+  });
+
+  const itemDetails = notReceivedItems
+    .filter((item) => !groupedItemKeys.has(deliveryExceptionKey(item)))
+    .map((item) => {
+      const name = clean(item.name) || "Unnamed item";
+      const quantity = nonNegativeNumber(item.quantity);
+      const receivedQuantity = nonNegativeNumber(item.receivedQuantity);
+      if (quantity > 0 && receivedQuantity > 0 && receivedQuantity < quantity) {
+        return `${name} (${formatQuantity(receivedQuantity)} out of ${formatQuantity(quantity)} received)`;
+      }
+      return name;
+    });
+
+  return cleanList([...groupedDetails, ...itemDetails]);
+}
+
 function makeAction(label, target) {
   return { label, target };
 }
@@ -538,7 +588,7 @@ function buildPricingAlerts(feed, feedAgeState, pricing) {
       priority: 80,
       title: "PMB tap-price coverage is partial",
       message: `${getFeedCoverageText(feed)} current tap prices were verified. Unmatched rows must not be treated as current.`,
-      action: makeAction("Retry Tap Pricing", DASHBOARD_OVERVIEW_TARGETS.pricing),
+      action: makeAction("Refresh PMB", DASHBOARD_OVERVIEW_TARGETS.refreshPmb),
     }));
   } else if (feed.status === "offline") {
     alerts.push(makeAlert({
@@ -547,7 +597,7 @@ function buildPricingAlerts(feed, feedAgeState, pricing) {
       priority: 80,
       title: "Tap pricing is offline",
       message: feed.error || "Current PMB prices cannot be verified, and live price updates are unavailable. Stored dashboard calculations may not reflect the wall.",
-      action: makeAction("Retry Tap Pricing", DASHBOARD_OVERVIEW_TARGETS.pricing),
+      action: makeAction("Refresh PMB", DASHBOARD_OVERVIEW_TARGETS.refreshPmb),
     }));
   } else if (feed.status === "not-checked") {
     alerts.push(makeAlert({
@@ -556,7 +606,7 @@ function buildPricingAlerts(feed, feedAgeState, pricing) {
       priority: 80,
       title: "Current tap pricing has not been checked",
       message: "Connect from the work network to verify PMB prices before using margin advice or live price controls.",
-      action: makeAction("Check Tap Pricing", DASHBOARD_OVERVIEW_TARGETS.pricing),
+      action: makeAction("Refresh PMB", DASHBOARD_OVERVIEW_TARGETS.refreshPmb),
     }));
   } else if (feed.status === "stale" || feedAgeState === "stale") {
     alerts.push(makeAlert({
@@ -565,7 +615,7 @@ function buildPricingAlerts(feed, feedAgeState, pricing) {
       priority: 80,
       title: "Tap pricing needs a fresh PMB check",
       message: "The last verified wall-price read is too old for current margin advice or live updates.",
-      action: makeAction("Refresh Tap Pricing", DASHBOARD_OVERVIEW_TARGETS.pricing),
+      action: makeAction("Refresh PMB", DASHBOARD_OVERVIEW_TARGETS.refreshPmb),
     }));
   }
 
@@ -600,7 +650,19 @@ function combinePmbConnectionAlerts({
   pricingFeed,
   pricingResult,
 }) {
-  if (kegFeed.status !== "offline" || pricingFeed.status !== "offline") {
+  const kegIssueIds = new Set([
+    "pmb-keg-levels-offline",
+    "pmb-keg-levels-unchecked",
+    "pmb-keg-levels-stale",
+  ]);
+  const pricingIssueIds = new Set([
+    "pmb-pricing-offline",
+    "pmb-pricing-unchecked",
+    "pmb-pricing-stale",
+  ]);
+  const kegIssue = kegAlerts.find((alert) => kegIssueIds.has(alert.id));
+  const pricingIssue = pricingResult.alerts.find((alert) => pricingIssueIds.has(alert.id));
+  if (!kegIssue || !pricingIssue) {
     return [...kegAlerts, ...pricingResult.alerts];
   }
 
@@ -608,16 +670,21 @@ function combinePmbConnectionAlerts({
     clean(kegFeed.error),
     clean(pricingFeed.error),
   ].filter(Boolean))];
+  const connectionOffline = kegFeed.status === "offline" || pricingFeed.status === "offline";
 
-  return [makeAlert({
-    id: "pmb-connection-offline",
-    severity: "critical",
-    priority: 60,
-    title: "PMB connection is unavailable",
-    message: "Live keg levels and tap pricing could not be refreshed. Saved information remains visible, but treat it as unverified until PMB reconnects.",
-    details: connectionDetails,
-    action: makeAction("Retry PMB Connection", DASHBOARD_OVERVIEW_TARGETS.kegLevels),
-  })];
+  return [
+    makeAlert({
+      id: "pmb-connection-offline",
+      severity: "critical",
+      priority: 60,
+      title: connectionOffline ? "PMB connection is unavailable" : "PMB refresh is needed",
+      message: "Live keg levels and tap pricing could not be verified together. Saved information remains visible, but treat it as unverified until PMB refreshes successfully.",
+      details: connectionDetails,
+      action: makeAction("Refresh PMB", DASHBOARD_OVERVIEW_TARGETS.refreshPmb),
+    }),
+    ...kegAlerts.filter((alert) => alert !== kegIssue),
+    ...pricingResult.alerts.filter((alert) => alert !== pricingIssue),
+  ];
 }
 
 function buildKpis({
@@ -832,20 +899,8 @@ export function buildDashboardOverview(signals = {}, options = {}) {
       severity: "critical",
       priority: 55,
       title: `${formatCount(notReceivedItems.length)} ordered ${plural(notReceivedItems.length, "item was", "items were")} short or not received`,
-      message: "A delivery was checked and at least one planned quantity was missing. Review the vendor order and arrange the follow-up.",
-      details: notReceivedItems.map((item) => {
-        const quantity = nonNegativeNumber(item.quantity);
-        const receivedQuantity = nonNegativeNumber(item.receivedQuantity);
-        const missingQuantity = nonNegativeNumber(item.missingQuantity || quantity - receivedQuantity);
-        const identity = [clean(item.vendor), clean(item.name)].filter(Boolean).join(" · ");
-        const unit = clean(item.unit) || plural(quantity, "unit");
-        const amount = quantity
-          ? `${formatQuantity(receivedQuantity)} of ${formatQuantity(quantity)} ${unit} received${missingQuantity ? ` (${formatQuantity(missingQuantity)} missing)` : ""}`
-          : "";
-        const reporter = clean(item.handledBy) ? `reported by ${clean(item.handledBy)}` : "";
-        return [identity, amount, reporter].filter(Boolean).join(" · ");
-      }),
-      action: makeAction("Review Delivery", DASHBOARD_OVERVIEW_TARGETS.weeklyPlan),
+      message: "",
+      details: buildDeliveryExceptionDetails(signals.orders, notReceivedItems),
     }));
   }
 

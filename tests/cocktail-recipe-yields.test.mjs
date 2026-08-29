@@ -91,7 +91,7 @@ function roundToHundredths(value) {
 
 const sourceRecipes = [
   ["Whiskey Smash", 1463],
-  ["Apple Jack (Whiskey)", 1530],
+  ["Apple Jack (Whiskey)", 1516],
   ["On Par Tee", 1452],
   ["Bacardi Sunset", 1379.05],
   ["Crown Apple 'rita(Whiskey)", 1471],

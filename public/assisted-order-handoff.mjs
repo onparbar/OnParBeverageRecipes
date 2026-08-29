@@ -357,6 +357,7 @@ export function createAuthoritativeAssistedOrderHandoff(
       ? handoff.blockers.length === 0
       : ["reviewed", "opened_vendor"].includes(status),
     rehearsal,
+    operatingWeekReference: cleanText(draft.generatedAt) || null,
     proofFee: draft.proofFee || null,
   };
 }
