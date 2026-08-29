@@ -204,6 +204,7 @@ import {
   renderWeeklyPlanLiquorTapRows as renderWeeklyPlanLiquorTapRowsView,
   renderWeeklyPlanTapRows as renderWeeklyPlanTapRowsView,
 } from "./weekly-plan-view.mjs";
+import { bindWeeklyPlanController } from "./weekly-plan-controller.mjs";
 
 const dashboardRenderCoordinator = createDashboardRenderCoordinator();
 
@@ -7565,30 +7566,31 @@ function renderWeeklyPlan() {
     ${renderWeeklyPlanReview(plan)}
   `;
 
-  document.querySelector("#run-weekly-plan-agent")?.addEventListener("click", runWeeklyPlanUpdate);
-  document.querySelector("#recall-weekly-plan")?.addEventListener("click", recallCurrentWeeklyPlan);
-  document.querySelector("#weekly-plan-finish-save")?.addEventListener("click", saveWeeklyPlanFinishWeek);
-  document.querySelector("#weekly-plan-finish-actor")?.addEventListener("input", (event) => {
-    dashboardFinishWeekActor = event.currentTarget.value;
+  bindWeeklyPlanController({
+    root: weeklyPlan,
+    documentRef: document,
+    clean,
+    runWeeklyPlanUpdate,
+    recallCurrentWeeklyPlan,
+    saveWeeklyPlanFinishWeek,
+    openMondayRunStep,
+    bindOrderTrackingEvents: bindOwnerWeeklyOrderTrackingEvents,
+    getOutsideMondayReason: () => weeklyPlanOutsideMondayReason,
+    setOutsideMondayReason: (value) => {
+      weeklyPlanOutsideMondayReason = value;
+    },
+    getOrderRehearsalMode: () => orderRehearsalMode,
+    setOrderRehearsalMode: (value) => {
+      orderRehearsalMode = value;
+    },
+    setWeeklyOrderTrackingMessage: (value) => {
+      weeklyOrderTrackingMessage = value;
+    },
+    setFinishWeekActor: (value) => {
+      dashboardFinishWeekActor = value;
+    },
+    renderWeeklyPlan,
   });
-  weeklyPlan.querySelectorAll("[data-monday-run-step]").forEach((button) => {
-    button.addEventListener("click", () => {
-      openMondayRunStep(button.dataset.mondayRunStep, button.dataset.dashboardTarget);
-    });
-  });
-  document.querySelector("#weekly-plan-late-reason")?.addEventListener("input", (event) => {
-    weeklyPlanOutsideMondayReason = event.currentTarget.value;
-    const saveButton = document.querySelector("#run-weekly-plan-agent");
-    if (saveButton) saveButton.disabled = !clean(weeklyPlanOutsideMondayReason);
-  });
-  document.querySelector("#toggle-order-rehearsal")?.addEventListener("click", () => {
-    orderRehearsalMode = !orderRehearsalMode;
-    weeklyOrderTrackingMessage = orderRehearsalMode
-      ? "Rehearsal uses the latest locked Weekly Plan and never submits orders."
-      : "Live Weekly Plan restored.";
-    renderWeeklyPlan();
-  });
-  bindOwnerWeeklyOrderTrackingEvents();
 }
 
 function renderKegLevels() {
