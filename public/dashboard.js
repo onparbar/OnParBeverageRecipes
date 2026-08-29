@@ -211,6 +211,7 @@ import {
   getVendorCartLabel,
   sendVendorCartRequest,
 } from "./vendor-cart-bridge.mjs";
+import { buildWeeklyPlanPresentationModel } from "./weekly-plan-presentation-model.mjs";
 
 const dashboardRenderCoordinator = createDashboardRenderCoordinator();
 
@@ -7266,27 +7267,21 @@ function renderWeeklyPlan() {
   const plan = getWeeklyPlanModel();
   const freshness = getWeeklyPlanFreshness(plan);
   const vendorOrderModel = getVendorOrderDraftModel(plan, freshness);
-  const activeOrderLines = vendorOrderModel.drafts.flatMap((draft) => draft.lines || []);
-  const activeMissingPriceCount = activeOrderLines.filter((line) => (
-    !line.excludeFromOrderCost && !(toNumber(line.unitCost) > 0)
-  )).length;
-  const summary = {
-    ...plan.summary,
-    orderLineCount: activeOrderLines.length,
-    beerKegTotal: sum(activeOrderLines.filter((line) => line.lineType === "Beer keg").map((line) => toNumber(line.requestedUnits))),
-    liquorTapBottleTotal: sum(activeOrderLines.filter((line) => line.lineType === "Liquor tap bottle").map((line) => toNumber(line.requestedUnits))),
-    estimatedKnownPurchaseCost: vendorOrderModel.weeklyTotal,
-    missingPriceCount: activeMissingPriceCount,
-    estimatedPurchaseCostComplete: activeMissingPriceCount === 0,
-  };
   const planLocked = Boolean(getCurrentWeeklyPlanSnapshot(recommendations, new Date()));
-  const requiresLateSnapshotReason = !planLocked && !isEasternMonday();
+  const {
+    activeOrderLines,
+    priceNote,
+    requiresLateSnapshotReason,
+    summary,
+  } = buildWeeklyPlanPresentationModel({
+    plan,
+    vendorOrderModel,
+    planLocked,
+    isMonday: isEasternMonday(),
+  });
   const mondayRun = getMondayRunModel(plan, freshness);
   const simpleSyrupNeed = getWeeklySimpleSyrupNeed(plan.prep.cocktails);
   const updatedText = planLocked ? "Thursday delivery · locked through Sunday" : "Live needs";
-  const priceNote = summary.estimatedPurchaseCostComplete
-    ? ""
-    : `${summary.missingPriceCount ? `${formatNumber(summary.missingPriceCount)} active line${summary.missingPriceCount === 1 ? " is" : "s are"} missing a price. ` : ""}The total shown is the known-price subtotal, not a complete spend total.`;
 
   weeklyPlan.innerHTML = `
     <header class="weekly-plan-header">
