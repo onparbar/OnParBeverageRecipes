@@ -166,6 +166,53 @@ import { buildWhatIfPlan } from "./what-if-planning.mjs";
 import { createDashboardRenderCoordinator } from "./dashboard-render-coordinator.mjs";
 import { calculateWeeklyIngredientPrepNeed } from "./weekly-plan-prep-needs.mjs";
 
+import {
+  capitalize,
+  clean,
+  cssEscape,
+  escapeHtml,
+  formatContainerSizeLabel,
+  formatInventoryQuantity,
+  formatInventorySnapshotLabel,
+  formatNumber,
+  formatUpdatedAt,
+  getInventorySnapshotDate,
+  isRoughlyEqual,
+  money,
+  normalizeTitle,
+  slugify,
+  sum,
+  toNumber,
+} from "./dashboard-formatters.mjs";
+import { renderFinishWeekPanel } from "./finish-week-view.mjs";
+import {
+  buildMondayRunModel as buildMondayRunModelView,
+  renderMondayRun as renderMondayRunView,
+  renderMondayRunCompact as renderMondayRunCompactView,
+} from "./monday-run-view.mjs";
+import {
+  buildFinishWeekProgress,
+  normalizeDashboardStaffPrepPlan,
+  normalizeWeeklyOrderTracking,
+} from "./weekly-handoff-state.mjs";
+import {
+  getWeeklyPlanTapContext as getWeeklyPlanTapContextView,
+  renderWeeklyPlanCocktailRows as renderWeeklyPlanCocktailRowsView,
+  renderWeeklyPlanGroup as renderWeeklyPlanGroupView,
+  renderWeeklyPlanInventoryRows as renderWeeklyPlanInventoryRowsView,
+  renderWeeklyPlanLiquorRefillRows as renderWeeklyPlanLiquorRefillRowsView,
+  renderWeeklyPlanLiquorTapRows as renderWeeklyPlanLiquorTapRowsView,
+  renderWeeklyPlanTapRows as renderWeeklyPlanTapRowsView,
+} from "./weekly-plan-view.mjs";
+import { bindWeeklyPlanController } from "./weekly-plan-controller.mjs";
+import { bindVendorOrderController } from "./vendor-order-controller.mjs";
+import {
+  canBuildVendorCart,
+  getVendorCartLabel,
+  sendVendorCartRequest,
+} from "./vendor-cart-bridge.mjs";
+import { buildWeeklyPlanPresentationModel } from "./weekly-plan-presentation-model.mjs";
+
 const dashboardRenderCoordinator = createDashboardRenderCoordinator();
 
 const CSV_PATH = "./data/cocktail-recipes.csv";
@@ -5261,24 +5308,6 @@ async function recallCurrentWeeklyPlan() {
   }
 }
 
-function normalizeWeeklyOrderTracking(result = {}) {
-  return {
-    available: result?.available === true,
-    generatedAt: clean(result?.generatedAt),
-    drafts: Array.isArray(result?.drafts) ? result.drafts : [],
-    adjustments: Array.isArray(result?.adjustments) ? result.adjustments : [],
-    adjustmentCatalog: Array.isArray(result?.adjustmentCatalog) ? result.adjustmentCatalog : [],
-    vendors: Array.isArray(result?.vendors) ? result.vendors : [],
-    itemCount: toNumber(result?.itemCount),
-    receivedCount: toNumber(result?.receivedCount),
-    notReceivedCount: toNumber(result?.notReceivedCount),
-    notReceivedItems: Array.isArray(result?.notReceivedItems) ? result.notReceivedItems : [],
-    orderPolicy: normalizeVendorOrderPolicy(result?.orderPolicy),
-    stateRevision: toNumber(result?.stateRevision),
-    message: clean(result?.message),
-  };
-}
-
 async function loadWeeklyOrderTracking() {
   try {
     const response = await fetch("/api/weekly-order-tracking", {
@@ -5318,20 +5347,6 @@ let dashboardFinishWeekActor = "";
 let dashboardFinishWeekSaving = false;
 let dashboardFinishWeekMessage = "";
 
-function normalizeDashboardStaffPrepPlan(result = {}) {
-  return {
-    available: result?.available === true,
-    generatedAt: clean(result?.generatedAt),
-    items: Array.isArray(result?.items) ? result.items : [],
-    liquorRefills: Array.isArray(result?.liquorRefills) ? result.liquorRefills : [],
-    completedCount: toNumber(result?.completedCount),
-    totalCount: toNumber(result?.totalCount),
-    liquorRefillCompletedCount: toNumber(result?.liquorRefillCompletedCount),
-    liquorRefillTotalCount: toNumber(result?.liquorRefillTotalCount),
-    message: clean(result?.message),
-  };
-}
-
 async function loadDashboardStaffPrepPlan() {
   try {
     const response = await fetch("/api/staff-prep-plan", {
@@ -5360,154 +5375,20 @@ async function refreshDashboardStaffPrepPlan() {
 }
 
 function getFinishWeekProgress() {
-  const deliveryItems = weeklyOrderTracking.available
-    ? weeklyOrderTracking.vendors.flatMap((vendor) => Array.isArray(vendor.items) ? vendor.items : [])
-    : [];
-  const deliveryReviewedCount = deliveryItems.filter((item) => clean(item.status) !== "pending").length;
-  const deliveryTotalCount = deliveryItems.length;
-  const cocktailCompletedCount = toNumber(dashboardStaffPrepPlan.completedCount);
-  const cocktailTotalCount = toNumber(dashboardStaffPrepPlan.totalCount);
-  const liquorCompletedCount = toNumber(dashboardStaffPrepPlan.liquorRefillCompletedCount);
-  const liquorTotalCount = toNumber(dashboardStaffPrepPlan.liquorRefillTotalCount);
-  const sections = [
-    {
-      id: "deliveries",
-      label: "Deliveries",
-      complete: weeklyOrderTracking.available && deliveryReviewedCount >= deliveryTotalCount,
-      completedCount: deliveryReviewedCount,
-      totalCount: deliveryTotalCount,
-    },
-    {
-      id: "cocktails",
-      label: "Cocktails",
-      complete: dashboardStaffPrepPlan.available && cocktailCompletedCount >= cocktailTotalCount,
-      completedCount: cocktailCompletedCount,
-      totalCount: cocktailTotalCount,
-    },
-    {
-      id: "liquor",
-      label: "Liquor",
-      complete: dashboardStaffPrepPlan.available && liquorCompletedCount >= liquorTotalCount,
-      completedCount: liquorCompletedCount,
-      totalCount: liquorTotalCount,
-    },
-  ];
-  const remainingCount = sections.reduce((sum, section) => (
-    sum + (section.complete ? 0 : Math.max(1, section.totalCount - section.completedCount))
-  ), 0);
-  return {
-    sections,
-    complete: sections.every((section) => section.complete),
-    remainingCount,
-  };
-}
-
-function renderFinishWeekChecklistItems(items, kind) {
-  if (!items.length) return '<p class="finish-week-empty">Nothing scheduled. This part is complete automatically.</p>';
-  return items.map((item) => {
-    const completed = item.completed === true;
-    const isLiquor = kind === "liquor";
-    const taps = Array.isArray(item.tapNumbers) && item.tapNumbers.length
-      ? `Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.join(", ")}`
-      : "";
-    return `
-      <div class="finish-week-item${completed ? " is-complete" : ""}">
-        <label>
-          <input type="checkbox" data-finish-prep-item="${escapeHtml(item.id)}" data-finish-prep-kind="${escapeHtml(kind)}" data-completed="${completed}"${completed ? " checked" : ""}>
-          <span>
-            <strong>${escapeHtml(item.displayName || item.name)}</strong>
-            <small>${escapeHtml([isLiquor ? `${formatNumber(item.quantity)} bottle${toNumber(item.quantity) === 1 ? "" : "s"}` : `${formatNumber(item.quantity)} batch${toNumber(item.quantity) === 1 ? "" : "es"}`, taps].filter(Boolean).join(" · "))}</small>
-          </span>
-        </label>
-        ${isLiquor ? `
-          <label class="finish-week-quantity">
-            <span>Bottles added</span>
-            <input type="number" min="1" max="99" step="1" data-finish-liquor-quantity="${escapeHtml(item.id)}" value="${escapeHtml(String(item.actualQuantity || item.quantity || 1))}">
-          </label>
-        ` : ""}
-      </div>
-    `;
-  }).join("");
-}
-
-function renderFinishWeekDeliveries() {
-  if (!weeklyOrderTracking.available) {
-    return '<p class="finish-week-empty">Delivery tracking will appear after the order plan is published.</p>';
-  }
-  if (!weeklyOrderTracking.vendors.length) {
-    return '<p class="finish-week-empty">No deliveries are expected. This part is complete automatically.</p>';
-  }
-  return weeklyOrderTracking.vendors.map((vendor) => `
-    <div class="finish-week-vendor">
-      <h4>${escapeHtml(vendor.vendor)}</h4>
-      ${(vendor.items || []).map((item) => {
-        const reviewed = clean(item.status) !== "pending";
-        const result = reviewed
-          ? item.status === "received"
-            ? "Received"
-            : `${formatNumber(item.receivedQuantity)} of ${formatNumber(item.quantity)} reviewed`
-          : `${formatNumber(item.quantity)} ${clean(item.unit) || "items"}`;
-        return `
-          <label class="finish-week-item${reviewed ? " is-complete" : ""}">
-            <input type="checkbox" data-finish-delivery-item="${escapeHtml(item.id)}" data-vendor-id="${escapeHtml(vendor.id)}" data-quantity="${escapeHtml(String(item.quantity || 0))}" data-completed="${reviewed}"${reviewed ? " checked disabled" : ""}>
-            <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(result)}</small></span>
-          </label>
-        `;
-      }).join("")}
-    </div>
-  `).join("");
+  return buildFinishWeekProgress({ weeklyOrderTracking, dashboardStaffPrepPlan });
 }
 
 function renderWeeklyPlanFinishWeek(planLocked) {
-  if (!planLocked) return "";
-  const progress = getFinishWeekProgress();
-  const cocktails = Array.isArray(dashboardStaffPrepPlan.items) ? dashboardStaffPrepPlan.items : [];
-  const liquor = Array.isArray(dashboardStaffPrepPlan.liquorRefills) ? dashboardStaffPrepPlan.liquorRefills : [];
-  return `
-    <section class="finish-week-panel" id="weekly-plan-finish-week" aria-labelledby="finish-week-title">
-      <header class="finish-week-header">
-        <div>
-          <p class="eyebrow">Shared with Staff View</p>
-          <h2 id="finish-week-title">Finish the Week</h2>
-          <p>Check off deliveries, prepared cocktails, and liquor added to taps. Both views update together.</p>
-        </div>
-        <strong class="finish-week-state${progress.complete ? " is-complete" : ""}">${progress.complete ? "Complete" : `${formatNumber(progress.remainingCount)} left`}</strong>
-      </header>
-      <div class="finish-week-progress" aria-label="Finish the Week progress">
-        ${progress.sections.map((section) => `
-          <div class="${section.complete ? "is-complete" : ""}">
-            <span>${escapeHtml(section.label)}</span>
-            <strong>${formatNumber(section.completedCount)} / ${formatNumber(section.totalCount)}</strong>
-          </div>
-        `).join("")}
-      </div>
-      <div class="finish-week-checklists">
-        <section>
-          <h3>Deliveries Received</h3>
-          <p>Check an item only when the full planned quantity arrived. Use Staff View for shortages, rejections, or extras.</p>
-          <div class="finish-week-list">${renderFinishWeekDeliveries()}</div>
-        </section>
-        <section>
-          <h3>Cocktails Prepared</h3>
-          <p>Completing a batch subtracts its mapped ingredients from on-hand inventory.</p>
-          <div class="finish-week-list">${renderFinishWeekChecklistItems(cocktails, "cocktail")}</div>
-        </section>
-        <section>
-          <h3>Liquor Added</h3>
-          <p>Enter the actual bottles added before checking off the refill.</p>
-          <div class="finish-week-list">${renderFinishWeekChecklistItems(liquor, "liquor")}</div>
-        </section>
-      </div>
-      <footer class="finish-week-actions">
-        <label>
-          <span>Completed by</span>
-          <input id="weekly-plan-finish-actor" type="text" maxlength="80" autocomplete="name" value="${escapeHtml(dashboardFinishWeekActor)}" placeholder="Manager name">
-        </label>
-        <button class="primary-button" id="weekly-plan-finish-save" type="button"${dashboardFinishWeekSaving ? " disabled" : ""}>${dashboardFinishWeekSaving ? "Saving..." : "Save selected"}</button>
-        <p id="weekly-plan-finish-status" role="status" aria-live="polite"${dashboardFinishWeekMessage ? "" : " hidden"}>${escapeHtml(dashboardFinishWeekMessage)}</p>
-      </footer>
-    </section>
-  `;
+  return renderFinishWeekPanel({
+    planLocked,
+    progress: getFinishWeekProgress(),
+    weeklyOrderTracking,
+    cocktails: Array.isArray(dashboardStaffPrepPlan.items) ? dashboardStaffPrepPlan.items : [],
+    liquor: Array.isArray(dashboardStaffPrepPlan.liquorRefills) ? dashboardStaffPrepPlan.liquorRefills : [],
+    actor: dashboardFinishWeekActor,
+    saving: dashboardFinishWeekSaving,
+    message: dashboardFinishWeekMessage,
+  });
 }
 
 async function saveWeeklyPlanFinishWeek() {
@@ -5687,72 +5568,31 @@ async function saveVendorHandoffEvent(view, event) {
 }
 
 function getWeeklyPlanTapContext(item, unit, { compact = false } = {}) {
-  const taps = item.tapNumbers.length
-    ? `Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.map(formatNumber).join(", ")}`
-    : "Tap assignment unavailable";
-  const walls = item.walls.length ? ` · ${item.walls.join(", ")}` : "";
-  if (compact) return `${taps}${walls}`;
-  if (unit === "oz") {
-    return `${taps}${walls} · ${formatNumber(item.currentStockOunces)} oz current · ${formatNumber(item.avgWeeklyOunces)} oz avg/week`;
-  }
-  return `${taps}${walls} · ${formatNumber(item.currentStockKegs)} kegs in stock · ${formatNumber(item.avgWeeklyKegs)} avg/week`;
+  return getWeeklyPlanTapContextView(item, unit, { compact });
 }
 
 function renderWeeklyPlanInventoryRows(items) {
-  if (!items.length) return '<p class="weekly-plan-empty">No active order lines in this section.</p>';
-  return `<div class="weekly-plan-list">${items.map((item) => {
-    const quantity = item.casePackaged
-      ? `${formatNumber(item.caseCount)} case${item.caseCount === 1 ? "" : "s"} · ${formatNumber(item.quantity)} units`
-      : `${formatNumber(item.quantity)} unit${item.quantity === 1 ? "" : "s"}`;
-    const details = [
-      item.vendor,
-      `${formatNumber(item.onHand)} on hand / ${formatNumber(item.par)} par`,
-      item.estimatedCost > 0 ? `${money(item.estimatedCost)} estimated` : "Price needed",
-    ].filter(Boolean).join(" · ");
-    return `
-      <div class="weekly-plan-item">
-        <div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(details)}</span></div>
-        <b>${escapeHtml(quantity)}</b>
-      </div>
-    `;
-  }).join("")}</div>`;
+  return renderWeeklyPlanInventoryRowsView(items);
+}
+
+function getWeeklyPlanProductViewItem(item) {
+  return {
+    ...item,
+    displayName: getCanonicalProductDisplayName(item.name),
+  };
 }
 
 function renderWeeklyPlanTapRows(items, { action, unit = "kegs" } = {}) {
-  if (!items.length) return `<p class="weekly-plan-empty">No active lines to ${escapeHtml(action.toLowerCase())} in this section.</p>`;
-  return `<div class="weekly-plan-list">${items.map((item) => `
-    <div class="weekly-plan-item">
-      <div>
-        <strong>${escapeHtml(getCanonicalProductDisplayName(item.name))}</strong>
-        <span>${escapeHtml(getWeeklyPlanTapContext(item, unit === "refills" ? "oz" : "kegs", { compact: true }))}</span>
-      </div>
-      <b>${escapeHtml(action)} ${formatNumber(item.quantity)} ${escapeHtml(unit === "refills" ? `refill${item.quantity === 1 ? "" : "s"}` : `keg${item.quantity === 1 ? "" : "s"}`)}</b>
-    </div>
-  `).join("")}</div>`;
+  return renderWeeklyPlanTapRowsView(items.map(getWeeklyPlanProductViewItem), { action, unit });
 }
 
 function renderWeeklyPlanCocktailRows(items) {
-  if (!items.length) return '<p class="weekly-plan-empty">None this week.</p>';
-  const orderedItems = [...items].sort((a, b) => (
-    toNumber(a.tapNumbers?.[0]) - toNumber(b.tapNumbers?.[0])
-    || clean(a.name).localeCompare(clean(b.name))
-  ));
-  return `<div class="weekly-plan-list weekly-plan-label-list">${orderedItems.map((item) => {
-    const wall = clean(item.walls?.[0]);
-    const details = [
-      wall ? `${wall} wall` : "Wall unavailable",
-      toNumber(item.batchSizeOz) > 0 ? `${formatNumber(item.batchSizeOz)} oz` : "Batch ounces unavailable",
-    ].join(" · ");
-    return `
-      <div class="weekly-plan-item weekly-plan-label-item">
-        <div>
-          <strong>${escapeHtml(getCocktailPrepDisplayName(getCanonicalProductDisplayName(item.name), wall))}</strong>
-          <span>${escapeHtml(details)}</span>
-        </div>
-        <b>${formatNumber(item.quantity)} label${item.quantity === 1 ? "" : "s"}</b>
-      </div>
-    `;
-  }).join("")}</div>`;
+  const viewItems = items.map((item) => ({
+    ...getWeeklyPlanProductViewItem(item),
+    batchSizeOz: item.batchSizeOz,
+    quantityLabel: `${formatNumber(item.quantity)} label${item.quantity === 1 ? "" : "s"}`,
+  }));
+  return renderWeeklyPlanCocktailRowsView(viewItems);
 }
 
 function getWeeklySimpleSyrupNeed(cocktails = []) {
@@ -5767,42 +5607,15 @@ function getWeeklySimpleSyrupNeed(cocktails = []) {
 }
 
 function renderWeeklyPlanLiquorTapRows(items) {
-  if (!items.length) return '<p class="weekly-plan-empty">No liquor-tap bottle orders this week.</p>';
-  return `<div class="weekly-plan-list">${items.map((item) => `
-    <div class="weekly-plan-item">
-      <div>
-        <strong>${escapeHtml(item.name)}</strong>
-        <span>${escapeHtml(getWeeklyPlanTapContext(item, "oz", { compact: true }))}${item.vendor ? ` · ${escapeHtml(item.vendor)}` : ""}${item.hasKnownPrice === false ? " · Price needed" : ""}</span>
-      </div>
-      <b>Order ${formatNumber(item.quantity)} bottle${item.quantity === 1 ? "" : "s"}</b>
-    </div>
-  `).join("")}</div>`;
+  return renderWeeklyPlanLiquorTapRowsView(items);
 }
 
 function renderWeeklyPlanLiquorRefillRows(items) {
-  if (!items.length) return '<p class="weekly-plan-empty">None this week.</p>';
-  return `<div class="weekly-plan-list">${items.map((item) => {
-    const taps = (item.tapNumbers || []).filter(Boolean);
-    const tapLabel = taps.length ? `Tap${taps.length === 1 ? "" : "s"} ${taps.join(", ")}` : "Tap unavailable";
-    return `
-      <div class="weekly-plan-item">
-        <div>
-          <strong>${escapeHtml(getCanonicalProductDisplayName(item.name))}</strong>
-          <span>${escapeHtml(tapLabel)}</span>
-        </div>
-        <b>${formatNumber(item.quantity)} bottle${item.quantity === 1 ? "" : "s"}</b>
-      </div>
-    `;
-  }).join("")}</div>`;
+  return renderWeeklyPlanLiquorRefillRowsView(items.map(getWeeklyPlanProductViewItem));
 }
 
 function renderWeeklyPlanGroup(title, count, content, accent = "") {
-  return `
-    <section class="weekly-plan-group ${accent ? `weekly-plan-group--${accent}` : ""}">
-      <div class="weekly-plan-group__header"><h3>${escapeHtml(title)}</h3><strong>${formatNumber(count)}</strong></div>
-      ${content}
-    </section>
-  `;
+  return renderWeeklyPlanGroupView(title, count, content, accent);
 }
 
 function getLatestPriceTimestamp() {
@@ -6109,9 +5922,7 @@ function getMondayRunModel(plan, freshness) {
     || inventoryActionOutbox.length > 0;
   const mondaySnapshotSaved = Boolean(getCurrentMondayInventorySnapshot(inventoryHistory, new Date()));
   const planLocked = hasPublishedWeeklyPlanRecommendations();
-  const lockedPlanCapturedSetup = planLocked;
   const finishWeek = getFinishWeekProgress();
-  const pmbFeedsReady = kegFeed.status === "online" && pricingFeed.status === "online";
   const weeklyUsageCaptured = freshness.latestCompletedUsageSaved === true && !weeklyUsageSharedSaveError;
   const pmbRefreshPending = unifiedPmbRefreshRunning
     || kegFeed.status === "loading"
@@ -6121,145 +5932,34 @@ function getMondayRunModel(plan, freshness) {
     || weeklyUsageSharedPendingWrites
     || Boolean(weeklyUsageSharedSaveTimer);
   const vendorOrders = Array.isArray(weeklyOrderTracking.vendors) ? weeklyOrderTracking.vendors : [];
-  const outstandingVendorCount = vendorOrders.filter((vendor) => vendor?.ordered !== true).length;
   const orderLineCount = toNumber(plan?.summary?.orderLineCount);
-  const ordersPlaced = planLocked && (
-    orderLineCount <= 0
-    || (weeklyOrderTracking.available && vendorOrders.length > 0 && outstandingVendorCount === 0)
-  );
-  const cocktailBatchTotal = toNumber(plan?.summary?.cocktailBatchTotal);
-  const prepComplete = planLocked && (
-    cocktailBatchTotal <= 0
-    || (
-      dashboardStaffPrepPlan.available
-      && dashboardStaffPrepPlan.totalCount > 0
-      && dashboardStaffPrepPlan.completedCount >= dashboardStaffPrepPlan.totalCount
-    )
-  );
   const tapSheets = buildTapWallPrintSheets();
-  const tapSheetsToPrint = tapSheets.filter((sheet) => !sheet.isCurrent).length;
-  const steps = [
-    {
-      id: "pmb",
-      label: "Refresh PMB & capture usage",
-      target: "dashboard",
-      complete: lockedPlanCapturedSetup || (pmbFeedsReady && weeklyUsageCaptured),
-      status: pmbRefreshPending
-        ? "Refreshing"
-        : !pmbFeedsReady
-          ? "Refresh PMB"
-          : weeklyUsageCaptured
-            ? "Ready"
-            : "Capture usage",
-    },
-    {
-      id: "inventory",
-      label: "Count inventory",
-      target: "inventory",
-      complete: lockedPlanCapturedSetup || (
-        inventorySharedInitialized
-        && inventoryMissingCount === 0
-        && !inventorySaving
-        && !inventorySharedSaveError
-      ),
-      status: inventorySaving
-        ? "Saving"
-        : inventoryMissingCount > 0
-          ? `${formatNumber(inventoryMissingCount)} left`
-          : inventorySharedInitialized
-            ? "Counted"
-            : "Set up",
-    },
-    {
-      id: "plan",
-      label: "Save & lock plan",
-      target: "weekly-plan",
-      complete: planLocked,
-      status: planLocked ? "Locked" : mondaySnapshotSaved ? "Snapshot saved" : freshness.readiness?.actionable ? "Ready" : "Waiting",
-    },
-    {
-      id: "orders",
-      label: "Place orders",
-      target: "weekly-plan",
-      complete: ordersPlaced,
-      status: ordersPlaced
-        ? orderLineCount > 0 ? "Placed" : "None needed"
-        : !planLocked
-          ? "After plan"
-          : weeklyOrderTracking.available && outstandingVendorCount > 0
-            ? `${formatNumber(outstandingVendorCount)} left`
-            : "Review",
-    },
-    {
-      id: "print",
-      label: "Print tap sheets",
-      target: "print",
-      complete: tapSheets.length > 0 && tapSheetsToPrint === 0,
-      status: tapSheetsToPrint > 0 ? `${formatNumber(tapSheetsToPrint)} left` : tapSheets.length ? "Current" : "Review",
-    },
-    {
-      id: "finish",
-      label: "Finish the week",
-      target: "weekly-plan",
-      complete: planLocked && finishWeek.complete,
-      status: !planLocked
-        ? "After plan"
-        : finishWeek.complete
-          ? "Complete"
-          : `${formatNumber(finishWeek.remainingCount)} left`,
-    },
-  ];
-  const completedCount = steps.filter((step) => step.complete).length;
-  const nextIndex = steps.findIndex((step) => !step.complete);
-  return {
-    steps,
-    completedCount,
-    nextIndex,
-    nextStep: steps[nextIndex < 0 ? 0 : nextIndex],
-    complete: nextIndex < 0,
-  };
+  return buildMondayRunModelView({
+    kegFeed,
+    pricingFeed,
+    inventoryMissingCount,
+    inventorySaving,
+    inventorySharedInitialized,
+    inventorySharedSaveError,
+    mondaySnapshotSaved,
+    planLocked,
+    finishWeek,
+    weeklyUsageCaptured,
+    pmbRefreshPending,
+    vendorOrders,
+    weeklyOrderTrackingAvailable: weeklyOrderTracking.available,
+    orderLineCount,
+    tapSheets,
+    planActionable: freshness.readiness?.actionable,
+  });
 }
 
 function renderMondayRun(run) {
-  const progress = run.steps.length ? Math.round((run.completedCount / run.steps.length) * 100) : 0;
-  const continueStepId = run.complete ? "review" : run.nextStep.id;
-  const continueTarget = run.complete ? "weekly-plan" : run.nextStep.target;
-  return `
-    <section class="monday-run" aria-labelledby="monday-run-title">
-      <header class="monday-run__header">
-        <div><h2 id="monday-run-title">Monday Run</h2><span>${formatNumber(run.completedCount)} / ${formatNumber(run.steps.length)}</span></div>
-        <button class="${run.complete ? "ghost-button" : "primary-button"}" type="button" data-monday-run-step="${escapeHtml(continueStepId)}" data-dashboard-target="${escapeHtml(continueTarget)}">${run.complete ? "Review" : "Continue"}</button>
-      </header>
-      <div class="monday-run__progress" role="progressbar" aria-label="Monday Run progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="--monday-run-progress: ${progress}%"></span></div>
-      <ol class="monday-run__steps">
-        ${run.steps.map((step, index) => `
-          <li class="monday-run__step${step.complete ? " monday-run__step--done" : index === run.nextIndex ? " monday-run__step--current" : ""}">
-            <button type="button" data-monday-run-step="${escapeHtml(step.id)}" data-dashboard-target="${escapeHtml(step.target)}"${index === run.nextIndex ? ' aria-current="step"' : ""}>
-              <span>${formatNumber(index + 1)}</span>
-              <strong>${escapeHtml(step.label)}</strong>
-              <small>${escapeHtml(step.complete ? "Done" : step.status)}</small>
-            </button>
-          </li>
-        `).join("")}
-      </ol>
-    </section>
-  `;
+  return renderMondayRunView(run);
 }
 
 function renderMondayRunCompact(run) {
-  const progress = run.steps.length ? Math.round((run.completedCount / run.steps.length) * 100) : 0;
-  const continueStepId = run.complete ? "review" : run.nextStep.id;
-  const continueTarget = run.complete ? "weekly-plan" : run.nextStep.target;
-  return `
-    <section class="monday-run monday-run--compact" aria-label="Monday Run">
-      <header class="monday-run__header">
-        <div><h2>Monday Run</h2><span>${formatNumber(run.completedCount)} / ${formatNumber(run.steps.length)}</span></div>
-        <button class="${run.complete ? "ghost-button" : "primary-button"}" type="button" data-monday-run-step="${escapeHtml(continueStepId)}" data-dashboard-target="${escapeHtml(continueTarget)}">${run.complete ? "Review" : "Continue"}</button>
-      </header>
-      <p class="monday-run__current-step"><span>${run.complete ? "Complete" : "Next"}:</span> <strong>${escapeHtml(run.complete ? "Review this week" : run.nextStep.label)}</strong></p>
-      <div class="monday-run__progress" role="progressbar" aria-label="Monday Run progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="--monday-run-progress: ${progress}%"></span></div>
-    </section>
-  `;
+  return renderMondayRunCompactView(run);
 }
 
 function openMondayRunStep(stepId, target) {
@@ -7415,263 +7115,33 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
   `;
 }
 
-const CART_BUILDER_VENDORS = new Set(["heidelberg", "proof", "ohlq"]);
-
-function buildVendorCartRequest(view) {
-  const order = view?.order;
-  return {
-    requestId: `${order.id}:${Date.now()}`,
-    orderId: order.id,
-    vendor: order.vendorKey,
-    approved: order.actionsEnabled === true,
-    rehearsal: order.rehearsal === true,
-    operatingWeekReference: order.operatingWeekReference,
-    expectedTotal: order.expectedTotal,
-    lineCount: order.lineCount,
-    lines: (order.lines || []).map((line) => ({
-      internalItemId: line.internalItemId,
-      name: line.name,
-      vendorSku: line.vendorSku,
-      packSize: line.packSize,
-      requestedCases: line.requestedCases,
-      requestedUnits: line.requestedUnits,
-    })),
-  };
-}
-
-function sendVendorCartRequest(view) {
-  const payload = buildVendorCartRequest(view);
-  return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      window.removeEventListener("message", receiveResponse);
-      reject(new Error("Install or enable the On Par Vendor Cart Builder in Chrome."));
-    }, 1800);
-    function receiveResponse(event) {
-      if (
-        event.source !== window ||
-        event.origin !== window.location.origin ||
-        event.data?.source !== "onpar-vendor-cart-builder" ||
-        event.data?.requestId !== payload.requestId
-      ) return;
-      window.clearTimeout(timeout);
-      window.removeEventListener("message", receiveResponse);
-      if (event.data.type === "ONPAR_VENDOR_CART_BUILD_ACCEPTED") resolve(event.data);
-      else reject(new Error(event.data.message || "The vendor cart helper could not start."));
-    }
-    window.addEventListener("message", receiveResponse);
-    window.postMessage({
-      source: "onpar-dashboard",
-      type: "ONPAR_VENDOR_CART_BUILD_REQUEST",
-      payload,
-    }, window.location.origin);
-  });
-}
-
 function bindOwnerWeeklyOrderTrackingEvents() {
-  document.querySelectorAll("[data-assisted-order-copy]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const view = currentVendorOrderDraftViews.get(button.dataset.assistedOrderCopy);
-      if (!view?.order.actionsEnabled) return;
-      if (!view.order.rehearsal && !confirmLateVendorOrder(view)) return;
-      await copyAssistedOrderText(view.copyText);
-      if (view.order.rehearsal) button.textContent = "Copied";
-      else await saveVendorHandoffEvent(view, "copied");
-    });
-  });
-  document.querySelectorAll("[data-assisted-order-open]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const view = currentVendorOrderDraftViews.get(button.dataset.assistedOrderOpen);
-      if (!view?.order.actionsEnabled) return;
-      if (!view.order.rehearsal && !confirmLateVendorOrder(view)) return;
-      if (CART_BUILDER_VENDORS.has(view.order.vendorKey)) {
-        const vendorLabel = view.order.vendorKey === "heidelberg" ? "BEES" : view.order.vendor;
-        const originalLabel = button.textContent;
-        button.disabled = true;
-        button.textContent = view.order.rehearsal ? `Filling ${vendorLabel} rehearsal...` : `Opening ${vendorLabel}...`;
-        try {
-          await sendVendorCartRequest(view);
-          button.textContent = view.order.rehearsal ? `${vendorLabel} rehearsal ready` : `Sent to ${vendorLabel}`;
-          if (!view.order.rehearsal) await saveVendorHandoffEvent(view, "opened_vendor");
-        } catch (error) {
-          button.disabled = false;
-          button.textContent = originalLabel;
-          weeklyOrderTrackingMessage = error.message;
-        }
-        return;
-      }
-      if (!view.vendorPath) return;
+  bindVendorOrderController({
+    documentRef: document,
+    clean,
+    rehearsalMode: orderRehearsalMode,
+    getDraftView: (key) => currentVendorOrderDraftViews.get(key),
+    confirmLateVendorOrder,
+    copyAssistedOrderText,
+    saveVendorHandoffEvent,
+    canBuildVendorCart,
+    getVendorCartLabel,
+    sendVendorCartRequest: (view) => sendVendorCartRequest(view, { windowRef: window }),
+    openVendorPath: (view) => {
       window.open(view.vendorPath, "_blank", "noopener,noreferrer");
-      await saveVendorHandoffEvent(view, "opened_vendor");
-    });
-  });
-  if (orderRehearsalMode) return;
-  const adjustmentPanel = document.querySelector("[data-order-adjustment-panel]");
-  const adjustmentAction = adjustmentPanel?.querySelector("[data-order-adjustment-action]");
-  const adjustmentVendor = adjustmentPanel?.querySelector("[data-order-adjustment-vendor-filter]");
-  const adjustmentProduct = adjustmentPanel?.querySelector("[data-order-adjustment-product]");
-  const adjustmentQuantity = adjustmentPanel?.querySelector("[data-order-adjustment-quantity-input]");
-  const adjustmentQuantityField = adjustmentPanel?.querySelector("[data-order-adjustment-quantity-field]");
-  const adjustmentReason = adjustmentPanel?.querySelector("[data-order-adjustment-reason-input]");
-  const adjustmentUnit = adjustmentPanel?.querySelector("[data-order-adjustment-unit-label]");
-  const adjustmentManager = adjustmentPanel?.querySelector("[data-order-adjustment-manager]");
-  const syncAdjustmentFields = () => {
-    const option = adjustmentProduct?.selectedOptions?.[0];
-    if (!option) return;
-    if (adjustmentQuantity) adjustmentQuantity.value = option.dataset.orderAdjustmentDefaultQuantity || "1";
-    if (adjustmentReason) adjustmentReason.value = option.dataset.orderAdjustmentDefaultReason || "";
-    if (adjustmentUnit) adjustmentUnit.textContent = option.dataset.orderAdjustmentQuantityUnit || "units";
-    const removing = adjustmentAction?.value === "remove";
-    if (adjustmentQuantityField) adjustmentQuantityField.hidden = removing;
-    if (adjustmentQuantity) adjustmentQuantity.disabled = removing;
-  };
-  const syncAdjustmentProducts = () => {
-    if (!adjustmentProduct) return;
-    const selectedVendor = adjustmentVendor?.value || "";
-    const removing = adjustmentAction?.value === "remove";
-    const options = [...adjustmentProduct.options];
-    options.forEach((option) => {
-      const matchesVendor = !selectedVendor || option.dataset.orderAdjustmentVendor === selectedVendor;
-      const isOnOrder = Number(option.dataset.orderAdjustmentCurrentQuantity) > 0;
-      option.hidden = !matchesVendor || (removing && !isOnOrder);
-      option.disabled = option.hidden;
-    });
-    if (adjustmentProduct.selectedOptions[0]?.disabled) {
-      const firstAvailable = options.find((option) => !option.disabled);
-      if (firstAvailable) adjustmentProduct.value = firstAvailable.value;
-    }
-    syncAdjustmentFields();
-  };
-  adjustmentAction?.addEventListener("change", syncAdjustmentProducts);
-  adjustmentVendor?.addEventListener("change", syncAdjustmentProducts);
-  adjustmentProduct?.addEventListener("change", syncAdjustmentFields);
-  syncAdjustmentProducts();
-  adjustmentPanel?.querySelector("[data-order-adjustment-save]")?.addEventListener("click", async () => {
-    const option = adjustmentProduct?.selectedOptions?.[0];
-    const adjustedBy = clean(adjustmentManager?.value);
-    const reason = clean(adjustmentReason?.value);
-    const quantity = Number(adjustmentQuantity?.value);
-    const removing = adjustmentAction?.value === "remove";
-    if (!option || (!removing && (!Number.isInteger(quantity) || quantity <= 0)) || !reason || !adjustedBy) {
-      weeklyOrderTrackingMessage = `Choose a product and enter ${removing ? "the" : "its quantity,"} reason and manager.`;
-      renderWeeklyPlan();
-      return;
-    }
-    await saveVendorOrderDraftAction({
-      action: "set-order-adjustment",
-      catalogId: option.value,
-      vendor: option.dataset.orderAdjustmentVendor,
-      quantity: removing ? 0 : quantity,
-      reason,
-      adjustedBy,
-    });
-  });
-  adjustmentPanel?.querySelectorAll("[data-order-adjustment-remove]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const adjustedBy = clean(adjustmentManager?.value);
-      if (!adjustedBy) {
-        weeklyOrderTrackingMessage = "Enter the manager removing this adjustment.";
-        renderWeeklyPlan();
-        return;
-      }
-      await saveVendorOrderDraftAction({
-        action: "remove-order-adjustment",
-        catalogId: button.dataset.orderAdjustmentRemove,
-        vendor: button.dataset.orderAdjustmentVendor,
-        adjustedBy,
-      });
-    });
-  });
-  document.querySelectorAll("[data-weekly-order-place]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const vendor = clean(button.dataset.weeklyOrderVendor);
-      const orderedBy = clean(button.dataset.weeklyOrderedBy);
-      if (!button.dataset.weeklyOrderVendorId || !orderedBy) return;
-      if (!confirmDashboardAction(
-        `Mark the ${vendor} order as placed?`,
-        ["This confirms the reviewed order was submitted outside the dashboard."],
-      )) return;
-      button.disabled = true;
-      await saveWeeklyOrderPlaced(button.dataset.weeklyOrderVendorId, true, orderedBy);
-    });
-  });
-  document.querySelectorAll("[data-vendor-order-draft]").forEach((form) => {
-    const vendor = form.dataset.vendorOrderDraft;
-    const managerInput = form.querySelector("[data-order-draft-manager]");
-    managerInput?.addEventListener("change", () => {
-      const manager = clean(managerInput.value);
-      if (!manager) return;
-      document.querySelectorAll("[data-order-draft-manager]").forEach((input) => {
-        if (!clean(input.value)) input.value = manager;
-      });
-    });
-    const removableLines = [...form.querySelectorAll("[data-order-draft-remove-line]")];
-    const selectAll = form.querySelector("[data-order-draft-select-all]");
-    const removeSelected = form.querySelector("[data-order-draft-remove-selected]");
-    const syncBulkRemoval = () => {
-      const selectedCount = removableLines.filter((input) => input.checked).length;
-      if (selectAll) {
-        selectAll.checked = removableLines.length > 0 && selectedCount === removableLines.length;
-        selectAll.indeterminate = selectedCount > 0 && selectedCount < removableLines.length;
-      }
-      if (removeSelected) {
-        removeSelected.disabled = selectedCount === 0;
-        removeSelected.textContent = selectedCount ? `Remove selected (${selectedCount})` : "Remove selected";
-      }
-    };
-    selectAll?.addEventListener("change", () => {
-      removableLines.forEach((input) => { input.checked = selectAll.checked; });
-      syncBulkRemoval();
-    });
-    removableLines.forEach((input) => input.addEventListener("change", syncBulkRemoval));
-    removeSelected?.addEventListener("click", async () => {
-      const adjustedBy = clean(managerInput?.value);
-      const selected = removableLines.filter((input) => input.checked);
-      if (!adjustedBy) {
-        managerInput?.setCustomValidity("Enter the manager adjusting this order.");
-        managerInput?.reportValidity();
-        return;
-      }
-      managerInput?.setCustomValidity("");
-      if (!selected.length) return;
-      removeSelected.disabled = true;
-      await saveVendorOrderDraftAction({
-        action: "set-order-adjustments",
-        vendor,
-        adjustedBy,
-        adjustments: selected.map((input) => ({
-          catalogId: input.value,
-          vendor,
-          quantity: 0,
-          reason: "Removed during draft review.",
-        })),
-      });
-    });
-    syncBulkRemoval();
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const approvedBy = clean(managerInput?.value);
-      const confirmed = Boolean(form.querySelector("[data-order-draft-confirm]")?.checked);
-      if (!approvedBy) {
-        managerInput?.setCustomValidity("Enter the approving manager.");
-        managerInput?.reportValidity();
-        return;
-      }
-      managerInput?.setCustomValidity("");
-      if (!confirmed) {
-        weeklyOrderTrackingMessage = "Confirm the vendor, total, and line count before approval.";
-        renderWeeklyPlan();
-        return;
-      }
+    },
+    setWeeklyOrderTrackingMessage: (value) => {
+      weeklyOrderTrackingMessage = value;
+    },
+    renderWeeklyPlan,
+    saveVendorOrderDraftAction,
+    confirmDashboardAction,
+    saveWeeklyOrderPlaced,
+    getReviewAndApproveOrderPolicy: () => {
       const plan = getWeeklyPlanModel();
       const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
-      await saveVendorOrderDraftAction({
-        action: "review-and-approve",
-        vendor,
-        approvedBy,
-        confirmed: true,
-        orderPolicy: getCurrentVendorOrderPolicy(plan, snapshot),
-      });
-    });
+      return getCurrentVendorOrderPolicy(plan, snapshot);
+    },
   });
 }
 
@@ -7797,27 +7267,21 @@ function renderWeeklyPlan() {
   const plan = getWeeklyPlanModel();
   const freshness = getWeeklyPlanFreshness(plan);
   const vendorOrderModel = getVendorOrderDraftModel(plan, freshness);
-  const activeOrderLines = vendorOrderModel.drafts.flatMap((draft) => draft.lines || []);
-  const activeMissingPriceCount = activeOrderLines.filter((line) => (
-    !line.excludeFromOrderCost && !(toNumber(line.unitCost) > 0)
-  )).length;
-  const summary = {
-    ...plan.summary,
-    orderLineCount: activeOrderLines.length,
-    beerKegTotal: sum(activeOrderLines.filter((line) => line.lineType === "Beer keg").map((line) => toNumber(line.requestedUnits))),
-    liquorTapBottleTotal: sum(activeOrderLines.filter((line) => line.lineType === "Liquor tap bottle").map((line) => toNumber(line.requestedUnits))),
-    estimatedKnownPurchaseCost: vendorOrderModel.weeklyTotal,
-    missingPriceCount: activeMissingPriceCount,
-    estimatedPurchaseCostComplete: activeMissingPriceCount === 0,
-  };
   const planLocked = Boolean(getCurrentWeeklyPlanSnapshot(recommendations, new Date()));
-  const requiresLateSnapshotReason = !planLocked && !isEasternMonday();
+  const {
+    activeOrderLines,
+    priceNote,
+    requiresLateSnapshotReason,
+    summary,
+  } = buildWeeklyPlanPresentationModel({
+    plan,
+    vendorOrderModel,
+    planLocked,
+    isMonday: isEasternMonday(),
+  });
   const mondayRun = getMondayRunModel(plan, freshness);
   const simpleSyrupNeed = getWeeklySimpleSyrupNeed(plan.prep.cocktails);
   const updatedText = planLocked ? "Thursday delivery · locked through Sunday" : "Live needs";
-  const priceNote = summary.estimatedPurchaseCostComplete
-    ? ""
-    : `${summary.missingPriceCount ? `${formatNumber(summary.missingPriceCount)} active line${summary.missingPriceCount === 1 ? " is" : "s are"} missing a price. ` : ""}The total shown is the known-price subtotal, not a complete spend total.`;
 
   weeklyPlan.innerHTML = `
     <header class="weekly-plan-header">
@@ -7873,30 +7337,31 @@ function renderWeeklyPlan() {
     ${renderWeeklyPlanReview(plan)}
   `;
 
-  document.querySelector("#run-weekly-plan-agent")?.addEventListener("click", runWeeklyPlanUpdate);
-  document.querySelector("#recall-weekly-plan")?.addEventListener("click", recallCurrentWeeklyPlan);
-  document.querySelector("#weekly-plan-finish-save")?.addEventListener("click", saveWeeklyPlanFinishWeek);
-  document.querySelector("#weekly-plan-finish-actor")?.addEventListener("input", (event) => {
-    dashboardFinishWeekActor = event.currentTarget.value;
+  bindWeeklyPlanController({
+    root: weeklyPlan,
+    documentRef: document,
+    clean,
+    runWeeklyPlanUpdate,
+    recallCurrentWeeklyPlan,
+    saveWeeklyPlanFinishWeek,
+    openMondayRunStep,
+    bindOrderTrackingEvents: bindOwnerWeeklyOrderTrackingEvents,
+    getOutsideMondayReason: () => weeklyPlanOutsideMondayReason,
+    setOutsideMondayReason: (value) => {
+      weeklyPlanOutsideMondayReason = value;
+    },
+    getOrderRehearsalMode: () => orderRehearsalMode,
+    setOrderRehearsalMode: (value) => {
+      orderRehearsalMode = value;
+    },
+    setWeeklyOrderTrackingMessage: (value) => {
+      weeklyOrderTrackingMessage = value;
+    },
+    setFinishWeekActor: (value) => {
+      dashboardFinishWeekActor = value;
+    },
+    renderWeeklyPlan,
   });
-  weeklyPlan.querySelectorAll("[data-monday-run-step]").forEach((button) => {
-    button.addEventListener("click", () => {
-      openMondayRunStep(button.dataset.mondayRunStep, button.dataset.dashboardTarget);
-    });
-  });
-  document.querySelector("#weekly-plan-late-reason")?.addEventListener("input", (event) => {
-    weeklyPlanOutsideMondayReason = event.currentTarget.value;
-    const saveButton = document.querySelector("#run-weekly-plan-agent");
-    if (saveButton) saveButton.disabled = !clean(weeklyPlanOutsideMondayReason);
-  });
-  document.querySelector("#toggle-order-rehearsal")?.addEventListener("click", () => {
-    orderRehearsalMode = !orderRehearsalMode;
-    weeklyOrderTrackingMessage = orderRehearsalMode
-      ? "Rehearsal uses the latest locked Weekly Plan and never submits orders."
-      : "Live Weekly Plan restored.";
-    renderWeeklyPlan();
-  });
-  bindOwnerWeeklyOrderTrackingEvents();
 }
 
 function renderKegLevels() {
@@ -18676,14 +18141,6 @@ function saveInventoryHistory() {
   localStorage.setItem(INVENTORY_HISTORY_STORAGE_KEY, JSON.stringify(inventoryHistory));
 }
 
-function clean(value) {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
-}
-
-function normalizeTitle(value) {
-  return clean(value).toLowerCase();
-}
-
 function getCanonicalProductDisplayName(value) {
   const original = clean(value);
   const key = original
@@ -18696,64 +18153,6 @@ function getCanonicalProductDisplayName(value) {
   return CANONICAL_PRODUCT_DISPLAY_NAMES[key] || original;
 }
 
-function toNumber(value) {
-  const cleaned = String(value ?? "").replace(/[$,%\s]/g, "").replace(/,/g, "");
-  const number = Number.parseFloat(cleaned);
-  return Number.isFinite(number) ? number : 0;
-}
-
-function sum(values) {
-  return values.reduce((total, value) => total + (Number.isFinite(value) ? value : 0), 0);
-}
-
-function isRoughlyEqual(left, right) {
-  if (!Number.isFinite(left) || !Number.isFinite(right) || left <= 0 || right <= 0) return false;
-  return Math.abs(left - right) < 0.2;
-}
-
-function money(value) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value || 0);
-}
-
-function formatNumber(value) {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 2,
-  }).format(value || 0);
-}
-
-function formatInventoryQuantity(value) {
-  const number = Number.parseFloat(String(value ?? "").replace(/,/g, ""));
-  if (Number.isFinite(number)) return formatNumber(number);
-  return value || "-";
-}
-
-function formatContainerSizeLabel(size, unit) {
-  const cleanedUnit = clean(unit).toLowerCase();
-  if (cleanedUnit === "l") return `${formatNumber(size)}L`;
-  if (cleanedUnit === "ml") return `${formatNumber(size)}mL`;
-  return `${formatNumber(size)} ${unit}`;
-}
-
-function formatUpdatedAt(value) {
-  if (!value) return "Not updated";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not updated";
-
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-}
-
 function getPreviousPriceNote(override) {
   const currentPrice = toNumber(override?.bottlePrice) || toNumber(override?.kegPrice);
   const previousPrice = toNumber(override?.previousBottlePrice) || toNumber(override?.previousKegPrice);
@@ -18764,51 +18163,9 @@ function getPreviousPriceNote(override) {
   return previousDate ? `Was ${money(previousPrice)} before ${previousDate}` : `Was ${money(previousPrice)}`;
 }
 
-function formatInventorySnapshotLabel(value) {
-  if (!value) return "Saved snapshot";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Saved snapshot";
-
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
-}
-
-function getInventorySnapshotDate(snapshot) {
-  return snapshot?.weekOf ? `${snapshot.weekOf}T12:00:00` : snapshot?.savedAt;
-}
-
 function formatBatchLabel(value) {
   const cleaned = clean(value);
   if (!cleaned) return DEFAULT_BATCH_LABEL;
   if (/^12\s*gallons?$/i.test(cleaned) || /^12\s*gallon\s*keg$/i.test(cleaned)) return DEFAULT_BATCH_LABEL;
   return cleaned;
-}
-
-function slugify(value) {
-  return clean(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
-function capitalize(value) {
-  return value ? value[0].toUpperCase() + value.slice(1) : "";
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function cssEscape(value) {
-  if (window.CSS?.escape) return window.CSS.escape(String(value || ""));
-  return String(value || "").replace(/["\\]/g, "\\$&");
 }

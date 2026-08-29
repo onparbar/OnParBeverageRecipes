@@ -1,0 +1,152 @@
+import { escapeHtml, formatNumber, toNumber } from "./dashboard-formatters.mjs";
+
+export function buildMondayRunModel({
+  kegFeed = {},
+  pricingFeed = {},
+  inventoryMissingCount = 0,
+  inventorySaving = false,
+  inventorySharedInitialized = false,
+  inventorySharedSaveError = "",
+  mondaySnapshotSaved = false,
+  planLocked = false,
+  finishWeek = { complete: false, remainingCount: 0 },
+  weeklyUsageCaptured = false,
+  pmbRefreshPending = false,
+  vendorOrders = [],
+  weeklyOrderTrackingAvailable = false,
+  orderLineCount = 0,
+  tapSheets = [],
+  planActionable = false,
+} = {}) {
+  const lockedPlanCapturedSetup = planLocked;
+  const pmbFeedsReady = kegFeed.status === "online" && pricingFeed.status === "online";
+  const outstandingVendorCount = vendorOrders.filter((vendor) => vendor?.ordered !== true).length;
+  const normalizedOrderLineCount = toNumber(orderLineCount);
+  const ordersPlaced = planLocked && (
+    normalizedOrderLineCount <= 0
+    || (weeklyOrderTrackingAvailable && vendorOrders.length > 0 && outstandingVendorCount === 0)
+  );
+  const tapSheetsToPrint = tapSheets.filter((sheet) => !sheet.isCurrent).length;
+  const steps = [
+    {
+      id: "pmb",
+      label: "Refresh PMB & capture usage",
+      target: "dashboard",
+      complete: lockedPlanCapturedSetup || (pmbFeedsReady && weeklyUsageCaptured),
+      status: pmbRefreshPending
+        ? "Refreshing"
+        : !pmbFeedsReady
+          ? "Refresh PMB"
+          : weeklyUsageCaptured
+            ? "Ready"
+            : "Capture usage",
+    },
+    {
+      id: "inventory",
+      label: "Count inventory",
+      target: "inventory",
+      complete: lockedPlanCapturedSetup || (
+        inventorySharedInitialized
+        && inventoryMissingCount === 0
+        && !inventorySaving
+        && !inventorySharedSaveError
+      ),
+      status: inventorySaving
+        ? "Saving"
+        : inventoryMissingCount > 0
+          ? `${formatNumber(inventoryMissingCount)} left`
+          : inventorySharedInitialized
+            ? "Counted"
+            : "Set up",
+    },
+    {
+      id: "plan",
+      label: "Save & lock plan",
+      target: "weekly-plan",
+      complete: planLocked,
+      status: planLocked ? "Locked" : mondaySnapshotSaved ? "Snapshot saved" : planActionable ? "Ready" : "Waiting",
+    },
+    {
+      id: "orders",
+      label: "Place orders",
+      target: "weekly-plan",
+      complete: ordersPlaced,
+      status: ordersPlaced
+        ? normalizedOrderLineCount > 0 ? "Placed" : "None needed"
+        : !planLocked
+          ? "After plan"
+          : weeklyOrderTrackingAvailable && outstandingVendorCount > 0
+            ? `${formatNumber(outstandingVendorCount)} left`
+            : "Review",
+    },
+    {
+      id: "print",
+      label: "Print tap sheets",
+      target: "print",
+      complete: tapSheets.length > 0 && tapSheetsToPrint === 0,
+      status: tapSheetsToPrint > 0 ? `${formatNumber(tapSheetsToPrint)} left` : tapSheets.length ? "Current" : "Review",
+    },
+    {
+      id: "finish",
+      label: "Finish the week",
+      target: "weekly-plan",
+      complete: planLocked && finishWeek.complete,
+      status: !planLocked
+        ? "After plan"
+        : finishWeek.complete
+          ? "Complete"
+          : `${formatNumber(finishWeek.remainingCount)} left`,
+    },
+  ];
+  const completedCount = steps.filter((step) => step.complete).length;
+  const nextIndex = steps.findIndex((step) => !step.complete);
+  return {
+    steps,
+    completedCount,
+    nextIndex,
+    nextStep: steps[nextIndex < 0 ? 0 : nextIndex],
+    complete: nextIndex < 0,
+  };
+}
+
+export function renderMondayRun(run) {
+  const progress = run.steps.length ? Math.round((run.completedCount / run.steps.length) * 100) : 0;
+  const continueStepId = run.complete ? "review" : run.nextStep.id;
+  const continueTarget = run.complete ? "weekly-plan" : run.nextStep.target;
+  return `
+    <section class="monday-run" aria-labelledby="monday-run-title">
+      <header class="monday-run__header">
+        <div><h2 id="monday-run-title">Monday Run</h2><span>${formatNumber(run.completedCount)} / ${formatNumber(run.steps.length)}</span></div>
+        <button class="${run.complete ? "ghost-button" : "primary-button"}" type="button" data-monday-run-step="${escapeHtml(continueStepId)}" data-dashboard-target="${escapeHtml(continueTarget)}">${run.complete ? "Review" : "Continue"}</button>
+      </header>
+      <div class="monday-run__progress" role="progressbar" aria-label="Monday Run progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="--monday-run-progress: ${progress}%"></span></div>
+      <ol class="monday-run__steps">
+        ${run.steps.map((step, index) => `
+          <li class="monday-run__step${step.complete ? " monday-run__step--done" : index === run.nextIndex ? " monday-run__step--current" : ""}">
+            <button type="button" data-monday-run-step="${escapeHtml(step.id)}" data-dashboard-target="${escapeHtml(step.target)}"${index === run.nextIndex ? ' aria-current="step"' : ""}>
+              <span>${formatNumber(index + 1)}</span>
+              <strong>${escapeHtml(step.label)}</strong>
+              <small>${escapeHtml(step.complete ? "Done" : step.status)}</small>
+            </button>
+          </li>
+        `).join("")}
+      </ol>
+    </section>
+  `;
+}
+
+export function renderMondayRunCompact(run) {
+  const progress = run.steps.length ? Math.round((run.completedCount / run.steps.length) * 100) : 0;
+  const continueStepId = run.complete ? "review" : run.nextStep.id;
+  const continueTarget = run.complete ? "weekly-plan" : run.nextStep.target;
+  return `
+    <section class="monday-run monday-run--compact" aria-label="Monday Run">
+      <header class="monday-run__header">
+        <div><h2>Monday Run</h2><span>${formatNumber(run.completedCount)} / ${formatNumber(run.steps.length)}</span></div>
+        <button class="${run.complete ? "ghost-button" : "primary-button"}" type="button" data-monday-run-step="${escapeHtml(continueStepId)}" data-dashboard-target="${escapeHtml(continueTarget)}">${run.complete ? "Review" : "Continue"}</button>
+      </header>
+      <p class="monday-run__current-step"><span>${run.complete ? "Complete" : "Next"}:</span> <strong>${escapeHtml(run.complete ? "Review this week" : run.nextStep.label)}</strong></p>
+      <div class="monday-run__progress" role="progressbar" aria-label="Monday Run progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="--monday-run-progress: ${progress}%"></span></div>
+    </section>
+  `;
+}
