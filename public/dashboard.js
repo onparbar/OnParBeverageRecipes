@@ -206,6 +206,11 @@ import {
 } from "./weekly-plan-view.mjs";
 import { bindWeeklyPlanController } from "./weekly-plan-controller.mjs";
 import { bindVendorOrderController } from "./vendor-order-controller.mjs";
+import {
+  canBuildVendorCart,
+  getVendorCartLabel,
+  sendVendorCartRequest,
+} from "./vendor-cart-bridge.mjs";
 
 const dashboardRenderCoordinator = createDashboardRenderCoordinator();
 
@@ -7109,58 +7114,6 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
   `;
 }
 
-const CART_BUILDER_VENDORS = new Set(["heidelberg", "proof", "ohlq"]);
-
-function buildVendorCartRequest(view) {
-  const order = view?.order;
-  return {
-    requestId: `${order.id}:${Date.now()}`,
-    orderId: order.id,
-    vendor: order.vendorKey,
-    approved: order.actionsEnabled === true,
-    rehearsal: order.rehearsal === true,
-    operatingWeekReference: order.operatingWeekReference,
-    expectedTotal: order.expectedTotal,
-    lineCount: order.lineCount,
-    lines: (order.lines || []).map((line) => ({
-      internalItemId: line.internalItemId,
-      name: line.name,
-      vendorSku: line.vendorSku,
-      packSize: line.packSize,
-      requestedCases: line.requestedCases,
-      requestedUnits: line.requestedUnits,
-    })),
-  };
-}
-
-function sendVendorCartRequest(view) {
-  const payload = buildVendorCartRequest(view);
-  return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      window.removeEventListener("message", receiveResponse);
-      reject(new Error("Install or enable the On Par Vendor Cart Builder in Chrome."));
-    }, 1800);
-    function receiveResponse(event) {
-      if (
-        event.source !== window ||
-        event.origin !== window.location.origin ||
-        event.data?.source !== "onpar-vendor-cart-builder" ||
-        event.data?.requestId !== payload.requestId
-      ) return;
-      window.clearTimeout(timeout);
-      window.removeEventListener("message", receiveResponse);
-      if (event.data.type === "ONPAR_VENDOR_CART_BUILD_ACCEPTED") resolve(event.data);
-      else reject(new Error(event.data.message || "The vendor cart helper could not start."));
-    }
-    window.addEventListener("message", receiveResponse);
-    window.postMessage({
-      source: "onpar-dashboard",
-      type: "ONPAR_VENDOR_CART_BUILD_REQUEST",
-      payload,
-    }, window.location.origin);
-  });
-}
-
 function bindOwnerWeeklyOrderTrackingEvents() {
   bindVendorOrderController({
     documentRef: document,
@@ -7170,9 +7123,9 @@ function bindOwnerWeeklyOrderTrackingEvents() {
     confirmLateVendorOrder,
     copyAssistedOrderText,
     saveVendorHandoffEvent,
-    canBuildVendorCart: (vendorKey) => CART_BUILDER_VENDORS.has(vendorKey),
-    getVendorCartLabel: (order) => order.vendorKey === "heidelberg" ? "BEES" : order.vendor,
-    sendVendorCartRequest,
+    canBuildVendorCart,
+    getVendorCartLabel,
+    sendVendorCartRequest: (view) => sendVendorCartRequest(view, { windowRef: window }),
     openVendorPath: (view) => {
       window.open(view.vendorPath, "_blank", "noopener,noreferrer");
     },
