@@ -8,6 +8,7 @@ import {
 import {
   assertInventoryContributionPlan,
   buildRecipeInventoryContributions,
+  classifyLiquorInventoryPolicy,
   findCatalogItem,
   isInventoryRecipeIngredient,
 } from "../lib/inventory-contributions.mjs";
@@ -45,6 +46,38 @@ test("cocktail ingredients prefer the canonical inventory item when duplicate na
     { id: "titos", name: "Tito's" },
   ];
   assert.equal(findCatalogItem(catalog, { name: "Tito's" })?.id, "titos");
+});
+
+test("liquor refill policy separates cabinet stock from direct-to-keg products", () => {
+  const activeRecipes = [{
+    id: "spiked-lemonade",
+    ingredients: [{ name: "Tito's", raw: "Tito's=6 bottles (1.75L)", oz: 355 }],
+  }, {
+    id: "old-fashioned",
+    inactive: true,
+    ingredients: [{ name: "Woodford Reserve", raw: "Woodford Reserve", oz: 50 }],
+  }];
+
+  assert.equal(classifyLiquorInventoryPolicy({
+    catalog: [{ id: "titos", name: "Tito's", baseline: 8 }],
+    recipes: activeRecipes,
+    target: { name: "Tito's Vodka" },
+  }).policy, "cabinet-backed");
+  assert.equal(classifyLiquorInventoryPolicy({
+    catalog: [],
+    recipes: activeRecipes,
+    target: { name: "Tito's Vodka" },
+  }).policy, "cabinet-review");
+  assert.equal(classifyLiquorInventoryPolicy({
+    catalog: [],
+    recipes: activeRecipes,
+    target: { name: "Woodford Reserve Bourbon" },
+  }).policy, "direct-to-keg");
+  assert.equal(classifyLiquorInventoryPolicy({
+    catalog: [],
+    recipes: activeRecipes,
+    target: { name: "Absolut Raspberri Vodka" },
+  }).policy, "direct-to-keg");
 });
 
 test("cocktail prep deducts only tracked on-hand ingredients using the requested bottle size", () => {

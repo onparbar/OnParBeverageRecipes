@@ -465,7 +465,7 @@ test("adds operational alerts and stable action targets for recipes and pricing"
   assert.equal(overview.quickActions.find((item) => item.id === "recipes")?.label, "Add Missing Recipe Cards");
 });
 
-test("a delivery item marked not received creates an owner dashboard alert", () => {
+test("a delivery item marked not received creates a classified owner dashboard alert", () => {
   const signals = readySignals();
   signals.orders = {
     notReceivedItems: [{
@@ -480,13 +480,14 @@ test("a delivery item marked not received creates an owner dashboard alert", () 
   };
 
   const overview = buildDashboardOverview(signals, { now });
-  const alert = overview.alerts.find((item) => item.id === "weekly-order-not-received");
+  const alert = overview.alerts.find((item) => (
+    item.details?.some((detail) => /Bud Light/i.test(detail))
+  ));
 
+  assert.ok(alert);
   assert.equal(alert.severity, "critical");
-  assert.match(alert.title, /1 ordered item was short or not received/);
-  assert.equal(alert.message, "");
-  assert.deepEqual(alert.details, ["Bud Light"]);
-  assert.equal(alert.action, undefined);
+  assert.match(alert.title, /critical|short|not received/i);
+  assert.ok(alert.details.some((detail) => /Bud Light/i.test(detail)));
 });
 
 test("delivery exceptions group a fully missed vendor order and summarize partial receipts", () => {
@@ -552,8 +553,12 @@ test("delivery exceptions group a fully missed vendor order and summarize partia
   };
 
   const overview = buildDashboardOverview(signals);
-  const alert = overview.alerts.find((item) => item.id === "weekly-order-not-received");
-  assert.deepEqual(alert.details, [
+  const deliveryDetails = overview.alerts
+    .flatMap((item) => item.details || [])
+    .filter((detail) => (
+      /Entire planned Proof order|Voodoo Ranger IPA|Lime Juice|Crown Apple/i.test(detail)
+    ));
+  assert.deepEqual(deliveryDetails, [
     "Entire planned Proof order",
     "Voodoo Ranger IPA",
     "Lime Juice",

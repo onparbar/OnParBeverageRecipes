@@ -9718,6 +9718,29 @@ tbody tr:hover {
   cursor: pointer;
 }
 
+.thirty-second-briefing__line--reviewable {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  cursor: default;
+}
+
+.thirty-second-briefing__line-main {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thirty-second-briefing__review {
+  align-self: flex-start;
+}
+
 .thirty-second-briefing__line strong,
 .thirty-second-briefing__line small {
   display: block;
@@ -10153,4 +10176,10 @@ table.keg-table td:nth-child(5) input {
   .operations-learning-panel__list small {
     white-space: normal;
   }
+}
+
+
+/* Home only shows work that still needs attention. */
+#dashboard-overview > .dashboard-prepped {
+  display: none;
 }

@@ -11,6 +11,16 @@ function cleanList(values) {
   return Array.isArray(values) ? values.map(clean).filter(Boolean) : [];
 }
 
+function getBriefingBullets(alert = {}) {
+  if (/tap sheets need printing/i.test(clean(alert.title))) return [];
+  return cleanList(alert.details);
+}
+
+function getBriefingDetail(alert = {}) {
+  if (/taps? (?:are|is) below the 82% floor/i.test(clean(alert.title))) return "";
+  return clean(alert.message);
+}
+
 function addUnique(lines, line) {
   if (!line?.text) return;
   if (lines.some((entry) => entry.text === line.text)) return;
@@ -61,7 +71,7 @@ function buildOutstandingWorkBullets(staffPrepPlan = {}, orders = {}, now = new 
   return cleanList(bullets);
 }
 
-export function buildThirtySecondBriefing({
+function buildThirtySecondBriefingRaw({
   overview = {},
   mondayRun = {},
   staffPrepPlan = {},
@@ -77,12 +87,13 @@ export function buildThirtySecondBriefing({
 
   if (criticalAlerts.length) {
     const alert = criticalAlerts[0];
-    const bullets = cleanList(alert.details);
+    const bullets = getBriefingBullets(alert);
     addUnique(lines, {
       tone: "critical",
       text: clean(alert.title),
-      detail: clean(alert.message),
+      detail: getBriefingDetail(alert),
       target: clean(alert.action?.target),
+      reviewAction: alert.reviewAction,
       ...(bullets.length ? { bullets } : {}),
     });
   } else if (nextStep) {
@@ -106,12 +117,13 @@ export function buildThirtySecondBriefing({
 
   const remainingAlerts = [...criticalAlerts.slice(1), ...warningAlerts, ...informationalAlerts];
   remainingAlerts.forEach((alert) => {
-    const bullets = cleanList(alert.details);
+    const bullets = getBriefingBullets(alert);
     addUnique(lines, {
       tone: alert.severity || "warning",
       text: clean(alert.title),
-      detail: clean(alert.message),
+      detail: getBriefingDetail(alert),
       target: clean(alert.action?.target),
+      reviewAction: alert.reviewAction,
       ...(bullets.length ? { bullets } : {}),
     });
   });
@@ -132,4 +144,141 @@ export function buildThirtySecondBriefing({
       .map((item) => [item.text, item.detail, ...cleanList(item.bullets)].filter(Boolean).join(". "))
       .join(". "),
   };
+}
+
+
+function homeBriefingTitle(item) {
+  return String(item?.title || item?.heading || item?.label || "").trim();
+}
+
+function homeBriefingStrings(value, output = [], seen = new WeakSet()) {
+  if (typeof value === "string") {
+    output.push(value);
+    return output;
+  }
+  if (!value || typeof value !== "object" || seen.has(value)) return output;
+  seen.add(value);
+  if (Array.isArray(value)) value.forEach((entry) => homeBriefingStrings(entry, output, seen));
+  else Object.values(value).forEach((entry) => homeBriefingStrings(entry, output, seen));
+  return output;
+}
+
+function homeComingSoonTime(value) {
+  const raw = String(
+    value?.replacementChangedAt
+    || value?.replacedAt
+    || value?.changedAt
+    || value?.assignedAt
+    || "",
+  ).trim();
+  const date = raw ? new Date(raw) : null;
+  if (!date || Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function homeCollectComingSoonTaps(value, taps, seen = new WeakSet()) {
+  if (typeof value === "string") {
+    const match = value.match(/Tap\s+(\d+)[^\n]*Coming Soon!?/i);
+    if (match) taps.set(Number(match[1]), taps.get(Number(match[1])) || "");
+    return;
+  }
+  if (!value || typeof value !== "object" || seen.has(value)) return;
+  seen.add(value);
+  const tapNumber = Number(value.tapNumber ?? value.tap ?? value.tapNo ?? 0);
+  const productName = [
+    value.currentProductName,
+    value.currentName,
+    value.productName,
+    value.name,
+    value.product,
+    value.currentProduct?.name,
+  ].find((entry) => typeof entry === "string" && entry.trim()) || "";
+  if (Number.isFinite(tapNumber) && tapNumber > 0 && /coming soon/i.test(productName)) {
+    taps.set(tapNumber, homeComingSoonTime(value) || taps.get(tapNumber) || "");
+  }
+  if (Array.isArray(value)) value.forEach((entry) => homeCollectComingSoonTaps(entry, taps, seen));
+  else Object.values(value).forEach((entry) => homeCollectComingSoonTaps(entry, taps, seen));
+}
+
+function homePolishBriefingItems(items, sourceArgs) {
+  const comingSoonTaps = new Map();
+  sourceArgs.forEach((entry) => homeCollectComingSoonTaps(entry, comingSoonTaps));
+  let coverageTemplate = null;
+  let pmbAdded = false;
+  const polished = [];
+
+  for (const item of items || []) {
+    const title = homeBriefingTitle(item);
+    if (/Weekly Usage coverage is partial/i.test(title)) {
+      coverageTemplate ||= item;
+      homeBriefingStrings(item).forEach((entry) => homeCollectComingSoonTaps(entry, comingSoonTaps));
+      continue;
+    }
+    if (/Live PMB keg levels are unavailable|Tap pricing is offline|PMB data unavailable/i.test(title)) {
+      if (pmbAdded) continue;
+      pmbAdded = true;
+      polished.push({
+        ...item,
+        title: "PMB data unavailable",
+        heading: "PMB data unavailable",
+        label: "PMB data unavailable",
+        description: "Click to refresh.",
+        detail: "Click to refresh.",
+        message: "Click to refresh.",
+        body: "Click to refresh.",
+        bullets: [],
+        details: [],
+        detailLines: [],
+      });
+      continue;
+    }
+    polished.push(item);
+  }
+
+  const taps = [...comingSoonTaps.entries()].sort((left, right) => left[0] - right[0]);
+  if (taps.length) {
+    const title = taps.length === 1
+      ? `Tap ${taps[0][0]} is set to Coming Soon`
+      : `${taps.length} taps are set to Coming Soon`;
+    const timed = taps.filter(([, changedAt]) => changedAt);
+    const description = taps.length === 1
+      ? (timed.length ? `Since ${timed[0][1]}.` : "")
+      : taps.map(([tapNumber, changedAt]) => changedAt ? `Tap ${tapNumber} · ${changedAt}` : `Tap ${tapNumber}`).join(" · ");
+    polished.push({
+      ...(coverageTemplate || {}),
+      title,
+      heading: title,
+      label: title,
+      description,
+      detail: description,
+      message: description,
+      body: description,
+      bullets: [],
+      details: [],
+      detailLines: [],
+      tone: coverageTemplate?.tone || "warning",
+      severity: coverageTemplate?.severity || "warning",
+      level: coverageTemplate?.level || "warning",
+    });
+  }
+  return polished;
+}
+
+export function buildThirtySecondBriefing(...args) {
+  const result = buildThirtySecondBriefingRaw(...args);
+  if (Array.isArray(result)) return homePolishBriefingItems(result, args);
+  if (!result || typeof result !== "object") return result;
+  for (const key of ["items", "lines", "alerts"]) {
+    if (Array.isArray(result[key])) {
+      return { ...result, [key]: homePolishBriefingItems(result[key], args) };
+    }
+  }
+  return result;
 }

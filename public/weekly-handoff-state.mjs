@@ -11,9 +11,19 @@ export function normalizeWeeklyOrderTracking(result = {}) {
     vendors: Array.isArray(result?.vendors) ? result.vendors : [],
     itemCount: toNumber(result?.itemCount),
     receivedCount: toNumber(result?.receivedCount),
-    notReceivedCount: toNumber(result?.notReceivedCount),
-    notReceivedItems: Array.isArray(result?.notReceivedItems) ? result.notReceivedItems : [],
-    orderPolicy: normalizeVendorOrderPolicy(result?.orderPolicy),
+      notReceivedCount: toNumber(result?.notReceivedCount),
+      notReceivedItems: Array.isArray(result?.notReceivedItems) ? result.notReceivedItems : [],
+      activeNotReceivedCount: toNumber(result?.activeNotReceivedCount),
+      activeNotReceivedItems: Array.isArray(result?.activeNotReceivedItems)
+        ? result.activeNotReceivedItems
+        : Array.isArray(result?.notReceivedItems) ? result.notReceivedItems : [],
+      criticalNotReceivedItems: Array.isArray(result?.criticalNotReceivedItems)
+        ? result.criticalNotReceivedItems
+        : [],
+      waitNotReceivedItems: Array.isArray(result?.waitNotReceivedItems)
+        ? result.waitNotReceivedItems
+        : [],
+      orderPolicy: normalizeVendorOrderPolicy(result?.orderPolicy),
     stateRevision: toNumber(result?.stateRevision),
     message: clean(result?.message),
   };

@@ -1176,9 +1176,10 @@ let parAgentStateOutboxDurable = true;
 let weeklyPlanUpdating = false;
 let weeklyPlanRefreshMessage = "";
 let weeklyPlanOutsideMondayReason = "";
-let weeklyOrderTracking = { available: false, generatedAt: "", drafts: [], adjustments: [], adjustmentCatalog: [], vendors: [], itemCount: 0, receivedCount: 0, notReceivedCount: 0, notReceivedItems: [] };
-let weeklyOrderTrackingMessage = "Loading shared order tracking...";
-let weeklyOrderTrackingRefreshRunning = false;
+  let weeklyOrderTracking = { available: false, generatedAt: "", drafts: [], adjustments: [], adjustmentCatalog: [], vendors: [], itemCount: 0, receivedCount: 0, notReceivedCount: 0, notReceivedItems: [], activeNotReceivedCount: 0, activeNotReceivedItems: [], criticalNotReceivedItems: [], waitNotReceivedItems: [] };
+  let weeklyOrderTrackingMessage = "Loading shared order tracking...";
+  let weeklyOrderTrackingRefreshRunning = false;
+  let shortageReviewSaving = false;
 let orderRehearsalMode = false;
 let bossDemoStep = 0;
 let currentVendorOrderDraftViews = new Map();
@@ -3072,13 +3073,24 @@ function bindEvents() {
       switchRecipeView(recipeViewButtons[nextIndex]?.dataset.recipeView, { focus: true });
     });
   });
-  dashboardOverview?.addEventListener("click", (event) => {
+    dashboardOverview?.addEventListener("click", (event) => {
     const complianceReview = event.target.closest("[data-ohio-compliance-reviewed]");
     if (complianceReview) {
       acknowledgeOhioComplianceWatch();
-      return;
-    }
-    const target = event.target.closest("[data-dashboard-target]");
+        return;
+      }
+      const shortageReview = event.target.closest("[data-shortage-review]");
+      if (shortageReview) {
+        let itemIds = [];
+        try {
+          itemIds = JSON.parse(decodeURIComponent(shortageReview.dataset.shortageItemIds || ""));
+        } catch {
+          itemIds = [];
+        }
+        void saveDeliveryShortageReview(shortageReview.dataset.shortageReview, itemIds);
+        return;
+      }
+      const target = event.target.closest("[data-dashboard-target]");
     if (!target) return;
     if (target.dataset.mondayRunStep) {
       openMondayRunStep(target.dataset.mondayRunStep, target.dataset.dashboardTarget);
@@ -5344,17 +5356,52 @@ async function loadWeeklyOrderTracking() {
   }
 }
 
-async function refreshWeeklyOrderTracking() {
+  async function refreshWeeklyOrderTracking() {
   if (weeklyOrderTrackingRefreshRunning || isEmployeeDashboard) return;
   weeklyOrderTrackingRefreshRunning = true;
   try {
     await loadWeeklyOrderTracking();
     renderWeeklyPlan();
     renderDashboardOverview();
-  } finally {
-    weeklyOrderTrackingRefreshRunning = false;
+    } finally {
+      weeklyOrderTrackingRefreshRunning = false;
+    }
   }
-}
+
+  async function saveDeliveryShortageReview(disposition, itemIds) {
+    if (shortageReviewSaving || !weeklyOrderTracking.available || !Array.isArray(itemIds) || !itemIds.length) return;
+    shortageReviewSaving = true;
+    weeklyOrderTrackingMessage = disposition === "wait"
+      ? "Saving until next week..."
+      : "Saving addressed shortages...";
+    renderDashboardOverview();
+    try {
+      const response = await fetch("/api/weekly-order-tracking", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "review-shortages",
+          generatedAt: weeklyOrderTracking.generatedAt,
+          disposition,
+          itemIds,
+        }),
+      });
+      const result = await parseJsonResponse(response);
+      if (!response.ok) throw new Error(result?.error || "The delivery shortages could not be reviewed.");
+      weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
+      weeklyOrderTrackingMessage = disposition === "wait"
+        ? "These items can wait until next week."
+        : "Critical delivery shortages marked addressed.";
+      await loadParAgentState();
+    } catch (error) {
+      weeklyOrderTrackingMessage = error?.message || "The delivery shortages could not be reviewed.";
+    } finally {
+      shortageReviewSaving = false;
+      renderWeeklyPlan();
+      renderDashboardOverview();
+    }
+  }
 
 let dashboardFinishWeekActor = "";
 let dashboardFinishWeekSaving = false;
@@ -5428,20 +5475,15 @@ async function saveWeeklyPlanFinishWeek() {
         actualQuantity: toNumber(document.querySelector(`[data-finish-liquor-quantity="${CSS.escape(input.dataset.finishPrepItem)}"]`)?.value),
       } : {}),
     }));
-  const deliveriesByVendor = new Map();
-  [...document.querySelectorAll("[data-finish-delivery-item]")]
-    .filter((input) => input.checked && input.dataset.completed !== "true")
-    .forEach((input) => {
-      const vendorId = input.dataset.vendorId;
-      if (!deliveriesByVendor.has(vendorId)) deliveriesByVendor.set(vendorId, []);
-      deliveriesByVendor.get(vendorId).push({
-        itemId: input.dataset.finishDeliveryItem,
-        status: "received",
-        receivedQuantity: toNumber(input.dataset.quantity),
-        reason: "",
-      });
-    });
-  if (!prepUpdates.length && !deliveriesByVendor.size) {
+    const deliveryUpdates = [...document.querySelectorAll("[data-finish-delivery-item]")]
+      .filter((input) => input.checked && input.dataset.completed !== "true")
+      .map((input) => ({
+          itemId: input.dataset.finishDeliveryItem,
+          status: "received",
+          receivedQuantity: toNumber(input.dataset.quantity),
+          reason: "",
+      }));
+    if (!prepUpdates.length && !deliveryUpdates.length) {
     if (status) {
       status.hidden = false;
       status.textContent = "Select at least one new completion to save.";
@@ -5471,20 +5513,18 @@ async function saveWeeklyPlanFinishWeek() {
       dashboardStaffPrepPlan = normalizeDashboardStaffPrepPlan(result);
       if (result?.inventoryUpdate?.warning) warnings.push(result.inventoryUpdate.warning);
     }
-    for (const [vendorId, receipts] of deliveriesByVendor) {
-      const response = await fetch("/api/weekly-order-tracking", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "set-receipts",
-          generatedAt: weeklyOrderTracking.generatedAt,
-          vendorId,
-          handledBy: dashboardFinishWeekActor,
-          confirmed: true,
-          receipts,
-        }),
-      });
+      for (const receipt of deliveryUpdates) {
+        const response = await fetch("/api/weekly-order-tracking", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "set-receipt",
+            generatedAt: weeklyOrderTracking.generatedAt,
+            handledBy: dashboardFinishWeekActor,
+            ...receipt,
+          }),
+        });
       const result = await parseJsonResponse(response);
       if (!response.ok) throw new Error(result?.error || "The delivery checklist could not be saved.");
       weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
@@ -6074,14 +6114,29 @@ function renderDashboardOverview() {
     warning: overview.alertCounts.warning + tapPrintAlerts.length + missingPriceAlerts.length,
   };
   const mondayRun = getMondayRunModel(plan, freshness);
-  const briefing = buildThirtySecondBriefing({
-    overview,
-    mondayRun,
-    staffPrepPlan: dashboardStaffPrepPlan,
-    orders: weeklyOrderTracking,
-  });
+    const briefing = buildThirtySecondBriefing({
+      overview,
+      mondayRun,
+      staffPrepPlan: dashboardStaffPrepPlan,
+      orders: weeklyOrderTracking,
+    });
+    const currentOrderVendors = Array.isArray(weeklyOrderTracking.vendors)
+      ? weeklyOrderTracking.vendors
+      : [];
+    const ordersComplete = weeklyOrderTracking.available === true
+      && currentOrderVendors.every((vendor) => vendor?.ordered === true);
+    const currentCocktailTasks = Array.isArray(dashboardStaffPrepPlan.items)
+      ? dashboardStaffPrepPlan.items
+      : [];
+    const cocktailsComplete = dashboardStaffPrepPlan.available === true
+      && currentCocktailTasks.every((item) => item?.completed === true);
+    const visibleKpis = overview.kpis.filter((kpi) => {
+      if (kpi.id === "items-to-order") return !ordersComplete;
+      if (kpi.id === "cocktails-to-make") return !cocktailsComplete;
+      return true;
+    });
 
-  dashboardOverview.innerHTML = `
+    dashboardOverview.innerHTML = `
     <header class="dashboard-overview-hero dashboard-overview-hero--${escapeHtml(overview.status)}">
       <div class="dashboard-overview-hero__copy">
         <h2>This week</h2>
@@ -6100,36 +6155,46 @@ function renderDashboardOverview() {
       <header>
         <h2 id="thirty-second-briefing-title">30-second briefing</h2>
       </header>
-      <div class="thirty-second-briefing__lines">
-        ${briefing.lines.map((item) => `
-          <button class="thirty-second-briefing__line thirty-second-briefing__line--${escapeHtml(item.tone)}" type="button" data-dashboard-target="${escapeHtml(item.target || "dashboard")}">
-            <strong>${escapeHtml(item.text)}</strong>
-            ${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}
-            ${Array.isArray(item.bullets) && item.bullets.length ? `
-              <span class="thirty-second-briefing__bullets">
-                ${item.bullets.map((bullet) => `<span>${escapeHtml(bullet)}</span>`).join("")}
-              </span>
-            ` : ""}
-          </button>
-        `).join("")}
-      </div>
+        <div class="thirty-second-briefing__lines">
+          ${briefing.lines.map((item) => {
+            const content = `
+              <strong>${escapeHtml(item.text)}</strong>
+              ${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}
+              ${Array.isArray(item.bullets) && item.bullets.length ? `
+                <span class="thirty-second-briefing__bullets">
+                  ${item.bullets.map((bullet) => `<span>${escapeHtml(bullet)}</span>`).join("")}
+                </span>
+              ` : ""}
+            `;
+            if (!item.reviewAction || !Array.isArray(item.reviewAction.itemIds) || !item.reviewAction.itemIds.length) {
+              return `<button class="thirty-second-briefing__line thirty-second-briefing__line--${escapeHtml(item.tone)}" type="button" data-dashboard-target="${escapeHtml(item.target || "dashboard")}">${content}</button>`;
+            }
+            const encodedItemIds = encodeURIComponent(JSON.stringify(item.reviewAction.itemIds));
+            return `
+              <div class="thirty-second-briefing__line thirty-second-briefing__line--reviewable thirty-second-briefing__line--${escapeHtml(item.tone)}">
+                <button class="thirty-second-briefing__line-main" type="button" data-dashboard-target="${escapeHtml(item.target || "weekly-plan")}">${content}</button>
+                <button class="mini-button thirty-second-briefing__review" type="button" data-shortage-review="${escapeHtml(item.reviewAction.disposition)}" data-shortage-item-ids="${escapeHtml(encodedItemIds)}"${shortageReviewSaving ? " disabled" : ""}>${escapeHtml(item.reviewAction.label)}</button>
+              </div>
+            `;
+          }).join("")}
+        </div>
     </section>
 
     ${renderMondayRunCompact(mondayRun)}
 
-      <section class="dashboard-kpi-grid" aria-label="Weekly operations summary">
-        ${overview.kpis.map((kpi) => {
-          const showDetail = kpi.confidence !== "verified" || kpi.id === "items-to-order";
-        return `
-          <button class="dashboard-kpi dashboard-kpi--${escapeHtml(kpi.tone)}" type="button" data-dashboard-target="${escapeHtml(kpi.target)}">
+        ${visibleKpis.length ? `<section class="dashboard-kpi-grid" aria-label="Weekly operations summary">
+          ${visibleKpis.map((kpi) => {
+            const showDetail = kpi.confidence !== "verified" || kpi.id === "items-to-order";
+          return `
+            <button class="dashboard-kpi dashboard-kpi--${escapeHtml(kpi.tone)}" type="button" data-dashboard-target="${escapeHtml(kpi.target)}">
             <span>${escapeHtml(kpi.label)}</span>
             <strong>${escapeHtml(kpi.value)}</strong>
             ${showDetail ? `<small>${escapeHtml(kpi.detail)}</small>` : ""}
             ${kpi.confidence === "verified" ? "" : `<em>${kpi.confidence === "partial" ? "Partial" : "Needs current data"}</em>`}
           </button>
-        `;
-      }).join("")}
-    </section>
+          `;
+        }).join("")}
+      </section>` : ""}
 
     ${renderDashboardCompletedPrep()}
   `;
@@ -7366,7 +7431,7 @@ function renderWeeklyPlan() {
       <div><span>Cocktail kegs to make</span><strong>${formatNumber(summary.cocktailBatchTotal)}</strong></div>
       <div class="${simpleSyrupNeed.complete ? "" : "weekly-plan-stat--warning"}"><span>Simple syrup</span><strong>${simpleSyrupNeed.complete ? `${formatNumber(simpleSyrupNeed.gallons)} gal` : "Check recipes"}</strong>${simpleSyrupNeed.complete ? `<small>${formatNumber(simpleSyrupNeed.totalOz)} oz</small>` : `<small>${formatNumber(simpleSyrupNeed.unmatched.length)} unmatched cocktail${simpleSyrupNeed.unmatched.length === 1 ? "" : "s"}</small>`}</div>
       <div><span>Held for review</span><strong>${formatNumber(summary.heldLineCount + summary.excludedLineCount)}</strong></div>
-      <div class="${summary.estimatedPurchaseCostComplete ? "" : "weekly-plan-stat--warning"}"><span>Purchase estimate</span><strong>${money(summary.estimatedKnownPurchaseCost)}</strong>${summary.missingPriceCount ? `<small>${formatNumber(summary.missingPriceCount)} missing price${summary.missingPriceCount === 1 ? "" : "s"}</small>` : ""}</div>
+      <div class="${summary.estimatedPurchaseCostComplete ? "" : "weekly-plan-stat--warning"}"><span>Plan purchase estimate</span><strong>${money(summary.estimatedKnownPurchaseCost)}</strong>${summary.missingPriceCount ? `<small>${formatNumber(summary.missingPriceCount)} missing price${summary.missingPriceCount === 1 ? "" : "s"}</small>` : ""}</div>
     </div>
     ${priceNote ? `<p class="weekly-plan-cost-note">${escapeHtml(priceNote)}</p>` : ""}
     <div class="weekly-plan-columns${planLocked ? " weekly-plan-columns--locked" : ""}">

@@ -126,7 +126,7 @@ export default function DashboardPage() {
         </div>
         <div className="topbar-actions">
           <div className="top-actions dashboard-owner-only" aria-label="Dashboard sections">
-            <button className="tab-button is-active" id="dashboard-tab" data-tab="dashboard" type="button">Dashboard</button>
+            <button className="tab-button is-active" id="dashboard-tab" data-tab="dashboard" type="button">Home</button>
             <button className="tab-button" id="operations-tab" data-tab="operations" type="button">Beverage Ops</button>
             <button className="tab-button" id="search-tab" data-tab="search" type="button">Search</button>
           </div>

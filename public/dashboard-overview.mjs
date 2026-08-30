@@ -99,15 +99,16 @@ function buildDeliveryExceptionDetails(orders = {}, notReceivedItems = []) {
     : [];
   const groupedItemKeys = new Set();
   const groupedDetails = [];
+  const suppliedItemKeys = new Set(notReceivedItems.map(deliveryExceptionKey));
 
   vendors.forEach((vendor) => {
     const items = Array.isArray(vendor.items)
       ? vendor.items.filter((item) => item && typeof item === "object")
       : [];
-    const entireOrderMissing = items.length > 0 && items.every((item) => (
-      ["not-received", "rejected"].includes(clean(item.status).toLowerCase())
-      && nonNegativeNumber(item.receivedQuantity) === 0
-    ));
+      const entireOrderMissing = items.length > 0 && items.every((item) => (
+        ["not-received", "rejected"].includes(clean(item.status).toLowerCase())
+        && nonNegativeNumber(item.receivedQuantity) === 0
+      )) && items.every((item) => suppliedItemKeys.has(deliveryExceptionKey(item)));
     if (!entireOrderMissing) return;
 
     const vendorName = conciseDeliveryVendor(vendor.vendor);
@@ -143,6 +144,7 @@ function makeAlert({
   message,
   details = [],
   action,
+  reviewAction,
 }) {
   return {
     id,
@@ -151,8 +153,9 @@ function makeAlert({
     title,
     message,
     details: cleanList(details),
-    action,
-  };
+      action,
+      reviewAction,
+    };
 }
 
 export function sortDashboardOverviewAlerts(alerts = []) {
@@ -742,7 +745,7 @@ function buildKpis({
   return [
     {
       id: "items-to-order",
-      label: "Items to order",
+      label: "Live items to order",
       value: planNumbersAvailable ? formatCount(remainingOrderLineCount) : "—",
       rawValue: planNumbersAvailable ? remainingOrderLineCount : null,
       detail: planNumbersAvailable
@@ -890,19 +893,45 @@ export function buildDashboardOverview(signals = {}, options = {}) {
   const planAlerts = buildPlanAlerts(planState, staleAfterDays);
   const extraAlerts = [];
 
-  const notReceivedItems = Array.isArray(signals.orders?.notReceivedItems)
-    ? signals.orders.notReceivedItems.filter((item) => item && typeof item === "object")
-    : [];
-  if (notReceivedItems.length > 0) {
-    extraAlerts.push(makeAlert({
-      id: "weekly-order-not-received",
-      severity: "critical",
-      priority: 55,
-      title: `${formatCount(notReceivedItems.length)} ordered ${plural(notReceivedItems.length, "item was", "items were")} short or not received`,
-      message: "",
-      details: buildDeliveryExceptionDetails(signals.orders, notReceivedItems),
-    }));
-  }
+    const notReceivedItems = Array.isArray(signals.orders?.activeNotReceivedItems)
+      ? signals.orders.activeNotReceivedItems.filter((item) => item && typeof item === "object")
+      : Array.isArray(signals.orders?.notReceivedItems)
+        ? signals.orders.notReceivedItems.filter((item) => item && typeof item === "object")
+      : [];
+    const criticalShortages = notReceivedItems.filter((item) => clean(item.shortagePriority).toLowerCase() !== "wait");
+    const waitShortages = notReceivedItems.filter((item) => clean(item.shortagePriority).toLowerCase() === "wait");
+    if (criticalShortages.length > 0) {
+      extraAlerts.push(makeAlert({
+        id: "weekly-order-critical-shortage",
+        severity: "critical",
+        priority: 55,
+        title: `Critical before next delivery · ${formatCount(criticalShortages.length)} ${plural(criticalShortages.length, "item", "items")}`,
+        message: "",
+        details: buildDeliveryExceptionDetails(signals.orders, criticalShortages),
+        action: makeAction("Review Weekly Plan", DASHBOARD_OVERVIEW_TARGETS.weeklyPlan),
+        reviewAction: {
+          label: "Mark addressed",
+          disposition: "addressed",
+          itemIds: criticalShortages.map((item) => clean(item.id)).filter(Boolean),
+        },
+      }));
+    }
+    if (waitShortages.length > 0) {
+      extraAlerts.push(makeAlert({
+        id: "weekly-order-wait-shortage",
+        severity: "warning",
+        priority: 56,
+        title: `Okay to wait until next week · ${formatCount(waitShortages.length)} ${plural(waitShortages.length, "item", "items")}`,
+        message: "",
+        details: buildDeliveryExceptionDetails(signals.orders, waitShortages),
+        action: makeAction("Review Weekly Plan", DASHBOARD_OVERVIEW_TARGETS.weeklyPlan),
+        reviewAction: {
+          label: "Wait until next week",
+          disposition: "wait",
+          itemIds: waitShortages.map((item) => clean(item.id)).filter(Boolean),
+        },
+      }));
+    }
 
   const missingCurrentCount = count(inventory.missingCurrentCount);
   if (missingCurrentCount > 0) {

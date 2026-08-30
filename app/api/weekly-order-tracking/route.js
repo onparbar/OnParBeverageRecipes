@@ -42,6 +42,10 @@ function unavailablePlan(state) {
     receivedCount: 0,
     notReceivedCount: 0,
     notReceivedItems: [],
+    activeNotReceivedCount: 0,
+    activeNotReceivedItems: [],
+    criticalNotReceivedItems: [],
+    waitNotReceivedItems: [],
     message: "A manager has not published this week's order plan yet.",
   };
 }
