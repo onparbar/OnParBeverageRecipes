@@ -10,6 +10,30 @@
     "nineteen", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
     "hundred", "point",
   ]);
+  const COUNT_WORD_VALUES = Object.freeze({
+    zero: 0,
+    no: 0,
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+    thirteen: 13,
+    fourteen: 14,
+    fifteen: 15,
+    sixteen: 16,
+    seventeen: 17,
+    eighteen: 18,
+    nineteen: 19,
+    twenty: 20,
+  });
   const FILLER_WORDS = new Set([
     "a", "an", "and", "of", "for", "the", "this", "list", "is", "are", "have", "has", "on", "hand",
     "main", "patio", "karaoke", "wall", "cooler", "inventory", "count", "set", "make", "change",
@@ -45,6 +69,85 @@
       if (!word || FILLER_WORDS.has(word) || NUMBER_WORDS.has(word)) return false;
       return !/^\d+(?:\.\d+)?$/.test(word);
     }).join(" ");
+  }
+
+  function formatInventoryItemName(value) {
+    return aliasCandidate(value)
+      .split(" ")
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  }
+
+  function getSpokenCount(value) {
+    const firstWord = normalize(value).split(" ").find(Boolean) || "";
+    const numeric = Number(firstWord);
+    if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+    return Object.hasOwn(COUNT_WORD_VALUES, firstWord) ? COUNT_WORD_VALUES[firstWord] : 0;
+  }
+
+  function getReviewCount(select, phrase) {
+    const root = select.closest("#inventory-speech-assistant");
+    let container = select.parentElement;
+    while (container && container !== root) {
+      const countFields = [...container.querySelectorAll("input")]
+        .filter((input) => /count|quantity|on hand/i.test(`${input.getAttribute("aria-label") || ""} ${input.closest("label")?.textContent || ""}`));
+      if (countFields.length === 1) {
+        const count = Number(countFields[0].value);
+        if (Number.isFinite(count) && count >= 0) return count;
+      }
+      container = container.parentElement;
+    }
+    return getSpokenCount(phrase);
+  }
+
+  function installInventoryAddChoices() {
+    const root = document.getElementById("inventory-speech-assistant");
+    if (!root) return;
+    root.querySelectorAll('select[aria-label^="Matched product for "]').forEach((select) => {
+      const selected = select.selectedOptions?.[0]?.textContent?.trim() || "";
+      const existingButton = select.parentElement?.querySelector('[data-inventory-add-choice="true"]');
+      if (selected && !/^choose item$/i.test(selected)) {
+        existingButton?.remove();
+        return;
+      }
+      if (existingButton) return;
+      const phrase = select.getAttribute("aria-label").replace(/^Matched product for\s+/i, "");
+      const productName = formatInventoryItemName(phrase);
+      if (!productName) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "mini-button inventory-speech-add-new";
+      button.dataset.inventoryAddChoice = "true";
+      button.dataset.phrase = phrase;
+      button.textContent = "Add as new inventory item";
+      button.setAttribute("aria-label", `Add ${productName} to inventory`);
+      select.insertAdjacentElement("afterend", button);
+    });
+  }
+
+  function openInventoryAddForm(button) {
+    const editor = document.getElementById("custom-inventory-editor");
+    const form = document.getElementById("custom-inventory-form");
+    const nameField = document.getElementById("custom-inventory-name");
+    const onHandField = document.getElementById("custom-inventory-on-hand");
+    if (!editor || !form || !nameField || !onHandField) return;
+
+    const phrase = button.dataset.phrase || "";
+    const productName = formatInventoryItemName(phrase);
+    const sourceSelect = button.parentElement?.querySelector('select[aria-label^="Matched product for "]');
+    const count = sourceSelect ? getReviewCount(sourceSelect, phrase) : getSpokenCount(phrase);
+    nameField.value = productName;
+    onHandField.value = String(count);
+    nameField.dispatchEvent(new Event("input", { bubbles: true }));
+    onHandField.dispatchEvent(new Event("input", { bubbles: true }));
+    editor.open = true;
+    const speechPanel = button.closest("details#inventory-speech-assistant");
+    if (speechPanel) speechPanel.open = false;
+    lastWalkSummary = `${productName} is ready to review and save.`;
+    updateControls();
+    editor.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => nameField.focus(), 250);
   }
 
   function loadAliases() {
@@ -271,6 +374,11 @@
   document.addEventListener("click", (event) => {
     const button = event.target.closest("button");
     if (!button) return;
+    if (button.dataset.inventoryAddChoice === "true") {
+      event.preventDefault();
+      openInventoryAddForm(button);
+      return;
+    }
     if (button.dataset.coolerWalkControl === "true") {
       event.preventDefault();
       if (walkActive) finishWalk();
@@ -306,9 +414,11 @@
 
   new MutationObserver(() => {
     installControls();
+    installInventoryAddChoices();
     updateControls();
   }).observe(document.documentElement, { childList: true, subtree: true });
 
   installControls();
+  installInventoryAddChoices();
   void syncSharedAliases();
 })();

@@ -226,9 +226,9 @@ export function buildLastWeekPourLeaders(
 
 /**
  * Estimates the latest saved weekly sales from PMB poured ounces and the
- * caller's current selling price per ounce. All categories follow a selected
+ * caller's saved or current selling price per ounce. All categories follow a selected
  * wall that has liquor taps. Main combines venue liquor because it has no
- * liquor wall of its own. Taps without a usable current price remain excluded.
+ * liquor wall of its own. The caller may mark a historical fallback as estimated.
  */
 export function buildLastWeekProjectedSalesMix(
   items = [],
@@ -252,6 +252,7 @@ export function buildLastWeekProjectedSalesMix(
   const categorySales = Object.fromEntries(CATEGORY_ORDER.map((category) => [category, 0]));
   let capturedTapCount = 0;
   let pricedTapCount = 0;
+  let estimatedTapCount = 0;
 
   sourceItems
     .filter((item) => {
@@ -272,14 +273,17 @@ export function buildLastWeekProjectedSalesMix(
       const category = resolveCategory(item);
       if (!CATEGORY_ORDER.includes(category)) return;
       capturedTapCount += 1;
-      const sellingPricePerOz = resolveSellingPricePerOz(getSellingPricePerOz, item, {
+      const priceContext = {
         category,
         pouredOz,
         weekLabel,
         weekStartTime: latestTime,
-      });
+        entry: entries[0] || null,
+      };
+      const sellingPricePerOz = resolveSellingPricePerOz(getSellingPricePerOz, item, priceContext);
       if (!(sellingPricePerOz > 0)) return;
       pricedTapCount += 1;
+      if (priceContext.estimated === true) estimatedTapCount += 1;
       categorySales[category] += pouredOz * sellingPricePerOz;
     });
 
@@ -300,6 +304,7 @@ export function buildLastWeekProjectedSalesMix(
     projectedSales,
     capturedTapCount,
     pricedTapCount,
+    estimatedTapCount,
     unpricedTapCount: Math.max(0, capturedTapCount - pricedTapCount),
     categories,
   };

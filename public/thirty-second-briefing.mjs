@@ -148,7 +148,7 @@ function buildThirtySecondBriefingRaw({
 
 
 function homeBriefingTitle(item) {
-  return String(item?.title || item?.heading || item?.label || "").trim();
+  return String(item?.text || item?.title || item?.heading || item?.label || "").trim();
 }
 
 function homeBriefingStrings(value, output = [], seen = new WeakSet()) {
@@ -173,14 +173,17 @@ function homeComingSoonTime(value) {
   ).trim();
   const date = raw ? new Date(raw) : null;
   if (!date || Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("en-US", {
+  const dateLabel = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
-    weekday: "short",
     month: "numeric",
     day: "numeric",
+  }).format(date);
+  const timeLabel = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+  return `${dateLabel} at ${timeLabel}`;
 }
 
 function homeCollectComingSoonTaps(value, taps, seen = new WeakSet()) {
@@ -193,6 +196,8 @@ function homeCollectComingSoonTaps(value, taps, seen = new WeakSet()) {
   seen.add(value);
   const tapNumber = Number(value.tapNumber ?? value.tap ?? value.tapNo ?? 0);
   const productName = [
+    value.newBrand,
+    value.newProductName,
     value.currentProductName,
     value.currentName,
     value.productName,
@@ -239,28 +244,30 @@ function homePolishBriefingItems(items, sourceArgs) {
       });
       continue;
     }
+    if (/taps? (?:are|is) below the 82% floor/i.test(title)) {
+      polished.push({ ...item, actionLabel: "Fix" });
+      continue;
+    }
     polished.push(item);
   }
 
   const taps = [...comingSoonTaps.entries()].sort((left, right) => left[0] - right[0]);
   if (taps.length) {
-    const title = taps.length === 1
-      ? `Tap ${taps[0][0]} is set to Coming Soon`
-      : `${taps.length} taps are set to Coming Soon`;
-    const timed = taps.filter(([, changedAt]) => changedAt);
-    const description = taps.length === 1
-      ? (timed.length ? `Since ${timed[0][1]}.` : "")
-      : taps.map(([tapNumber, changedAt]) => changedAt ? `Tap ${tapNumber} · ${changedAt}` : `Tap ${tapNumber}`).join(" · ");
+    const tapLabels = taps.map(([tapNumber, changedAt]) => (
+      `Tap ${tapNumber} - set to Coming Soon${changedAt ? ` on ${changedAt}` : ""}`
+    ));
+    const title = taps.length === 1 ? tapLabels[0] : `${taps.length} taps set to Coming Soon`;
     polished.push({
       ...(coverageTemplate || {}),
+      text: title,
       title,
       heading: title,
       label: title,
-      description,
-      detail: description,
-      message: description,
-      body: description,
-      bullets: [],
+      description: "",
+      detail: "",
+      message: "",
+      body: "",
+      bullets: taps.length > 1 ? tapLabels : [],
       details: [],
       detailLines: [],
       tone: coverageTemplate?.tone || "warning",

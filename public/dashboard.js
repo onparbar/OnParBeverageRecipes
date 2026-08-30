@@ -850,7 +850,7 @@ const MENU_ORDER = [
   ["WASHINGTON APPLE (CROWN ROYAL APPLE)", "Washington Apple (Whiskey)"],
   ["WHISKEY SOUR (JACK DANIELS)", "Whiskey Sour (Whiskey)"],
 ];
-const OPERATION_TAB_NAMES = ["keg-levels", "inventory", "weekly-plan", "insights"];
+const OPERATION_TAB_NAMES = ["keg-levels", "inventory", "weekly-plan"];
 const MENU_TAB_NAMES = ["performance", "weekly-usage", "recipes", "add", "pricing", "ingredients", "print"];
 const NEW_RECIPE_ORDER = [
   ["Bacardi Sunset", "Bacardi Sunset"],
@@ -6119,6 +6119,8 @@ function renderDashboardOverview() {
       mondayRun,
       staffPrepPlan: dashboardStaffPrepPlan,
       orders: weeklyOrderTracking,
+      tapReplacementOverrides,
+      comingSoonItems,
     });
     const currentOrderVendors = Array.isArray(weeklyOrderTracking.vendors)
       ? weeklyOrderTracking.vendors
@@ -6166,6 +6168,14 @@ function renderDashboardOverview() {
                 </span>
               ` : ""}
             `;
+            if (item.actionLabel) {
+              return `
+                <div class="thirty-second-briefing__line thirty-second-briefing__line--reviewable thirty-second-briefing__line--${escapeHtml(item.tone)}">
+                  <div class="thirty-second-briefing__line-main">${content}</div>
+                  <button class="mini-button thirty-second-briefing__review" type="button" data-dashboard-target="${escapeHtml(item.target || "pricing")}">${escapeHtml(item.actionLabel)}</button>
+                </div>
+              `;
+            }
             if (!item.reviewAction || !Array.isArray(item.reviewAction.itemIds) || !item.reviewAction.itemIds.length) {
               return `<button class="thirty-second-briefing__line thirty-second-briefing__line--${escapeHtml(item.tone)}" type="button" data-dashboard-target="${escapeHtml(item.target || "dashboard")}">${content}</button>`;
             }
@@ -6215,18 +6225,91 @@ function getWeeklyUsageLivePrice(item) {
   return matches.length === 1 ? matches[0] : null;
 }
 
-function getWeeklyUsageItemSellingRate(item) {
-  const livePrice = getWeeklyUsageLivePrice(item);
-  if (!livePrice) {
-    return { sellingPricePerOz: null, reason: "Refresh PMB prices to verify this exact physical tap." };
+function normalizeWeeklyUsageSellingRate(value) {
+  const rate = toNumber(value);
+  return rate > 0 ? Math.round(rate * 10_000) / 10_000 : null;
+}
+
+function getWeeklyUsageLiveSellingRate(priceItem, category) {
+  return normalizeWeeklyUsageSellingRate(category === "liquor"
+    ? getAverageLiquorSellingPricePerOz(priceItem)
+    : priceItem?.chargePerOz);
+}
+
+function getWeeklyUsagePluSellingRate(item, category) {
+  const plu = toNumber(item?.plu);
+  if (!(plu > 0)) return null;
+  const rates = (Array.isArray(liveTapPriceItems) ? liveTapPriceItems : [])
+    .filter((priceItem) => toNumber(priceItem?.plu) === plu)
+    .map((priceItem) => getWeeklyUsageLiveSellingRate(priceItem, category))
+    .filter((rate) => rate > 0);
+  const uniqueRates = [...new Set(rates.map((rate) => rate.toFixed(4)))];
+  return uniqueRates.length === 1 ? rates[0] : null;
+}
+
+function getWeeklyUsageCategoryAverageSellingRate(category) {
+  const rates = (Array.isArray(liveTapPriceItems) ? liveTapPriceItems : [])
+    .filter((priceItem) => getWeeklyUsagePerformanceCategory(priceItem) === category)
+    .map((priceItem) => getWeeklyUsageLiveSellingRate(priceItem, category))
+    .filter((rate) => rate > 0);
+  if (!rates.length) return null;
+  return normalizeWeeklyUsageSellingRate(rates.reduce((sum, rate) => sum + rate, 0) / rates.length);
+}
+
+function getWeeklyUsageItemSellingRate(item, context = {}) {
+  const entryRate = normalizeWeeklyUsageSellingRate(context?.entry?.sellingPricePerOz);
+  if (entryRate) {
+    if (context?.entry?.sellingPriceEstimated === true) context.estimated = true;
+    return {
+      sellingPricePerOz: entryRate,
+      source: context?.entry?.sellingPriceSource || "weekly-price-snapshot",
+    };
   }
+
+  const livePrice = getWeeklyUsageLivePrice(item);
   const category = getWeeklyUsagePerformanceCategory(item);
-  const sellingPricePerOz = category === "liquor"
-    ? getAverageLiquorSellingPricePerOz(livePrice)
-    : toNumber(livePrice.chargePerOz);
-  return sellingPricePerOz > 0
-    ? { sellingPricePerOz }
-    : { sellingPricePerOz: null, reason: "A current PMB selling price is unavailable." };
+  const liveRate = livePrice ? getWeeklyUsageLiveSellingRate(livePrice, category) : null;
+  if (liveRate) return { sellingPricePerOz: liveRate, source: "pmb-current-tap" };
+
+  const savedEntry = (Array.isArray(item?.history) ? item.history : [])
+    .find((entry) => normalizeWeeklyUsageSellingRate(entry?.sellingPricePerOz));
+  const savedRate = normalizeWeeklyUsageSellingRate(savedEntry?.sellingPricePerOz);
+  if (savedRate) {
+    context.estimated = true;
+    return { sellingPricePerOz: savedRate, source: "saved-product-price" };
+  }
+
+  const pluRate = getWeeklyUsagePluSellingRate(item, category);
+  if (pluRate) {
+    context.estimated = true;
+    return { sellingPricePerOz: pluRate, source: "pmb-product-plu" };
+  }
+
+  const categoryRate = getWeeklyUsageCategoryAverageSellingRate(category);
+  if (categoryRate) {
+    context.estimated = true;
+    return { sellingPricePerOz: categoryRate, source: "category-average" };
+  }
+
+  return {
+    sellingPricePerOz: null,
+    reason: "No saved, current, or category-average selling price is available.",
+  };
+}
+
+function getWeeklyUsagePriceSnapshot(item) {
+  const context = {};
+  const resolved = getWeeklyUsageItemSellingRate(item, context);
+  const sellingPricePerOz = normalizeWeeklyUsageSellingRate(resolved?.sellingPricePerOz);
+  if (!sellingPricePerOz) return {};
+  return {
+    sellingPricePerOz,
+    sellingPriceSource: resolved?.source || "pmb-current-tap",
+    sellingPriceEstimated: context.estimated === true,
+    priceCapturedAt: new Date().toISOString(),
+    priceTapNumber: toNumber(item?.tapNumber) || null,
+    pricePlu: toNumber(item?.plu) || null,
+  };
 }
 
 function getWeeklyUsageItemProfitRate(item) {
@@ -6514,8 +6597,11 @@ function renderDashboardProjectedSalesMix(mix) {
     `;
   }
   const coverageCopy = mix.unpricedTapCount
-    ? `${formatNumber(mix.unpricedTapCount)} poured tap${mix.unpricedTapCount === 1 ? " was" : "s were"} left out because a current price was unavailable.`
-    : "All captured taps were priced.";
+    ? `${formatNumber(mix.unpricedTapCount)} tap${mix.unpricedTapCount === 1 ? " remains" : "s remain"} unavailable.`
+    : "";
+  const estimatedCopy = mix.estimatedTapCount
+    ? `${formatNumber(mix.estimatedTapCount)} historical tap${mix.estimatedTapCount === 1 ? "" : "s"} estimated from category averages.`
+    : "";
   return `
     <aside class="dashboard-pulse-sales-mix">
       <div class="dashboard-pulse-sales-mix__header">
@@ -6534,14 +6620,17 @@ function renderDashboardProjectedSalesMix(mix) {
           </div>
         `).join("")}
       </div>
-      <p>PMB ounces × current prices · liquor uses an average. ${escapeHtml(coverageCopy)}</p>
+      <p>PMB ounces × saved/current prices · liquor uses an average.${estimatedCopy ? ` ${escapeHtml(estimatedCopy)}` : ""}${coverageCopy ? ` ${escapeHtml(coverageCopy)}` : ""}</p>
     </aside>
   `;
 }
 
 function renderDashboardBeveragePulse() {
-  const container = document.querySelector("#dashboard-beverage-pulse");
-  if (!container || isEmployeeDashboard) return;
+  const containers = [
+    document.querySelector("#dashboard-beverage-pulse"),
+    document.querySelector("#dashboard-guest-favorites"),
+  ].filter(Boolean);
+  if (!containers.length || isEmployeeDashboard) return;
   const wallItems = weeklyUsageItems.filter((item) => getDashboardPulseWall(item) === sellerRankingWall);
   const trends = buildWeeklyPlanTrends(wallItems, { now: new Date(), limit: 3 });
   const rankings = buildWeeklyUsageSellerRankings(
@@ -6589,10 +6678,10 @@ function renderDashboardBeveragePulse() {
     : sellerRankingWall === "karaoke"
       ? "Karaoke wall"
       : "Main wall";
-  container.innerHTML = `
+  const markup = `
     <header class="dashboard-pulse-header">
       <div>
-        <h2 id="dashboard-beverage-pulse-title">Guest favorites</h2>
+        <h2>Guest favorites</h2>
       </div>
       <div class="dashboard-pulse-controls">
         <label class="dashboard-pulse-wall"><span>Wall</span><select data-seller-ranking-wall>
@@ -6642,6 +6731,9 @@ function renderDashboardBeveragePulse() {
       ${renderDashboardProjectedSalesMix(projectedSalesMix)}
     </div>
   `;
+  containers.forEach((container) => {
+    container.innerHTML = markup;
+  });
   // The detailed renderer is intentionally retained as a fallback for future
   // drill-down work, but it is no longer mounted on the owner Dashboard.
   void renderOnParInsights;
@@ -8943,6 +9035,11 @@ function applyPmbWeeklyUsageReport(report) {
       hasValue: true,
       source: "PMB",
       volumeOz: Math.round(toNumber(match.volumeOz) * 100) / 100,
+      ...getWeeklyUsagePriceSnapshot({
+        ...item,
+        tapNumber: match.tapNumber ?? item.tapNumber,
+        plu: match.plu ?? item.plu,
+      }),
     };
     const mergedHistory = mergeWeeklyUsageHistory([
       historyEntry,
@@ -9046,6 +9143,11 @@ function applyCurrentTapZeroUsageRows(label, reportItems, usedReportIds) {
       hasValue: true,
       source: "PMB",
       volumeOz: 0,
+      ...getWeeklyUsagePriceSnapshot({
+        ...item,
+        tapNumber: reportItem.tapNumber ?? item.tapNumber,
+        plu: reportItem.plu ?? item.plu,
+      }),
     };
     const mergedHistory = mergeWeeklyUsageHistory([
       historyEntry,
@@ -9117,6 +9219,15 @@ function archivePmbWeeklyUsageReportItem(reportItem, label) {
     hasValue: true,
     source: "PMB",
     volumeOz: Math.round(volumeOz * 100) / 100,
+    ...getWeeklyUsagePriceSnapshot({
+      ...(existing || {}),
+      tapNumber,
+      plu: reportItem.plu,
+      wall: reportItem.wall,
+      type: reportItem.type,
+      name,
+      history: existing?.history || [],
+    }),
   };
   const history = mergeWeeklyUsageHistory([
     historyEntry,
@@ -11736,6 +11847,8 @@ function setKegOnDeckItem(key, comingSoonId) {
 }
 
 function getKegNeed(item) {
+  const liveRow = getKegLiveRow(item);
+  if (!liveRow || liveRow.levelAvailable === false) return null;
   if (parAgentState?.recommendations?.generatedAt && !hasCurrentParAgentRecommendations()) return 0;
   const recommendation = getParAgentRecommendation(item);
   if (recommendation?.isLiquorTap) {
@@ -11753,15 +11866,15 @@ function getKegNeed(item) {
   const onHand = toNumber(getKegOnHandDisplay(item));
   const par = toNumber(getKegParDisplay(item));
   if (!par) return 0;
-  const liveFraction = isLiquorOunceTap(toNumber(item?.tapNumber)) ? 0 : getKegCurrentFraction(item, getKegLiveRow(item));
+  const liveFraction = isLiquorOunceTap(toNumber(item?.tapNumber)) ? 0 : getKegCurrentFraction(item, liveRow);
   if (liveFraction === null) return null;
   return Math.max(0, Math.ceil(par - (onHand + liveFraction)));
 }
 
 function renderKegNeedCell(item, need) {
   const recommendation = getParAgentRecommendation(item);
-  if (need === null && !recommendation) {
-    return '<span class="inventory-order-zero">Unknown</span>';
+  if (need === null) {
+    return '<span class="inventory-order-zero">PMB sync issue</span>';
   }
   const valueHtml = need > 0
       ? `<span class="inventory-order-value">${formatNumber(need)}${recommendation?.isLiquorTap ? ` bottle${need === 1 ? "" : "s"}` : ""}</span>`
@@ -11795,7 +11908,13 @@ function renderKegNeedCell(item, need) {
 }
 
 function getKegLiveRow(item) {
-  return kegTemplateAssignments.get(getKegItemKey(item)) || null;
+  const row = kegTemplateAssignments.get(getKegItemKey(item)) || null;
+  if (!row || row.levelAvailable !== false) return row;
+  return {
+    ...row,
+    fillLevelPercent: null,
+    rawPercent: null,
+  };
 }
 
 function getDefaultKegLevelSize(item) {
@@ -11920,7 +12039,7 @@ function getKegFullOunces(liveRow, item = null) {
 }
 
 function getKegCurrentLevelOz(liveRow, item = null) {
-  if (!liveRow) return null;
+  if (!liveRow || liveRow.levelAvailable === false) return null;
   const rawPercentValue = liveRow.rawPercent;
   if (rawPercentValue == null || String(rawPercentValue).trim() === "") return null;
   const rawPercent = Number(rawPercentValue);
@@ -11932,7 +12051,7 @@ function getKegCurrentLevelOz(liveRow, item = null) {
 }
 
 function formatKegCurrentLevel(item, liveRow) {
-  if (!liveRow) return "Unknown";
+  if (!liveRow || liveRow.levelAvailable === false) return "PMB sync issue";
   const reportedPercent = liveRow.fillLevelPercent;
   if (reportedPercent == null || String(reportedPercent).trim() === "" || !Number.isFinite(Number(reportedPercent))) {
     return "Unknown";
@@ -11946,7 +12065,7 @@ function formatKegCurrentLevel(item, liveRow) {
 }
 
 function getKegCurrentFraction(item, liveRow) {
-  if (!liveRow) return null;
+  if (!liveRow || liveRow.levelAvailable === false) return null;
   if (isLiquorOunceTap(toNumber(item?.tapNumber))) {
     const currentOunces = getKegCurrentLevelOz(liveRow, item);
     const fullOunces = getKegFullOunces(liveRow, item);
@@ -14192,56 +14311,75 @@ function renderInventoryHistory() {
     return;
   }
 
-  inventoryHistoryList.innerHTML = inventoryHistory.map((snapshot, index) => {
+  const renderSnapshotCard = (snapshot, { latest = false } = {}) => {
     const reorderItems = snapshot.items.filter((item) => toNumber(item.orderDisplay) > 0);
     const totalValue = sum(snapshot.items.map((item) => item.totalValue));
     const reorderCost = sum(reorderItems.map((item) => toNumber(item.orderDisplay) * item.unitCost));
     const valueSummary = snapshot.summary;
+    const totalBeverageValue = valueSummary
+      ? toNumber(valueSummary.totalBeverageInventoryValue)
+      : totalValue;
 
     return `
-      <details class="inventory-history-card"${index === 0 ? " open" : ""}>
+      <details class="inventory-history-card${latest ? " inventory-history-card--latest" : ""}">
         <summary>
           <div class="inventory-history-heading">
+            ${latest ? '<span class="inventory-history-heading__label">Current weekly snapshot</span>' : ""}
             <strong>Week of ${escapeHtml(formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot)))}</strong>
             <span>Saved ${escapeHtml(formatUpdatedAt(snapshot.savedAt))}</span>
-            <span>Shared manager snapshot</span>
-            <span>${snapshot.items.length} items saved</span>
-            ${snapshot.kegPlanSnapshot?.tapInputs?.length ? `<span>${formatNumber(snapshot.kegPlanSnapshot.tapInputs.length)} tap inputs saved</span>` : '<span>Legacy snapshot · resave to include tap inputs</span>'}
           </div>
           <div class="inventory-history-stats">
-            <span>${money(totalValue)} on hand</span>
-            ${valueSummary ? `<span>${money(valueSummary.currentLineValue)} current line</span>` : ""}
-            ${valueSummary ? `<strong>${money(valueSummary.totalBeverageInventoryValue)} total beverage</strong>` : ""}
-            <span>${money(reorderCost)} to reorder</span>
+            <span><strong>${money(totalBeverageValue)}</strong><small>Total beverage</small></span>
+            <span><strong>${money(reorderCost)}</strong><small>To reorder</small></span>
+            <b class="inventory-history-toggle">View</b>
           </div>
         </summary>
         <div class="inventory-history-card__body">
-          ${valueSummary ? renderInventorySnapshotValueSummary(valueSummary) : ""}
           <div class="inventory-history-actions">
-            <button class="ghost-button inventory-history-restore" data-snapshot-id="${escapeHtml(snapshot.id)}" type="button">Recall Snapshot</button>
-            <button class="ghost-button inventory-history-delete" data-snapshot-id="${escapeHtml(snapshot.id)}" type="button">Delete snapshot</button>
+            <button class="ghost-button inventory-history-restore" data-snapshot-id="${escapeHtml(snapshot.id)}" type="button">Recall counts</button>
+            <button class="ghost-button inventory-history-delete" data-snapshot-id="${escapeHtml(snapshot.id)}" type="button">Delete</button>
           </div>
-          <div class="inventory-table-wrap">
-            <table class="inventory-table">
-              <thead>
-                <tr>
-                  <th>Item</th>
-                  <th>On hand</th>
-                  <th>Par</th>
-                  <th>Order</th>
-                  <th>Unit cost</th>
-                  <th>Total value</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${renderInventoryHistoryRows(snapshot.items)}
-              </tbody>
-            </table>
-          </div>
+          ${valueSummary ? renderInventorySnapshotValueSummary(valueSummary) : ""}
+          <details class="inventory-history-items">
+            <summary>View ${formatNumber(snapshot.items.length)} saved item counts</summary>
+            <div class="inventory-table-wrap">
+              <table class="inventory-table">
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>On hand</th>
+                    <th>Par</th>
+                    <th>Order</th>
+                    <th>Unit cost</th>
+                    <th>Total value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${renderInventoryHistoryRows(snapshot.items)}
+                </tbody>
+              </table>
+            </div>
+          </details>
         </div>
       </details>
     `;
-  }).join("");
+  };
+
+  const [latestSnapshot, ...earlierSnapshots] = inventoryHistory;
+  inventoryHistoryList.innerHTML = `
+    ${renderSnapshotCard(latestSnapshot, { latest: true })}
+    ${earlierSnapshots.length ? `
+      <details class="inventory-history-archive">
+        <summary>
+          <span>Earlier snapshots</span>
+          <strong>${formatNumber(earlierSnapshots.length)}</strong>
+        </summary>
+        <div class="inventory-history-archive__list">
+          ${earlierSnapshots.map((snapshot) => renderSnapshotCard(snapshot)).join("")}
+        </div>
+      </details>
+    ` : ""}
+  `;
 
   inventoryHistoryList.querySelectorAll(".inventory-history-restore").forEach((button) => {
     button.addEventListener("click", () => restoreInventorySnapshot(button.dataset.snapshotId));

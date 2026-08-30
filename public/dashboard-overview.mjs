@@ -926,7 +926,7 @@ export function buildDashboardOverview(signals = {}, options = {}) {
         details: buildDeliveryExceptionDetails(signals.orders, waitShortages),
         action: makeAction("Review Weekly Plan", DASHBOARD_OVERVIEW_TARGETS.weeklyPlan),
         reviewAction: {
-          label: "Wait until next week",
+          label: "Okay",
           disposition: "wait",
           itemIds: waitShortages.map((item) => clean(item.id)).filter(Boolean),
         },

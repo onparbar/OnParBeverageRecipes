@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { verifyPmbPortionManagementReadOnly } from "../../../lib/pmb-item-management.mjs";
+import { normalizePmbPortionItem } from "../../../lib/pmb-portion-price-update.mjs";
+import { resolvePmbPortionSchema } from "../../../lib/pmb-portion-schema.mjs";
 import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
 import {
   buildCurrentTapAssignments,
@@ -284,41 +287,22 @@ function getItemPrice(item) {
   return price / (10 ** (Number.isFinite(decimalPlaces) ? decimalPlaces : 2));
 }
 
-const PMB_PORTION_ITEM_ID_FIELD = clean(process.env.PMB_PORTION_ITEM_ID_FIELD);
-const PMB_PORTION_QUANTITY_FIELD = clean(process.env.PMB_PORTION_QUANTITY_FIELD);
-const PMB_PORTION_QUANTITY_DP_FIELD = clean(process.env.PMB_PORTION_QUANTITY_DP_FIELD);
-
-function getPositiveInteger(value) {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
+function getVerifiedItemIdentity(item, schema) {
+  if (!schema) return null;
+  try {
+    const normalized = normalizePmbPortionItem(item, schema);
+    return {
+      itemId: normalized.itemId,
+      quantityOz: normalized.quantityOz,
+      priceRaw: normalized.priceRaw,
+      priceDp: normalized.priceDp,
+    };
+  } catch {
+    return null;
+  }
 }
 
-function getVerifiedItemIdentity(item) {
-  if (!PMB_PORTION_ITEM_ID_FIELD || !PMB_PORTION_QUANTITY_FIELD) return null;
-  const itemId = clean(item?.[PMB_PORTION_ITEM_ID_FIELD]);
-  const rawQuantity = Number(item?.[PMB_PORTION_QUANTITY_FIELD]);
-  const quantityDpRaw = PMB_PORTION_QUANTITY_DP_FIELD
-    ? Number(item?.[PMB_PORTION_QUANTITY_DP_FIELD])
-    : 0;
-  const quantityDp = Number.isSafeInteger(quantityDpRaw) && quantityDpRaw >= 0 && quantityDpRaw <= 6
-    ? quantityDpRaw
-    : -1;
-  const quantityOz = quantityDp >= 0 ? rawQuantity / (10 ** quantityDp) : 0;
-  const priceRaw = getPositiveInteger(item?.price);
-  const priceDp = Number(item?.price_dp);
-  if (
-    !itemId
-    || !Number.isFinite(quantityOz)
-    || quantityOz <= 0
-    || !priceRaw
-    || !Number.isSafeInteger(priceDp)
-    || priceDp < 0
-    || priceDp > 6
-  ) return null;
-  return { itemId, quantityOz, priceRaw, priceDp };
-}
-
-function buildItemPriceMap(itemlist = []) {
+function buildItemPriceMap(itemlist = [], schema = null) {
   const byPlu = new Map();
   itemlist.forEach((item) => {
     const plu = Number(item?.product_plu || 0);
@@ -329,7 +313,7 @@ function buildItemPriceMap(itemlist = []) {
     byPlu.get(plu).push({
       name: portionName,
       price,
-      ...getVerifiedItemIdentity(item),
+      ...getVerifiedItemIdentity(item, schema),
     });
   });
 
@@ -361,7 +345,25 @@ export async function GET() {
       throw new Error("PMB tap configuration returned no current physical taps.");
     }
 
-    const itemPricesByPlu = buildItemPriceMap(itemPrices.json?.itemlist || []);
+    const itemRows = Array.isArray(itemPrices.json?.itemlist) ? itemPrices.json.itemlist : [];
+    const portionSchema = resolvePmbPortionSchema(itemRows);
+    let portionManagement = {
+      ok: false,
+      code: portionSchema.code || "PMB_PORTION_SCHEMA_UNVERIFIED",
+      message: portionSchema.message || "PMB portion identity verification is unavailable.",
+    };
+    if (portionSchema.ok) {
+      try {
+        portionManagement = await verifyPmbPortionManagementReadOnly(config, itemRows, portionSchema.schema);
+      } catch (error) {
+        portionManagement = {
+          ok: false,
+          code: error.code || "PMB_PORTION_FORM_UNVERIFIED",
+          message: error.message || "PMB item form verification is unavailable.",
+        };
+      }
+    }
+    const itemPricesByPlu = buildItemPriceMap(itemRows, portionSchema.ok ? portionSchema.schema : null);
     const currentTapAssignmentsByPlu = buildCurrentTapAssignments(tapConfigRows, tapLookup);
     const occupiedTapNumbers = new Set(
       [...currentTapAssignmentsByPlu.values()]
@@ -411,14 +413,13 @@ export async function GET() {
       updatedAt: new Date().toISOString(),
       items,
       portionPricing: {
-        writeAvailable: false,
-        schemaConfigured: Boolean(PMB_PORTION_ITEM_ID_FIELD && PMB_PORTION_QUANTITY_FIELD),
-        code: PMB_PORTION_ITEM_ID_FIELD && PMB_PORTION_QUANTITY_FIELD
-          ? "PMB_PORTION_FORM_UNVERIFIED"
-          : "PMB_PORTION_SCHEMA_UNVERIFIED",
-        message: PMB_PORTION_ITEM_ID_FIELD && PMB_PORTION_QUANTITY_FIELD
-          ? "The PMB item edit form still needs one on-site read-only verification before live shot-price saves can be enabled."
-          : "The PMB portion item IDs and quantities need one on-site read-only verification before live shot-price saves can be enabled.",
+        writeAvailable: Boolean(portionSchema.ok && portionManagement.ok),
+        schemaConfigured: Boolean(portionSchema.ok),
+        schemaSource: portionSchema.source || "",
+        code: portionManagement.ok ? "" : portionManagement.code,
+        message: portionManagement.ok
+          ? "Live PMB portion identities and price controls were verified read-only."
+          : portionManagement.message,
       },
     });
   } catch (error) {

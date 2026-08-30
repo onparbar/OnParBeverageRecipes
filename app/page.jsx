@@ -6,7 +6,6 @@ const operationSections = [
   ["keg-levels", "Keg Levels"],
   ["inventory", "Inventory"],
   ["weekly-plan", "Weekly Plan"],
-  ["insights", "Insights"],
 ];
 
 function OperationsBar({ context }) {
@@ -171,6 +170,7 @@ export default function DashboardPage() {
       <main>
         <section className="panel is-active" id="dashboard-panel" role="tabpanel" aria-labelledby="dashboard-tab">
           <div className="dashboard-overview" id="dashboard-overview"></div>
+          <section className="dashboard-beverage-pulse dashboard-beverage-pulse--compact" id="dashboard-guest-favorites" aria-label="Guest favorites"></section>
         </section>
 
         <section className="panel" id="search-panel" role="tabpanel" aria-labelledby="search-tab">
@@ -370,11 +370,6 @@ export default function DashboardPage() {
         <section className="panel" id="weekly-plan-panel" role="tabpanel" aria-label="Weekly Plan">
           <OperationsBar context="weekly-plan" />
           <div id="weekly-plan" className="weekly-plan"></div>
-        </section>
-
-        <section className="panel" id="insights-panel" role="tabpanel" aria-label="Insights">
-          <OperationsBar context="insights" />
-          <section className="dashboard-beverage-pulse" id="dashboard-beverage-pulse" aria-labelledby="dashboard-beverage-pulse-title"></section>
         </section>
 
         <section className="panel" id="add-panel" aria-labelledby="add-tab">
@@ -723,6 +718,17 @@ export default function DashboardPage() {
             </label>
           </div>
 
+          <section className="inventory-block inventory-snapshots-block">
+            <div className="inventory-block__header inventory-snapshots-block__header">
+              <div>
+                <span className="inventory-snapshots-block__eyebrow">Weekly record</span>
+                <h2>Weekly Snapshots</h2>
+              </div>
+              <span className="inventory-snapshots-block__hint">Latest week first</span>
+            </div>
+            <div className="inventory-history-list" id="inventory-history-list"></div>
+          </section>
+
           <div className="inventory-layout">
             <aside className="inventory-summary" id="inventory-summary"></aside>
             <div className="inventory-sections">
@@ -813,14 +819,6 @@ export default function DashboardPage() {
                 </div>
               </section>
 
-              <section className="inventory-block">
-                <div className="inventory-block__header">
-                  <div>
-                    <h2>Saved Inventory Snapshots</h2>
-                  </div>
-                </div>
-                <div className="inventory-history-list" id="inventory-history-list"></div>
-              </section>
             </div>
           </div>
         </section>

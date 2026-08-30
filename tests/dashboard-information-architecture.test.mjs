@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [pageSource, dashboardSource, inventorySource, staffDashboardSource] = await Promise.all([
+const [pageSource, dashboardSource, inventorySource, staffDashboardSource, beveragePulseSource] = await Promise.all([
   readFile(new URL("../app/page.jsx", import.meta.url), "utf8"),
   readFile(new URL("../public/dashboard.js", import.meta.url), "utf8"),
   readFile(new URL("../public/data/inventory-2026-06-01.csv", import.meta.url), "utf8"),
   readFile(new URL("../public/staff-dashboard.js", import.meta.url), "utf8"),
+  readFile(new URL("../public/dashboard-beverage-pulse.mjs", import.meta.url), "utf8"),
 ]);
 
 test("the owner dashboard is the initial page and recipes appear later in navigation", () => {
@@ -25,10 +26,12 @@ test("the owner dashboard is the initial page and recipes appear later in naviga
   assert.match(pageSource, /data-menu-tab="pricing"/);
   assert.match(pageSource, /data-menu-tab="ingredients"/);
   assert.match(pageSource, /\["keg-levels", "Keg Levels"\],[\s\S]*\["inventory", "Inventory"\],[\s\S]*\["weekly-plan", "Weekly Plan"\]/);
-  assert.match(pageSource, /\["insights", "Insights"\]/);
+  assert.match(pageSource, /data-tab="dashboard"[^>]*>Home<\/button>/);
+  assert.doesNotMatch(pageSource, /\["insights", "Insights"\]/);
   assert.match(pageSource, /className="panel is-active" id="dashboard-panel"/);
   assert.doesNotMatch(pageSource, /className="panel is-active" id="recipes-panel"/);
   assert.match(pageSource, /id="performance-panel"/);
+  assert.doesNotMatch(pageSource, /id="insights-panel"/);
   assert.match(pageSource, /id="onpar-insights"/);
   assert.match(dashboardSource, /option value="sales"/);
   assert.match(dashboardSource, /option value="profit"/);
@@ -117,17 +120,13 @@ test("new recipe cards use spirit labels without physical-wall suffixes", () => 
   assert.match(dashboardSource, /getCanonicalProductDisplayName\(recommendation\.orderProductName\)/);
 });
 
-test("Beverage Ops Insights owns the combined beverage pulse instead of duplicating it on the cockpit or Weekly Plan", () => {
+test("Home owns compact Guest Favorites while deeper analysis stays in Performance", () => {
   assert.match(pageSource, /id="dashboard-overview"/);
   assert.match(dashboardSource, /buildDashboardOverview\(/);
   assert.match(dashboardSource, /buildWeeklyPlanTrends\(/);
-  assert.match(pageSource, /id="insights-panel"/);
-  assert.match(pageSource, /id="dashboard-beverage-pulse"/);
+  assert.doesNotMatch(pageSource, /id="insights-panel"/);
+  assert.match(pageSource, /id="dashboard-guest-favorites"/);
   assert.match(dashboardSource, /Guest favorites/);
-
-  const dashboardStart = dashboardSource.indexOf("function renderDashboardOverview()");
-  const dashboardEnd = dashboardSource.indexOf("function getWeeklyUsageLivePrice", dashboardStart);
-  assert.doesNotMatch(dashboardSource.slice(dashboardStart, dashboardEnd), /id="dashboard-beverage-pulse"/);
 
   const weeklyPlanStart = dashboardSource.indexOf("function renderWeeklyPlan()");
   const weeklyPlanEnd = dashboardSource.indexOf("function renderKegLevels", weeklyPlanStart);
@@ -352,24 +351,25 @@ test("Weekly Usage keeps averages and history without rising or falling labels",
 });
 
 test("the initial Dashboard uses a light visual beverage pulse and change-only Ohio compliance", () => {
-  assert.match(dashboardSource, /Crowd favorite/);
-  assert.match(dashboardSource, /Gaining attention/);
-  assert.match(dashboardSource, /Worth a glance/);
-  assert.match(dashboardSource, /Top beers/);
-  assert.match(dashboardSource, /Top cocktails/);
-  assert.match(dashboardSource, /Top liquor/);
-  assert.match(dashboardSource, /Rank by/);
-  assert.match(dashboardSource, /buildLastWeekPourLeaders/);
-  assert.match(dashboardSource, /No liquor pours were saved for the Patio or Karaoke wall last week/);
-  assert.match(dashboardSource, /Projected sales mix/);
-  assert.match(dashboardSource, /const projectedSalesMix = buildLastWeekProjectedSalesMix\(/);
-  assert.match(dashboardSource, /PMB ounces × current prices · liquor uses an average/);
-  assert.match(dashboardSource, /dashboard-pulse-bar/);
-  assert.match(dashboardSource, /data-seller-ranking-wall/);
-  assert.match(dashboardSource, /Main wall/);
-  assert.match(dashboardSource, /Karaoke wall/);
-  assert.match(dashboardSource, /Patio liquor wall/);
-  assert.match(dashboardSource, /let sellerRankingWall = "main"/);
+  const pulseSource = `${dashboardSource}\n${beveragePulseSource}`;
+  assert.match(pulseSource, /Crowd favorite/);
+  assert.match(pulseSource, /Gaining attention/);
+  assert.match(pulseSource, /Worth a glance/);
+  assert.match(pulseSource, /Top beers/);
+  assert.match(pulseSource, /Top cocktails/);
+  assert.match(pulseSource, /Top liquor/);
+  assert.match(pulseSource, /Rank by/);
+  assert.match(pulseSource, /buildLastWeekPourLeaders/);
+  assert.match(pulseSource, /No liquor pours were saved for the Patio or Karaoke wall last week/);
+  assert.match(pulseSource, /Projected sales mix/);
+  assert.match(pulseSource, /const projectedSalesMix = buildLastWeekProjectedSalesMix\(/);
+  assert.match(pulseSource, /PMB ounces × saved\/current prices · liquor uses an average/);
+  assert.match(pulseSource, /dashboard-pulse-bar/);
+  assert.match(pulseSource, /data-seller-ranking-wall/);
+  assert.match(pulseSource, /Main wall/);
+  assert.match(pulseSource, /Karaoke wall/);
+  assert.match(pulseSource, /Patio liquor wall/);
+  assert.match(pulseSource, /let sellerRankingWall = "main"/);
   assert.doesNotMatch(dashboardSource, /Quick actions/);
   assert.match(dashboardSource, /fetch\(`\/api\/beverage-news\?scope=compliance/);
   assert.doesNotMatch(dashboardSource, /Beverage radar/);
