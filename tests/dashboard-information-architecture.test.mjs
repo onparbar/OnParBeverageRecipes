@@ -191,11 +191,13 @@ test("locking a new Monday plan clears the prior plan's prep history", async () 
 test("Tap Pricing displays only PMB-verified current wall products", () => {
   assert.match(dashboardSource, /liveTapPriceItems = filterCurrentTapPricingItems\(result\.items\)/);
   assert.match(dashboardSource, /if \(!liveTapPriceItems\.length\) return \[\];/);
+  assert.match(dashboardSource, /const pricedTapCount = kegWallItems\.filter/);
+  assert.match(dashboardSource, /\^coming soon!\?\$/i);
   assert.match(pageSource, /82% Price Suggestions/);
   assert.match(dashboardSource, /Approve & update PMB/);
 });
 
-test("owner login automatically attempts PMB and mapped vendor price refreshes", () => {
+test("owner login automatically attempts PMB and defers mapped vendor price refreshes", () => {
   assert.match(dashboardSource, /void runOwnerLoginSync\(\)/);
   assert.match(dashboardSource, /acquireOwnerLoginSyncLock\(\)/);
   assert.match(dashboardSource, /releaseOwnerLoginSyncLock\(lockToken\)/);
@@ -219,18 +221,24 @@ test("owner login automatically attempts PMB and mapped vendor price refreshes",
   assert.match(ownerSyncSource, /if \(!kegResult\) kegResult = await runKegLevelSync\(\)/);
   assert.match(ownerSyncSource, /runTapPricingSync\(\)/);
   assert.match(ownerSyncSource, /lockToken\s*\? runPmbWeeklyUsageSync/);
-  assert.match(ownerSyncSource, /lockToken\s*\? runVendorSync/);
+  assert.match(ownerSyncSource, /window\.setTimeout\([\s\S]*runVendorSync\(\{ automatic: true \}\)/);
+  const ownerCoreStart = ownerSyncSource.indexOf("await Promise.allSettled([");
+  const ownerCoreEnd = ownerSyncSource.indexOf("let kegResult", ownerCoreStart);
+  assert.doesNotMatch(ownerSyncSource.slice(ownerCoreStart, ownerCoreEnd), /runVendorSync/);
   assert.match(ownerSyncSource, /mondaySnapshot\?\.kegPlanSnapshot/);
   assert.doesNotMatch(ownerSyncSource, /runKegParAgent\(\)/);
   assert.doesNotMatch(ownerSyncSource, /if \(!lockToken\) return;/);
 });
 
-test("vendor price sync is automatic at owner login and included in the unified PMB refresh", () => {
+test("vendor price sync remains automatic at login but stays outside the unified PMB refresh", () => {
   assert.match(dashboardSource, /async function runVendorSync\(\{ automatic = false \} = \{\}\)/);
   assert.match(dashboardSource, /const syncScope = automatic \? "all" : vendorSyncScope/);
   assert.match(dashboardSource, /Prices sync automatically/);
   assert.match(pageSource, /id="refresh-all-pmb"/);
   assert.match(dashboardSource, /async function runUnifiedPmbRefresh\(\)/);
+  const unifiedStart = dashboardSource.indexOf("async function runUnifiedPmbRefresh()");
+  const unifiedEnd = dashboardSource.indexOf("document.querySelector(\"#refresh-all-pmb\")", unifiedStart);
+  assert.doesNotMatch(dashboardSource.slice(unifiedStart, unifiedEnd), /runVendorSync/);
   assert.doesNotMatch(dashboardSource, /id="run-vendor-sync"/);
 });
 

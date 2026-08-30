@@ -1337,9 +1337,6 @@ async function runOwnerLoginSync() {
       lockToken
         ? runPmbWeeklyUsageSync({ automatic: true })
         : Promise.resolve({ ok: false, skipped: true }),
-      lockToken
-        ? runVendorSync({ automatic: true })
-        : Promise.resolve({ ok: false, skipped: true }),
       checkPmbQueueConnection(),
     ]);
     let kegResult = kegOutcome.status === "fulfilled" && kegOutcome.value;
@@ -1372,7 +1369,12 @@ async function runOwnerLoginSync() {
     }
     renderDashboardOverview();
   } finally {
-    if (lockToken) releaseOwnerLoginSyncLock(lockToken);
+    if (lockToken) {
+      releaseOwnerLoginSyncLock(lockToken);
+      window.setTimeout(() => {
+        if (!vendorSyncRunning) void runVendorSync({ automatic: true });
+      }, 0);
+    }
   }
 }
 
@@ -1416,7 +1418,6 @@ async function runUnifiedPmbRefresh() {
         runKegLevelSync(),
         runTapPricingSync(),
         runPmbWeeklyUsageSync({ automatic: true }),
-        runVendorSync({ automatic: true }),
         checkPmbQueueConnection(),
       ]);
       await Promise.allSettled([
@@ -5783,7 +5784,12 @@ function getPmbKegLevelOverviewFeed() {
 }
 
 function getPmbPricingOverviewFeed() {
-  const expectedCount = kegWallItems.length || liveTapPriceItems.length;
+  const pricedTapCount = kegWallItems.filter((item) => {
+    const liveItem = kegLiveLevels.get(`tap:${toNumber(item?.tapNumber)}`);
+    const currentName = clean(liveItem?.name || item?.brand);
+    return !/^coming soon!?$/i.test(currentName);
+  }).length;
+  const expectedCount = pricedTapCount || liveTapPriceItems.length;
   const capturedCount = liveTapPriceItems.length;
   const status = tapPricingSyncLoading
     ? "loading"
