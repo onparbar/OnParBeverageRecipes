@@ -25,6 +25,7 @@ test("the owner dashboard is the initial page and recipes appear later in naviga
   assert.match(pageSource, /data-menu-tab="pricing"/);
   assert.match(pageSource, /data-menu-tab="ingredients"/);
   assert.match(pageSource, /\["keg-levels", "Keg Levels"\],[\s\S]*\["inventory", "Inventory"\],[\s\S]*\["weekly-plan", "Weekly Plan"\]/);
+  assert.match(pageSource, /\["insights", "Insights"\]/);
   assert.match(pageSource, /className="panel is-active" id="dashboard-panel"/);
   assert.doesNotMatch(pageSource, /className="panel is-active" id="recipes-panel"/);
   assert.match(pageSource, /id="performance-panel"/);
@@ -116,12 +117,17 @@ test("new recipe cards use spirit labels without physical-wall suffixes", () => 
   assert.match(dashboardSource, /getCanonicalProductDisplayName\(recommendation\.orderProductName\)/);
 });
 
-test("Dashboard owns the combined beverage pulse instead of duplicating it in Weekly Plan", () => {
+test("Beverage Ops Insights owns the combined beverage pulse instead of duplicating it on the cockpit or Weekly Plan", () => {
   assert.match(pageSource, /id="dashboard-overview"/);
   assert.match(dashboardSource, /buildDashboardOverview\(/);
   assert.match(dashboardSource, /buildWeeklyPlanTrends\(/);
-  assert.match(dashboardSource, /id="dashboard-beverage-pulse"/);
+  assert.match(pageSource, /id="insights-panel"/);
+  assert.match(pageSource, /id="dashboard-beverage-pulse"/);
   assert.match(dashboardSource, /Guest favorites/);
+
+  const dashboardStart = dashboardSource.indexOf("function renderDashboardOverview()");
+  const dashboardEnd = dashboardSource.indexOf("function getWeeklyUsageLivePrice", dashboardStart);
+  assert.doesNotMatch(dashboardSource.slice(dashboardStart, dashboardEnd), /id="dashboard-beverage-pulse"/);
 
   const weeklyPlanStart = dashboardSource.indexOf("function renderWeeklyPlan()");
   const weeklyPlanEnd = dashboardSource.indexOf("function renderKegLevels", weeklyPlanStart);

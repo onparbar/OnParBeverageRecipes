@@ -151,12 +151,19 @@
 }
 
 .staff-rehearsal-banner[hidden] { display: none; }
-.staff-rehearsal-banner div { display: grid; gap: 0.2rem; }
+.staff-rehearsal-banner__copy { display: grid; gap: 0.2rem; }
 .staff-rehearsal-banner strong { font-size: 1.2rem; }
 .staff-rehearsal-banner span { color: #60716c; }
+.staff-rehearsal-banner small { color: #9a681d; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
+.staff-rehearsal-banner__actions { display: flex; flex-wrap: wrap; gap: 0.55rem; justify-content: flex-end; }
 .staff-rehearsal-mode .staff-view-mark::after { content: " · Rehearsal"; color: #9a681d; }
+.staff-boss-demo-mode [data-staff-section-tab="recipes"],
+.staff-boss-demo-mode [data-staff-section-tab="taps"],
+.staff-boss-demo-mode [data-staff-section-target="recipes"],
+.staff-boss-demo-mode .staff-recipe-badge { display: none !important; }
 
 @media (max-width: 700px) {
   .staff-rehearsal-banner { align-items: stretch; flex-direction: column; }
+  .staff-rehearsal-banner__actions { display: grid; grid-template-columns: 1fr; }
   .staff-rehearsal-banner .logout-link { text-align: center; }
 }

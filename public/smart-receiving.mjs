@@ -26,6 +26,8 @@ const VENDOR_ALIASES = Object.freeze({
     "belmont",
     "party supply",
     "wholesale",
+    "liquor wholesale",
+    "belmont wholesale",
   ],
 });
 
@@ -61,12 +63,12 @@ function vendorAliasKey(vendor) {
 function getVendorIntentKeys(query) {
   const normalizedQuery = normalize(query);
   const keys = new Set();
-  if (/\b(?:all\s+)?beer\s+deliver(?:y|ies)\b/.test(normalizedQuery)) {
+  if (/\b(?:(?:all|both)\s+)?beer\s+(?:deliver(?:y|ies)|orders?)\b/.test(normalizedQuery)) {
     keys.add("bonbright");
     keys.add("heidelberg");
   }
-  if (/\b(?:all\s+)?mixers?\b/.test(normalizedQuery)) keys.add("proof");
-  if (/\b(?:all\s+)?(?:liquor|alcohol)\b/.test(normalizedQuery)) keys.add("ohlq");
+  if (/\b(?:(?:all|the)\s+)?(?:mixers?|proof\s+order)\b/.test(normalizedQuery)) keys.add("proof");
+  if (/\b(?:(?:all|the)\s+)?(?:liquor|alcohol|ohlq\s+order|wholesale\s+order)\b/.test(normalizedQuery)) keys.add("ohlq");
   return keys;
 }
 
@@ -158,8 +160,8 @@ function hasFullDeliveryStatement(value) {
     || /\b(?:full|complete)\s+(?:delivery|order)\b/.test(normalizedValue)
     || /\b(?:delivery|order)\s+(?:came|arrived)\b/.test(normalizedValue)
     || /\b(?:everythings?|everything\s+is|all(?:\s+is)?)\s+here\b/.test(normalizedValue)
-    || /\ball\s+(?:beer\s+deliver(?:y|ies)|mixers?|liquor|alcohol)\b/.test(normalizedValue)
-    || /\b(?:beer\s+deliver(?:y|ies)|mixers?|liquor|alcohol)(?:\s+(?:delivery|order))?(?:\s+all)?\s+(?:came|arrived|were delivered|was delivered|received|are here|is here)\b/.test(normalizedValue);
+    || /\b(?:all|both)\s+(?:beer\s+(?:deliver(?:y|ies)|orders?)|mixers?|liquor|alcohol)\b/.test(normalizedValue)
+    || /\b(?:beer\s+(?:deliver(?:y|ies)|orders?)|mixers?|liquor|alcohol)(?:\s+(?:delivery|order))?(?:\s+all)?\s+(?:came|arrived|were delivered|was delivered|received|are here|is here)\b/.test(normalizedValue);
 }
 
 function splitNarrativeClauses(value) {

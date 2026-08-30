@@ -1,4 +1,12 @@
 import { parseSmartReceivingTranscript } from "./smart-receiving.mjs";
+import "./staff-resilience.mjs";
+
+import {
+  applyRehearsalReceipts,
+  BOSS_DEMO_STEPS,
+  buildRehearsalOrderTracking,
+  normalizeBossDemoStep,
+} from "./boss-demo.mjs";
 
 const DEFAULT_BATCH_LABEL = "12 gallon keg";
 const STAFF_MENU_ORDER = [
@@ -74,6 +82,7 @@ const overviewOrderValue = document.querySelector("#staff-overview-order-value")
 const overviewOrderDetail = document.querySelector("#staff-overview-order-detail");
 const overviewRecipeValue = document.querySelector("#staff-overview-recipe-value");
 const overviewRecipeDetail = document.querySelector("#staff-overview-recipe-detail");
+const overviewRetryButton = document.querySelector("#staff-overview-retry");
 
 let recipes = [];
 let activeRecipeView = "current";
@@ -96,6 +105,12 @@ let staffPrepDrafts = new Map();
 let staffPrepBatchName = "";
 let staffPrepBatchSaving = false;
 let staffPrepBatchViews = [];
+let recipesLoaded = false;
+let recipesAvailable = false;
+let prepPlanLoaded = false;
+let orderTrackingLoaded = false;
+let tapSheetsLoaded = false;
+let staffSectionRefreshRunning = false;
 const STAFF_FETCH_TIMEOUT_MS = 8000;
 
 initStaffRecipes();
@@ -134,50 +149,16 @@ async function initStaffRecipes() {
     }
 
     bindStaffSectionEvents();
+    applyStaffDemoContext();
 
     const profileCheck = inspectStaffBrowserProfile();
     if (!isOwnerPreview && !profileCheck.safe && !isLocalStaffPreview()) {
       lockStaffRecipesForBrowserProfile(profileCheck.storageUnavailable);
       return;
     }
-
-    const [activeCsvResult, newCsvResult, sharedLoadResult, prepLoadResult, orderLoadResult, tapSheetLoadResult] = await Promise.allSettled([
-      fetchStaffRecipeCsv("active"),
-      fetchStaffRecipeCsv("new"),
-      fetchSharedRecipeUpdates(),
-      fetchStaffPrepPlan(),
-      fetchWeeklyOrderTracking(),
-      fetchStaffTapSheets(),
-    ]);
-    const recipesAvailable = activeCsvResult.status === "fulfilled" && newCsvResult.status === "fulfilled";
-    const sharedResult = sharedLoadResult.status === "fulfilled"
-      ? sharedLoadResult.value
-      : { available: false, recipes: null };
-    recipes = recipesAvailable
-      ? buildRecipeCollection(activeCsvResult.value, newCsvResult.value, sharedResult.recipes)
-      : [];
-    prepPlan = prepLoadResult.status === "fulfilled"
-      ? prepLoadResult.value
-      : { ...prepPlan, message: "The weekly prep checklist is unavailable. Reload to try again." };
-    orderTracking = orderLoadResult.status === "fulfilled"
-      ? orderLoadResult.value
-      : { ...orderTracking, message: "The delivery checklist is unavailable. Reload to try again." };
-    tapSheets = tapSheetLoadResult.status === "fulfilled"
-      ? tapSheetLoadResult.value
-      : { ...tapSheets, message: "Tap sheets are unavailable. Reload to try again." };
-    populateCategoryFilter();
     bindStaffRecipeEvents();
-    renderStaffPrepPlan();
-    renderWeeklyOrderTracking();
-    renderStaffTapSheets();
-    renderStaffRecipes();
-    renderStaffOverview();
-    statusPanel.textContent = recipesAvailable
-      ? (sharedResult.available
-        ? "Current shared recipe updates are included."
-        : "Core recipes are available. Shared recipe updates could not be checked right now.")
-      : "Recipes could not be loaded. Reload to try again.";
-    if (!recipesAvailable) statusPanel.dataset.state = "error";
+    overviewRetryButton?.addEventListener("click", refreshStaffSections);
+    await refreshStaffSections();
   } catch (error) {
     statusPanel.textContent = error?.message || "Recipes could not be loaded.";
     statusPanel.dataset.state = "error";
@@ -205,6 +186,87 @@ async function initStaffRecipes() {
     if (overviewRecipeValue) overviewRecipeValue.textContent = "—";
     if (overviewRecipeDetail) overviewRecipeDetail.textContent = "Unavailable";
   }
+}
+
+async function refreshStaffSections() {
+  if (staffSectionRefreshRunning) return;
+  staffSectionRefreshRunning = true;
+  updateStaffRetryState();
+  await Promise.allSettled([
+    loadStaffRecipeSection(),
+    loadStaffPrepSection(),
+    loadStaffOrderSection(),
+    loadStaffTapSheetSection(),
+  ]);
+  staffSectionRefreshRunning = false;
+  updateStaffRetryState();
+}
+
+async function loadStaffRecipeSection() {
+  const [activeCsvResult, newCsvResult, sharedLoadResult] = await Promise.allSettled([
+    fetchStaffRecipeCsv("active"),
+    fetchStaffRecipeCsv("new"),
+    fetchSharedRecipeUpdates(),
+  ]);
+  recipesLoaded = true;
+  recipesAvailable = activeCsvResult.status === "fulfilled" && newCsvResult.status === "fulfilled";
+  const sharedResult = sharedLoadResult.status === "fulfilled"
+    ? sharedLoadResult.value
+    : { available: false, recipes: null };
+  recipes = recipesAvailable
+    ? buildRecipeCollection(activeCsvResult.value, newCsvResult.value, sharedResult.recipes)
+    : [];
+  populateCategoryFilter();
+  renderStaffRecipes();
+  statusPanel.textContent = recipesAvailable
+    ? (sharedResult.available
+      ? "Current shared recipe updates are included."
+      : "Core recipes are available. Shared recipe updates could not be checked right now.")
+    : "Recipes could not be loaded.";
+  if (recipesAvailable) delete statusPanel.dataset.state;
+  else statusPanel.dataset.state = "error";
+  updateStaffRetryState();
+}
+
+async function loadStaffPrepSection() {
+  const nextPlan = await fetchStaffPrepPlan();
+  prepPlanLoaded = true;
+  if (nextPlan.available || !prepPlan.available) prepPlan = nextPlan;
+  renderStaffPrepPlan();
+  renderStaffOverview();
+  updateStaffRetryState();
+}
+
+async function loadStaffOrderSection() {
+  const nextTracking = await fetchWeeklyOrderTracking();
+  orderTrackingLoaded = true;
+  if (nextTracking.available || !orderTracking.available) orderTracking = nextTracking;
+  renderWeeklyOrderTracking();
+  renderStaffOverview();
+  updateStaffRetryState();
+}
+
+async function loadStaffTapSheetSection() {
+  const nextTapSheets = await fetchStaffTapSheets();
+  tapSheetsLoaded = true;
+  if (nextTapSheets.available || !tapSheets.available) tapSheets = nextTapSheets;
+  renderStaffTapSheets();
+  updateStaffRetryState();
+}
+
+function isRetryableStaffMessage(value) {
+  return /unavailable|too long|reload|could not|failed/i.test(clean(value));
+}
+
+function updateStaffRetryState() {
+  if (!overviewRetryButton) return;
+  const hasRetryableFailure = (recipesLoaded && !recipesAvailable)
+    || (prepPlanLoaded && !prepPlan.available && isRetryableStaffMessage(prepPlan.message))
+    || (orderTrackingLoaded && !orderTracking.available && isRetryableStaffMessage(orderTracking.message))
+    || (tapSheetsLoaded && !tapSheets.available && isRetryableStaffMessage(tapSheets.message));
+  overviewRetryButton.hidden = !hasRetryableFailure && !staffSectionRefreshRunning;
+  overviewRetryButton.disabled = staffSectionRefreshRunning;
+  overviewRetryButton.textContent = staffSectionRefreshRunning ? "Refreshing..." : "Retry";
 }
 
 function isLocalStaffPreview() {
@@ -298,6 +360,42 @@ if (isStaffRehearsalMode()) {
   const banner = document.querySelector("#staff-rehearsal-banner");
   if (banner) banner.hidden = false;
   document.body.classList.add("staff-rehearsal-mode");
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("demo") === "1") {
+    document.body.classList.add("staff-boss-demo-mode");
+    const stepIndex = normalizeBossDemoStep(params.get("demoStep"));
+    const step = BOSS_DEMO_STEPS[stepIndex];
+    const title = document.querySelector("#staff-rehearsal-title");
+    const description = document.querySelector("#staff-rehearsal-description");
+    const progress = document.querySelector("#staff-demo-progress");
+    const reset = document.querySelector("#staff-demo-reset");
+    const next = document.querySelector("#staff-demo-next");
+    if (title) title.textContent = "Boss Demo · Staff workflow";
+    if (description) description.textContent = "Try the saved Weekly Plan. Every change stays in this browser tab.";
+    if (progress) {
+      progress.hidden = false;
+      progress.textContent = `Demo ${stepIndex + 1} of ${BOSS_DEMO_STEPS.length} · ${step.label}`;
+    }
+    if (reset) {
+      reset.hidden = false;
+      reset.href = `/staff?rehearsal=1&demo=1&section=${encodeURIComponent(params.get("section") || "overview")}&demoStep=${stepIndex}`;
+    }
+    if (next && step.id === "receiving") {
+      next.hidden = false;
+      next.textContent = "Next: Staff prep";
+      next.href = "/staff?rehearsal=1&demo=1&section=prep&demoStep=5";
+    } else if (next && step.id === "prep") {
+      next.hidden = false;
+      next.textContent = "Next: Finish";
+      next.href = "/staff?rehearsal=1&demo=1&section=overview&demoStep=6";
+    }
+    const prepHelp = document.querySelector("#staff-prep-help");
+    const liquorHelp = document.querySelector("#staff-liquor-help");
+    const orderHelp = document.querySelector("#staff-order-help");
+    if (prepHelp) prepHelp.textContent = "Select several cocktails, enter a name once, and save the rehearsal batch.";
+    if (liquorHelp) liquorHelp.textContent = "Enter the bottles actually added, select the refills, and save the rehearsal batch.";
+    if (orderHelp) orderHelp.textContent = "Try a full delivery or an exception. Reloading resets this rehearsal checklist.";
+  }
   const liveFetch = window.fetch.bind(window);
   window.fetch = (input, options = {}) => {
     const method = clean(options.method || (typeof input === "object" ? input?.method : "GET")).toUpperCase();
@@ -362,7 +460,8 @@ async function fetchWeeklyOrderTracking() {
     });
     const result = await parseJsonResponse(response);
     if (!response.ok) throw new Error(result?.error || "The delivery checklist is unavailable.");
-    return normalizeOrderTracking(result);
+    const tracking = normalizeOrderTracking(result);
+    return isStaffRehearsalMode() ? buildRehearsalOrderTracking(tracking) : tracking;
   } catch (error) {
     return {
       available: false,
@@ -476,7 +575,9 @@ function renderWeeklyOrderTracking() {
   }
 
   delete orderStatusPanel.dataset.state;
-  orderStatusPanel.textContent = orderTracking.generatedAt
+  orderStatusPanel.textContent = isStaffRehearsalMode()
+    ? "Rehearsal copy of the current delivery plan. Live delivery records are unchanged."
+    : orderTracking.generatedAt
     ? `Showing deliveries for the shared ${formatPlanWeek(orderTracking.generatedAt)} plan.`
     : "Showing the current shared weekly order.";
   orderSummary.textContent = orderTracking.itemCount
@@ -623,6 +724,15 @@ function createOrderReceiptItem(item) {
       rowStatus.textContent = "Enter your name before saving the delivery status.";
       rowStatus.dataset.state = "error";
       nameInput.focus();
+      return;
+    }
+    if (isStaffRehearsalMode()) {
+      orderTracking = applyRehearsalReceipts(orderTracking, {
+        receipts: [{ itemId: item.id, status, receivedQuantity }],
+        handledBy,
+      });
+      renderWeeklyOrderTracking();
+      renderStaffOverview();
       return;
     }
     const inputs = [...form.querySelectorAll("input, button")];
@@ -800,9 +910,6 @@ async function applySmartReceivingProposal() {
     smartReceivingName?.focus();
     return;
   }
-  smartReceivingApply.disabled = true;
-  smartReceivingReview.disabled = true;
-  smartReceivingSpeak.disabled = true;
   const receiptBatches = Array.isArray(smartReceivingProposal.batches) && smartReceivingProposal.batches.length
     ? smartReceivingProposal.batches
     : [{
@@ -811,6 +918,33 @@ async function applySmartReceivingProposal() {
       vendor: smartReceivingProposal.vendor,
       lines: smartReceivingProposal.lines,
     }];
+  if (isStaffRehearsalMode()) {
+    let savedLineCount = 0;
+    receiptBatches.forEach((batch) => {
+      orderTracking = applyRehearsalReceipts(orderTracking, {
+        vendorId: batch.vendorId,
+        handledBy,
+        receipts: batch.lines.map((line) => ({
+          itemId: line.itemId,
+          status: line.status,
+          receivedQuantity: line.receivedQuantity,
+          reason: line.reason,
+        })),
+        note: clean(smartReceivingNote?.value),
+      });
+      savedLineCount += batch.lines.length;
+    });
+    smartReceivingTranscript.value = "";
+    if (smartReceivingNote) smartReceivingNote.value = "";
+    clearSmartReceivingProposal();
+    renderWeeklyOrderTracking();
+    renderStaffOverview();
+    setSmartReceivingStatus(`${formatNumber(savedLineCount)} delivery lines applied in rehearsal. Live deliveries are unchanged.`);
+    return;
+  }
+  smartReceivingApply.disabled = true;
+  smartReceivingReview.disabled = true;
+  smartReceivingSpeak.disabled = true;
   setSmartReceivingStatus(`Saving ${receiptBatches.length === 1 ? "reviewed delivery" : `${formatNumber(receiptBatches.length)} reviewed deliveries`}...`);
   try {
     let result = null;
@@ -1521,6 +1655,12 @@ function bindStaffSectionEvents() {
   });
 }
 
+function applyStaffDemoContext() {
+  if (!isStaffRehearsalMode()) return;
+  const requestedSection = new URLSearchParams(window.location.search).get("section");
+  if (requestedSection) switchStaffSection(requestedSection);
+}
+
 function switchStaffSection(section) {
   const nextSection = ["overview", "prep", "liquor", "recipes", "orders", "taps"].includes(section) ? section : "overview";
   sectionTabButtons.forEach((button) => {
@@ -1543,7 +1683,9 @@ function renderStaffOverview() {
   const planDate = prepPlan.generatedAt || orderTracking.generatedAt;
   overviewWeek.textContent = planDate
     ? formatPlanWeek(planDate)
-    : "No Monday plan has been published yet.";
+    : prepPlanLoaded && orderTrackingLoaded
+      ? "No Monday plan has been published yet."
+      : "Loading this week's plan...";
 
   if (prepPlan.available) {
     const remainingPrep = Math.max(0, prepPlan.totalCount - prepPlan.completedCount);
@@ -1552,11 +1694,16 @@ function renderStaffOverview() {
     const remainingLiquor = Math.max(0, prepPlan.liquorRefillTotalCount - prepPlan.liquorRefillCompletedCount);
     overviewLiquorValue.textContent = `${formatNumber(remainingLiquor)} left`;
     overviewLiquorDetail.textContent = `${formatNumber(prepPlan.liquorRefillCompletedCount)} of ${formatNumber(prepPlan.liquorRefillTotalCount)} added`;
-  } else {
+  } else if (prepPlanLoaded) {
     overviewPrepValue.textContent = "No plan";
     overviewPrepDetail.textContent = "Waiting for the Monday plan";
     overviewLiquorValue.textContent = "No plan";
     overviewLiquorDetail.textContent = "Waiting for the Monday plan";
+  } else {
+    overviewPrepValue.textContent = "—";
+    overviewPrepDetail.textContent = "Loading prep plan...";
+    overviewLiquorValue.textContent = "—";
+    overviewLiquorDetail.textContent = "Loading keg refills...";
   }
 
   if (orderTracking.available) {
@@ -1566,13 +1713,16 @@ function renderStaffOverview() {
     overviewOrderDetail.textContent = orderTracking.notReceivedCount
       ? `${formatNumber(orderTracking.notReceivedCount)} short or missing`
       : `${formatNumber(checkedOrders)} of ${formatNumber(orderTracking.itemCount)} checked`;
-  } else {
+  } else if (orderTrackingLoaded) {
     overviewOrderValue.textContent = "No plan";
     overviewOrderDetail.textContent = "Waiting for the Monday plan";
+  } else {
+    overviewOrderValue.textContent = "—";
+    overviewOrderDetail.textContent = "Loading delivery plan...";
   }
 
-  overviewRecipeValue.textContent = `${formatNumber(currentRecipes.length)} current`;
-  overviewRecipeDetail.textContent = `${formatNumber(inactiveRecipes.length)} deactivated`;
+  overviewRecipeValue.textContent = recipesLoaded ? `${formatNumber(currentRecipes.length)} current` : "—";
+  overviewRecipeDetail.textContent = recipesLoaded ? `${formatNumber(inactiveRecipes.length)} deactivated` : "Loading recipes...";
 }
 
 function switchStaffRecipeView(view) {

@@ -1,3 +1,5 @@
+import "./operations-learning-ui.mjs";
+
 import {
   getCanonicalTapDisplayName,
   isRetiredProduct,
@@ -8,6 +10,11 @@ import {
   copyAssistedOrderText,
 } from "./assisted-order-direct-ui.mjs";
 import { buildOrderRehearsalModel } from "./order-rehearsal.mjs";
+import {
+  buildBossDemoModel,
+  normalizeBossDemoStep,
+  renderBossDemo,
+} from "./boss-demo.mjs";
 import {
   convertLegacyCaseCountToUnits,
   getCurrentMondayInventorySnapshot,
@@ -843,7 +850,7 @@ const MENU_ORDER = [
   ["WASHINGTON APPLE (CROWN ROYAL APPLE)", "Washington Apple (Whiskey)"],
   ["WHISKEY SOUR (JACK DANIELS)", "Whiskey Sour (Whiskey)"],
 ];
-const OPERATION_TAB_NAMES = ["keg-levels", "inventory", "weekly-plan"];
+const OPERATION_TAB_NAMES = ["keg-levels", "inventory", "weekly-plan", "insights"];
 const MENU_TAB_NAMES = ["performance", "weekly-usage", "recipes", "add", "pricing", "ingredients", "print"];
 const NEW_RECIPE_ORDER = [
   ["Bacardi Sunset", "Bacardi Sunset"],
@@ -1173,10 +1180,12 @@ let weeklyOrderTracking = { available: false, generatedAt: "", drafts: [], adjus
 let weeklyOrderTrackingMessage = "Loading shared order tracking...";
 let weeklyOrderTrackingRefreshRunning = false;
 let orderRehearsalMode = false;
+let bossDemoStep = 0;
 let currentVendorOrderDraftViews = new Map();
 let dashboardStaffPrepPlan = { available: false, generatedAt: "", items: [], completedCount: 0, totalCount: 0 };
 let dashboardStaffPrepRefreshRunning = false;
 let activeKegAdjustKey = "";
+let activeKegWallFilter = "main";
 let pmbProductSaving = false;
 let liquorProductSaving = false;
 let activePmbQueuePublishId = "";
@@ -3086,18 +3095,20 @@ function bindEvents() {
     if (target.dataset.dashboardTarget === "recipes") switchRecipeView("current");
     switchTab(target.dataset.dashboardTarget);
   });
-  dashboardOverview?.addEventListener("change", (event) => {
+  const handleDashboardPulseChange = (event) => {
     const metricControl = event.target.closest("[data-dashboard-pulse-metric]");
     if (metricControl) {
       dashboardPulseRankingMetric = clean(metricControl.value).toLowerCase() === "sales" ? "sales" : "oz";
-      renderDashboardOverview();
+      renderDashboardBeveragePulse();
       return;
     }
     const wallFilterControl = event.target.closest("[data-seller-ranking-wall]");
     if (!wallFilterControl) return;
     sellerRankingWall = clean(wallFilterControl.value).toLowerCase() || "main";
-    renderDashboardOverview();
-  });
+    renderDashboardBeveragePulse();
+  };
+  dashboardOverview?.addEventListener("change", handleDashboardPulseChange);
+  document.querySelector("#dashboard-beverage-pulse")?.addEventListener("change", handleDashboardPulseChange);
   document.querySelectorAll(".operation-tab").forEach((button) => {
     button.addEventListener("click", () => switchTab(button.dataset.operationTab));
     button.addEventListener("keydown", (event) => {
@@ -3327,7 +3338,7 @@ function switchTab(tabName) {
     button.tabIndex = isActive ? 0 : -1;
   });
 
-  if (!isEmployeeDashboard && ["weekly-usage", "performance"].includes(requestedTab) && !weeklyUsageSyncAttempted) {
+  if (!isEmployeeDashboard && ["weekly-usage", "performance", "insights"].includes(requestedTab) && !weeklyUsageSyncAttempted) {
     runPmbWeeklyUsageSync({ automatic: true });
   }
   if (!isEmployeeDashboard && ["weekly-plan", "keg-levels", "ingredients", "inventory"].includes(requestedTab) && !kegSyncAttempted) {
@@ -3337,6 +3348,7 @@ function switchTab(tabName) {
     runTapPricingSync();
   }
   if (requestedTab === "dashboard") renderDashboardOverview();
+  if (requestedTab === "insights") renderDashboardBeveragePulse();
   if (requestedTab === "print") renderTapPrintWorkspace();
 }
 
@@ -5988,6 +6000,9 @@ function openMondayRunStep(stepId, target) {
 
   requestAnimationFrame(() => {
     const destination = weeklyPlan?.querySelector(selector);
+    if (destination instanceof HTMLDetailsElement) destination.open = true;
+    const parentDetails = destination?.closest("details");
+    if (parentDetails) parentDetails.open = true;
     destination?.scrollIntoView({ block: "center", behavior: "smooth" });
     if (destination instanceof HTMLButtonElement && !destination.disabled) {
       destination.focus({ preventScroll: true });
@@ -6117,8 +6132,6 @@ function renderDashboardOverview() {
     </section>
 
     ${renderDashboardCompletedPrep()}
-
-    <section class="dashboard-beverage-pulse" id="dashboard-beverage-pulse" aria-labelledby="dashboard-beverage-pulse-title"></section>
   `;
   renderDashboardBeveragePulse();
 }
@@ -6779,12 +6792,31 @@ function acknowledgeOhioComplianceWatch() {
   renderDashboardOverview();
 }
 
+function isWeeklyPlanRecoveryMessage(value) {
+  return /revision|recovery copy|changed on another device|shared weekly usage is now/i.test(clean(value));
+}
+
+function getWeeklyPlanManagerMessage(value) {
+  const message = clean(value);
+  if (!message) return "";
+  if (isWeeklyPlanRecoveryMessage(message)) {
+    return "Shared data changed on another device. Reload current data before saving.";
+  }
+  if (/prompt\(\) is not supported/i.test(message)) {
+    return "That action could not be completed. Reload current data and try again.";
+  }
+  return message;
+}
+
 function renderWeeklyPlanReadiness(readiness) {
   const reasons = [...readiness.blockers, ...readiness.staleReasons, ...readiness.reviewReasons];
+  const needsReload = reasons.some(isWeeklyPlanRecoveryMessage);
+  const friendlyReasons = [...new Set(reasons.map(getWeeklyPlanManagerMessage).filter(Boolean))];
   return `
     <section class="weekly-plan-readiness weekly-plan-readiness--${escapeHtml(readiness.status)}" aria-labelledby="weekly-plan-readiness-title">
       <h3 id="weekly-plan-readiness-title">${escapeHtml(readiness.label)}</h3>
-      ${reasons.length ? `<ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
+      ${friendlyReasons.length ? `<ul>${friendlyReasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
+      ${needsReload ? '<button class="mini-button" type="button" data-weekly-plan-reload>Reload current data</button>' : ""}
     </section>
   `;
 }
@@ -6802,13 +6834,13 @@ function renderWeeklyPlanProvenance({ latestCompletedWeek, latestCompletedUsageS
       </div>
       <div class="weekly-plan-provenance__item">
         <span>Weekly Usage</span>
-        <strong>${weeklyUsageSharedSaveError ? "Recovery review needed" : weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites || weeklyUsageSharedSaveTimer || weeklyUsageSharedOutbox ? "Saving changes" : latestCompletedWeek ? `Week of ${escapeHtml(formatIsoDate(latestCompletedWeek))}` : "No completed week"}</strong>
-        ${weeklyUsageSharedSaveError ? `<small>${escapeHtml(weeklyUsageSharedSaveError)}</small>` : !latestCompletedUsageSaved ? `<small>${formatNumber(latestCompletedUsageRowCount)}/${formatNumber(weeklyUsageItems.length)} taps saved</small>` : ""}
+        <strong>${weeklyUsageSharedSaveError ? "Needs refresh" : weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites || weeklyUsageSharedSaveTimer || weeklyUsageSharedOutbox ? "Saving changes" : latestCompletedWeek ? `Week of ${escapeHtml(formatIsoDate(latestCompletedWeek))}` : "No completed week"}</strong>
+        ${weeklyUsageSharedSaveError ? `<small>${escapeHtml(getWeeklyPlanManagerMessage(weeklyUsageSharedSaveError))}</small>` : !latestCompletedUsageSaved ? `<small>${formatNumber(latestCompletedUsageRowCount)}/${formatNumber(weeklyUsageItems.length)} taps saved</small>` : ""}
       </div>
       <div class="weekly-plan-provenance__item">
         <span>Inventory</span>
-        <strong>${inventorySharedSaveError ? "Recovery review needed" : inventorySharedSaving || inventoryFieldSyncPendingCount || inventoryFieldSyncTimers.size || Object.keys(inventoryFieldOutbox).length || inventoryActionOutbox.length ? "Saving changes" : inventorySharedInitialized ? (inventorySharedUpdatedAt ? escapeHtml(formatUpdatedAt(inventorySharedUpdatedAt)) : "Shared inventory") : "Local / baseline only"}</strong>
-        ${inventorySharedSaveError ? `<small>${escapeHtml(inventorySharedSaveError)}</small>` : missingCounts ? `<small>${formatNumber(missingCounts)} missing count${missingCounts === 1 ? "" : "s"}</small>` : ""}
+        <strong>${inventorySharedSaveError ? "Needs refresh" : inventorySharedSaving || inventoryFieldSyncPendingCount || inventoryFieldSyncTimers.size || Object.keys(inventoryFieldOutbox).length || inventoryActionOutbox.length ? "Saving changes" : inventorySharedInitialized ? (inventorySharedUpdatedAt ? escapeHtml(formatUpdatedAt(inventorySharedUpdatedAt)) : "Shared inventory") : "Local / baseline only"}</strong>
+        ${inventorySharedSaveError ? `<small>${escapeHtml(getWeeklyPlanManagerMessage(inventorySharedSaveError))}</small>` : missingCounts ? `<small>${formatNumber(missingCounts)} missing count${missingCounts === 1 ? "" : "s"}</small>` : ""}
       </div>
       <div class="weekly-plan-provenance__item">
         <span>Prices</span>
@@ -7266,6 +7298,21 @@ function isEasternMonday(now = new Date()) {
   }).format(now) === "Mon";
 }
 
+function bindBossDemoEvents() {
+  if (!orderRehearsalMode) return;
+  weeklyPlan.querySelectorAll("[data-boss-demo-step]").forEach((button) => {
+    button.addEventListener("click", () => {
+      bossDemoStep = normalizeBossDemoStep(button.dataset.bossDemoStep);
+      renderWeeklyPlan();
+    });
+  });
+  weeklyPlan.querySelector("[data-boss-demo-reset]")?.addEventListener("click", () => {
+    bossDemoStep = 0;
+    weeklyOrderTrackingMessage = "Rehearsal reset. Live records were not changed.";
+    renderWeeklyPlan();
+  });
+}
+
 function renderWeeklyPlan() {
   if (dashboardRenderCoordinator.defer("weekly-plan", renderWeeklyPlan)) return;
   if (!weeklyPlan) return;
@@ -7286,33 +7333,32 @@ function renderWeeklyPlan() {
     isMonday: isEasternMonday(),
   });
   const mondayRun = getMondayRunModel(plan, freshness);
+  const orderStep = mondayRun.steps.find((step) => step.id === "orders");
   const simpleSyrupNeed = getWeeklySimpleSyrupNeed(plan.prep.cocktails);
   const updatedText = planLocked ? "Thursday delivery · locked through Sunday" : "Live needs";
-
-  weeklyPlan.innerHTML = `
-    <header class="weekly-plan-header">
-      <div>
-        <h2>Order &amp; Prep Plan</h2>
-        <p>${escapeHtml(updatedText)}</p>
-      </div>
-      <div class="weekly-plan-actions">
-        ${ORDER_REHEARSAL_AVAILABLE && (planLocked || orderRehearsalMode) ? `<button class="ghost-button" id="toggle-order-rehearsal" type="button">${orderRehearsalMode ? "Exit Rehearsal" : "Rehearsal"}</button>` : ""}
-        ${orderRehearsalMode ? `<a class="ghost-button" href="/staff?rehearsal=1" target="_blank" rel="noopener">Open Staff Rehearsal</a>` : ""}
-        ${planLocked ? `<button class="ghost-button" id="recall-weekly-plan" type="button"${weeklyPlanUpdating ? " disabled" : ""}>${weeklyPlanUpdating ? "Recalling..." : "Recall Plan"}</button>` : ""}
-        ${requiresLateSnapshotReason ? `
-          <label class="weekly-plan-late-reason">
-            <span>Reason required</span>
-            <input id="weekly-plan-late-reason" type="text" autocomplete="off" value="${escapeHtml(weeklyPlanOutsideMondayReason)}" placeholder="Why is this snapshot late?">
-          </label>
-        ` : ""}
-        ${planLocked ? "" : `<button class="primary-button" id="run-weekly-plan-agent" type="button"${parAgentRunning || weeklyPlanUpdating || (requiresLateSnapshotReason && !clean(weeklyPlanOutsideMondayReason)) ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Saving & locking..." : "Save & Lock Plan"}</button>`}
-      </div>
-    </header>
-    <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : ""))}</p>
+  const demoToggle = ORDER_REHEARSAL_AVAILABLE && (planLocked || orderRehearsalMode)
+    ? `<button class="ghost-button" id="toggle-order-rehearsal" type="button">${orderRehearsalMode ? "Exit Boss Demo" : "Boss Demo"}</button>`
+    : "";
+  const liveHeaderActions = `
+    ${demoToggle}
+    ${planLocked ? `<button class="ghost-button" id="recall-weekly-plan" type="button"${weeklyPlanUpdating ? " disabled" : ""}>${weeklyPlanUpdating ? "Recalling..." : "Recall Plan"}</button>` : ""}
+    ${requiresLateSnapshotReason ? `
+      <label class="weekly-plan-late-reason">
+        <span>Reason required</span>
+        <input id="weekly-plan-late-reason" type="text" autocomplete="off" value="${escapeHtml(weeklyPlanOutsideMondayReason)}" placeholder="Why is this snapshot late?">
+      </label>
+    ` : ""}
+    ${planLocked ? "" : `<button class="primary-button" id="run-weekly-plan-agent" type="button"${parAgentRunning || weeklyPlanUpdating || (requiresLateSnapshotReason && !clean(weeklyPlanOutsideMondayReason)) ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Saving & locking..." : "Save & Lock Plan"}</button>`}
+  `;
+  const liveWeeklyPlanBody = `
+    <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(getWeeklyPlanManagerMessage(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : "")))}</p>
     ${renderMondayRun(mondayRun)}
     ${renderWeeklyPlanFinishWeek(planLocked)}
     ${renderWeeklyPlanReadiness(freshness.readiness)}
-    ${renderWeeklyPlanProvenance(freshness)}
+    <details class="weekly-plan-details">
+      <summary>Plan details</summary>
+      ${renderWeeklyPlanProvenance(freshness)}
+    </details>
     <div class="weekly-plan-stats">
       <div><span>Order lines</span><strong>${formatNumber(summary.orderLineCount)}</strong></div>
       <div><span>Beer kegs</span><strong>${formatNumber(summary.beerKegTotal)}</strong></div>
@@ -7328,20 +7374,51 @@ function renderWeeklyPlan() {
         <div class="weekly-plan-column__header"><h2>Order This Week</h2></div>
         ${renderWeeklyPlanByVendor(plan, vendorOrderModel.deferredOrders)}
       </section>`}
-      <section class="weekly-plan-column weekly-plan-column--prep">
-        <div class="weekly-plan-column__header"><h2>Cocktails To Make</h2></div>
-        ${renderWeeklyPlanCocktailRows(plan.prep.cocktails)}
-        <div class="weekly-plan-column__header"><h2>Add Liquor To Kegs</h2></div>
-        ${renderWeeklyPlanLiquorRefillRows(plan.orders.liquorTapBottles)}
-      </section>
+      <details class="weekly-plan-phase weekly-plan-phase--prep"${planLocked ? "" : " open"}>
+        <summary><span>Prep plan</span><strong>${formatNumber(summary.cocktailBatchTotal)} cocktail${toNumber(summary.cocktailBatchTotal) === 1 ? "" : "s"} · ${formatNumber(summary.liquorTapBottleTotal)} liquor</strong></summary>
+        <section class="weekly-plan-column weekly-plan-column--prep">
+          <div class="weekly-plan-column__header"><h2>Cocktails To Make</h2></div>
+          ${renderWeeklyPlanCocktailRows(plan.prep.cocktails)}
+          <div class="weekly-plan-column__header"><h2>Add Liquor To Kegs</h2></div>
+          ${renderWeeklyPlanLiquorRefillRows(plan.orders.liquorTapBottles)}
+        </section>
+      </details>
     </div>
-    ${orderRehearsalMode
-      ? renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)
-      : planLocked
-        ? `<div id="weekly-plan-orders">${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)}</div>`
-        : ""}
+    ${planLocked
+      ? `<details class="weekly-plan-phase weekly-plan-phase--orders${orderStep?.complete ? " is-complete" : ""}" id="weekly-plan-orders"${orderStep?.complete ? "" : " open"}><summary><span>Place orders</span><strong>${escapeHtml(orderStep?.status || "Review")}</strong></summary>${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)}</details>`
+      : ""}
     ${renderWeeklyPlanReview(plan)}
   `;
+  let weeklyPlanBody = liveWeeklyPlanBody;
+  if (orderRehearsalMode) {
+    const demoModel = buildBossDemoModel({
+      step: bossDemoStep,
+      planLocked,
+      planDate: recommendations?.generatedAt,
+      pmbTapCount: kegWallItems.length,
+      summary,
+      vendors: vendorOrderModel.drafts,
+    });
+    const orderWorkspace = demoModel.currentStep.id === "orders"
+      ? renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)
+      : "";
+    weeklyPlanBody = renderBossDemo(demoModel, { orderWorkspace });
+  }
+
+  weeklyPlan.innerHTML = `
+    <header class="weekly-plan-header">
+      <div>
+        <h2>${orderRehearsalMode ? "Boss Demo" : "Order &amp; Prep Plan"}</h2>
+        <p>${escapeHtml(orderRehearsalMode ? "Guided weekly workflow rehearsal" : updatedText)}</p>
+      </div>
+      <div class="weekly-plan-actions">
+        ${orderRehearsalMode ? demoToggle : liveHeaderActions}
+      </div>
+    </header>
+    ${weeklyPlanBody}
+  `;
+
+  weeklyPlan.querySelector("[data-weekly-plan-reload]")?.addEventListener("click", () => window.location.reload());
 
   bindWeeklyPlanController({
     root: weeklyPlan,
@@ -7359,6 +7436,7 @@ function renderWeeklyPlan() {
     getOrderRehearsalMode: () => orderRehearsalMode,
     setOrderRehearsalMode: (value) => {
       orderRehearsalMode = value;
+      if (value) bossDemoStep = 0;
     },
     setWeeklyOrderTrackingMessage: (value) => {
       weeklyOrderTrackingMessage = value;
@@ -7368,13 +7446,14 @@ function renderWeeklyPlan() {
     },
     renderWeeklyPlan,
   });
+  bindBossDemoEvents();
 }
 
 function renderKegLevels() {
   if (dashboardRenderCoordinator.defer("keg-levels", renderKegLevels)) return;
   if (!kegSummary || !kegWalls) return;
 
-  const wallNames = ["Patio", "Main", "Karaoke"];
+  const wallNames = ["Main", "Patio", "Karaoke"];
   const totalTaps = kegWallItems.length;
   const liveCount = kegWallItems.filter((item) => {
     const row = getKegLiveRow(item);
@@ -7414,9 +7493,49 @@ function renderKegLevels() {
     ${renderCocktailsToMakePanel()}
   `;
 
-  kegWalls.innerHTML = '<details class="inventory-speech" id="keg-speech-assistant"></details>' + wallNames
-    .map((wallName) => renderKegWallBlock(wallName, kegWallItems.filter((item) => item.wall === wallName)))
-    .join("") + renderComingSoonBlock();
+  const attentionItems = kegWallItems.filter((item) => {
+    const liveRow = getKegLiveRow(item);
+    const level = liveRow?.fillLevelPercent;
+    const hasLiveLevel = liveRow?.levelAvailable !== false
+      && level != null
+      && String(level).trim() !== ""
+      && Number.isFinite(Number(level));
+    return getKegNeed(item) > 0 || !hasLiveLevel;
+  });
+  const visibleWallBlocks = activeKegWallFilter === "attention"
+    ? wallNames.map((wallName) => {
+      const items = attentionItems.filter((item) => item.wall === wallName);
+      return items.length ? renderKegWallBlock(wallName, items, { attentionOnly: true }) : "";
+    }).join("") || '<div class="empty-state keg-attention-empty"><strong>All walls are clear.</strong><span>No tap needs attention right now.</span></div>'
+    : renderKegWallBlock(
+      wallNames.find((wallName) => wallName.toLowerCase() === activeKegWallFilter) || "Main",
+      kegWallItems.filter((item) => item.wall.toLowerCase() === activeKegWallFilter),
+    );
+  const activeComingSoonCount = comingSoonItems.filter((item) => !item.replacedAt).length;
+  kegWalls.dataset.activeWallFilter = activeKegWallFilter;
+  kegWalls.innerHTML = `
+    <nav class="keg-wall-switcher" aria-label="Choose a keg wall">
+      ${[
+        ["main", "Main"],
+        ["patio", "Patio"],
+        ["karaoke", "Karaoke"],
+        ["attention", `Needs Attention · ${attentionItems.length}`],
+      ].map(([key, label]) => `<button class="${key === activeKegWallFilter ? "is-active" : ""}" type="button" data-keg-wall-filter="${key}" aria-pressed="${key === activeKegWallFilter}">${escapeHtml(label)}</button>`).join("")}
+    </nav>
+    <details class="inventory-speech" id="keg-speech-assistant"></details>
+    ${visibleWallBlocks}
+    <details class="keg-coming-soon">
+      <summary>Coming Soon · ${formatNumber(activeComingSoonCount)}</summary>
+      ${renderComingSoonBlock()}
+    </details>
+  `;
+
+  kegWalls.querySelectorAll("[data-keg-wall-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeKegWallFilter = clean(button.dataset.kegWallFilter) || "main";
+      renderKegLevels();
+    });
+  });
 
   const cocktailsToMakePanel = kegSummary.querySelector(".cocktails-to-make-panel");
   const speechPanel = kegWalls.querySelector("#keg-speech-assistant");
@@ -9064,17 +9183,17 @@ function buildWeeklyUsageSaveLabel() {
   return `${monday.getMonth() + 1}/${monday.getDate()}/${String(monday.getFullYear()).slice(-2)} - ${sunday.getMonth() + 1}/${sunday.getDate()}/${String(sunday.getFullYear()).slice(-2)}`;
 }
 
-function renderKegWallBlock(wallName, items) {
+function renderKegWallBlock(wallName, items, { attentionOnly = false } = {}) {
   const belowParCount = items.filter((item) => getKegNeed(item) > 0).length;
   return `
-    <section class="keg-wall-card">
+    <section class="keg-wall-card" data-keg-wall="${escapeHtml(wallName.toLowerCase())}">
       <div class="keg-wall-card__header">
         <div>
           <h2>${escapeHtml(wallName)}</h2>
         </div>
         <div class="keg-wall-card__meta">
-          <strong>${items.length} taps</strong>
-          <span class="keg-wall-card__badge">${belowParCount} below par</span>
+          <strong>${items.length} ${attentionOnly ? "flagged" : "taps"}</strong>
+          <span class="keg-wall-card__badge">${attentionOnly ? "Needs attention" : `${belowParCount} below par`}</span>
         </div>
       </div>
       <div class="inventory-table-wrap">

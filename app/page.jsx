@@ -6,6 +6,7 @@ const operationSections = [
   ["keg-levels", "Keg Levels"],
   ["inventory", "Inventory"],
   ["weekly-plan", "Weekly Plan"],
+  ["insights", "Insights"],
 ];
 
 function OperationsBar({ context }) {
@@ -369,6 +370,11 @@ export default function DashboardPage() {
         <section className="panel" id="weekly-plan-panel" role="tabpanel" aria-label="Weekly Plan">
           <OperationsBar context="weekly-plan" />
           <div id="weekly-plan" className="weekly-plan"></div>
+        </section>
+
+        <section className="panel" id="insights-panel" role="tabpanel" aria-label="Insights">
+          <OperationsBar context="insights" />
+          <section className="dashboard-beverage-pulse" id="dashboard-beverage-pulse" aria-labelledby="dashboard-beverage-pulse-title"></section>
         </section>
 
         <section className="panel" id="add-panel" aria-labelledby="add-tab">

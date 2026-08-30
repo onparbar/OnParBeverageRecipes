@@ -16,6 +16,48 @@ function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+export function buildOperationalRecovery({
+  message = "",
+  conflict = false,
+} = {}) {
+  const source = clean(message);
+  if (!source && !conflict) {
+    return { kind: "none", message: "", action: "" };
+  }
+  if (
+    conflict
+    || /\brevision\b/i.test(source)
+    || /\bchanged after\b/i.test(source)
+    || /\bnewer saved\b/i.test(source)
+    || /\bold baseline\b/i.test(source)
+  ) {
+    return {
+      kind: "reload-latest",
+      message: "Newer saved data is available. Your unsaved changes are still here.",
+      action: "Reload latest and retry",
+    };
+  }
+  if (/\bstill saving\b/i.test(source) || /\bchanges are saving\b/i.test(source)) {
+    return {
+      kind: "wait-retry",
+      message: "Your latest changes are still saving.",
+      action: "Wait a moment and retry",
+    };
+  }
+  if (/\b(fetch failed|network|offline|ehostunreach|timed? out|connection)\b/i.test(source)) {
+    return {
+      kind: "connection",
+      message: "The connection was interrupted. Your unsaved changes are still here.",
+      action: "Retry",
+    };
+  }
+  return {
+    kind: "retry",
+    message: source || "This could not be saved yet. Your unsaved changes are still here.",
+    action: "Retry",
+  };
+}
+
 export function createOperationalOutboxEntry({
   baseRevision,
   payload,
@@ -50,11 +92,16 @@ export function normalizeOperationalOutboxEntry(value) {
   });
   if (!entry) return null;
   const currentRevision = normalizeRevision(value.currentRevision);
+  const recovery = buildOperationalRecovery({
+    message: value.lastError,
+    conflict: value.conflict === true,
+  });
   return {
     ...entry,
     conflict: value.conflict === true,
     currentRevision,
-    lastError: clean(value.lastError),
+    lastError: recovery.message,
+    recovery,
   };
 }
 
@@ -72,11 +119,13 @@ export function markOperationalOutboxFailure(entry, {
   const normalized = normalizeOperationalOutboxEntry(entry);
   if (!normalized) return null;
   const revision = normalizeRevision(currentRevision);
+  const recovery = buildOperationalRecovery({ message, conflict });
   return {
     ...normalized,
     conflict: conflict === true,
     currentRevision: revision,
-    lastError: clean(message),
+    lastError: recovery.message,
+    recovery,
   };
 }
 

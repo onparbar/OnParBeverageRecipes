@@ -10,11 +10,16 @@ export default function StaffRecipePage() {
     <div className="shell staff-recipe-shell" data-staff-dashboard="true">
       <link rel="stylesheet" href="/smart-receiving.css" />
       <section className="staff-rehearsal-banner" id="staff-rehearsal-banner" hidden aria-live="polite">
-        <div>
-          <strong>Staff Rehearsal</strong>
-          <span>Try the latest Weekly Plan. Nothing here changes live records.</span>
+        <div className="staff-rehearsal-banner__copy">
+          <strong id="staff-rehearsal-title">Staff Rehearsal</strong>
+          <span id="staff-rehearsal-description">Try the latest Weekly Plan. Nothing here changes live records.</span>
+          <small id="staff-demo-progress" hidden></small>
         </div>
-        <a className="logout-link" href="/staff">Exit rehearsal</a>
+        <div className="staff-rehearsal-banner__actions">
+          <a className="logout-link" id="staff-demo-next" href="/staff" hidden>Next demo step</a>
+          <a className="logout-link" id="staff-demo-reset" href="/staff" hidden>Reset</a>
+          <a className="logout-link" href="/staff">Exit rehearsal</a>
+        </div>
       </section>
       <header className="topbar">
         <div>
@@ -43,7 +48,10 @@ export default function StaffRecipePage() {
               <p className="eyebrow">Current weekly plan</p>
               <h2 id="staff-overview-title">Weekly overview</h2>
             </div>
-            <p id="staff-overview-week" className="staff-overview-week">Loading this week&apos;s plan...</p>
+            <div className="staff-overview-week-wrap">
+              <p id="staff-overview-week" className="staff-overview-week">Loading this week&apos;s plan...</p>
+              <button className="ghost-button staff-overview-retry" id="staff-overview-retry" type="button" hidden>Retry</button>
+            </div>
           </div>
           <div className="staff-overview-grid">
             <button className="staff-overview-card" data-staff-section-target="prep" type="button">
@@ -75,7 +83,7 @@ export default function StaffRecipePage() {
               <p className="eyebrow">Current weekly plan</p>
               <h2 id="staff-prep-title">Cocktails to make</h2>
             </div>
-            <p>Enter who prepared each cocktail, check it off, and save. Updates are shared with the current Monday–Sunday plan.</p>
+            <p id="staff-prep-help">Enter who prepared each cocktail, check it off, and save. Updates are shared with the current Monday–Sunday plan.</p>
           </div>
           <div id="staff-prep-status" className="staff-recipe-status" role="status" aria-live="polite">
             Loading this week&apos;s prep checklist...
@@ -90,7 +98,7 @@ export default function StaffRecipePage() {
               <p className="eyebrow">Current weekly plan</p>
               <h2 id="staff-liquor-title">Liquor to add to kegs</h2>
             </div>
-            <p>Add the listed bottles directly to each keg, then check it off.</p>
+            <p id="staff-liquor-help">Add the listed bottles directly to each keg, then check it off.</p>
           </div>
           <div id="staff-liquor-status" className="staff-recipe-status" role="status" aria-live="polite">
             Loading this week&apos;s liquor checklist...
@@ -105,7 +113,7 @@ export default function StaffRecipePage() {
               <p className="eyebrow">Delivery checklist</p>
               <h2 id="staff-order-title">Orders to receive</h2>
             </div>
-            <p>Check off a full delivery, or enter the quantity received when an order arrives short. Missing items alert the owner dashboard.</p>
+            <p id="staff-order-help">Check off a full delivery, or enter the quantity received when an order arrives short. Missing items alert the owner dashboard.</p>
           </div>
           <div id="staff-order-status" className="staff-recipe-status" role="status" aria-live="polite">
             Loading this week&apos;s order checklist...
@@ -204,7 +212,7 @@ export default function StaffRecipePage() {
         </section>
       </main>
 
-        <Script type="module" src="/staff-dashboard.js?v=20260827-2" strategy="afterInteractive" />
+        <Script type="module" src="/staff-dashboard.js?v=20260830-2" strategy="afterInteractive" />
     </div>
   );
 }

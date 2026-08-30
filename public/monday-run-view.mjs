@@ -113,6 +113,10 @@ export function renderMondayRun(run) {
   const progress = run.steps.length ? Math.round((run.completedCount / run.steps.length) * 100) : 0;
   const continueStepId = run.complete ? "review" : run.nextStep.id;
   const continueTarget = run.complete ? "weekly-plan" : run.nextStep.target;
+  const focusStep = run.complete
+    ? { id: "review", label: "Review this week", status: "Complete", target: "weekly-plan" }
+    : run.nextStep;
+  const focusNumber = run.complete ? run.steps.length : run.nextIndex + 1;
   return `
     <section class="monday-run" aria-labelledby="monday-run-title">
       <header class="monday-run__header">
@@ -120,17 +124,27 @@ export function renderMondayRun(run) {
         <button class="${run.complete ? "ghost-button" : "primary-button"}" type="button" data-monday-run-step="${escapeHtml(continueStepId)}" data-dashboard-target="${escapeHtml(continueTarget)}">${run.complete ? "Review" : "Continue"}</button>
       </header>
       <div class="monday-run__progress" role="progressbar" aria-label="Monday Run progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="--monday-run-progress: ${progress}%"></span></div>
-      <ol class="monday-run__steps">
-        ${run.steps.map((step, index) => `
-          <li class="monday-run__step${step.complete ? " monday-run__step--done" : index === run.nextIndex ? " monday-run__step--current" : ""}">
-            <button type="button" data-monday-run-step="${escapeHtml(step.id)}" data-dashboard-target="${escapeHtml(step.target)}"${index === run.nextIndex ? ' aria-current="step"' : ""}>
-              <span>${formatNumber(index + 1)}</span>
-              <strong>${escapeHtml(step.label)}</strong>
-              <small>${escapeHtml(step.complete ? "Done" : step.status)}</small>
-            </button>
-          </li>
-        `).join("")}
-      </ol>
+      <article class="monday-run__focus${run.complete ? " is-complete" : ""}">
+        <button type="button" data-monday-run-step="${escapeHtml(focusStep.id)}" data-dashboard-target="${escapeHtml(focusStep.target)}"${run.complete ? "" : ' aria-current="step"'}>
+          <span>${formatNumber(focusNumber)}</span>
+          <span><small>${run.complete ? "Completed" : "Current step"}</small><strong>${escapeHtml(focusStep.label)}</strong></span>
+          <b>${escapeHtml(run.complete ? "Done" : focusStep.status)}</b>
+        </button>
+      </article>
+      <details class="monday-run__details">
+        <summary>View all ${formatNumber(run.steps.length)} steps</summary>
+        <ol class="monday-run__steps">
+          ${run.steps.map((step, index) => `
+            <li class="monday-run__step${step.complete ? " monday-run__step--done" : index === run.nextIndex ? " monday-run__step--current" : ""}">
+              <button type="button" data-monday-run-step="${escapeHtml(step.id)}" data-dashboard-target="${escapeHtml(step.target)}"${index === run.nextIndex ? ' aria-current="step"' : ""}>
+                <span>${formatNumber(index + 1)}</span>
+                <strong>${escapeHtml(step.label)}</strong>
+                <small>${escapeHtml(step.complete ? "Done" : step.status)}</small>
+              </button>
+            </li>
+          `).join("")}
+        </ol>
+      </details>
     </section>
   `;
 }

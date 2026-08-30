@@ -67,6 +67,23 @@ export function renderFinishWeekPanel({
   message = "",
 } = {}) {
   if (!planLocked) return "";
+  const checklistSections = [
+    {
+      title: "Deliveries Received",
+      description: "Check an item only when the full planned quantity arrived. Use Staff View for shortages, rejections, or extras.",
+      content: renderFinishWeekDeliveries(weeklyOrderTracking),
+    },
+    {
+      title: "Cocktails Prepared",
+      description: "Completing a batch subtracts its mapped ingredients from on-hand inventory.",
+      content: renderFinishWeekChecklistItems(cocktails, "cocktail"),
+    },
+    {
+      title: "Liquor Added",
+      description: "Enter the actual bottles added before checking off the refill.",
+      content: renderFinishWeekChecklistItems(liquor, "liquor"),
+    },
+  ];
   return `
     <section class="finish-week-panel" id="weekly-plan-finish-week" aria-labelledby="finish-week-title">
       <header class="finish-week-header">
@@ -86,21 +103,18 @@ export function renderFinishWeekPanel({
         `).join("")}
       </div>
       <div class="finish-week-checklists">
-        <section>
-          <h3>Deliveries Received</h3>
-          <p>Check an item only when the full planned quantity arrived. Use Staff View for shortages, rejections, or extras.</p>
-          <div class="finish-week-list">${renderFinishWeekDeliveries(weeklyOrderTracking)}</div>
-        </section>
-        <section>
-          <h3>Cocktails Prepared</h3>
-          <p>Completing a batch subtracts its mapped ingredients from on-hand inventory.</p>
-          <div class="finish-week-list">${renderFinishWeekChecklistItems(cocktails, "cocktail")}</div>
-        </section>
-        <section>
-          <h3>Liquor Added</h3>
-          <p>Enter the actual bottles added before checking off the refill.</p>
-          <div class="finish-week-list">${renderFinishWeekChecklistItems(liquor, "liquor")}</div>
-        </section>
+        ${checklistSections.map((item, index) => {
+          const section = progress.sections[index] || { complete: false, completedCount: 0, totalCount: 0 };
+          return `
+            <details class="finish-week-checklist${section.complete ? " is-complete" : ""}"${section.complete ? "" : " open"}>
+              <summary><span>${escapeHtml(item.title)}</span><strong>${formatNumber(section.completedCount)} / ${formatNumber(section.totalCount)}</strong></summary>
+              <div class="finish-week-checklist__body">
+                <p>${escapeHtml(item.description)}</p>
+                <div class="finish-week-list">${item.content}</div>
+              </div>
+            </details>
+          `;
+        }).join("")}
       </div>
       <footer class="finish-week-actions">
         <label>
