@@ -131,19 +131,29 @@ export async function POST(request) {
         && requestedActualQuantity !== Number(target.actualQuantity);
       const stateChanged = Boolean(target)
         && (target.completed !== update.completed || actualQuantityChanged);
-      inventoryPlans.push(await planPrepInventoryContributions({
+      const contributionPlan = await planPrepInventoryContributions({
         target,
         generatedAt: recommendations.generatedAt,
         completed: update.completed,
         actualQuantity: update.actualQuantity,
-      }));
+      });
+      inventoryPlans.push({ kind: target?.kind || "cocktail", plan: contributionPlan });
       changes.push({ target, update, stateChanged });
       updatedRecommendations = nextRecommendations;
     }
 
+    const liquorInventoryReview = inventoryPlans
+      .filter((entry) => entry.kind === "liquor-refill")
+      .flatMap((entry) => Array.isArray(entry.plan?.unmatched) ? entry.plan.unmatched : []);
     const inventoryPlan = {
-      sources: inventoryPlans.flatMap((plan) => Array.isArray(plan?.sources) ? plan.sources : []),
-      unmatched: inventoryPlans.flatMap((plan) => Array.isArray(plan?.unmatched) ? plan.unmatched : []),
+      sources: inventoryPlans.flatMap((entry) => Array.isArray(entry.plan?.sources) ? entry.plan.sources : []),
+      // A missing cocktail recipe remains blocking because its full ingredient
+      // usage is unknown. A liquor refill is different: the staff completion
+      // can be saved safely even when that bottle is not yet represented in the
+      // cabinet inventory catalog. In that case no inventory field is changed.
+      unmatched: inventoryPlans
+        .filter((entry) => entry.kind !== "liquor-refill")
+        .flatMap((entry) => Array.isArray(entry.plan?.unmatched) ? entry.plan.unmatched : []),
     };
     const stateChanged = changes.some((change) => change.stateChanged);
     const actor = sharedPreparedBy || String(updates[0]?.preparedBy || role).replace(/\s+/g, " ").trim().slice(0, 80);
@@ -172,14 +182,20 @@ export async function POST(request) {
         action: "updated staff prep checklist",
         role,
         revision: savedState.revision,
-        summary: `${completedChanges} completed and ${reopenedChanges} reopened by ${actor} for Weekly Plan ${recommendations.generatedAt}.`,
+        summary: `${completedChanges} completed and ${reopenedChanges} reopened by ${actor} for Weekly Plan ${recommendations.generatedAt}.${liquorInventoryReview.length
+          ? ` Bottle inventory mapping needs manager review for ${[...new Set(liquorInventoryReview.map((item) => item.name).filter(Boolean))].join(", ")}.`
+          : ""}`,
         dedupe: true,
       }),
     });
     return jsonResponse({
       available: true,
       message: `${updates.length} checklist item${updates.length === 1 ? "" : "s"} saved.`,
-      inventoryUpdate,
+      inventoryUpdate: {
+        ...inventoryUpdate,
+        reviewRequired: liquorInventoryReview.length > 0,
+        reviewItems: liquorInventoryReview.map((item) => ({ id: item.id, name: item.name })),
+      },
       ...buildStaffPrepPlan(saved.recommendations),
     });
   } catch (error) {

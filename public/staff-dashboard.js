@@ -1044,13 +1044,13 @@ function renderStaffPrepPlan() {
     : "No liquor to add this week.";
 
   if (prepPlan.items.length) {
-    prepList.append(createStaffPrepBatchControls());
+    prepList.append(createStaffPrepBatchControls("cocktail"));
     prepPlan.items.forEach((item) => prepList.append(createStaffPrepItem(item)));
   } else {
     prepList.append(createEmptyState("No cocktails need to be made this week."));
   }
   if (liquorRefills.length) {
-    liquorList.append(createStaffPrepBatchControls());
+    liquorList.append(createStaffPrepBatchControls("liquor-refill"));
     liquorRefills.forEach((item) => liquorList.append(createStaffPrepItem(item)));
   } else {
     liquorList.append(createEmptyState("No liquor needs to be added to kegs this week."));
@@ -1058,9 +1058,16 @@ function renderStaffPrepPlan() {
   updateStaffPrepBatchControls();
 }
 
-function createStaffPrepBatchControls() {
+function getStaffPrepDraftsForKind(kind) {
+  const items = kind === "liquor-refill" ? prepPlan.liquorRefills : prepPlan.items;
+  const itemIds = new Set((Array.isArray(items) ? items : []).map((item) => item.id));
+  return [...staffPrepDrafts.values()].filter((update) => itemIds.has(update.itemId));
+}
+
+function createStaffPrepBatchControls(kind = "cocktail") {
   const form = document.createElement("form");
   form.className = "staff-prep-batch";
+  form.dataset.staffPrepBatchKind = kind;
 
   const copy = document.createElement("div");
   copy.className = "staff-prep-batch__copy";
@@ -1092,7 +1099,7 @@ function createStaffPrepBatchControls() {
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
 
-  const view = { form, nameInput, saveButton, status };
+  const view = { form, nameInput, saveButton, status, kind };
   staffPrepBatchViews.push(view);
   nameInput.addEventListener("input", () => {
     staffPrepBatchName = nameInput.value;
@@ -1105,9 +1112,10 @@ function createStaffPrepBatchControls() {
   return form;
 }
 
-function updateStaffPrepBatchControls({ message = "", state = "" } = {}) {
-  const count = staffPrepDrafts.size;
+function updateStaffPrepBatchControls({ message = "", state = "", kind = "" } = {}) {
   staffPrepBatchViews.forEach((view) => {
+    const count = getStaffPrepDraftsForKind(view.kind).length;
+    const showMessage = !kind || kind === view.kind;
     view.form.setAttribute("aria-busy", String(staffPrepBatchSaving));
     view.nameInput.disabled = staffPrepBatchSaving;
     view.saveButton.disabled = staffPrepBatchSaving || count === 0;
@@ -1116,10 +1124,10 @@ function updateStaffPrepBatchControls({ message = "", state = "" } = {}) {
       : count > 0
         ? `Save ${count} change${count === 1 ? "" : "s"}`
         : "Save selected";
-    view.status.textContent = message || (count > 0
+    view.status.textContent = (showMessage ? message : "") || (count > 0
       ? `${count} change${count === 1 ? "" : "s"} ready to save.`
       : "Select completed items below.");
-    if (state) view.status.dataset.state = state;
+    if (showMessage && state) view.status.dataset.state = state;
     else delete view.status.dataset.state;
   });
 }
@@ -1131,26 +1139,27 @@ function setStaffPrepItemInputsDisabled(disabled) {
 
 async function saveStaffPrepBatch(event) {
   event.preventDefault();
-  if (staffPrepBatchSaving || staffPrepDrafts.size === 0) return;
+  const batchKind = event.currentTarget.dataset.staffPrepBatchKind || "cocktail";
+  const updates = getStaffPrepDraftsForKind(batchKind);
+  if (staffPrepBatchSaving || updates.length === 0) return;
   const preparedBy = clean(staffPrepBatchName);
   if (!preparedBy) {
-    updateStaffPrepBatchControls({ message: "Enter your name before saving the selected items.", state: "error" });
+    updateStaffPrepBatchControls({ message: "Enter your name before saving the selected items.", state: "error", kind: batchKind });
     event.currentTarget.querySelector("input[type='text']")?.focus();
     return;
   }
 
-  const updates = [...staffPrepDrafts.values()];
   const invalidLiquor = updates.find((update) => update.completed
     && update.actualQuantity !== undefined
     && (!Number.isInteger(update.actualQuantity) || update.actualQuantity < 1 || update.actualQuantity > 99));
   if (invalidLiquor) {
-    updateStaffPrepBatchControls({ message: "Enter a valid bottle quantity for every selected liquor refill.", state: "error" });
+    updateStaffPrepBatchControls({ message: "Enter a valid bottle quantity for every selected liquor refill.", state: "error", kind: batchKind });
     return;
   }
 
   staffPrepBatchSaving = true;
   setStaffPrepItemInputsDisabled(true);
-  updateStaffPrepBatchControls({ message: "Saving all selected items..." });
+  updateStaffPrepBatchControls({ message: "Saving all selected items...", kind: batchKind });
   try {
     if (isStaffRehearsalMode()) {
       const timestamp = new Date().toISOString();
@@ -1166,7 +1175,7 @@ async function saveStaffPrepBatch(event) {
       });
       prepPlan.completedCount = prepPlan.items.filter((entry) => entry.completed).length;
       prepPlan.liquorRefillCompletedCount = prepPlan.liquorRefills.filter((entry) => entry.completed).length;
-      staffPrepDrafts.clear();
+      updates.forEach((update) => staffPrepDrafts.delete(update.itemId));
       staffPrepBatchName = preparedBy;
       staffPrepBatchSaving = false;
       renderStaffPrepPlan();
@@ -1199,7 +1208,7 @@ async function saveStaffPrepBatch(event) {
       liquorRefillTotalCount: number(result.liquorRefillTotalCount),
       message: clean(result.message),
     };
-    staffPrepDrafts.clear();
+    updates.forEach((update) => staffPrepDrafts.delete(update.itemId));
     staffPrepBatchName = preparedBy;
     staffPrepBatchSaving = false;
     renderStaffPrepPlan();
@@ -1216,6 +1225,7 @@ async function saveStaffPrepBatch(event) {
     updateStaffPrepBatchControls({
       message: error?.message || "The selected checklist updates could not be saved.",
       state: "error",
+      kind: batchKind,
     });
   }
 }
