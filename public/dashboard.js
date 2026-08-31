@@ -6014,9 +6014,7 @@ function getMondayRunModel(plan, freshness) {
   const inventoryMissingCount = getWeeklyPlanMissingInventoryCount();
   const inventorySaving = inventorySharedSaving
     || inventoryFieldSyncPendingCount > 0
-    || inventoryFieldSyncTimers.size > 0
-    || Object.keys(inventoryFieldOutbox).length > 0
-    || inventoryActionOutbox.length > 0;
+    || inventoryFieldSyncTimers.size > 0;
   const mondaySnapshotSaved = Boolean(getCurrentMondayInventorySnapshot(inventoryHistory, new Date()));
   const planLocked = hasPublishedWeeklyPlanRecommendations();
   const weeklyUsageCaptured = freshness.latestCompletedUsageSaved === true && !weeklyUsageSharedSaveError;

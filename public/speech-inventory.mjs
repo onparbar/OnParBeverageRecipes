@@ -1,3 +1,9 @@
+function normalizeCabinetRecognitionBoundaries(value) {
+  return String(value ?? "")
+    .replace(/\bkahula\b/gi, "kahlua")
+    .replace(/\bfor(?=\s+cold\s+brew\b)/gi, "four");
+}
+
 const NUMBER_WORDS = Object.freeze({
   zero: 0, no: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
   eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
@@ -539,6 +545,7 @@ function resolveContextualAmbiguities(proposals, catalog, sharedWall) {
 }
 
 export function parseInventoryTranscript(transcript, sourceItems = []) {
+  transcript = normalizeCabinetRecognitionBoundaries(transcript);
   const catalog = buildSpeechInventoryCatalog(sourceItems);
   const sharedContext = extractSharedWallContext(transcript);
   const proposals = [];

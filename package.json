@@ -13,6 +13,7 @@
     "test": "node --test tests/*.test.mjs scripts/provi/utils.test.mjs",
     "lint": "eslint . --max-warnings=0",
     "check": "npm test && npm run lint && npm run build:check",
+    "release:prod": "node scripts/release-prod.mjs",
     "check:storage": "node --env-file=.env.local scripts/check-shared-storage.mjs",
     "provi:session": "node scripts/provi/setup_provi_session.mjs",
     "provi:capture": "node scripts/provi/capture_provi_checkout.mjs",

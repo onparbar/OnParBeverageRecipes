@@ -52,6 +52,8 @@ export function buildMondayRunModel({
       ),
       status: inventorySaving
         ? "Saving"
+        : inventorySharedSaveError
+          ? "Retry needed"
         : inventoryMissingCount > 0
           ? `${formatNumber(inventoryMissingCount)} left`
           : inventorySharedInitialized
