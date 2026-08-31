@@ -48,6 +48,11 @@ test("cocktail ingredients prefer the canonical inventory item when duplicate na
   assert.equal(findCatalogItem(catalog, { name: "Tito's" })?.id, "titos");
 });
 
+test("vanilla syrup recipes keep the existing vanilla inventory identity", () => {
+  const catalog = [{ id: "vanilla", name: "Vanilla", baseline: 2 }];
+  assert.equal(findCatalogItem(catalog, { name: "Vanilla Syrup" })?.id, "vanilla");
+});
+
 test("liquor refill policy separates cabinet stock from direct-to-keg products", () => {
   const activeRecipes = [{
     id: "spiked-lemonade",

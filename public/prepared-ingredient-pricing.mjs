@@ -23,8 +23,8 @@ export const PREPARED_INGREDIENT_PURCHASES = Object.freeze({
     purchaseUnitStorageValue: "32",
     purchaseUnitLabel: "32 oz concentrate bottle",
     priceInputLabel: "Concentrate bottle price",
-    finishedYieldOzPerPurchaseUnit: 192,
-    waterOzPerPurchaseUnit: 160,
+    finishedYieldOzPerPurchaseUnit: 32,
+    waterOzPerPurchaseUnit: 0,
   }),
   "blue-dot-juice": Object.freeze({
     ingredientId: "blue-dot-juice",
@@ -96,6 +96,9 @@ export function getPreparedIngredientCost(ingredientId, finishedOunces, packageP
 export function getPreparedIngredientYieldNote(ingredientId) {
   const config = getPreparedIngredientPurchase(ingredientId);
   if (!config) return "";
+  if (!config.waterOzPerPurchaseUnit) {
+    return `${config.purchaseUnitLabel} provides ${formatQuantity(config.finishedYieldOzPerPurchaseUnit)} oz`;
+  }
   const water = config.waterOzPerPurchaseUnit / 128;
   const waterLabel = water === 1 ? "1 gallon water" : `${formatQuantity(water)} gallons water`;
   return `${config.purchaseUnitLabel} makes ${formatQuantity(config.finishedYieldOzPerPurchaseUnit)} oz with ${waterLabel}`;
@@ -108,12 +111,14 @@ export function getPreparedIngredientRecipeAmount(ingredientId, finishedOunces) 
 
   const purchaseUnits = ounces / config.finishedYieldOzPerPurchaseUnit;
   const waterGallons = (purchaseUnits * config.waterOzPerPurchaseUnit) / 128;
-  const waterLabel = `${formatQuantity(waterGallons)} ${waterGallons === 1 ? "gallon" : "gallons"} water`;
+  const waterLabel = waterGallons
+    ? ` + ${formatQuantity(waterGallons)} ${waterGallons === 1 ? "gallon" : "gallons"} water`
+    : "";
 
   if (config.packetsPerPurchaseUnit) {
     const packets = purchaseUnits * config.packetsPerPurchaseUnit;
-    return `${formatQuantity(purchaseUnits)} Starburst ${purchaseUnits === 1 ? "box" : "boxes"} (${formatQuantity(packets)} packets) + ${waterLabel}`;
+    return `${formatQuantity(purchaseUnits)} Starburst ${purchaseUnits === 1 ? "box" : "boxes"} (${formatQuantity(packets)} packets)${waterLabel}`;
   }
 
-  return `${formatQuantity(purchaseUnits)} concentrate ${purchaseUnits === 1 ? "bottle" : "bottles"} (32 oz) + ${waterLabel}`;
+  return `${formatQuantity(purchaseUnits)} concentrate ${purchaseUnits === 1 ? "bottle" : "bottles"} (32 oz)${waterLabel}`;
 }

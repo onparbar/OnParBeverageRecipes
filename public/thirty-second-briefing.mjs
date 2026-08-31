@@ -284,9 +284,16 @@ function homePolishBriefingItems(items, sourceArgs) {
 
   const taps = [...comingSoonTaps.entries()].sort((left, right) => left[0] - right[0]);
   if (taps.length) {
-    const tapLabels = taps.map(([tapNumber, status]) => (
-      `Tap ${tapNumber}- set to coming soon.${status?.onDeck ? ` On Deck: ${status.onDeck}` : ""}`
-    ));
+    const tapLabels = taps.map(([tapNumber]) => `Tap ${tapNumber}- set to coming soon.`);
+    const onDeckSummary = taps
+      .map(([tapNumber, status]) => {
+        if (!status?.onDeck) return "";
+        return taps.length === 1
+          ? `On Deck: ${status.onDeck}`
+          : `Tap ${tapNumber} On Deck: ${status.onDeck}`;
+      })
+      .filter(Boolean)
+      .join(" · ");
     const title = taps.length === 1 ? tapLabels[0] : `${taps.length} taps set to Coming Soon`;
     polished.push({
       ...(coverageTemplate || {}),
@@ -294,8 +301,8 @@ function homePolishBriefingItems(items, sourceArgs) {
       title,
       heading: title,
       label: title,
-      description: "",
-      detail: "",
+      description: onDeckSummary,
+      detail: onDeckSummary,
       message: "",
       body: "",
       bullets: taps.length > 1 ? tapLabels : [],

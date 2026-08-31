@@ -150,7 +150,7 @@ test("cocktails in the employee prep list expand their matching recipe inline", 
 });
 
 test("expanded prep recipes offer optional per-container progress checks", () => {
-  assert.match(staffDashboardSource, /getOptionalIngredientProgress\(ingredient\.raw\)/);
+  assert.match(staffDashboardSource, /getOptionalIngredientProgress\(ingredient\.raw, ingredient\.name\)/);
   assert.match(staffDashboardSource, /for \(let index = 1; index <= progress\.count; index \+= 1\)/);
   assert.match(staffDashboardSource, /label\.textContent = "Optional progress"/);
   assert.match(staffDashboardSource, /checkbox\.setAttribute\("aria-label", `\$\{ingredientName\}: \$\{progress\.unit\} \$\{index\} added`\)/);

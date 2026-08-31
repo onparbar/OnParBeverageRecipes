@@ -173,7 +173,7 @@ export function renderBossDemo(model, { orderWorkspace = "" } = {}) {
   return `
     <section class="boss-demo" aria-labelledby="boss-demo-title">
       <header class="boss-demo__header">
-        <div><p class="eyebrow">Read-only rehearsal</p><h2 id="boss-demo-title">Boss Demo</h2></div>
+        <div><p class="eyebrow">Read-only rehearsal</p><h2 id="boss-demo-title">Rehearsal</h2></div>
         <span class="boss-demo__safe">No live records change</span>
       </header>
       <div class="boss-demo__progress" role="progressbar" aria-valuemin="1" aria-valuemax="${model.stepCount}" aria-valuenow="${model.stepNumber}" aria-label="Boss demo progress"><i style="width:${progress}%"></i></div>

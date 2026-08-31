@@ -775,6 +775,7 @@ export default function DashboardPage() {
                   </details>
                 </div>
                 <details className="inventory-speech" id="inventory-speech-assistant"></details>
+                <button className="ghost-button inventory-clear-on-hand-button" id="clear-inventory-on-hand" type="button">Clear on hand</button>
                 <div className="inventory-table-wrap">
                   <table className="inventory-table inventory-table--stock">
                     <thead>
@@ -868,10 +869,10 @@ export default function DashboardPage() {
             <article class="recipe-card">
               <div class="recipe-card__header">
                 <div>
-                  <p class="recipe-card__batch"></p>
+                  <p class="recipe-card__search-category" aria-hidden="true"></p>
                   <h2></h2>
                 </div>
-                <span class="spirit-pill"></span>
+                <span class="recipe-card__batch-pill"></span>
               </div>
               <div class="recipe-card__actions"></div>
               <div class="recipe-card__numbers"></div>

@@ -2110,11 +2110,11 @@ h1 {
 .dashboard-pulse-story {
   position: relative;
   min-width: 0;
-  min-height: 178px;
+  min-height: 126px;
   overflow: hidden;
   border: 1px solid rgba(24, 33, 31, 0.1);
   border-radius: 20px;
-  padding: 22px;
+  padding: 18px 64px 18px 18px;
   background: var(--paper-strong);
 }
 
@@ -2146,9 +2146,13 @@ h1 {
 }
 
 .dashboard-pulse-story__symbol {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
   display: grid;
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   place-items: center;
   border-radius: 50%;
   color: currentColor;
@@ -2166,7 +2170,7 @@ h1 {
 }
 
 .dashboard-pulse-story p {
-  margin: 18px 0 3px;
+  margin: 0 0 3px;
   color: currentColor;
   font-size: 0.64rem;
   font-weight: 900;
@@ -2183,7 +2187,7 @@ h1 {
 }
 
 .dashboard-pulse-story small {
-  margin-top: 8px;
+  margin-top: 6px;
   color: var(--muted);
   font-size: 0.74rem;
   line-height: 1.42;
@@ -2200,6 +2204,14 @@ h1 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.dashboard-pulse-category-leaders--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.dashboard-pulse-category-leaders--double {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .dashboard-pulse-category-leaders > section,
@@ -3198,6 +3210,10 @@ select {
   margin-bottom: 22px;
 }
 
+#stats-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .stat-card {
   min-height: 112px;
   padding: 18px;
@@ -3284,12 +3300,16 @@ select {
   text-transform: uppercase;
 }
 
-.recipe-card__batch {
-  margin: 0 0 8px;
-  color: var(--tomato);
-  font-size: 0.76rem;
-  font-weight: 800;
-  text-transform: uppercase;
+.recipe-card__search-category {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .recipe-card h2 {
@@ -3304,7 +3324,7 @@ select {
   text-transform: uppercase;
 }
 
-.spirit-pill {
+.recipe-card__batch-pill {
   flex: 0 0 auto;
   max-width: 116px;
   border: 1px solid rgba(31, 95, 84, 0.22);
@@ -3795,7 +3815,7 @@ td {
 
 .pricing-advisor__summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
   gap: 8px;
   margin-bottom: 14px;
 }
@@ -8532,7 +8552,7 @@ td {
   }
 
   .pricing-advisor__summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
   }
 
   .weekly-plan-header {
@@ -9651,6 +9671,26 @@ tbody tr:hover {
   }
 }
 
+.dashboard-overview-status > span {
+  display: none;
+}
+
+#weekly-plan > .weekly-plan-header > div:first-child {
+  display: none;
+}
+
+#weekly-plan > .weekly-plan-header {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#weekly-plan > .weekly-plan-header > div:last-child {
+  width: 100%;
+}
+
+#weekly-plan.weekly-plan--orders-complete > .weekly-plan-readiness--ready {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .panel.is-active {
     animation: none;
@@ -9666,6 +9706,25 @@ tbody tr:hover {
   button[type="submit"] {
     transition: none;
   }
+}
+
+/* The compact Monday module already sits directly below the briefing. */
+.thirty-second-briefing__line--next {
+  display: none !important;
+}
+
+/* With five fixed Monday steps, 80% means the fifth and final step is active. */
+.monday-run--compact:has(.monday-run__progress[aria-valuenow="80"])
+  .monday-run__current-step
+  > span {
+  font-size: 0;
+}
+
+.monday-run--compact:has(.monday-run__progress[aria-valuenow="80"])
+  .monday-run__current-step
+  > span::after {
+  content: "Final step:";
+  font-size: 0.82rem;
 }
 .assisted-order-handoff {
   display: grid;
@@ -10525,5 +10584,790 @@ table.keg-table td:nth-child(5) input {
   #shot-pricing-table > tr > td:nth-child(5) .table-note {
     max-width: 100%;
     white-space: normal;
+  }
+
+  .pricing-advisor .pricing-table-wrap {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  table:has(> tbody#pricing-advisor-table) {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  table:has(> tbody#pricing-advisor-table) > thead {
+    display: none;
+  }
+
+  tbody#pricing-advisor-table {
+    display: grid;
+    gap: 1rem;
+    width: 100%;
+  }
+
+  #pricing-advisor-table > tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.9rem 1rem;
+    width: 100%;
+    padding: 1.1rem;
+    border: 1px solid #d8e2dc;
+    border-radius: 1.15rem;
+    background: #fffdf8;
+    box-shadow: 0 0.45rem 1.2rem rgba(31, 62, 52, 0.07);
+  }
+
+  #pricing-advisor-table > tr > td {
+    display: block;
+    width: auto;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    overflow-wrap: anywhere;
+  }
+
+  #pricing-advisor-table > tr > td:nth-child(2),
+  #pricing-advisor-table > tr > td:nth-child(7),
+  #pricing-advisor-table > tr > td:nth-child(8) {
+    grid-column: 1 / -1;
+  }
+
+  #pricing-advisor-table > tr > td:nth-child(n + 3)::before {
+    display: block;
+    margin-bottom: 0.4rem;
+    color: #6e7d77;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  #pricing-advisor-table > tr > td:nth-child(3)::before {
+    content: "Current";
+  }
+
+  #pricing-advisor-table > tr > td:nth-child(4)::before {
+    content: "Margin";
+  }
+
+  #pricing-advisor-table > tr > td:nth-child(5)::before {
+    content: "Suggested";
+  }
+
+  #pricing-advisor-table > tr > td:nth-child(6)::before {
+    content: "Change";
+  }
+
+  #pricing-advisor-table > tr > td:nth-child(7)::before {
+    content: "Status";
+  }
+
+  #pricing-advisor-table > tr > td:nth-child(8)::before {
+    content: "Update PMB";
+  }
+
+  #pricing-advisor-table .pricing-advisor-status {
+    align-self: flex-start;
+  }
+
+  #pricing-advisor-table .pricing-advisor-action {
+    max-width: 26rem;
+  }
+
+  #pricing-advisor-table > tr > td.empty-state {
+    grid-column: 1 / -1;
+    padding: 1rem;
+  }
+
+  #pricing-advisor-table > tr > td.empty-state::before {
+    display: none;
+  }
+}
+
+#inventory-panel .inventory-clear-on-hand-button {
+  justify-content: center;
+  width: 100%;
+  margin: 10px 0 14px;
+  border-color: rgba(198, 74, 50, 0.34);
+  color: var(--tomato);
+}
+
+/* --------------------------------------------------------------------------
+   Dashboard visual polish
+
+   This layer intentionally changes presentation only. Operational tables keep
+   their information density while the surrounding hierarchy, spacing, and
+   controls share one calmer visual system.
+   -------------------------------------------------------------------------- */
+
+.shell {
+  --ui-surface: rgba(255, 253, 248, 0.94);
+  --ui-surface-strong: #fffdf8;
+  --ui-surface-soft: rgba(240, 246, 241, 0.82);
+  --ui-surface-warm: rgba(250, 244, 229, 0.9);
+  --ui-line: rgba(42, 82, 72, 0.15);
+  --ui-line-strong: rgba(42, 82, 72, 0.28);
+  --ui-shadow: 0 14px 34px rgba(31, 53, 46, 0.07);
+  --ui-shadow-small: 0 7px 18px rgba(31, 53, 46, 0.06);
+  --ui-radius: 22px;
+  --ui-radius-small: 14px;
+  --ui-space: clamp(16px, 2.2vw, 26px);
+}
+
+.topbar {
+  gap: 18px;
+  padding: clamp(18px, 3vw, 30px);
+  border: 1px solid var(--ui-line);
+  border-radius: 28px;
+  box-shadow: var(--ui-shadow);
+}
+
+.topbar h1 {
+  max-width: 100%;
+  margin-inline: auto;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.topbar .top-actions,
+.topbar .dashboard-owner-actions {
+  gap: 10px;
+}
+
+.panel.is-active {
+  animation: dashboard-panel-arrive 220ms ease-out both;
+}
+
+@keyframes dashboard-panel-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.operations-bar {
+  width: min(100%, 1100px);
+  margin: 0 auto var(--ui-space);
+  padding: 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius);
+  background: var(--ui-surface-warm);
+  box-shadow: var(--ui-shadow-small);
+}
+
+.operation-tabs {
+  width: min(100%, 920px);
+  margin-inline: auto;
+  gap: 8px;
+}
+
+.panel > .toolbar {
+  width: min(100%, 1100px);
+  margin: 0 auto var(--ui-space);
+  padding: 16px;
+  border: 1px solid var(--ui-line);
+  border-radius: 18px;
+  background: var(--ui-surface);
+  box-shadow: var(--ui-shadow-small);
+}
+
+.toolbar label,
+.toolbar .field-label {
+  text-align: center;
+}
+
+.keg-layout,
+.inventory-layout,
+.ingredient-layout,
+.pricing-layout {
+  gap: var(--ui-space);
+}
+
+.keg-summary,
+.ingredient-summary,
+.inventory-summary,
+.inventory-snapshots-block,
+.inventory-block,
+.pricing-advisor,
+.weekly-plan-header,
+.finish-week-panel,
+.dashboard-beverage-pulse,
+#search-performance-view {
+  border: 1px solid var(--ui-line) !important;
+  border-radius: var(--ui-radius) !important;
+  background: var(--ui-surface) !important;
+  box-shadow: var(--ui-shadow);
+}
+
+.keg-summary,
+.ingredient-summary,
+.inventory-summary,
+.inventory-snapshots-block,
+.inventory-block,
+.pricing-advisor,
+#search-performance-view {
+  padding: clamp(16px, 2.5vw, 24px) !important;
+}
+
+.keg-summary > h2,
+.ingredient-summary > h2,
+.inventory-summary > h2,
+.inventory-block > h2,
+.pricing-advisor__header h2,
+.weekly-plan-header h2,
+.dashboard-pulse-header h2,
+#search-performance-view > h2 {
+  margin-top: 0;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.sync-status,
+.empty-state,
+.inventory-snapshots-block__hint {
+  line-height: 1.5;
+  text-align: center;
+}
+
+.summary-line {
+  min-height: 48px;
+  padding: 12px 2px;
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.summary-line:last-child {
+  border-bottom: 0;
+}
+
+.keg-summary-stats,
+.pricing-advisor__summary,
+.inventory-history-stats,
+.weekly-plan-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 10px;
+}
+
+.pricing-advisor__summary > *,
+.inventory-history-stats > *,
+.weekly-plan-stats > * {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-small);
+  background: var(--ui-surface-strong);
+  text-align: center;
+}
+
+.primary-button,
+.ghost-button,
+.mini-button,
+.tab-button,
+.operation-tab,
+.dashboard-menu-item,
+.recipe-view-button,
+.inventory-history-toggle,
+.inventory-clear-on-hand-button,
+.keg-clear-on-hand-button {
+  min-height: 44px;
+  border-radius: 13px;
+  transition: transform 150ms ease, box-shadow 150ms ease,
+    border-color 150ms ease, background-color 150ms ease;
+}
+
+.primary-button {
+  box-shadow: 0 8px 18px rgba(33, 89, 75, 0.16);
+}
+
+.ghost-button,
+.mini-button {
+  background: rgba(255, 253, 248, 0.72);
+}
+
+.primary-button:not(:disabled):hover,
+.ghost-button:not(:disabled):hover,
+.mini-button:not(:disabled):hover,
+.tab-button:not(:disabled):hover,
+.operation-tab:not(:disabled):hover,
+.dashboard-menu-item:not(:disabled):hover,
+.recipe-view-button:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(31, 53, 46, 0.1);
+}
+
+.primary-button:disabled,
+.ghost-button:disabled,
+.mini-button:disabled,
+.inventory-clear-on-hand-button:disabled,
+.keg-clear-on-hand-button:disabled {
+  cursor: not-allowed;
+  box-shadow: none;
+  opacity: 0.55;
+}
+
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(47, 119, 99, 0.28);
+  outline-offset: 3px;
+}
+
+input,
+select,
+textarea {
+  border-radius: 12px;
+  transition: border-color 150ms ease, box-shadow 150ms ease,
+    background-color 150ms ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--ui-line-strong);
+  box-shadow: 0 0 0 4px rgba(47, 119, 99, 0.09);
+}
+
+details.pricing-directory,
+details.shot-pricing,
+details.weekly-plan-details,
+details.weekly-plan-phase,
+details.inventory-history-card,
+details.inventory-speech,
+details.custom-inventory-editor {
+  overflow: clip;
+  border: 1px solid var(--ui-line) !important;
+  border-radius: 17px !important;
+  background: var(--ui-surface) !important;
+  box-shadow: var(--ui-shadow-small);
+}
+
+details.pricing-directory > summary,
+details.shot-pricing > summary,
+details.weekly-plan-details > summary,
+details.weekly-plan-phase > summary,
+details.inventory-history-card > summary,
+details.inventory-speech > summary,
+details.custom-inventory-editor > summary {
+  min-height: 58px;
+  padding: 16px 20px;
+  border-radius: inherit;
+}
+
+details.pricing-directory[open] > summary,
+details.shot-pricing[open] > summary,
+details.weekly-plan-details[open] > summary,
+details.weekly-plan-phase[open] > summary,
+details.inventory-history-card[open] > summary,
+details.inventory-speech[open] > summary,
+details.custom-inventory-editor[open] > summary {
+  border-bottom: 1px solid var(--ui-line);
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.pricing-table-wrap,
+.inventory-table-wrap,
+.ingredient-table-wrap,
+.keg-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--ui-line);
+  border-radius: 16px;
+  background: var(--ui-surface-strong);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.7);
+  scrollbar-color: rgba(42, 82, 72, 0.34) transparent;
+  scrollbar-gutter: stable;
+}
+
+#keg-levels-panel table,
+#inventory-panel table,
+#weekly-plan-panel table,
+#weekly-usage-panel table,
+#ingredients-panel table,
+#pricing-panel table,
+#recipes-panel table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+#keg-levels-panel th,
+#inventory-panel th,
+#weekly-plan-panel th,
+#weekly-usage-panel th,
+#ingredients-panel th,
+#pricing-panel th,
+#recipes-panel th {
+  padding: 14px 16px;
+  background: #f3ecdc;
+  color: rgba(31, 62, 54, 0.7);
+  font-size: 0.78rem;
+  letter-spacing: 0.055em;
+  line-height: 1.25;
+  vertical-align: middle;
+}
+
+#keg-levels-panel td,
+#inventory-panel td,
+#weekly-plan-panel td,
+#weekly-usage-panel td,
+#ingredients-panel td,
+#pricing-panel td,
+#recipes-panel td {
+  padding: 14px 16px;
+  line-height: 1.35;
+  vertical-align: middle;
+}
+
+#keg-levels-panel tbody tr,
+#inventory-panel tbody tr,
+#weekly-plan-panel tbody tr,
+#weekly-usage-panel tbody tr,
+#ingredients-panel tbody tr,
+#pricing-panel tbody tr,
+#recipes-panel tbody tr {
+  transition: background-color 120ms ease;
+}
+
+#keg-levels-panel tbody tr:not(.inventory-group-row):hover,
+#inventory-panel tbody tr:not(.inventory-group-row):hover,
+#weekly-plan-panel tbody tr:not(.inventory-group-row):hover,
+#weekly-usage-panel tbody tr:not(.inventory-group-row):hover,
+#ingredients-panel tbody tr:not(.inventory-group-row):hover,
+#pricing-panel tbody tr:not(.inventory-group-row):hover,
+#recipes-panel tbody tr:not(.inventory-group-row):hover {
+  background: rgba(47, 119, 99, 0.035);
+}
+
+.inventory-group-row td,
+.ingredient-group-row td {
+  background: #eaf2ed !important;
+  color: #245d50;
+  letter-spacing: 0.055em;
+}
+
+.dashboard-overview-hero {
+  border: 1px solid rgba(255, 255, 255, 0.17);
+  box-shadow: 0 18px 42px rgba(31, 53, 46, 0.12);
+  text-align: center;
+}
+
+.dashboard-overview-hero__actions {
+  width: min(100%, 980px);
+  margin-inline: auto;
+}
+
+.thirty-second-briefing,
+.monday-run {
+  border: 1px solid var(--ui-line);
+  box-shadow: var(--ui-shadow);
+}
+
+.thirty-second-briefing > h2,
+.monday-run h2 {
+  text-align: center;
+  text-wrap: balance;
+}
+
+.thirty-second-briefing__lines {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.thirty-second-briefing__line {
+  min-height: 116px;
+  padding: 18px;
+  border: 1px solid rgba(42, 82, 72, 0.08);
+  border-radius: 17px;
+}
+
+.thirty-second-briefing__line strong {
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.monday-run {
+  background: rgba(255, 253, 248, 0.88);
+}
+
+.dashboard-beverage-pulse {
+  margin-top: var(--ui-space);
+  padding: clamp(18px, 3vw, 30px);
+}
+
+.dashboard-pulse-header,
+.dashboard-pulse-controls {
+  text-align: center;
+}
+
+.dashboard-pulse-controls {
+  width: min(100%, 820px);
+  margin-inline: auto;
+}
+
+.dashboard-pulse-story,
+.dashboard-pulse-category-leaders,
+.dashboard-pulse-sales-mix {
+  border: 1px solid var(--ui-line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.dashboard-pulse-story {
+  padding: 18px 64px 18px 18px;
+}
+
+.dashboard-pulse-bar {
+  overflow: hidden;
+  border-radius: 999px;
+}
+
+.inventory-snapshots-block__header,
+.inventory-block__header,
+.pricing-advisor__header,
+.finish-week-header {
+  gap: 12px;
+  text-align: center;
+}
+
+.inventory-history-list,
+.finish-week-checklists,
+.weekly-plan-columns,
+.keg-walls {
+  gap: var(--ui-space);
+}
+
+.inventory-history-card {
+  transition: border-color 150ms ease, box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+.inventory-history-card:hover {
+  border-color: var(--ui-line-strong) !important;
+  box-shadow: var(--ui-shadow);
+  transform: translateY(-1px);
+}
+
+.inventory-history-card--latest {
+  background: linear-gradient(145deg, #fffdf8, #f0f6f1) !important;
+}
+
+.inventory-history-heading,
+.inventory-history-heading__label {
+  text-align: center;
+}
+
+.weekly-plan-header {
+  padding: clamp(20px, 3vw, 30px) !important;
+  text-align: center;
+}
+
+.weekly-plan-header .weekly-plan-actions,
+.weekly-plan-header .button-row {
+  justify-content: center;
+}
+
+.finish-week-panel {
+  padding: clamp(18px, 3vw, 28px) !important;
+}
+
+.finish-week-checklist,
+.weekly-plan-column,
+.weekly-plan-group,
+.keg-wall-card {
+  overflow: clip;
+  border: 1px solid var(--ui-line);
+  border-radius: 17px;
+  background: var(--ui-surface-strong);
+  box-shadow: var(--ui-shadow-small);
+}
+
+.finish-week-checklist__body,
+.weekly-plan-group__body,
+.keg-wall-card__body {
+  padding: 16px;
+}
+
+.weekly-plan-readiness {
+  border: 1px solid var(--ui-line);
+  border-radius: 17px !important;
+  box-shadow: var(--ui-shadow-small);
+  text-align: center;
+}
+
+.empty-state {
+  min-height: 120px;
+  padding: 28px 20px;
+  border: 1px dashed var(--ui-line-strong);
+  border-radius: 16px;
+  background: var(--ui-surface-soft);
+}
+
+#search-performance-view {
+  width: min(100%, 1200px);
+  margin-inline: auto;
+}
+
+@media (max-width: 980px) {
+  .keg-layout,
+  .inventory-layout,
+  .ingredient-layout,
+  .pricing-layout {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .keg-summary,
+  .inventory-summary,
+  .ingredient-summary {
+    position: static;
+  }
+
+  .finish-week-checklists,
+  .weekly-plan-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    border-radius: 24px;
+  }
+
+  .operations-bar {
+    padding: 8px;
+  }
+
+  .operation-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .operation-tabs > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+    width: calc(50% - 4px);
+    justify-self: center;
+  }
+
+  .panel > .toolbar {
+    align-items: stretch;
+  }
+
+  .toolbar > * {
+    min-width: 0;
+  }
+
+  .pricing-advisor__summary,
+  .inventory-history-stats,
+  .weekly-plan-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-pulse-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #keg-levels-panel th,
+  #inventory-panel th,
+  #weekly-plan-panel th,
+  #weekly-usage-panel th,
+  #ingredients-panel th,
+  #pricing-panel th,
+  #recipes-panel th,
+  #keg-levels-panel td,
+  #inventory-panel td,
+  #weekly-plan-panel td,
+  #weekly-usage-panel td,
+  #ingredients-panel td,
+  #pricing-panel td,
+  #recipes-panel td {
+    padding: 12px 13px;
+  }
+}
+
+@media (max-width: 560px) {
+  .shell {
+    --ui-radius: 18px;
+    --ui-space: 14px;
+  }
+
+  .topbar,
+  .keg-summary,
+  .ingredient-summary,
+  .inventory-summary,
+  .inventory-snapshots-block,
+  .inventory-block,
+  .pricing-advisor,
+  .weekly-plan-header,
+  .finish-week-panel,
+  .dashboard-beverage-pulse,
+  #search-performance-view {
+    border-radius: 18px !important;
+  }
+
+  .topbar {
+    padding: 16px;
+  }
+
+  .thirty-second-briefing__lines {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .thirty-second-briefing__line {
+    min-height: auto;
+  }
+
+  .pricing-advisor__summary,
+  .inventory-history-stats,
+  .weekly-plan-stats {
+    gap: 8px;
+  }
+
+  .pricing-advisor__summary > *,
+  .inventory-history-stats > *,
+  .weekly-plan-stats > * {
+    padding: 13px 10px;
+  }
+
+  .dashboard-pulse-story,
+  .dashboard-pulse-category-leaders,
+  .dashboard-pulse-sales-mix {
+    border-radius: 15px;
+  }
+
+  details.pricing-directory > summary,
+  details.shot-pricing > summary,
+  details.weekly-plan-details > summary,
+  details.weekly-plan-phase > summary,
+  details.inventory-history-card > summary,
+  details.inventory-speech > summary,
+  details.custom-inventory-editor > summary {
+    padding: 14px 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel.is-active {
+    animation: none;
+  }
+
+  .primary-button,
+  .ghost-button,
+  .mini-button,
+  .tab-button,
+  .operation-tab,
+  .dashboard-menu-item,
+  .recipe-view-button,
+  .inventory-history-card {
+    transition: none;
   }
 }

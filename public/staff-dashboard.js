@@ -370,7 +370,7 @@ if (isStaffRehearsalMode()) {
     const progress = document.querySelector("#staff-demo-progress");
     const reset = document.querySelector("#staff-demo-reset");
     const next = document.querySelector("#staff-demo-next");
-    if (title) title.textContent = "Boss Demo · Staff workflow";
+    if (title) title.textContent = "Rehearsal · Staff workflow";
     if (description) description.textContent = "Try the saved Weekly Plan. Every change stays in this browser tab.";
     if (progress) {
       progress.hidden = false;
@@ -1392,7 +1392,7 @@ function createInlineStaffPrepRecipe(recipe, panelId) {
     amount.textContent = getIngredientAddAmount(ingredient.raw) || `${formatNumber(ingredient.oz)} oz`;
     row.append(name, amount);
     body.append(row);
-    const progress = getOptionalIngredientProgress(ingredient.raw);
+    const progress = getOptionalIngredientProgress(ingredient.raw, ingredient.name);
     if (progress) body.append(createOptionalIngredientProgressRow(ingredient.name, progress));
   });
   table.append(body);
@@ -1400,7 +1400,25 @@ function createInlineStaffPrepRecipe(recipe, panelId) {
   return panel;
 }
 
-function getOptionalIngredientProgress(rawValue) {
+function supportsOptionalIngredientProgress(ingredientName) {
+  const normalizedName = clean(ingredientName)
+    .toLowerCase()
+    .replace(/\bjuice\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return new Set([
+    "cranberry",
+    "sweet tea",
+    "strawberry lemonade",
+    "pink lemonade",
+    "lemonade",
+    "water",
+  ]).has(normalizedName);
+}
+
+function getOptionalIngredientProgress(rawValue, ingredientName) {
+  if (!supportsOptionalIngredientProgress(ingredientName)) return null;
   const amount = getIngredientAddAmount(rawValue);
   const standard = amount.match(/^(\d+)\s*(gallons?|bottles?|btls?|bts|packets?|pitchers?|boxes?|cans?)\b/i);
   const sizedBottles = amount.match(/^(\d+)\s*\([^)]*(?:btls?|bts)\b[^)]*\)/i);

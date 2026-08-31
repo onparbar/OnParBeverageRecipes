@@ -125,6 +125,7 @@ export function buildLastWeekPourLeaders(
   items = [],
   {
     wall = "main",
+    period = 1,
     metric = "oz",
     getFullOunces = () => 0,
     getSellingPricePerOz = () => null,
@@ -147,8 +148,19 @@ export function buildLastWeekPourLeaders(
     });
   });
 
-  const latestTime = Math.max(0, ...labelsByTime.keys());
-  const weekLabel = labelsByTime.get(latestTime) || "";
+  const selectedWeekTimes = [...labelsByTime.keys()]
+    .sort((left, right) => right - left)
+    .slice(0, Math.max(1, Math.floor(Number(period) || 1)));
+  const selectedWeekTimeSet = new Set(selectedWeekTimes);
+  const latestTime = selectedWeekTimes[0] || 0;
+  const latestWeekLabel = labelsByTime.get(latestTime) || "";
+  const earliestWeekLabel = labelsByTime.get(selectedWeekTimes[selectedWeekTimes.length - 1]) || latestWeekLabel;
+  const earliestWeekStart = clean(earliestWeekLabel).split(/\s+-\s+/)[0] || earliestWeekLabel;
+  const latestWeekParts = clean(latestWeekLabel).split(/\s+-\s+/);
+  const latestWeekEnd = latestWeekParts[latestWeekParts.length - 1] || latestWeekLabel;
+  const weekLabel = selectedWeekTimes.length > 1
+    ? `${earliestWeekStart} - ${latestWeekEnd}`
+    : latestWeekLabel;
   const products = new Map();
   const coverage = Object.fromEntries(CATEGORY_ORDER.map((category) => [category, {
     capturedTapCount: 0,
@@ -161,19 +173,29 @@ export function buildLastWeekPourLeaders(
     const inScope = isInSelectedWall(category, itemWall, normalizedWall);
     if (!CATEGORY_ORDER.includes(category) || !inScope) return;
 
-    const pouredValues = (Array.isArray(item?.history) ? item.history : [])
-      .filter((entry) => getWeekStartTime(entry?.label) === latestTime)
-      .map((entry) => getWeeklyUsageEntryPouredOz(item, entry, getFullOunces))
-      .filter((value) => value !== null);
-    const distinctPouredValues = [...new Set(pouredValues)];
-    if (distinctPouredValues.length !== 1 || !(distinctPouredValues[0] > 0)) return;
+    const pouredValuesByWeek = new Map();
+    (Array.isArray(item?.history) ? item.history : []).forEach((entry) => {
+      const time = getWeekStartTime(entry?.label);
+      if (!selectedWeekTimeSet.has(time)) return;
+      const value = getWeeklyUsageEntryPouredOz(item, entry, getFullOunces);
+      if (value === null) return;
+      const values = pouredValuesByWeek.get(time) || [];
+      values.push(value);
+      pouredValuesByWeek.set(time, values);
+    });
+    const pouredOz = [...pouredValuesByWeek.values()].reduce((total, values) => {
+      const distinctValues = [...new Set(values)];
+      return distinctValues.length === 1 && distinctValues[0] > 0
+        ? total + distinctValues[0]
+        : total;
+    }, 0);
+    if (!(pouredOz > 0)) return;
 
-    const pouredOz = distinctPouredValues[0];
     coverage[category].capturedTapCount += 1;
     const sellingPricePerOz = resolveSellingPricePerOz(getSellingPricePerOz, item, {
       category,
       pouredOz,
-      weekLabel,
+      weekLabel: latestWeekLabel,
       weekStartTime: latestTime,
     });
     if (sellingPricePerOz > 0) coverage[category].pricedTapCount += 1;
@@ -187,11 +209,16 @@ export function buildLastWeekPourLeaders(
       category,
       pouredOz: 0,
       projectedSales: 0,
+      kegEquivalent: 0,
       tapCount: 0,
       walls: [],
     };
     existing.pouredOz += pouredOz;
     existing.projectedSales += sellingPricePerOz > 0 ? pouredOz * sellingPricePerOz : 0;
+    const fullOunces = Number(getFullOunces(item));
+    if ((category === "beer" || category === "cocktail") && fullOunces > 0) {
+      existing.kegEquivalent += pouredOz / fullOunces;
+    }
     existing.tapCount += 1;
     if (itemWall && !existing.walls.includes(itemWall)) existing.walls.push(itemWall);
     products.set(key, existing);
@@ -204,6 +231,7 @@ export function buildLastWeekPourLeaders(
         ...row,
         pouredOz: round(row.pouredOz),
         projectedSales: round(row.projectedSales),
+        kegEquivalent: round(row.kegEquivalent),
         value: round(normalizedMetric === "sales" ? row.projectedSales : row.pouredOz),
       }))
       .sort((left, right) => right.value - left.value || left.name.localeCompare(right.name))
@@ -220,6 +248,7 @@ export function buildLastWeekPourLeaders(
     wall: normalizedWall,
     weekLabel,
     weekStartTime: latestTime,
+    periodWeeks: selectedWeekTimes.length,
     sections,
   };
 }
@@ -234,6 +263,7 @@ export function buildLastWeekProjectedSalesMix(
   items = [],
   {
     wall = "main",
+    period = 1,
     getFullOunces = () => 0,
     getSellingPricePerOz = () => null,
   } = {},
@@ -247,40 +277,69 @@ export function buildLastWeekProjectedSalesMix(
       if (!labelsByTime.has(time)) labelsByTime.set(time, clean(entry.label));
     });
   });
-  const latestTime = Math.max(0, ...labelsByTime.keys());
-  const weekLabel = labelsByTime.get(latestTime) || "";
+  const selectedWeekTimes = [...labelsByTime.keys()]
+    .sort((left, right) => right - left)
+    .slice(0, Math.max(1, Math.floor(Number(period) || 1)));
+  const selectedWeekTimeSet = new Set(selectedWeekTimes);
+  const latestTime = selectedWeekTimes[0] || 0;
+  const latestWeekLabel = labelsByTime.get(latestTime) || "";
+  const earliestWeekLabel = labelsByTime.get(selectedWeekTimes[selectedWeekTimes.length - 1]) || latestWeekLabel;
+  const earliestWeekStart = clean(earliestWeekLabel).split(/\s+-\s+/)[0] || earliestWeekLabel;
+  const latestWeekParts = clean(latestWeekLabel).split(/\s+-\s+/);
+  const latestWeekEnd = latestWeekParts[latestWeekParts.length - 1] || latestWeekLabel;
+  const weekLabel = selectedWeekTimes.length > 1
+    ? `${earliestWeekStart} - ${latestWeekEnd}`
+    : latestWeekLabel;
   const categorySales = Object.fromEntries(CATEGORY_ORDER.map((category) => [category, 0]));
+  const wallOrder = ["main", "karaoke", "patio"];
+  const wallLabels = {
+    main: "Main wall",
+    karaoke: "Karaoke wall",
+    patio: "Patio wall",
+  };
+  const wallSales = Object.fromEntries(wallOrder.map((wallKey) => [wallKey, 0]));
+  const selectedWall = clean(wall).toLowerCase();
   let capturedTapCount = 0;
   let pricedTapCount = 0;
   let estimatedTapCount = 0;
 
-  sourceItems
-    .filter((item) => {
+  sourceItems.forEach((item) => {
       const category = resolveCategory(item);
       const itemWall = resolveWall(item);
-      return isInSelectedWall(category, itemWall, clean(wall).toLowerCase());
-    })
-    .forEach((item) => {
+      const inSelectedWall = isInSelectedWall(category, itemWall, selectedWall);
       const entries = (Array.isArray(item?.history) ? item.history : [])
-        .filter((entry) => getWeekStartTime(entry?.label) === latestTime);
-      const pouredValues = entries
-        .map((entry) => getWeeklyUsageEntryPouredOz(item, entry, getFullOunces))
-        .filter((value) => value !== null);
-      const distinctPouredValues = [...new Set(pouredValues)];
-      if (distinctPouredValues.length !== 1) return;
+        .filter((entry) => selectedWeekTimeSet.has(getWeekStartTime(entry?.label)));
+      const pouredValuesByWeek = new Map();
+      entries.forEach((entry) => {
+        const time = getWeekStartTime(entry?.label);
+        const value = getWeeklyUsageEntryPouredOz(item, entry, getFullOunces);
+        if (value === null) return;
+        const values = pouredValuesByWeek.get(time) || [];
+        values.push(value);
+        pouredValuesByWeek.set(time, values);
+      });
+      const pouredOz = [...pouredValuesByWeek.values()].reduce((total, values) => {
+        const distinctValues = [...new Set(values)];
+        return distinctValues.length === 1 && distinctValues[0] > 0
+          ? total + distinctValues[0]
+          : total;
+      }, 0);
+      if (!(pouredOz > 0)) return;
 
-      const pouredOz = distinctPouredValues[0];
-      const category = resolveCategory(item);
       if (!CATEGORY_ORDER.includes(category)) return;
-      capturedTapCount += 1;
       const priceContext = {
         category,
         pouredOz,
-        weekLabel,
+        weekLabel: latestWeekLabel,
         weekStartTime: latestTime,
         entry: entries[0] || null,
       };
       const sellingPricePerOz = resolveSellingPricePerOz(getSellingPricePerOz, item, priceContext);
+      if (wallOrder.includes(itemWall) && sellingPricePerOz > 0) {
+        wallSales[itemWall] += pouredOz * sellingPricePerOz;
+      }
+      if (!inSelectedWall) return;
+      capturedTapCount += 1;
       if (!(sellingPricePerOz > 0)) return;
       pricedTapCount += 1;
       if (priceContext.estimated === true) estimatedTapCount += 1;
@@ -295,17 +354,26 @@ export function buildLastWeekProjectedSalesMix(
     projectedSales: round(categorySales[category]),
     sharePercent: percentages[index],
   }));
+  const wallPercentages = allocateWholePercentages(wallOrder.map((wallKey) => wallSales[wallKey]));
+  const walls = wallOrder.map((wallKey, index) => ({
+    wall: wallKey,
+    label: wallLabels[wallKey],
+    projectedSales: round(wallSales[wallKey]),
+    sharePercent: wallPercentages[index],
+  }));
 
   return {
     available: projectedSales > 0,
     wall: clean(wall).toLowerCase(),
     weekLabel,
     weekStartTime: latestTime,
+    periodWeeks: selectedWeekTimes.length,
     projectedSales,
     capturedTapCount,
     pricedTapCount,
     estimatedTapCount,
     unpricedTapCount: Math.max(0, capturedTapCount - pricedTapCount),
     categories,
+    walls,
   };
 }

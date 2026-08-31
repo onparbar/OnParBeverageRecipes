@@ -96,11 +96,11 @@ export async function POST(request) {
     let inventoryPlan = null;
     let blockedItems = [];
     let receiptVendorId = "";
-    if (["set-receipts", "set-receipt"].includes(body.action)) {
+    if (["set-receipts", "set-selected-receipts", "set-receipt"].includes(body.action)) {
       const proposedTracking = buildWeeklyOrderTracking(updatedRecommendations);
       receiptVendorId = body.vendorId || proposedTracking?.vendors?.find((vendor) => vendor.items.some((item) => item.id === body.itemId))?.id;
       const proposedPlan = await planReceiptInventoryContributions(proposedTracking, receiptVendorId);
-      if (proposedPlan.unmatched.length && body.action === "set-receipts") {
+      if (proposedPlan.unmatched.length && ["set-receipts", "set-selected-receipts"].includes(body.action)) {
         const blockedIds = new Set(proposedPlan.unmatched.map((item) => item.id).filter(Boolean));
         const safeReceipts = (Array.isArray(body.receipts) ? body.receipts : [])
           .filter((receipt) => !blockedIds.has(String(receipt?.itemId || "")));
@@ -149,7 +149,7 @@ export async function POST(request) {
           action: "received vendor delivery",
           role,
           revision: savedState.revision,
-          summary: `${String(trackedVendor?.vendor || "Vendor").slice(0, 80)} delivery reviewed by ${actor} for Weekly Plan ${priorTracking.generatedAt}; ${body.action === "set-receipts" ? (effectiveBody.receipts?.length || 0) : 1} lines updated.`,
+          summary: `${String(trackedVendor?.vendor || "Vendor").slice(0, 80)} delivery reviewed by ${actor} for Weekly Plan ${priorTracking.generatedAt}; ${body.action === "set-receipt" ? 1 : (effectiveBody.receipts?.length || 0)} lines updated.`,
           dedupe: true,
         }),
       });

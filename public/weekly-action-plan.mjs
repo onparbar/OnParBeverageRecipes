@@ -168,6 +168,13 @@ function normalizeInventoryOrders(items) {
         hasCurrentCount: item.hasCurrentCount !== false,
         cocktailPrepRequiredBottles,
         cocktailPrepShortageUnits,
+        neededBeforeThursday: Boolean(
+          item.neededBeforeThursday
+          || item.requiredBeforeThursday
+          || item.neededBeforeNextDelivery
+          || item.requiredBeforeNextDelivery
+          || cocktailPrepShortageUnits > 0
+        ),
         reasons: cocktailPrepShortageUnits > 0
           ? [`Cocktail prep needs ${cocktailPrepRequiredBottles} bottle${cocktailPrepRequiredBottles === 1 ? "" : "s"}; ${number(item.onHand)} counted on hand.`]
           : [],

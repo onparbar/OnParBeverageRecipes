@@ -115,7 +115,7 @@ test("new recipe cards use spirit labels without physical-wall suffixes", () => 
   assert.doesNotMatch(dashboardSource, /\["WHISKEY SMASH", "Whiskey Smash"\]/);
   assert.doesNotMatch(dashboardSource, /\["ON PAR TEE", "On Par Tee"\]/);
   assert.match(dashboardSource, /function getCanonicalProductDisplayName\(/);
-  assert.match(dashboardSource, /getCanonicalProductDisplayName\(item\.orderProductName \|\| item\.name\)/);
+  assert.match(dashboardSource, /getCanonicalProductDisplayName\(item\.name\)/);
   assert.match(dashboardSource, /getCanonicalProductDisplayName\(item\.name\)/);
   assert.match(dashboardSource, /getCanonicalProductDisplayName\(recommendation\.orderProductName\)/);
 });
@@ -362,7 +362,7 @@ test("the initial Dashboard uses a light visual beverage pulse and change-only O
   assert.match(pulseSource, /No liquor pours were saved for the Patio or Karaoke wall last week/);
   assert.match(pulseSource, /Projected sales mix/);
   assert.match(pulseSource, /const projectedSalesMix = buildLastWeekProjectedSalesMix\(/);
-  assert.match(pulseSource, /PMB ounces × saved\/current prices · liquor uses an average/);
+  assert.doesNotMatch(pulseSource, /PMB ounces × saved\/current prices/);
   assert.match(pulseSource, /dashboard-pulse-bar/);
   assert.match(pulseSource, /data-seller-ranking-wall/);
   assert.match(pulseSource, /Main wall/);

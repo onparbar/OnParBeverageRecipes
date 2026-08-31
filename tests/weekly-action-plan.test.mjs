@@ -459,6 +459,7 @@ test("a verified cocktail ingredient shortage remains orderable when its cabinet
 
   assert.equal(plan.orders.liquor.length, 1);
   assert.equal(plan.orders.liquor[0].quantity, 1);
+  assert.equal(plan.orders.liquor[0].neededBeforeThursday, true);
   assert.match(plan.orders.liquor[0].reasons[0], /Cocktail prep needs 4 bottles; 3 counted on hand/);
 });
 

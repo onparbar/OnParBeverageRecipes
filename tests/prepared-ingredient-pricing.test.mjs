@@ -18,10 +18,10 @@ test("prices cold brew by each concentrate bottle while keeping the diluted reci
 
   assert.equal(migrated.bottleOz, "32");
   assert.equal(Number(migrated.bottlePrice), 25.835);
-  assert.equal(getPreparedIngredientCost("cold-brew-coffee", 384, migrated.bottlePrice), 51.67);
+  assert.equal(getPreparedIngredientCost("cold-brew-coffee", 64, migrated.bottlePrice), 51.67);
   assert.equal(
-    getPreparedIngredientRecipeAmount("cold-brew-coffee", 384),
-    "2 concentrate bottles (32 oz) + 2.5 gallons water",
+    getPreparedIngredientRecipeAmount("cold-brew-coffee", 64),
+    "2 concentrate bottles (32 oz)",
   );
 });
 
