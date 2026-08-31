@@ -2,10 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  getActiveComingSoonItems,
   getComingSoonKindLabel,
   mergeRequiredComingSoonItems,
   REQUIRED_COMING_SOON_ITEMS,
 } from "../public/coming-soon-items.mjs";
+
+test("shows only unresolved products in the Coming Soon section", () => {
+  const active = getActiveComingSoonItems([
+    { id: "beer:waiting", name: "Waiting Lager" },
+    { id: "recipe:completed", name: "Completed Cocktail", replacedAt: "2026-08-30T12:00:00.000Z" },
+    null,
+  ]);
+
+  assert.deepEqual(active, [{ id: "beer:waiting", name: "Waiting Lager" }]);
+});
 
 test("keeps the required products in Coming Soon", () => {
   assert.deepEqual(
@@ -30,6 +41,7 @@ test("keeps the required products in Coming Soon", () => {
       recipeId: "vodka-cran-tito-s",
       name: "Vodka Cran (Tito's) 2",
       cloneSourceName: "VODKA CRAN (TITO'S) 1",
+      imageUrl: "/images/products/vodka-cran-2.png",
     },
   );
   assert.equal(merged.some(({ id }) => id === "liquor:don-julio-blanco-2"), false);
@@ -92,6 +104,8 @@ test("removes the mistaken legacy Vodka Cran card in favor of the canonical clon
   assert.equal(merged.some(({ id }) => id === "recipe:vodka-cran-tito-s"), false);
   assert.equal(merged.filter(({ id }) => id === "recipe:vodka-cran-2").length, 1);
   assert.equal(merged.find(({ id }) => id === "recipe:vodka-cran-2")?.cloneSourceName, "VODKA CRAN (TITO'S) 1");
+  assert.equal(merged.find(({ id }) => id === "beer:triple-jam-2")?.imageUrl, "/images/products/triple-jam-cider-2.png");
+  assert.equal(merged.find(({ id }) => id === "recipe:vodka-cran-2")?.imageUrl, "/images/products/vodka-cran-2.png");
 });
 
 test("labels beer, liquor, and cocktail Coming Soon items correctly", () => {

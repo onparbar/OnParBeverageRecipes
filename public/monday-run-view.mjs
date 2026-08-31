@@ -9,7 +9,6 @@ export function buildMondayRunModel({
   inventorySharedSaveError = "",
   mondaySnapshotSaved = false,
   planLocked = false,
-  finishWeek = { complete: false, remainingCount: 0 },
   weeklyUsageCaptured = false,
   pmbRefreshPending = false,
   vendorOrders = [],
@@ -86,17 +85,6 @@ export function buildMondayRunModel({
       complete: tapSheets.length > 0 && tapSheetsToPrint === 0,
       status: tapSheetsToPrint > 0 ? `${formatNumber(tapSheetsToPrint)} left` : tapSheets.length ? "Current" : "Review",
     },
-    {
-      id: "finish",
-      label: "Finish the week",
-      target: "weekly-plan",
-      complete: planLocked && finishWeek.complete,
-      status: !planLocked
-        ? "After plan"
-        : finishWeek.complete
-          ? "Complete"
-          : `${formatNumber(finishWeek.remainingCount)} left`,
-    },
   ];
   const completedCount = steps.filter((step) => step.complete).length;
   const nextIndex = steps.findIndex((step) => !step.complete);
@@ -111,23 +99,24 @@ export function buildMondayRunModel({
 
 export function renderMondayRun(run) {
   const progress = run.steps.length ? Math.round((run.completedCount / run.steps.length) * 100) : 0;
+  const currentStepNumber = run.complete ? run.steps.length : run.nextIndex + 1;
   const continueStepId = run.complete ? "review" : run.nextStep.id;
   const continueTarget = run.complete ? "weekly-plan" : run.nextStep.target;
   const focusStep = run.complete
     ? { id: "review", label: "Review this week", status: "Complete", target: "weekly-plan" }
     : run.nextStep;
-  const focusNumber = run.complete ? run.steps.length : run.nextIndex + 1;
+  const focusNumber = currentStepNumber;
   return `
     <section class="monday-run" aria-labelledby="monday-run-title">
       <header class="monday-run__header">
-        <div><h2 id="monday-run-title">Monday Run</h2><span>${formatNumber(run.completedCount)} / ${formatNumber(run.steps.length)}</span></div>
+        <div><h2 id="monday-run-title">Monday Run</h2><span>Step ${formatNumber(currentStepNumber)} of ${formatNumber(run.steps.length)}</span></div>
         <button class="${run.complete ? "ghost-button" : "primary-button"}" type="button" data-monday-run-step="${escapeHtml(continueStepId)}" data-dashboard-target="${escapeHtml(continueTarget)}">${run.complete ? "Review" : "Continue"}</button>
       </header>
       <div class="monday-run__progress" role="progressbar" aria-label="Monday Run progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="--monday-run-progress: ${progress}%"></span></div>
       <article class="monday-run__focus${run.complete ? " is-complete" : ""}">
         <button type="button" data-monday-run-step="${escapeHtml(focusStep.id)}" data-dashboard-target="${escapeHtml(focusStep.target)}"${run.complete ? "" : ' aria-current="step"'}>
           <span>${formatNumber(focusNumber)}</span>
-          <span><small>${run.complete ? "Completed" : "Current step"}</small><strong>${escapeHtml(focusStep.label)}</strong></span>
+          <span><small>${run.complete ? "Completed" : currentStepNumber === run.steps.length ? "Final step" : "Current step"}</small><strong>${escapeHtml(focusStep.label)}</strong></span>
           <b>${escapeHtml(run.complete ? "Done" : focusStep.status)}</b>
         </button>
       </article>
@@ -151,12 +140,13 @@ export function renderMondayRun(run) {
 
 export function renderMondayRunCompact(run) {
   const progress = run.steps.length ? Math.round((run.completedCount / run.steps.length) * 100) : 0;
+  const currentStepNumber = run.complete ? run.steps.length : run.nextIndex + 1;
   const continueStepId = run.complete ? "review" : run.nextStep.id;
   const continueTarget = run.complete ? "weekly-plan" : run.nextStep.target;
   return `
     <section class="monday-run monday-run--compact" aria-label="Monday Run">
       <header class="monday-run__header">
-        <div><h2>Monday Run</h2><span>${formatNumber(run.completedCount)} / ${formatNumber(run.steps.length)}</span></div>
+        <div><h2>Monday Run</h2><span>Step ${formatNumber(currentStepNumber)} of ${formatNumber(run.steps.length)}</span></div>
         <button class="${run.complete ? "ghost-button" : "primary-button"}" type="button" data-monday-run-step="${escapeHtml(continueStepId)}" data-dashboard-target="${escapeHtml(continueTarget)}">${run.complete ? "Review" : "Continue"}</button>
       </header>
       <p class="monday-run__current-step"><span>${run.complete ? "Complete" : "Next"}:</span> <strong>${escapeHtml(run.complete ? "Review this week" : run.nextStep.label)}</strong></p>

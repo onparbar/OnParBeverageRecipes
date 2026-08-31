@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSafeDashboardNextPath } from "../../lib/dashboard-navigation.mjs";
+import { getDashboardPostLoginPath } from "../../lib/dashboard-navigation.mjs";
 
 export default function LoginPage() {
   const [password, setPassword] = useState("");
@@ -29,8 +29,7 @@ export default function LoginPage() {
       if (!response.ok) throw new Error(result?.error || "Could not log in.");
 
       const params = new URLSearchParams(window.location.search);
-      const nextPath = getSafeDashboardNextPath(params.get("next"));
-      window.location.assign(result?.role === "employee" ? "/staff" : nextPath);
+      window.location.assign(getDashboardPostLoginPath(result?.role, params.get("next")));
     } catch (error) {
       setMessage(error.message || "Could not log in.");
     } finally {

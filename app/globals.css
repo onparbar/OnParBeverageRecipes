@@ -45,6 +45,28 @@
     display: block !important;
   }
 
+  body.tap-sheet-printing,
+  body.tap-sheet-printing .shell,
+  body.tap-sheet-printing main,
+  body.tap-sheet-printing #print-panel,
+  body.tap-sheet-printing #tap-print-workspace,
+  body.tap-sheet-printing .tap-print-workspace,
+  body.tap-sheet-printing .tap-sheet-preview {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+
+  body.tap-sheet-printing main,
+  body.tap-sheet-printing #print-panel {
+    display: block !important;
+  }
+
   body.tap-sheet-printing .tap-print-toolbar,
   body.tap-sheet-printing .tap-print-wall-tabs {
     display: none !important;
@@ -61,12 +83,66 @@
 
   body.tap-sheet-printing .tap-sheet-page.is-print-target {
     display: grid !important;
-    width: 7.8in;
-    height: 10.3in;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0 !important;
+    height: 9.9in;
+    min-height: 0;
+    max-height: 9.9in;
     margin: 0;
     border: 0;
     padding: 0;
+    overflow: hidden;
     box-shadow: none;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  body.tap-sheet-printing .tap-sheet-header {
+    gap: 10px;
+    padding-bottom: 7px;
+  }
+
+  body.tap-sheet-printing .tap-sheet-header h2 {
+    font-size: 22pt;
+  }
+
+  body.tap-sheet-printing .tap-sheet-column-headings {
+    margin-top: 6px;
+    padding: 0 4px 4px;
+    column-gap: 6px;
+    font-size: 6.5pt;
+  }
+
+  body.tap-sheet-printing .tap-sheet-grid {
+    min-width: 0;
+    min-height: 0;
+    column-gap: 12px;
+    overflow: hidden;
+  }
+
+  body.tap-sheet-printing .tap-sheet-row {
+    min-width: 0;
+    padding: 2px 4px;
+    gap: 6px;
+    font-size: 8pt;
+    line-height: 1.05;
+  }
+
+  body.tap-sheet-printing .tap-sheet-row > strong {
+    font-size: 9pt;
+  }
+
+  body.tap-sheet-printing .tap-sheet-row > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  body.tap-sheet-printing .tap-sheet-page footer {
+    padding-top: 5px;
+    font-size: 6.5pt;
   }
 
   .weekly-plan {
@@ -585,6 +661,10 @@ h1 {
   padding: 7px;
   background: var(--paper-strong);
   box-shadow: var(--shadow);
+}
+
+.dashboard-menu:not([open]) > .dashboard-menu-popover {
+  display: none;
 }
 
 .dashboard-menu-item {
@@ -9548,6 +9628,12 @@ tbody tr:hover {
 
   .operation-tab {
     padding-inline: 8px;
+  }
+
+  .operation-tabs .operation-tab:last-child {
+    grid-column: 1 / -1;
+    width: calc(50% - 3px);
+    justify-self: center;
   }
 
   .monday-run__focus button {

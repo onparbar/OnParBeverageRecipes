@@ -113,7 +113,7 @@ test("finish-week views preserve shared checklist controls and escaped labels", 
   assert.match(panel, /Saving\.\.\./);
 });
 
-test("Monday Run model preserves the six operational steps and next-action rules", () => {
+test("Monday Run model preserves the five Monday operational steps and next-action rules", () => {
   const run = buildMondayRunModel({
     kegFeed: { status: "online" },
     pricingFeed: { status: "online" },
@@ -122,14 +122,13 @@ test("Monday Run model preserves the six operational steps and next-action rules
     planActionable: true,
     tapSheets: [{ isCurrent: false }, { isCurrent: true }],
   });
-  assert.equal(run.steps.length, 6);
+  assert.equal(run.steps.length, 5);
   assert.equal(run.completedCount, 2);
   assert.equal(run.nextStep.id, "plan");
   assert.equal(run.steps.find((step) => step.id === "print").status, "1 left");
 
   const locked = buildMondayRunModel({
     planLocked: true,
-    finishWeek: { complete: true, remainingCount: 0 },
     weeklyOrderTrackingAvailable: true,
     vendorOrders: [{ ordered: true }],
     orderLineCount: 3,
@@ -137,7 +136,6 @@ test("Monday Run model preserves the six operational steps and next-action rules
   });
   assert.equal(locked.complete, true);
   assert.equal(locked.steps.find((step) => step.id === "orders").status, "Placed");
-  assert.equal(locked.steps.find((step) => step.id === "finish").status, "Complete");
 });
 
 test("Monday Run renderers keep actionable data attributes and compact next-step text", () => {
@@ -152,5 +150,7 @@ test("Monday Run renderers keep actionable data attributes and compact next-step
   const compact = renderMondayRunCompact(run);
   assert.match(full, /data-monday-run-step="plan"/);
   assert.match(full, /aria-current="step"/);
+  assert.match(full, /Step 3 of 5/);
+  assert.match(compact, /Step 3 of 5/);
   assert.match(compact, /Next:<\/span> <strong>Save &amp; lock plan/);
 });

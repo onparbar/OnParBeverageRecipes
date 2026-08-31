@@ -10,7 +10,10 @@ import {
   requireDashboardRequestRole,
   signDashboardSession,
 } from "../lib/dashboard-auth.mjs";
-import { getSafeDashboardNextPath } from "../lib/dashboard-navigation.mjs";
+import {
+  getDashboardPostLoginPath,
+  getSafeDashboardNextPath,
+} from "../lib/dashboard-navigation.mjs";
 import { createLoginThrottle, getLoginClientKey } from "../lib/login-rate-limit.mjs";
 
 const env = {
@@ -107,6 +110,13 @@ test("allows only same-origin dashboard paths after login", () => {
   assert.equal(getSafeDashboardNextPath("/\\evil.example/steal"), "/");
   assert.equal(getSafeDashboardNextPath("https://evil.example/steal"), "/");
   assert.equal(getSafeDashboardNextPath("invalid", "//evil.example/fallback"), "/");
+});
+
+test("routes recovery owners to admin even when login began on Staff View", () => {
+  assert.equal(getDashboardPostLoginPath("owner", "/staff"), "/");
+  assert.equal(getDashboardPostLoginPath("owner", "/staff?tab=orders"), "/");
+  assert.equal(getDashboardPostLoginPath("owner", "/?tab=inventory"), "/?tab=inventory");
+  assert.equal(getDashboardPostLoginPath("employee", "/"), "/staff");
 });
 
 test("throttles repeated failures and resets after a successful login", () => {

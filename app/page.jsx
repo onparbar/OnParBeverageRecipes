@@ -170,7 +170,7 @@ export default function DashboardPage() {
       <main>
         <section className="panel is-active" id="dashboard-panel" role="tabpanel" aria-labelledby="dashboard-tab">
           <div className="dashboard-overview" id="dashboard-overview"></div>
-          <section className="dashboard-beverage-pulse dashboard-beverage-pulse--compact" id="dashboard-guest-favorites" aria-label="Guest favorites"></section>
+          <section className="dashboard-beverage-pulse" id="dashboard-guest-favorites" aria-label="Guest favorites"></section>
         </section>
 
         <section className="panel" id="search-panel" role="tabpanel" aria-labelledby="search-tab">

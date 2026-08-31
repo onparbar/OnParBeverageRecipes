@@ -186,10 +186,32 @@ function homeComingSoonTime(value) {
   return `${dateLabel} at ${timeLabel}`;
 }
 
+function homeComingSoonOnDeck(value) {
+  const candidate = [
+    value?.onDeck,
+    value?.onDeckName,
+    value?.onDeckProductName,
+    value?.onDeckProduct?.name,
+    value?.replacementName,
+    value?.replacementProductName,
+    value?.nextProductName,
+  ].find((entry) => (
+    (typeof entry === "string" && entry.trim())
+    || (entry && typeof entry === "object" && typeof entry.name === "string" && entry.name.trim())
+  ));
+  const name = clean(typeof candidate === "object" ? candidate?.name : candidate);
+  return name
+    .replace(/\s*\([^)]*\)\s*\d*\s*$/, "")
+    .replace(/\s+\d+\s*$/, "")
+    .trim();
+}
+
 function homeCollectComingSoonTaps(value, taps, seen = new WeakSet()) {
   if (typeof value === "string") {
     const match = value.match(/Tap\s+(\d+)[^\n]*Coming Soon!?/i);
-    if (match) taps.set(Number(match[1]), taps.get(Number(match[1])) || "");
+    if (match && !taps.has(Number(match[1]))) {
+      taps.set(Number(match[1]), { changedAt: "", onDeck: "" });
+    }
     return;
   }
   if (!value || typeof value !== "object" || seen.has(value)) return;
@@ -206,7 +228,11 @@ function homeCollectComingSoonTaps(value, taps, seen = new WeakSet()) {
     value.currentProduct?.name,
   ].find((entry) => typeof entry === "string" && entry.trim()) || "";
   if (Number.isFinite(tapNumber) && tapNumber > 0 && /coming soon/i.test(productName)) {
-    taps.set(tapNumber, homeComingSoonTime(value) || taps.get(tapNumber) || "");
+    const previous = taps.get(tapNumber) || {};
+    taps.set(tapNumber, {
+      changedAt: homeComingSoonTime(value) || previous.changedAt || "",
+      onDeck: homeComingSoonOnDeck(value) || previous.onDeck || "",
+    });
   }
   if (Array.isArray(value)) value.forEach((entry) => homeCollectComingSoonTaps(entry, taps, seen));
   else Object.values(value).forEach((entry) => homeCollectComingSoonTaps(entry, taps, seen));
@@ -217,6 +243,7 @@ function homePolishBriefingItems(items, sourceArgs) {
   sourceArgs.forEach((entry) => homeCollectComingSoonTaps(entry, comingSoonTaps));
   let coverageTemplate = null;
   let pmbAdded = false;
+  let tapSheetPrintingAdded = false;
   const polished = [];
 
   for (const item of items || []) {
@@ -244,6 +271,10 @@ function homePolishBriefingItems(items, sourceArgs) {
       });
       continue;
     }
+    if (/tap sheets need printing/i.test(title)) {
+      if (tapSheetPrintingAdded) continue;
+      tapSheetPrintingAdded = true;
+    }
     if (/taps? (?:are|is) below the 82% floor/i.test(title)) {
       polished.push({ ...item, actionLabel: "Fix" });
       continue;
@@ -253,8 +284,8 @@ function homePolishBriefingItems(items, sourceArgs) {
 
   const taps = [...comingSoonTaps.entries()].sort((left, right) => left[0] - right[0]);
   if (taps.length) {
-    const tapLabels = taps.map(([tapNumber, changedAt]) => (
-      `Tap ${tapNumber} - set to Coming Soon${changedAt ? ` on ${changedAt}` : ""}`
+    const tapLabels = taps.map(([tapNumber, status]) => (
+      `Tap ${tapNumber}- set to coming soon.${status?.onDeck ? ` On Deck: ${status.onDeck}` : ""}`
     ));
     const title = taps.length === 1 ? tapLabels[0] : `${taps.length} taps set to Coming Soon`;
     polished.push({

@@ -150,6 +150,7 @@ import {
 import {
   getComingSoonKindLabel,
   mergeRequiredComingSoonItems,
+  getActiveComingSoonItems,
 } from "./coming-soon-items.mjs";
 import {
   buildUnifiedVendorOrderModel,
@@ -5983,7 +5984,6 @@ function getMondayRunModel(plan, freshness) {
     || inventoryActionOutbox.length > 0;
   const mondaySnapshotSaved = Boolean(getCurrentMondayInventorySnapshot(inventoryHistory, new Date()));
   const planLocked = hasPublishedWeeklyPlanRecommendations();
-  const finishWeek = getFinishWeekProgress();
   const weeklyUsageCaptured = freshness.latestCompletedUsageSaved === true && !weeklyUsageSharedSaveError;
   const pmbRefreshPending = unifiedPmbRefreshRunning
     || kegFeed.status === "loading"
@@ -6004,7 +6004,6 @@ function getMondayRunModel(plan, freshness) {
     inventorySharedSaveError,
     mondaySnapshotSaved,
     planLocked,
-    finishWeek,
     weeklyUsageCaptured,
     pmbRefreshPending,
     vendorOrders,
@@ -6125,6 +6124,7 @@ function renderDashboardOverview() {
       orders: weeklyOrderTracking,
       tapReplacementOverrides,
       comingSoonItems,
+      tapPrintSheets: buildTapWallPrintSheets(),
     });
     const currentOrderVendors = Array.isArray(weeklyOrderTracking.vendors)
       ? weeklyOrderTracking.vendors
@@ -6142,13 +6142,22 @@ function renderDashboardOverview() {
       return true;
     });
 
+    const alertSummary = [
+      overview.alertCounts.critical ? `${formatNumber(overview.alertCounts.critical)} urgent` : "",
+      overview.alertCounts.warning ? `${formatNumber(overview.alertCounts.warning)} to review` : "",
+    ].filter(Boolean).join(" · ") || "All clear";
+    const briefingLines = briefing.lines.filter((item) => !(
+      clean(item.text) === "Tap sheets need printing"
+      && briefing.lines.some((candidate) => /^Next:\s*Print tap sheets\b/i.test(clean(candidate.text)))
+    ));
+
     dashboardOverview.innerHTML = `
     <header class="dashboard-overview-hero dashboard-overview-hero--${escapeHtml(overview.status)}">
       <div class="dashboard-overview-hero__copy">
         <h2>This week</h2>
         <div class="dashboard-overview-status">
           <span>${escapeHtml(overview.statusLabel)}</span>
-          <strong>${formatNumber(overview.alertCounts.critical)} urgent · ${formatNumber(overview.alertCounts.warning)} to review</strong>
+          <strong>${escapeHtml(alertSummary)}</strong>
         </div>
       </div>
       <div class="dashboard-overview-hero__actions">
@@ -6162,7 +6171,7 @@ function renderDashboardOverview() {
         <h2 id="thirty-second-briefing-title">30-second briefing</h2>
       </header>
         <div class="thirty-second-briefing__lines">
-          ${briefing.lines.map((item) => {
+          ${briefingLines.map((item) => {
             const content = `
               <strong>${escapeHtml(item.text)}</strong>
               ${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}
@@ -7525,13 +7534,13 @@ function renderWeeklyPlan() {
       ${renderWeeklyPlanProvenance(freshness)}
     </details>
     <div class="weekly-plan-stats">
-      <div><span>Order lines</span><strong>${formatNumber(summary.orderLineCount)}</strong></div>
+      <div><span>Items to order</span><strong>${formatNumber(summary.orderLineCount)}</strong></div>
       <div><span>Beer kegs</span><strong>${formatNumber(summary.beerKegTotal)}</strong></div>
-      <div><span>Liquor tap bottles</span><strong>${formatNumber(summary.liquorTapBottleTotal)}</strong></div>
-      <div><span>Cocktail kegs to make</span><strong>${formatNumber(summary.cocktailBatchTotal)}</strong></div>
+      <div><span>Bottles for liquor taps</span><strong>${formatNumber(summary.liquorTapBottleTotal)}</strong></div>
+      <div><span>Cocktails to make</span><strong>${formatNumber(summary.cocktailBatchTotal)}</strong></div>
       <div class="${simpleSyrupNeed.complete ? "" : "weekly-plan-stat--warning"}"><span>Simple syrup</span><strong>${simpleSyrupNeed.complete ? `${formatNumber(simpleSyrupNeed.gallons)} gal` : "Check recipes"}</strong>${simpleSyrupNeed.complete ? `<small>${formatNumber(simpleSyrupNeed.totalOz)} oz</small>` : `<small>${formatNumber(simpleSyrupNeed.unmatched.length)} unmatched cocktail${simpleSyrupNeed.unmatched.length === 1 ? "" : "s"}</small>`}</div>
-      <div><span>Held for review</span><strong>${formatNumber(summary.heldLineCount + summary.excludedLineCount)}</strong></div>
-      <div class="${summary.estimatedPurchaseCostComplete ? "" : "weekly-plan-stat--warning"}"><span>Plan purchase estimate</span><strong>${money(summary.estimatedKnownPurchaseCost)}</strong>${summary.missingPriceCount ? `<small>${formatNumber(summary.missingPriceCount)} missing price${summary.missingPriceCount === 1 ? "" : "s"}</small>` : ""}</div>
+      ${summary.heldLineCount + summary.excludedLineCount > 0 ? `<div><span>Held for review</span><strong>${formatNumber(summary.heldLineCount + summary.excludedLineCount)}</strong></div>` : ""}
+      <div class="${summary.estimatedPurchaseCostComplete ? "" : "weekly-plan-stat--warning"}"><span>Estimated purchase</span><strong>${money(summary.estimatedKnownPurchaseCost)}</strong>${summary.missingPriceCount ? `<small>${formatNumber(summary.missingPriceCount)} missing price${summary.missingPriceCount === 1 ? "" : "s"}</small>` : ""}</div>
     </div>
     ${priceNote ? `<p class="weekly-plan-cost-note">${escapeHtml(priceNote)}</p>` : ""}
     <div class="weekly-plan-columns${planLocked ? " weekly-plan-columns--locked" : ""}">
@@ -7676,7 +7685,7 @@ function renderKegLevels() {
       wallNames.find((wallName) => wallName.toLowerCase() === activeKegWallFilter) || "Main",
       kegWallItems.filter((item) => item.wall.toLowerCase() === activeKegWallFilter),
     );
-  const activeComingSoonCount = comingSoonItems.filter((item) => !item.replacedAt).length;
+  const activeComingSoonCount = getActiveComingSoonItems(comingSoonItems).length;
   kegWalls.dataset.activeWallFilter = activeKegWallFilter;
   kegWalls.innerHTML = `
     <nav class="keg-wall-switcher" aria-label="Choose a keg wall">
@@ -7724,9 +7733,7 @@ function renderKegLevels() {
 }
 
 function renderComingSoonBlock() {
-  const activeItems = comingSoonItems.filter((item) => !item.replacedAt);
-  const archivedItems = comingSoonItems.filter((item) => item.replacedAt).slice(-5);
-  const items = [...activeItems, ...archivedItems];
+  const items = getActiveComingSoonItems(comingSoonItems);
 
   return `
     <section class="keg-wall-card coming-soon-card">
@@ -7735,8 +7742,7 @@ function renderComingSoonBlock() {
           <h2>Coming Soon</h2>
         </div>
         <div class="keg-wall-card__meta">
-          <strong>${activeItems.length} waiting</strong>
-          <span class="keg-wall-card__badge">${archivedItems.length} replaced</span>
+          <strong>${items.length} waiting</strong>
         </div>
       </div>
       ${items.length ? `
@@ -7755,7 +7761,6 @@ function renderComingSoonItem(item) {
   const imageUrl = getComingSoonImageUrl(item);
   const currentMargin = toNumber(item.targetMargin) || DEFAULT_BEER_TARGET_MARGIN;
   const currentPrice = getGeneratedBeerChargePerOz(item.kegCost, currentMargin);
-  const replacement = item.replaceTapKey ? tapReplacementOverrides[item.replaceTapKey] : null;
   return `
     <article class="coming-soon-item" data-coming-soon-id="${escapeHtml(item.id)}">
       ${imageUrl ? `<img class="coming-soon-item__image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(item.name)}">` : ""}
@@ -7764,7 +7769,6 @@ function renderComingSoonItem(item) {
           <strong>${escapeHtml(item.name)}</strong>
           <span>${escapeHtml(getComingSoonKindLabel(item.kind))}</span>
         </div>
-        ${item.description ? `<p>${escapeHtml(getComingSoonCardDescription(item.description))}</p>` : ""}
         ${isRecipe ? renderComingSoonRecipeStats(item) : ""}
         ${isLiquor ? renderComingSoonLiquorDetails(item) : ""}
         ${isBeer ? `
@@ -7780,7 +7784,6 @@ function renderComingSoonItem(item) {
         ${isRecipe ? `
           <div class="coming-soon-controls">
             <button class="mini-button send-coming-soon-pmb" type="button">${item.plu ? "Update PMB product" : "Create PMB product"}</button>
-            ${item.plu ? `<span class="table-note table-note--accent">PMB PLU ${escapeHtml(item.plu)}</span>` : ""}
           </div>
         ` : ""}
         <div class="coming-soon-controls">
@@ -7795,7 +7798,6 @@ function renderComingSoonItem(item) {
             </select>
           </label>
           <button class="primary-button replace-coming-soon" type="button"${item.replacedAt ? " disabled" : ""}>Replace wall product</button>
-          ${item.replacedAt ? `<span class="table-note table-note--accent">Replaced ${escapeHtml(replacement?.oldBrand || "wall product")} on ${escapeHtml(replacement?.tapLabel || "tap")}.</span>` : ""}
         </div>
       </div>
     </article>

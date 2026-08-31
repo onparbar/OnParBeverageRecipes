@@ -24,6 +24,7 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
     kind: "beer",
     name: "Triple Jam Cider 2",
     cloneSourceName: "TRIPLE JAM CIDER 1",
+    imageUrl: "/images/products/triple-jam-cider-2.png",
   }),
   Object.freeze({
     id: "recipe:vodka-cran-2",
@@ -31,6 +32,7 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
     recipeId: "vodka-cran-tito-s",
     name: "Vodka Cran (Tito's) 2",
     cloneSourceName: "VODKA CRAN (TITO'S) 1",
+    imageUrl: "/images/products/vodka-cran-2.png",
   }),
 ]);
 
@@ -83,6 +85,12 @@ export function getComingSoonKindLabel(kind, { compact = false } = {}) {
   if (normalized === "beer") return compact ? "beer" : "Beer keg";
   if (normalized === "liquor") return compact ? "liquor" : "Liquor tap";
   return compact ? "cocktail" : "Cocktail recipe";
+}
+
+export function getActiveComingSoonItems(items = []) {
+  return Array.isArray(items)
+    ? items.filter((item) => item && typeof item === "object" && !clean(item.replacedAt))
+    : [];
 }
 
 export function mergeRequiredComingSoonItems(items = [], pmbPublishQueue = []) {
