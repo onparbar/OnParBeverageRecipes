@@ -390,16 +390,42 @@ function getTransactionRangePayload(range) {
   };
 }
 
-function buildWeeklyReport(range, transactions, productByPlu, context) {
+function getPreThursdayTransactionRangePayload(range) {
+  const thursdayDelivery = new Date(range.start);
+  thursdayDelivery.setDate(thursdayDelivery.getDate() + 3);
+  thursdayDelivery.setHours(9, 0, 0, 0);
+  return {
+    start_time: `${formatDate(range.start)}T00:00:00${formatOffset(range.start)}`,
+    end_time: `${formatDate(thursdayDelivery)}T09:00:00${formatOffset(thursdayDelivery)}`,
+  };
+}
+
+function getWeeklyUsageItemKey(item) {
+  return item?.tapNumber ? `tap:${item.tapNumber}` : `plu:${item?.plu || 0}`;
+}
+
+function buildWeeklyReport(range, transactions, preThursdayTransactions, productByPlu, context) {
+  const preThursdayItemsByKey = new Map(
+    buildPhysicalWeeklyUsageItems(preThursdayTransactions, productByPlu, context)
+      .map((item) => [getWeeklyUsageItemKey(item), item]),
+  );
   const items = buildPhysicalWeeklyUsageItems(transactions, productByPlu, context)
     .map((item) => {
+      const preThursdayVolumeOz = Math.round(
+        Number(preThursdayItemsByKey.get(getWeeklyUsageItemKey(item))?.volumeOz || 0) * 100,
+      ) / 100;
       if (item.tapNumber) {
-        return { ...item, volumeOz: Math.round(item.volumeOz * 100) / 100 };
+        return {
+          ...item,
+          volumeOz: Math.round(item.volumeOz * 100) / 100,
+          preThursdayVolumeOz,
+        };
       }
       const tap = getMatchedTap(item.name, item.plu, context);
       return {
         ...item,
         volumeOz: Math.round(item.volumeOz * 100) / 100,
+        preThursdayVolumeOz,
         tapNumber: tap?.tapNumber || null,
         wall: tap?.wall || "",
         type: tap?.type || "",
@@ -502,9 +528,20 @@ export async function GET(request) {
       );
     }
 
-    const transactionResults = await Promise.all(ranges.map((range) => (
-      postJson(config.baseUrl, "/api/transactions", { id: config.clientId, ...getTransactionRangePayload(range) }, token)
-    )));
+    const [transactionResults, preThursdayTransactionResults] = await Promise.all([
+      Promise.all(ranges.map((range) => (
+        postJson(config.baseUrl, "/api/transactions", { id: config.clientId, ...getTransactionRangePayload(range) }, token)
+      ))),
+      Promise.all(ranges.map((range) => (
+        postJson(config.baseUrl, "/api/transactions", { id: config.clientId, ...getPreThursdayTransactionRangePayload(range) }, token)
+      ))),
+    ]);
+
+    preThursdayTransactionResults.forEach((transactions, index) => {
+      if (transactions.status !== 200 || !Array.isArray(transactions.json?.taptransactions)) {
+        throw new Error(`PMB pre-Thursday transactions failed for ${formatShortDate(ranges[index].start)} (${transactions.status})`);
+      }
+    });
 
     const minimumPositiveRows = getSparseWeekPositiveRowThreshold(currentTaps.length);
     const reviewWeeks = [];
@@ -578,10 +615,11 @@ export async function GET(request) {
     const reports = ranges.map((range, index) => buildWeeklyReport(
       range,
       transactionResults[index].json.taptransactions,
+      preThursdayTransactionResults[index].json.taptransactions,
       productByPlu,
       context,
     ));
-    const primaryReport = reports[reports.length - 1] || buildWeeklyReport(getLastCompletedWeekRange(), [], productByPlu, context);
+    const primaryReport = reports[reports.length - 1] || buildWeeklyReport(getLastCompletedWeekRange(), [], [], productByPlu, context);
 
     return NextResponse.json({
       ...primaryReport,

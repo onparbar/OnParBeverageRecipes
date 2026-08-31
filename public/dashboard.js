@@ -9229,6 +9229,9 @@ function applyPmbWeeklyUsageReport(report) {
       hasValue: true,
       source: "PMB",
       volumeOz: Math.round(toNumber(match.volumeOz) * 100) / 100,
+      preThursdayVolumeOz: Number.isFinite(Number(match.preThursdayVolumeOz))
+        ? Math.round(Number(match.preThursdayVolumeOz) * 100) / 100
+        : null,
       ...getWeeklyUsagePriceSnapshot({
         ...item,
         tapNumber: match.tapNumber ?? item.tapNumber,
@@ -9337,6 +9340,9 @@ function applyCurrentTapZeroUsageRows(label, reportItems, usedReportIds) {
       hasValue: true,
       source: "PMB",
       volumeOz: 0,
+      preThursdayVolumeOz: Number.isFinite(Number(reportItem.preThursdayVolumeOz))
+        ? Math.round(Number(reportItem.preThursdayVolumeOz) * 100) / 100
+        : 0,
       ...getWeeklyUsagePriceSnapshot({
         ...item,
         tapNumber: reportItem.tapNumber ?? item.tapNumber,
@@ -9413,6 +9419,9 @@ function archivePmbWeeklyUsageReportItem(reportItem, label) {
     hasValue: true,
     source: "PMB",
     volumeOz: Math.round(volumeOz * 100) / 100,
+    preThursdayVolumeOz: Number.isFinite(Number(reportItem.preThursdayVolumeOz))
+      ? Math.round(Number(reportItem.preThursdayVolumeOz) * 100) / 100
+      : null,
     ...getWeeklyUsagePriceSnapshot({
       ...(existing || {}),
       tapNumber,
