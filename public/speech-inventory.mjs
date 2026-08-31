@@ -26,9 +26,13 @@ export function normalizeSpeechInventoryText(value) {
     .replace(/\bfor\s+(?=bacardi\b)/g, "four ")
     .replace(/\bto\s+(?=makers\s+mark\b)/g, "two ")
     .replace(/\b(?:course|cores)\b/g, "coors")
-    .replace(/\bmiller\s+light\b/g, "miller lite")
+    .replace(/\bmiller\s+lights?\b/g, "miller lite")
     .replace(/\bpaps?\s+blue\s+ribbon\b/g, "pabst blue ribbon")
     .replace(/\b(?:scentsy|sensei|cincinnati)\s+light\b/g, "cincy light")
+    .replace(/\b(?:yingling|yueng\s+ling)\b/g, "yuengling")
+    .replace(/\btruce\b/g, "truth")
+    .replace(/\b(?:door\s+under|dort\s+munder)\b/g, "dortmunder")
+    .replace(/\boktober\s*fest\b/g, "octoberfest")
     .replace(/\bdortmund+er\b/g, "dortmunder")
     .replace(/\bgarage\s+(?:rear|bear|we\s+are)\s+regular\b/g, "regular garage beer")
     .replace(/\bgarage\s+for\s+(?:your|you)\s+lime\b/g, "garage beer lime")
@@ -88,10 +92,14 @@ function catalogAliases(item) {
   }
   if (normalizedName.includes("pabst blue ribbon")) spokenAliases.push("pbr");
   if (normalizedName.includes("coors light")) spokenAliases.push("coors");
+  if (normalizedName.includes("yuengling")) spokenAliases.push("yuengling", "yingling");
   if (normalizedName.includes("kona big wave")) spokenAliases.push("kona");
   if (normalizedName.includes("garage beer lime")) spokenAliases.push("garage lime");
   if (normalizedName.includes("voodoo ranger juicy haze")) spokenAliases.push("voodoo juicy haze", "juicy haze");
   if (normalizedName.includes("dortmunder gold")) spokenAliases.push("dortmunder", "dortmunder gold");
+  if (normalizedName.includes("truth")) spokenAliases.push("truth", "truce");
+  if (normalizedName.includes("stella artois")) spokenAliases.push("stella");
+  if (normalizedName.includes("octoberfest")) spokenAliases.push("octoberfest", "oktoberfest");
   if (normalizedName.includes("guinness draught")) spokenAliases.push("guinness");
   if (normalizedName.includes("triple jam cider")) spokenAliases.push("triple jam");
   if (normalizedName.includes("truly wild berry")) spokenAliases.push("truly");
@@ -162,6 +170,22 @@ function findAliasOccurrences(text, catalog) {
   return selected.sort((left, right) => left.start - right.start);
 }
 
+function normalizeQuantityHomophones(value, catalog) {
+  const text = String(value || "");
+  const aliasStarts = new Set(findAliasOccurrences(text, catalog).map((match) => match.start));
+  return text.replace(/\bto\b/g, (token, offset) => {
+    let nextStart = offset + token.length;
+    while (text[nextStart] === " ") nextStart += 1;
+    return aliasStarts.has(nextStart) ? "two" : token;
+  });
+}
+
+function cleanSplitClause(value) {
+  return String(value || "")
+    .replace(/\s+(?:add|plus)\s*$/, "")
+    .trim();
+}
+
 function findSpokenQuantityStart(value) {
   const tokens = [...String(value || "").matchAll(/[a-z0-9.]+/g)];
   for (let index = 0; index < tokens.length; index += 1) {
@@ -205,7 +229,7 @@ function findIncrementStart(value) {
 }
 
 function splitQuantityFirstTranscript(transcript, catalog) {
-  const text = normalizeSpeechInventoryText(transcript);
+  const text = normalizeQuantityHomophones(normalizeSpeechInventoryText(transcript), catalog);
   const matches = findAliasOccurrences(text, catalog);
   const quantityStarts = findQuantityClauseStarts(text, catalog);
   if (quantityStarts.length >= 2 && quantityStarts[0] <= (matches[0]?.start ?? text.length)) {
@@ -216,9 +240,8 @@ function splitQuantityFirstTranscript(transcript, catalog) {
     });
     const clauseStarts = [...new Set([...quantityStarts, ...incrementStarts])]
       .sort((left, right) => left - right);
-    return clauseStarts.map((start, index) => text
-      .slice(start, clauseStarts[index + 1] ?? text.length)
-      .trim())
+    return clauseStarts.map((start, index) => cleanSplitClause(text
+      .slice(start, clauseStarts[index + 1] ?? text.length)))
       .filter(Boolean);
   }
   if (matches.length < 2) return null;
@@ -231,9 +254,8 @@ function splitQuantityFirstTranscript(transcript, catalog) {
   const supported = starts.filter((start) => start !== null).length;
   if (starts[0] === null || supported < Math.ceil(matches.length * 0.75)) return null;
   const resolvedStarts = starts.map((start, index) => start ?? matches[index].start);
-  return resolvedStarts.map((start, index) => text
-    .slice(start, resolvedStarts[index + 1] ?? text.length)
-    .trim())
+  return resolvedStarts.map((start, index) => cleanSplitClause(text
+    .slice(start, resolvedStarts[index + 1] ?? text.length)))
     .filter(Boolean);
 }
 
@@ -243,7 +265,7 @@ function splitTranscript(transcript, catalog) {
   return String(transcript || "")
     .split(/[,;\n.]+/)
     .flatMap((rawPart) => {
-      const part = normalizeSpeechInventoryText(rawPart);
+      const part = normalizeQuantityHomophones(normalizeSpeechInventoryText(rawPart), catalog);
       if (!part) return [];
       const matches = findAliasOccurrences(part, catalog);
       if (matches.length < 2) return [part];
@@ -274,6 +296,16 @@ function stripListLeadIn(value) {
     .trim();
 }
 
+function startsWithAdditionalQuantity(value) {
+  const text = stripListLeadIn(normalizeSpeechInventoryText(value))
+    .replace(/^(?:please\s+)?(?:add|plus)\s+/, "");
+  const tokens = text.split(" ");
+  const moreIndex = tokens.indexOf("more");
+  if (moreIndex < 1 || moreIndex >= tokens.length - 1) return false;
+  const quantity = parseSpokenInventoryNumber(tokens.slice(0, moreIndex).join(" "));
+  return quantity !== null && quantity <= 500;
+}
+
 function extractQuantityAndProduct(clause, catalog = []) {
   let text = stripListLeadIn(normalizeSpeechInventoryText(clause))
     .replace(/^(?:oh\s+)?(?:whoops|oops)\s+/, "")
@@ -286,6 +318,14 @@ function extractQuantityAndProduct(clause, catalog = []) {
   const rawUnit = unitMatch?.[1] || "";
   const unit = /^(?:ounce|ounces|oz)$/.test(rawUnit) ? "oz" : rawUnit.replace(/s$/, "") || "unit";
   text = text.replace(/\b(cases?|bottles?|kegs?|units?|ounces?|oz)\b/g, " ").replace(/\s+/g, " ").trim();
+  const additionalText = text.replace(/^(?:please\s+)?(?:add|plus)\s+/, "");
+  const additionalTokens = additionalText.split(" ");
+  const moreIndex = additionalTokens.indexOf("more");
+  if (moreIndex > 0 && moreIndex < additionalTokens.length - 1) {
+    const quantity = parseSpokenInventoryNumber(additionalTokens.slice(0, moreIndex).join(" "));
+    const product = additionalTokens.slice(moreIndex + 1).join(" ").replace(/^(?:of|for)\s+/, "").trim();
+    if (quantity !== null && quantity <= 500 && product) return { product, quantity, unit };
+  }
   const noMatch = text.match(/^(?:i have\s+)?no\s+(.+)$/);
   if (noMatch) return { product: noMatch[1], quantity: 0, unit };
   const markerMatch = [...text.matchAll(/\b(to|is|has)\b/g)].pop();
@@ -363,6 +403,34 @@ function extractSharedWallContext(transcript) {
   return { wall: "", transcript: source };
 }
 
+function speechEditDistance(leftValue, rightValue) {
+  const left = String(leftValue || "");
+  const right = String(rightValue || "");
+  if (!left) return right.length;
+  if (!right) return left.length;
+  let prior = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        prior[rightIndex] + 1,
+        prior[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+    }
+    prior = current;
+  }
+  return prior[right.length];
+}
+
+function speechAliasSimilarity(leftValue, rightValue) {
+  const left = normalizeSpeechInventoryText(leftValue).replace(/\s+/g, "");
+  const right = normalizeSpeechInventoryText(rightValue).replace(/\s+/g, "");
+  const longest = Math.max(left.length, right.length);
+  if (Math.min(left.length, right.length) < 4 || !longest) return 0;
+  return 1 - (speechEditDistance(left, right) / longest);
+}
+
 function matchProduct(productText, unit, catalog) {
   const product = normalizeSpeechInventoryText(productText);
   const requestedWall = product.match(/\b(main|patio|karaoke)(?: wall)?\b/)?.[1] || "";
@@ -380,7 +448,28 @@ function matchProduct(productText, unit, catalog) {
     }), 0);
     return score ? [{ item, score }] : [];
   }).sort((left, right) => right.score - left.score || left.item.name.localeCompare(right.item.name));
-  if (!candidates.length) return { status: "unmatched", candidates: [] };
+  if (!candidates.length) {
+    const fuzzyCandidates = catalog.flatMap((item) => {
+      if (target && item.target !== target) return [];
+      if (requestedWall && item.target === "keg" && normalizeSpeechInventoryText(item.wall) !== requestedWall) return [];
+      const similarity = Math.max(...item.aliases.map((alias) => speechAliasSimilarity(withoutWall, alias)), 0);
+      return similarity >= 0.68 ? [{ item, similarity }] : [];
+    }).sort((left, right) => right.similarity - left.similarity || left.item.name.localeCompare(right.item.name));
+    if (!fuzzyCandidates.length) return { status: "unmatched", candidates: [] };
+    const strongest = fuzzyCandidates[0];
+    const closeMatches = fuzzyCandidates
+      .filter((candidate) => strongest.similarity - candidate.similarity < 0.08)
+      .slice(0, 5);
+    if (strongest.similarity < 0.84 || closeMatches.length > 1) {
+      return { status: "ambiguous", candidates: closeMatches.map((candidate) => candidate.item) };
+    }
+    return {
+      status: "matched",
+      item: strongest.item,
+      confidence: "medium",
+      candidates: [strongest.item],
+    };
+  }
   const best = candidates.filter((candidate) => candidate.score === candidates[0].score);
   if (best.length > 1) return { status: "ambiguous", candidates: best.map((candidate) => candidate.item) };
   return { status: "matched", item: best[0].item, confidence: best[0].score >= 1000 ? "high" : "medium", candidates: [best[0].item] };
@@ -460,7 +549,8 @@ export function parseInventoryTranscript(transcript, sourceItems = []) {
     const actionableClause = stripListLeadIn(normalizeSpeechInventoryText(clause));
     const skipped = /^(skip|leave)\b/.test(actionableClause);
     const correction = /^(actually|change|set)\b/.test(actionableClause);
-    const increment = /^(?:i\s+(?:need|want)\s+to\s+)?(?:oh\s+)?(?:whoops|oops)?\s*(?:please\s+)?(?:add\s+(?:another|one\s+more)|plus\s+(?:another|one))\b/.test(actionableClause);
+    const increment = /^(?:i\s+(?:need|want)\s+to\s+)?(?:oh\s+)?(?:whoops|oops)?\s*(?:please\s+)?(?:add\s+(?:another|one\s+more)|plus\s+(?:another|one))\b/.test(actionableClause)
+      || startsWithAdditionalQuantity(actionableClause);
     const extracted = extractQuantityAndProduct(clause.replace(/^(skip|leave)\s+/, ""), catalog);
     if (correction && /^(actually make|change|set)\s+that\b/.test(clause)) {
       const prior = [...proposals].reverse().find((proposal) => proposal.status === "matched");
