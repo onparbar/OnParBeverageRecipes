@@ -441,6 +441,7 @@ export function evaluateWeeklyPlanReadiness({
   const currentTime = parseTime(now) || Date.now();
   const operatingWeekCurrent = isRecommendationForOperatingWeek(generatedTime, currentTime);
   const publishedPlanLocked = lockedForWeek && operatingWeekCurrent;
+  const newOperatingWeekStarted = Boolean(generatedTime && !operatingWeekCurrent);
 
   if (!publishedPlanLocked && !parInitialized) blockers.push("Shared Keg Levels setup is incomplete.");
   if (!publishedPlanLocked && !inventoryInitialized) blockers.push("Shared inventory setup is incomplete.");
@@ -449,14 +450,14 @@ export function evaluateWeeklyPlanReadiness({
   if (!publishedPlanLocked && inventorySavePending) blockers.push("Inventory changes are still saving.");
   if (!publishedPlanLocked && inventorySaveError) blockers.push(`The latest inventory save failed: ${clean(inventorySaveError)}`);
   if (!publishedPlanLocked && !weeklyUsageInitialized) blockers.push("Shared Weekly Usage setup is incomplete.");
-  if (!publishedPlanLocked && weeklyUsageSavePending) blockers.push("Weekly Usage changes are still saving.");
-  if (!publishedPlanLocked && weeklyUsageSaveError) blockers.push(`The latest Weekly Usage save failed: ${clean(weeklyUsageSaveError)}`);
+  if (!publishedPlanLocked && !newOperatingWeekStarted && weeklyUsageSavePending) blockers.push("Weekly Usage changes are still saving.");
+  if (!publishedPlanLocked && !newOperatingWeekStarted && weeklyUsageSaveError) blockers.push(`The latest Weekly Usage save failed: ${clean(weeklyUsageSaveError)}`);
   if (!generatedTime) blockers.push("Keg and prep recommendations have not been generated.");
   if (!publishedPlanLocked && recommendationInventoryMissing) blockers.push("Keg backup/on-hand counts are incomplete, so ordering is held.");
   if (!publishedPlanLocked && missingInventoryCount > 0) {
     blockers.push(`${missingInventoryCount} inventory item${missingInventoryCount === 1 ? " is" : "s are"} using an old baseline instead of a current saved count.`);
   }
-  if (!publishedPlanLocked && recommendationError) blockers.push(`The latest update failed: ${clean(recommendationError)}`);
+  if (!publishedPlanLocked && !newOperatingWeekStarted && recommendationError) blockers.push(`The latest update failed: ${clean(recommendationError)}`);
 
   if (!publishedPlanLocked && weeklyUsageInitialized && !latestCompletedUsageSaved) {
     staleReasons.push("The latest completed Monday-Sunday usage report is not saved.");

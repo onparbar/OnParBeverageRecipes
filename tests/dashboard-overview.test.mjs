@@ -209,7 +209,7 @@ test("a complete current week does not alert for expected new-tap exclusions", (
   assert.equal(overview.kpis.find((item) => item.id === "usage-coverage"), undefined);
 });
 
-test("a real reporting gap still produces a week-over-week alert when new taps are also present", () => {
+test("reporting gaps stay out of the operational briefing even when new taps are also present", () => {
   const signals = readySignals();
   signals.usage.performance.comparableCount = 99;
   signals.usage.performance.trendComplete = false;
@@ -222,10 +222,8 @@ test("a real reporting gap still produces a week-over-week alert when new taps a
   const overview = buildDashboardOverview(signals, { now });
   const alert = overview.alerts.find((item) => item.id === "weekly-usage-trend-incomplete");
 
-  assert.equal(alert.title, "Week-over-week comparison excludes 1 tap");
-  assert.equal(alert.details.length, 1);
-  assert.match(alert.details[0], /Established Gap/);
-  assert.doesNotMatch(alert.details[0], /New Cocktail/);
+  assert.equal(alert, undefined);
+  assert.equal(overview.kpis.find((item) => item.id === "usage-coverage"), undefined);
 });
 
 test("shared setup failures alert without a duplicate shared-save warning", () => {

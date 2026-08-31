@@ -8836,12 +8836,15 @@ async function loadSharedWeeklyUsageState() {
           const recovered = await queueSharedWeeklyUsageSave();
           if (recovered) return;
         } else {
-          weeklyUsageSharedOutbox = markOperationalOutboxFailure(weeklyUsageSharedOutbox, {
-            conflict: true,
-            currentRevision: state.revision,
-            message: `Shared Weekly Usage is now revision ${state.revision}, but this browser's recovery copy was based on revision ${weeklyUsageSharedOutbox.baseRevision}.`,
-          });
+          // Weekly Usage is reproducible from PMB, so a newer shared revision is
+          // authoritative. Keeping an older browser recovery copy here creates a
+          // permanent false blocker even though no unique inventory input is lost.
+          weeklyUsageSharedOutbox = null;
           saveWeeklyUsageSharedOutbox();
+          applySharedWeeklyUsageState(state);
+          weeklyUsageSharedSaveError = "";
+          weeklyUsageSharedMessage = "Loaded the newest shared Weekly Usage.";
+          return;
         }
         weeklyUsageSharedSaveError = weeklyUsageSharedOutbox?.lastError || "Pending Weekly Usage recovery needs review.";
         weeklyUsageSharedMessage = weeklyUsageSharedOutbox?.conflict
@@ -11620,14 +11623,27 @@ async function runKegParAgent() {
   renderWeeklyPlan();
 
   try {
-    const result = await requestParAgentState({
+    const buildRunRequest = () => ({
         action: "run",
         expectedRevision: parAgentState.revision,
         onHandOverrides: getShareableKegOnHandOverrides(),
         parOverrides: kegParOverrides,
         onDeckOverrides: getShareableKegOnDeckOverrides(),
         settings: getParAgentSettings(),
-      }, PAR_AGENT_RUN_REQUEST_TIMEOUT_MS);
+      });
+    let result;
+    try {
+      result = await requestParAgentState(buildRunRequest(), PAR_AGENT_RUN_REQUEST_TIMEOUT_MS);
+    } catch (error) {
+      if (error.code !== "KEG_STATE_REVISION_CONFLICT") throw error;
+
+      const latestState = await requestParAgentState();
+      applyParAgentState(latestState);
+      parAgentMessage = "Keg Levels changed while PMB was refreshing. Using the newest shared counts and finishing the update...";
+      renderKegLevels();
+      renderWeeklyPlan();
+      result = await requestParAgentState(buildRunRequest(), PAR_AGENT_RUN_REQUEST_TIMEOUT_MS);
+    }
 
     applyParAgentState(result);
     parAgentInputsChangedAt = "";
@@ -11636,7 +11652,7 @@ async function runKegParAgent() {
     return true;
   } catch (error) {
     parAgentError = error.code === "KEG_STATE_REVISION_CONFLICT"
-      ? "Another manager changed Keg Levels first. Reload before running the agent again."
+      ? "Keg Levels changed again while PMB was refreshing. Press Refresh PMB once more."
       : error.message || "Could not run par agent.";
     parAgentMessage = parAgentError;
     return false;

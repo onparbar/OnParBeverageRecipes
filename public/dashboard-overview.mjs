@@ -542,20 +542,6 @@ function buildUsageAlerts(usage, ageState) {
       details: exclusionDetails,
       action: makeAction("Complete Weekly Usage", DASHBOARD_OVERVIEW_TARGETS.weeklyUsage),
     }));
-  } else if (!usage.trendComplete && (!usage.previousLabel || excludedCount > 0)) {
-    alerts.push(makeAlert({
-      id: "weekly-usage-trend-incomplete",
-      severity: "warning",
-      priority: 72,
-      title: usage.comparableCount > 0
-        ? `Week-over-week comparison excludes ${formatCount(excludedCount)} ${plural(excludedCount, "tap")}`
-        : "Week-over-week trend coverage is incomplete",
-      message: usage.previousLabel
-        ? partialMovementCopy
-        : "The current PMB week is complete, but there is not yet a complete prior PMB week for comparison.",
-      details: exclusionDetails,
-      action: makeAction("Review Beverage Trends", DASHBOARD_OVERVIEW_TARGETS.weeklyUsage),
-    }));
   }
 
   if (ageState === "stale") {
