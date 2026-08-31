@@ -5854,10 +5854,15 @@ function getPmbKegLevelOverviewFeed() {
       && row?.fillLevelPercent != null
       && Number.isFinite(Number(row.fillLevelPercent));
   }).length;
+  const hasCompleteSnapshot = Boolean(kegUpdatedAt)
+    && expectedCount > 0
+    && capturedCount === expectedCount;
   const status = kegSyncLoading
     ? "loading"
     : kegLiveLevelsStale
-      ? "offline"
+      ? hasCompleteSnapshot
+        ? "stale"
+        : "offline"
     : kegUpdatedAt
       ? capturedCount < expectedCount
         ? "partial"
