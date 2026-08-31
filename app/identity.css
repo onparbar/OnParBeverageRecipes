@@ -1,8 +1,10 @@
 .topbar h1.has-dashboard-identity {
-  align-items: baseline;
+  align-items: center;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem 0.85rem;
+  flex-direction: column;
+  gap: 0.55rem;
+  justify-content: center;
+  text-align: center;
 }
 
 .dashboard-current-user {
@@ -27,8 +29,9 @@
 
 @media (max-width: 720px) {
   .topbar h1.has-dashboard-identity {
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    width: 100%;
   }
 
   .dashboard-current-user {

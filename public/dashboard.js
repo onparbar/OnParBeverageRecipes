@@ -279,7 +279,8 @@ const INVENTORY_FIELD_OUTBOX_STORAGE_KEY = "cocktail-dashboard-inventory-field-o
 const INVENTORY_ACTION_OUTBOX_STORAGE_KEY = "cocktail-dashboard-inventory-action-outbox";
 const KEG_LEVELS_OUTBOX_STORAGE_KEY = "cocktail-dashboard-keg-levels-outbox";
 const OWNER_PROFILE_MARKER_STORAGE_KEY = "cocktail-dashboard-owner-profile-marker";
-const WEEKLY_USAGE_SYNC_LOOKBACK_WEEKS = 12;
+const WEEKLY_USAGE_SYNC_LOOKBACK_WEEKS = 52;
+const PMB_WEEKLY_USAGE_REQUEST_BATCH_SIZE = 12;
 const SHARED_DASHBOARD_FIELD_PATHS = Object.freeze([
   "pricing.ingredientPriceOverrides",
   "pricing.kegPriceOverrides",
@@ -293,6 +294,7 @@ const SHARED_DASHBOARD_FIELD_PATHS = Object.freeze([
   "products.comingSoonItems",
   "products.tapReplacementOverrides",
   "monitoring.ohioComplianceAcknowledgement",
+  "monitoring.comingSoonFollowUps",
 ]);
 const SHARED_DASHBOARD_IMPORT_PHRASE = "IMPORT FROM SERVICE COMPUTER";
 const INVENTORY_SHARED_IMPORT_PHRASE = "IMPORT INVENTORY FROM SERVICE COMPUTER";
@@ -414,8 +416,8 @@ const DEFAULT_PRICE_OVERRIDES = {
     updatedAt: "OHLQ pricing 2026-07-25",
   },
   vanilla: {
-    bottleOz: "1",
-    bottlePrice: "0.31",
+    bottleOz: "25",
+    bottlePrice: "13.12",
     updatedAt: "Default pricing",
   },
 };
@@ -709,7 +711,7 @@ const INVENTORY_CABINET_ORDER = [
   "Apple Schnapps",
   "Creme de Cacao",
   "Kahlua",
-  "Cold Brew",
+  "Cold Brew Concentrate",
   "Sour Mix",
 ];
 const DEFAULT_BATCH_LABEL = "12 gallon keg";
@@ -1114,6 +1116,7 @@ let dashboardSharedState = {
   },
   monitoring: {
     ohioComplianceAcknowledgement: {},
+    comingSoonFollowUps: {},
   },
 };
 let dashboardSharedSyncStatus = "loading";
@@ -1245,6 +1248,7 @@ let pricingAdvisorShowAll = false;
 let beverageNewsPayload = null;
 let beverageNewsLoading = false;
 let ohioComplianceAcknowledgement = {};
+let comingSoonFollowUps = {};
 let tapWallPrintAcknowledgements = {};
 let activeTapPrintWall = "main";
 let sellerRankingWall = "main";
@@ -1525,6 +1529,9 @@ function normalizeDashboardSharedState(state = {}) {
       ohioComplianceAcknowledgement: isPlainDashboardRecord(monitoring.ohioComplianceAcknowledgement)
         ? cloneDashboardStateValue(monitoring.ohioComplianceAcknowledgement)
         : {},
+      comingSoonFollowUps: isPlainDashboardRecord(monitoring.comingSoonFollowUps)
+        ? cloneDashboardStateValue(monitoring.comingSoonFollowUps)
+        : {},
     },
   };
 }
@@ -1657,6 +1664,7 @@ function getSharedDashboardImportSnapshot() {
     },
     monitoring: {
       ohioComplianceAcknowledgement: {},
+      comingSoonFollowUps: {},
     },
   };
 }
@@ -1734,6 +1742,7 @@ function getSharedDashboardConfigSnapshot() {
         ...cloneDashboardStateValue(ohioComplianceAcknowledgement),
         tapWallPrints: cloneDashboardStateValue(tapWallPrintAcknowledgements),
       },
+      comingSoonFollowUps: cloneDashboardStateValue(comingSoonFollowUps),
     },
   };
 }
@@ -2088,6 +2097,9 @@ function applySharedDashboardState(rawState) {
   ohioComplianceAcknowledgement = cloneDashboardStateValue(
     effectiveState.monitoring?.ohioComplianceAcknowledgement || {},
   );
+  comingSoonFollowUps = cloneDashboardStateValue(
+    effectiveState.monitoring?.comingSoonFollowUps || {},
+  );
   tapWallPrintAcknowledgements = isPlainDashboardRecord(ohioComplianceAcknowledgement.tapWallPrints)
     ? cloneDashboardStateValue(ohioComplianceAcknowledgement.tapWallPrints)
     : {};
@@ -2438,6 +2450,7 @@ function getDashboardSharedFieldLabel(path) {
     "products.comingSoonItems": "coming-soon products",
     "products.tapReplacementOverrides": "tap replacements",
     "monitoring.ohioComplianceAcknowledgement": "Ohio compliance review status",
+    "monitoring.comingSoonFollowUps": "Coming Soon follow-up status",
   }[path] || path;
 }
 
@@ -2832,6 +2845,7 @@ function scheduleSharedDashboardStateSync(...slices) {
       "products.comingSoonItems",
       "products.tapReplacementOverrides",
       "monitoring.ohioComplianceAcknowledgement",
+      "monitoring.comingSoonFollowUps",
     ].includes(slice))
     .forEach((slice) => dashboardSharedPendingSlices.add(slice));
   if (dashboardSharedPatchScheduled) return;
@@ -3099,6 +3113,12 @@ function bindEvents() {
       }
       const target = event.target.closest("[data-dashboard-target]");
     if (!target) return;
+    const comingSoonContact = clean(target.dataset.dashboardTarget)
+      .match(/^coming-soon-contact:(\d+)$/i);
+    if (comingSoonContact) {
+      acknowledgeComingSoonStarkDraftContact(comingSoonContact[1]);
+      return;
+    }
     if (target.dataset.mondayRunStep) {
       openMondayRunStep(target.dataset.mondayRunStep, target.dataset.dashboardTarget);
       return;
@@ -3924,6 +3944,7 @@ function getWallCocktailRecipeCoverage() {
       const context = getKegCostContext(item, displayBrand);
       if (context.kind !== "cocktail") return null;
       const productName = getKegDisplayName(context.livePrice?.name || displayBrand || item.brand);
+      if (/^coming soon\b/i.test(clean(productName))) return null;
       const inactiveRecipe = context.recipe ? null : findRecipeForWallProduct(getInactiveRecipes(), productName);
       return {
         item,
@@ -3969,7 +3990,7 @@ function findRecipeForWallProduct(sourceRecipes, productName) {
 function renderRecipeCoverageAlert() {
   if (!recipeCoverageAlert || !kegWallItems.length) return;
   const coverage = getWallCocktailRecipeCoverage();
-  const missingRecipes = coverage.missing.filter((item) => !/^coming soon\b/i.test(clean(item?.name)));
+  const missingRecipes = coverage.missing;
   const actionableTapCount = coverage.coveredTaps + missingRecipes.length;
   recipeCoverageAlert.hidden = false;
   recipeCoverageAlert.classList.toggle("is-complete", missingRecipes.length === 0);
@@ -4996,25 +5017,14 @@ function renderIngredientSummary(visibleIngredientsInput = ingredients.filter((i
   const kegTrackedValue = sum(visibleKegs.map((item) => getKegPrice(item)));
 
   ingredientSummary.innerHTML = `
-    <h2>Pricing</h2>
-    <div class="sync-panel">
-      <h3>Price Sync</h3>
-      <label class="sync-field">
-        <span>Vendor scope</span>
-        <select id="vendor-sync-scope">
-          <option value="all"${vendorSyncScope === "all" ? " selected" : ""}>All mapped vendors</option>
-          <option value="Provi"${vendorSyncScope === "Provi" ? " selected" : ""}>Provi</option>
-          <option value="OHLQ"${vendorSyncScope === "OHLQ" ? " selected" : ""}>OHLQ</option>
-        </select>
-      </label>
-      <div class="sync-actions">
-      </div>
-      <p class="sync-status">${escapeHtml(vendorSyncMessage)}</p>
-    </div>
-    <div class="summary-line"><span>Mapped to vendors</span><strong>${countVendorMappings(visibleIngredients)}</strong></div>
-    <div class="summary-line"><span>Beer kegs tracked</span><strong>${visibleKegs.length}</strong></div>
-    <div class="summary-line"><span>Keg catalog value</span><strong>${money(kegTrackedValue)}</strong></div>
-    <div class="summary-line"><span>Estimated catalog cost</span><strong>${money(sum(visibleIngredients.map((item) => getCatalogCost(item))))}</strong></div>
+    <label class="sync-field">
+      <span>Vendor</span>
+      <select id="vendor-sync-scope">
+        <option value="all"${vendorSyncScope === "all" ? " selected" : ""}>All mapped vendors</option>
+        <option value="Provi"${vendorSyncScope === "Provi" ? " selected" : ""}>Provi</option>
+        <option value="OHLQ"${vendorSyncScope === "OHLQ" ? " selected" : ""}>OHLQ</option>
+      </select>
+    </label>
   `;
 
   bindIngredientSummaryEvents();
@@ -6077,6 +6087,64 @@ function openMondayRunStep(stepId, target) {
   });
 }
 
+function formatComingSoonFollowUpTime(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function normalizeComingSoonBriefingItem(item) {
+  const title = clean(item?.text || item?.title || item?.heading || item?.label);
+  const match = title.match(/^Tap\s+(\d+)-\s*(?:set to coming soon\.?|Coming Soon)$/i);
+  if (!match) return item;
+
+  const tapNumber = Number(match[1]);
+  const followUp = comingSoonFollowUps[String(tapNumber)] || {};
+  const contactedAt = clean(followUp.contactedAt);
+  const contactedBy = clean(followUp.contactedBy);
+  const contactedTime = formatComingSoonFollowUpTime(contactedAt);
+  const contactDetail = contactedAt
+    ? `Stark Draft contacted${contactedBy ? ` by ${contactedBy}` : ""}${contactedTime ? ` · ${contactedTime}` : ""}`
+    : "";
+  const detail = [clean(item.detail || item.description), contactDetail]
+    .filter(Boolean)
+    .join("\n");
+  const normalizedTitle = `Tap ${tapNumber}- Coming Soon`;
+
+  return {
+    ...item,
+    text: normalizedTitle,
+    title: normalizedTitle,
+    heading: normalizedTitle,
+    label: normalizedTitle,
+    description: detail,
+    detail,
+    actionLabel: contactedAt ? "" : "Contacted Stark Draft",
+    target: contactedAt ? (item.target || "keg-levels") : `coming-soon-contact:${tapNumber}`,
+  };
+}
+
+function acknowledgeComingSoonStarkDraftContact(value) {
+  const tapNumber = Number(value);
+  if (!Number.isFinite(tapNumber) || tapNumber <= 0) return;
+  const contactedBy = clean(window.onParDashboardIdentity?.name) || "Manager";
+  comingSoonFollowUps = {
+    ...comingSoonFollowUps,
+    [String(tapNumber)]: {
+      tapNumber,
+      contactedAt: new Date().toISOString(),
+      contactedBy,
+    },
+  };
+  scheduleSharedDashboardStateSync("monitoring.comingSoonFollowUps");
+  renderDashboardOverview();
+}
+
 function renderDashboardOverview() {
   if (dashboardRenderCoordinator.defer("overview", renderDashboardOverview)) return;
   if (!dashboardOverview || isEmployeeDashboard) return;
@@ -6167,33 +6235,21 @@ function renderDashboardOverview() {
       return true;
     });
 
-    const alertSummary = [
-      overview.alertCounts.critical ? `${formatNumber(overview.alertCounts.critical)} urgent` : "",
-      overview.alertCounts.warning ? `${formatNumber(overview.alertCounts.warning)} to review` : "",
-    ].filter(Boolean).join(" · ") || "All clear";
     const briefingLines = briefing.lines.filter((item) => !(
       clean(item.text) === "Tap sheets need printing"
       && briefing.lines.some((candidate) => /^Next:\s*Print tap sheets\b/i.test(clean(candidate.text)))
-    ));
+    )).map(normalizeComingSoonBriefingItem);
 
     dashboardOverview.innerHTML = `
-    <header class="dashboard-overview-hero dashboard-overview-hero--${escapeHtml(overview.status)}">
+    <header class="dashboard-overview-hero dashboard-overview-hero--${escapeHtml(overview.status)} dashboard-overview-hero--compact">
       <div class="dashboard-overview-hero__copy">
         <h2>This week</h2>
-        <div class="dashboard-overview-status">
-          <span>${escapeHtml(overview.statusLabel)}</span>
-          <strong>${escapeHtml(alertSummary)}</strong>
-        </div>
-      </div>
-      <div class="dashboard-overview-hero__actions">
-        <button class="primary-button" type="button" data-dashboard-target="weekly-plan">Open Weekly Plan</button>
-        <button class="ghost-button" type="button" data-dashboard-target="keg-levels">Check Keg Levels</button>
       </div>
     </header>
 
     <section class="thirty-second-briefing" aria-labelledby="thirty-second-briefing-title">
       <header>
-        <h2 id="thirty-second-briefing-title">30-second briefing</h2>
+        <h2 id="thirty-second-briefing-title">Beverage Brief</h2>
       </header>
         <div class="thirty-second-briefing__lines">
           ${briefingLines.map((item) => {
@@ -6587,18 +6643,20 @@ function renderDashboardPulseStory({ tone, symbol, eyebrow, item, copy, emptyCop
   `;
 }
 
-function renderDashboardPulseLeaderList(rows, metric, emptyMessage) {
+function renderDashboardPulseLeaderList(rows, metric, emptyMessage, periodWeeks = 1) {
   if (!rows.length) return `<p class="dashboard-pulse-empty">${escapeHtml(emptyMessage)}</p>`;
   const highestValue = Math.max(...rows.map((row) => toNumber(row.value)), 1);
+  const weekDivisor = Math.max(1, Math.floor(toNumber(periodWeeks)) || 1);
   return `<ol class="dashboard-pulse-bars dashboard-pulse-bars--valued">${rows.map((row, index) => {
     const width = Math.max(12, Math.round((toNumber(row.value) / highestValue) * 100));
-    const kegEquivalent = toNumber(row.kegEquivalent);
+    const averageWeeklyValue = toNumber(row.value) / weekDivisor;
+    const kegEquivalent = toNumber(row.kegEquivalent) / weekDivisor;
     const kegSuffix = metric === "oz"
       && ["beer", "cocktail"].includes(row.category)
       && kegEquivalent > 0
       ? ` · ${formatNumber(kegEquivalent)} keg`
       : "";
-    const value = metric === "sales" ? money(row.value) : `${formatNumber(row.value)} oz${kegSuffix}`;
+    const value = metric === "sales" ? money(averageWeeklyValue) : `${formatNumber(averageWeeklyValue)} oz${kegSuffix}`;
     return `
       <li style="grid-template-columns: 1fr; gap: 6px;">
         <div><span>${String(index + 1).padStart(2, "0")}</span><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(value)}</small></div>
@@ -6613,7 +6671,7 @@ function renderDashboardPulseCategoryLeaders({
   categories = ["beer", "cocktail", "liquor"],
 }) {
   const metric = pourLeaders.metric;
-  const metricLabel = metric === "sales" ? "$" : "Oz";
+  const metricLabel = metric === "sales" ? "Avg $ / week" : "Avg / week";
   const categorySettings = {
     beer: {
       title: "Top beers",
@@ -6644,7 +6702,12 @@ function renderDashboardPulseCategoryLeaders({
         return `
           <section aria-labelledby="${headingId}">
             <div class="dashboard-pulse-leader-heading"><h3 id="${headingId}">${settings.title}</h3><small>${metricLabel}</small></div>
-            ${renderDashboardPulseLeaderList(pourLeaders.sections[category].rows, metric, settings.emptyCopy)}
+            ${renderDashboardPulseLeaderList(
+              pourLeaders.sections[category].rows,
+              metric,
+              settings.emptyCopy,
+              pourLeaders.periodWeeks,
+            )}
           </section>
         `;
       }).join("")}
@@ -6779,8 +6842,10 @@ function renderDashboardBeveragePulse() {
       : "Main wall";
   const markup = `
     <header class="dashboard-pulse-header">
-      <div>
+      <div class="dashboard-pulse-title-lockup">
+        <span class="dashboard-pulse-brand-mark" aria-hidden="true">OPE</span>
         <h2>Guest favorites</h2>
+        <span class="dashboard-pulse-brand-mark" aria-hidden="true">OPE</span>
       </div>
       <div class="dashboard-pulse-controls">
         <label class="dashboard-pulse-wall"><span>Wall</span><select data-seller-ranking-wall>
@@ -6828,7 +6893,7 @@ function renderDashboardBeveragePulse() {
         eyebrow: "Worth a glance",
         item: cooling,
         copy: lowSignal
-          ? "Poured less than its recent average."
+          ? `Poured ${formatNumber(Math.abs(toNumber(lowSignal.changeOz)))} oz less than its recent average.`
           : getDashboardPulseMovementCopy(cooling, "down"),
         emptyCopy: "Nothing needs special attention",
       })}
@@ -8403,7 +8468,6 @@ function renderWeeklyUsage() {
     ));
 
   const latestLabel = weeklyUsageItems[0]?.history?.[0]?.label || "Latest week";
-  const activeRows = visibleItems.filter((item) => !item.isArchivedSearchResult).length;
   const searchArchiveRows = visibleItems.filter((item) => item.isArchivedSearchResult).length;
   const allHistoryHeaders = getWeeklyUsageHistoryHeaders(visibleItems);
   const historyHeaders = weeklyUsageHistoryLimit
@@ -8444,11 +8508,12 @@ function renderWeeklyUsage() {
       <span>Latest history week</span>
       <strong>${escapeHtml(latestLabel)}</strong>
     </div>
-    <div class="weekly-usage-summary__grid">
-      <div><strong>${activeRows}</strong><span>Current taps</span></div>
-      ${searchArchiveRows ? `<div><strong>${searchArchiveRows}</strong><span>Archived matches</span></div>` : ""}
-    </div>
-    <div class="summary-line"><span>Weeks displayed</span><strong>${historyHeaders.length}${historyHeaders.length !== allHistoryHeaders.length ? ` of ${allHistoryHeaders.length}` : ""}</strong></div>
+    ${searchArchiveRows ? `
+      <div class="weekly-usage-summary__grid">
+        <div><strong>${searchArchiveRows}</strong><span>Archived matches</span></div>
+      </div>
+    ` : ""}
+    <div class="summary-line"><span>History saved</span><strong>${allHistoryHeaders.length < 52 ? `${allHistoryHeaders.length} / 52 weeks` : `${allHistoryHeaders.length} weeks`}</strong></div>
     <div class="summary-line"><span>Last PMB sync</span><strong>${weeklyUsageLastSyncAt ? escapeHtml(formatUpdatedAt(weeklyUsageLastSyncAt)) : "Not yet"}</strong></div>
     <div class="sync-panel sync-panel--weekly-usage">
       <p class="sync-status">${escapeHtml(weeklyUsageSyncMessage)}</p>
@@ -8473,16 +8538,28 @@ function renderWeeklyUsage() {
         item.isLiquorShot ? "weekly-usage-row--shot" : "weekly-usage-row--pour",
         item.isArchivedSearchResult ? "weekly-usage-row--archived" : "",
       ].filter(Boolean).join(" ");
+      const displayCocktailInOunces = normalizeTitle(item.type) === "cocktail";
+      const displayUnit = displayCocktailInOunces ? "oz" : item.displayUnit;
+      const getDisplayValue = (entry) => {
+        if (!entry) return null;
+        if (!displayCocktailInOunces) return entry.value;
+        return getWeeklyUsageEntryPouredOz(item, entry, getWeeklyUsageFullOunces);
+      };
       const wallLabel = item.isArchivedSearchResult
         ? `Historical - no longer on wall${item.replacedBy ? ` | Current tap: ${item.replacedBy}` : ""}`
         : clean(item.wall) || "Unassigned";
       const historyCells = historyHeaders
         .map((label) => {
           const match = item.history.find((entry) => entry.label === label);
-          return `<td class="weekly-usage-week">${escapeHtml(formatUsageDisplay(match?.value, item.displayUnit))}</td>`;
+          return `<td class="weekly-usage-week">${escapeHtml(formatUsageDisplay(getDisplayValue(match), displayUnit))}</td>`;
         })
         .join("");
-      const averageDisplay = item.history.length ? formatUsageDisplay(item.average, item.displayUnit) : "—";
+      const displayHistoryValues = item.history
+        .map(getDisplayValue)
+        .filter((value) => Number.isFinite(value));
+      const averageDisplay = displayHistoryValues.length
+        ? formatUsageDisplay(calculateAverage(displayHistoryValues), displayUnit)
+        : "—";
       return `
         <tr class="${rowClass}">
           <td class="weekly-usage-tap"><span>${item.tapNumber || "-"}</span></td>
@@ -8996,76 +9073,101 @@ async function runPmbWeeklyUsageSync({ automatic = false } = {}) {
   renderWeeklyUsage();
 
   try {
-    const requestParams = new URLSearchParams({
-      weeks: weekStarts.map(formatIsoDate).join(","),
-    });
-    const requestWeeklyUsage = async (confirmationToken = "") => {
-      const params = new URLSearchParams(requestParams);
-      if (confirmationToken) params.set("confirm", confirmationToken);
-      return requestOperationalSharedJson(`/api/pmb-weekly-usage?${params.toString()}`, {
-        cache: "no-store",
-        credentials: "same-origin",
-        headers: {
-          Accept: "application/json",
-        },
-      }, 45_000);
-    };
+    const weekBatches = [];
+    for (let index = 0; index < weekStarts.length; index += PMB_WEEKLY_USAGE_REQUEST_BATCH_SIZE) {
+      weekBatches.push(weekStarts.slice(index, index + PMB_WEEKLY_USAGE_REQUEST_BATCH_SIZE));
+    }
+    const syncResults = [];
 
-    let { response, result } = await requestWeeklyUsage();
-    if (!response.ok && result?.code === "PMB_WEEKLY_USAGE_REVIEW_REQUIRED") {
-      const reviewWeeks = Array.isArray(result.reviewWeeks) ? result.reviewWeeks : [];
-      const reviewDetails = reviewWeeks.map((entry) => {
-        if (typeof entry === "string") return `Week: ${clean(entry)}`;
-        const range = [
-          clean(entry?.weekStart || entry?.start || entry?.week || entry?.label),
-          clean(entry?.weekEnd || entry?.end),
-        ].filter(Boolean).join(" to ");
-        const reason = clean(entry?.reason || entry?.message);
-        return [range ? `Week: ${range}` : "Week requiring review", reason].filter(Boolean).join(" — ");
+    for (let batchIndex = 0; batchIndex < weekBatches.length; batchIndex += 1) {
+      const batch = weekBatches[batchIndex];
+      if (weekBatches.length > 1) {
+        weeklyUsageSyncMessage = `${automatic ? "Automatically checking" : "Pulling"} PMB history ${batchIndex + 1} of ${weekBatches.length}...`;
+        renderWeeklyUsage();
+      }
+      const requestParams = new URLSearchParams({
+        weeks: batch.map(formatIsoDate).join(","),
       });
-      const overallReason = clean(result.reviewReason || result.reason || result.error);
-      if (automatic) {
-        weeklyUsageSyncAttempted = false;
-        weeklyUsageSyncMessage = [
-          "Automatic PMB check paused for owner review.",
-          overallReason,
-          ...reviewDetails,
-          "Open Weekly Usage and refresh manually to review this exception; nothing was accepted or saved automatically.",
-        ].filter(Boolean).join(" ");
-        return { ok: false, reviewRequired: true, error: weeklyUsageSyncMessage };
+      const requestWeeklyUsage = async (confirmationToken = "") => {
+        const params = new URLSearchParams(requestParams);
+        if (confirmationToken) params.set("confirm", confirmationToken);
+        return requestOperationalSharedJson(`/api/pmb-weekly-usage?${params.toString()}`, {
+          cache: "no-store",
+          credentials: "same-origin",
+          headers: {
+            Accept: "application/json",
+          },
+        }, 45_000);
+      };
+
+      let { response, result } = await requestWeeklyUsage();
+      if (!response.ok && result?.code === "PMB_WEEKLY_USAGE_REVIEW_REQUIRED") {
+        const reviewWeeks = Array.isArray(result.reviewWeeks) ? result.reviewWeeks : [];
+        const reviewDetails = reviewWeeks.map((entry) => {
+          if (typeof entry === "string") return `Week: ${clean(entry)}`;
+          const range = [
+            clean(entry?.weekStart || entry?.start || entry?.week || entry?.label),
+            clean(entry?.weekEnd || entry?.end),
+          ].filter(Boolean).join(" to ");
+          const reason = clean(entry?.reason || entry?.message);
+          return [range ? `Week: ${range}` : "Week requiring review", reason].filter(Boolean).join(" — ");
+        });
+        const overallReason = clean(result.reviewReason || result.reason || result.error);
+        if (automatic) {
+          weeklyUsageSyncAttempted = false;
+          weeklyUsageSyncMessage = [
+            "Automatic PMB check paused for owner review.",
+            overallReason,
+            ...reviewDetails,
+            "Open Weekly Usage and refresh manually to review this exception; nothing was accepted or saved automatically.",
+          ].filter(Boolean).join(" ");
+          return { ok: false, reviewRequired: true, error: weeklyUsageSyncMessage };
+        }
+        const confirmed = confirmDashboardAction(
+          "Pour My Beer returned a sparse or closed week that needs owner review.",
+          [overallReason, ...reviewDetails],
+          "Continue only if these weeks are legitimately closed or sparse. Confirming records the exception and retries the same report; it does not invent usage rows.",
+        );
+        if (!confirmed) {
+          weeklyUsageSyncAttempted = false;
+          weeklyUsageSyncMessage = "Weekly Usage review canceled. No sparse or closed week was accepted or saved.";
+          return { ok: false, canceled: true, error: weeklyUsageSyncMessage };
+        }
+        const confirmationToken = clean(result.confirmationToken);
+        if (!confirmationToken) {
+          throw new Error("PMB requested owner review but did not provide a valid confirmation token. Nothing was saved.");
+        }
+        weeklyUsageSyncMessage = "Owner confirmed the reviewed week; retrying the same PMB report...";
+        renderWeeklyUsage();
+        ({ response, result } = await requestWeeklyUsage(confirmationToken));
       }
-      const confirmed = confirmDashboardAction(
-        "Pour My Beer returned a sparse or closed week that needs owner review.",
-        [overallReason, ...reviewDetails],
-        "Continue only if these weeks are legitimately closed or sparse. Confirming records the exception and retries the same report; it does not invent usage rows.",
-      );
-      if (!confirmed) {
-        weeklyUsageSyncAttempted = false;
-        weeklyUsageSyncMessage = "Weekly Usage review canceled. No sparse or closed week was accepted or saved.";
-        return { ok: false, canceled: true, error: weeklyUsageSyncMessage };
+      if (!response.ok) {
+        const error = new Error(result?.error || "Could not pull PMB weekly usage.");
+        error.code = result?.code;
+        throw error;
       }
-      const confirmationToken = clean(result.confirmationToken);
-      if (!confirmationToken) {
-        throw new Error("PMB requested owner review but did not provide a valid confirmation token. Nothing was saved.");
-      }
-      weeklyUsageSyncMessage = "Owner confirmed the reviewed week; retrying the same PMB report...";
-      renderWeeklyUsage();
-      ({ response, result } = await requestWeeklyUsage(confirmationToken));
-    }
-    if (!response.ok) {
-      const error = new Error(result?.error || "Could not pull PMB weekly usage.");
-      error.code = result?.code;
-      throw error;
+      syncResults.push(result);
     }
 
-    const applied = applyPmbWeeklyUsageSync(result);
-    weeklyUsageLastSyncAt = result.updatedAt || new Date().toISOString();
+    const latestResult = syncResults[syncResults.length - 1] || {};
+    const resultWithCurrentTaps = [...syncResults]
+      .reverse()
+      .find((entry) => Array.isArray(entry?.currentTaps));
+    const combinedResult = {
+      ...latestResult,
+      currentTaps: resultWithCurrentTaps?.currentTaps || [],
+      reports: syncResults.flatMap((entry) => (
+        Array.isArray(entry?.reports) && entry.reports.length ? entry.reports : [entry]
+      )),
+    };
+    const applied = applyPmbWeeklyUsageSync(combinedResult);
+    weeklyUsageLastSyncAt = latestResult.updatedAt || new Date().toISOString();
     saveWeeklyUsageLastSyncAt();
     const successPrefix = automatic ? "Automatic PMB check complete. " : "";
     weeklyUsageSyncMessage = applied.matched
       ? `${successPrefix}Saved ${applied.matched} PMB row${applied.matched === 1 ? "" : "s"} across ${applied.reports} week${applied.reports === 1 ? "" : "s"}. ${applied.archived ? `${applied.archived} old/replaced product row${applied.archived === 1 ? "" : "s"} went to hidden history.` : ""}`
       : `PMB returned ${applied.reportItems} product row${applied.reportItems === 1 ? "" : "s"} across ${applied.reports} week${applied.reports === 1 ? "" : "s"}, but none matched the active tracker.`;
-    return { ok: true, checkedWeeks: weekStarts.length, ...applied };
+    return { ok: true, checkedWeeks: weekStarts.length, batches: weekBatches.length, ...applied };
   } catch (error) {
     weeklyUsageSyncAttempted = false;
     const message = getPmbConnectionErrorMessage(error, "Could not pull PMB weekly usage.");
@@ -17305,7 +17407,7 @@ function migrateInventoryOnHandOverrides(rows) {
 
 function getLegacyInventoryPackSize(name, packSize, casePackaged) {
   if (!casePackaged) return 1;
-  if (name === "Cold Brew") return 1;
+  if (name === "Cold Brew" || name === "Cold Brew Concentrate") return 1;
   return normalizePackSize(packSize);
 }
 
@@ -17796,7 +17898,9 @@ function getIngredientGroup(name) {
 
   if (STRAIGHT_LIQUOR_TAP_INGREDIENTS.some((item) => item.toLowerCase() === normalized)) return "Liquor";
   if (["lemonade", "pink lemonade", "cranberry juice", "sweet tea", "strawberry lemonade"].includes(normalized)) return "Buckeye Beverage";
-  if (normalized === "cold brew coffee" || normalized === "sour mix" || normalized === "vanilla") return "Food Vendors";
+  if (
+    ["cold brew", "cold brew coffee", "cold brew concentrate", "sour mix", "vanilla", "vanilla syrup"].includes(normalized)
+  ) return "Food Vendors";
   if (
     normalized === "triple sec" ||
     normalized === "bitters" ||

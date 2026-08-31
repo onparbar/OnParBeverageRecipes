@@ -284,7 +284,7 @@ function homePolishBriefingItems(items, sourceArgs) {
 
   const taps = [...comingSoonTaps.entries()].sort((left, right) => left[0] - right[0]);
   if (taps.length) {
-    const tapLabels = taps.map(([tapNumber]) => `Tap ${tapNumber}- set to coming soon.`);
+    const tapLabels = taps.map(([tapNumber]) => `Tap ${tapNumber}- Coming Soon`);
     const onDeckSummary = taps
       .map(([tapNumber, status]) => {
         if (!status?.onDeck) return "";
@@ -294,7 +294,7 @@ function homePolishBriefingItems(items, sourceArgs) {
       })
       .filter(Boolean)
       .join(" · ");
-    const title = taps.length === 1 ? tapLabels[0] : `${taps.length} taps set to Coming Soon`;
+    const title = taps.length === 1 ? tapLabels[0] : `${taps.length} taps marked Coming Soon`;
     polished.push({
       ...(coverageTemplate || {}),
       text: title,

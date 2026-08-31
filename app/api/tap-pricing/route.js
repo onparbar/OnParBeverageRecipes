@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  readLatestPmbDataBackup,
+  savePmbDataBackup,
+} from "../../../lib/pmb-data-backup-store.mjs";
 import { verifyPmbPortionManagementReadOnly } from "../../../lib/pmb-item-management.mjs";
 import { normalizePmbPortionItem } from "../../../lib/pmb-portion-price-update.mjs";
 import { resolvePmbPortionSchema } from "../../../lib/pmb-portion-schema.mjs";
@@ -355,13 +359,12 @@ export async function GET() {
     const verifiedItemRows = attachVerifiedPmbPortionIdentity(rawItemRows);
     const ownerVerifiedRows = getOwnerVerifiedPmbPortionRows(rawItemRows);
     const ownerVerifiedSchema = resolvePmbPortionSchema(ownerVerifiedRows, VERIFIED_PMB_PORTION_SCHEMA);
-    const portionSchema = discoveredPortionSchema.ok
-      ? discoveredPortionSchema
-      : ownerVerifiedSchema.ok
-        ? { ...ownerVerifiedSchema, source: "owner-verified" }
-        : discoveredPortionSchema;
-    const portionRows = discoveredPortionSchema.ok ? rawItemRows : verifiedItemRows;
-    const managementRows = discoveredPortionSchema.ok ? rawItemRows : ownerVerifiedRows;
+    const useOwnerVerifiedSchema = ownerVerifiedSchema.ok;
+    const portionSchema = useOwnerVerifiedSchema
+      ? { ...ownerVerifiedSchema, source: "owner-verified" }
+      : discoveredPortionSchema;
+    const portionRows = useOwnerVerifiedSchema ? verifiedItemRows : rawItemRows;
+    const managementRows = useOwnerVerifiedSchema ? ownerVerifiedRows : rawItemRows;
     let portionManagement = {
       ok: false,
       code: portionSchema.code || "PMB_PORTION_SCHEMA_UNVERIFIED",
@@ -424,8 +427,9 @@ export async function GET() {
       })
       .filter(Boolean));
 
-    return NextResponse.json({
-      updatedAt: new Date().toISOString(),
+    const updatedAt = new Date().toISOString();
+    const payload = {
+      updatedAt,
       items,
       portionPricing: {
         writeAvailable: Boolean(portionSchema.ok && portionManagement.ok),
@@ -436,10 +440,30 @@ export async function GET() {
           ? "Live PMB portion identities and price controls were verified read-only."
           : portionManagement.message,
       },
+    };
+    const pmbBackupSaved = await savePmbDataBackup("tap-pricing", payload, {
+      capturedAt: updatedAt,
+    }).then(() => true).catch(() => false);
+
+    return NextResponse.json({
+      ...payload,
+      pmbBackupSaved,
     });
   } catch (error) {
     const message = error.message || "Could not load tap pricing.";
     const upstreamFailure = /PMB|tap configuration|timed out|fetch|socket|network/i.test(message);
+    if (upstreamFailure) {
+      const backup = await readLatestPmbDataBackup("tap-pricing").catch(() => null);
+      if (backup?.data?.items) {
+        return NextResponse.json({
+          ...backup.data,
+          stale: true,
+          degraded: true,
+          backupCapturedAt: backup.capturedAt,
+          liveError: message,
+        });
+      }
+    }
     return NextResponse.json(
       { error: message },
       { status: upstreamFailure ? 503 : 500 },

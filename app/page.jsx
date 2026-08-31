@@ -99,7 +99,7 @@ export default function DashboardPage() {
       <div className="shell">
         <header className="topbar">
           <div>
-            <h1>Beverage Dashboard</h1>
+            <h1>OPE Beverage</h1>
           </div>
         </header>
         <main>
@@ -116,7 +116,7 @@ export default function DashboardPage() {
       <link rel="stylesheet" href="/inventory-reality-check.css" />
       <header className="topbar">
         <div className="topbar-title-row">
-          <h1>Beverage Dashboard</h1>
+          <h1>OPE Beverage</h1>
           <div className="topbar-account-actions">
             <a className="logout-link dashboard-owner-only" href="/staff">Staff View</a>
             <button className="logout-link pmb-refresh-button dashboard-owner-only" id="refresh-all-pmb" type="button">Refresh PMB</button>
@@ -685,7 +685,7 @@ export default function DashboardPage() {
                   <div>
                     <h2>Keg Pricing</h2>
                   </div>
-                  <button className="ghost-button" id="clear-keg-prices" type="button">Clear keg overrides</button>
+                    <button className="ghost-button" id="clear-keg-prices" type="button" hidden>Clear keg overrides</button>
                 </div>
                 <div className="ingredient-table-wrap">
                   <table className="ingredient-table">
@@ -829,24 +829,25 @@ export default function DashboardPage() {
               <span>Find tap or product</span>
               <input id="weekly-usage-search" type="search" placeholder="Search tap, wall, liquor, beer, cocktail..." />
             </label>
-            <label className="select-field weekly-usage-range-field">
-              <span>History shown</span>
-              <select id="weekly-usage-range" defaultValue="0">
-                <option value="6">Recent 6 weeks</option>
-                <option value="12">Recent 12 weeks</option>
-                <option value="0">All history</option>
-              </select>
-            </label>
           </div>
 
           <div className="inventory-layout">
             <aside className="weekly-usage-summary" id="weekly-usage-summary"></aside>
             <div className="inventory-sections">
               <section className="inventory-block">
-                <div className="inventory-block__header">
+                <div className="inventory-block__header weekly-usage-tracker-header">
                   <div>
                     <h2>Weekly Usage Tracker</h2>
                   </div>
+                  <label className="select-field weekly-usage-range-field">
+                    <span>History shown</span>
+                    <select id="weekly-usage-range" defaultValue="0">
+                      <option value="6">Recent 6 weeks</option>
+                      <option value="12">Recent 12 weeks</option>
+                      <option value="52">Past year (52 weeks)</option>
+                      <option value="0">All history</option>
+                    </select>
+                  </label>
                 </div>
                 <div className="inventory-table-wrap">
                   <table className="inventory-table weekly-usage-table">

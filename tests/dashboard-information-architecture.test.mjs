@@ -49,12 +49,13 @@ test("current and old recipes share one Recipes workspace", () => {
   assert.match(dashboardSource, /recipeView: inactive \? "old" : "current"/);
 });
 
-test("recipe coverage requires an exact PMB tap instead of a stale template-name fallback", () => {
+test("recipe coverage requires an exact PMB tap and excludes Coming Soon placeholders", () => {
   const start = dashboardSource.indexOf("function getWallCocktailRecipeCoverage()");
   const end = dashboardSource.indexOf("function findRecipeForWallProduct", start);
   const coverageSource = dashboardSource.slice(start, end);
   assert.match(coverageSource, /kegLiveLevels\.get\(`tap:\$\{toNumber\(item\.tapNumber\)\}`\)/);
   assert.doesNotMatch(coverageSource, /getKegLiveRow\(item\)/);
+  assert.equal(coverageSource.includes('if (/^coming soon\\b/i.test(clean(productName))) return null;'), true);
 });
 
 test("speech inventory assigns On Deck units only where the On Deck product is defined", () => {
