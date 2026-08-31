@@ -7128,6 +7128,9 @@ function getWeeklyPlanManagerMessage(value) {
   if (/prompt\(\) is not supported/i.test(message)) {
     return "That action could not be completed. Reload current data and try again.";
   }
+  if (/\b(fetch failed|failed to fetch|networkerror|econnrefused|econnreset|enotfound|etimedout|timed? ?out|socket hang up|aborted)\b/i.test(message)) {
+    return "The connection was interrupted. Reload current data and try again.";
+  }
   return message;
 }
 

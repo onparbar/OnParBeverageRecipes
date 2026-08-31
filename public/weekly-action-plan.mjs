@@ -410,6 +410,10 @@ export function isWeeklyPlanHandoffAllowed(readinessStatus) {
   return readinessStatus === "ready" || readinessStatus === "review";
 }
 
+export function isTransientWeeklyPlanConnectionError(error) {
+  return /\b(fetch failed|failed to fetch|networkerror|econnrefused|econnreset|enotfound|etimedout|timed? ?out|socket hang up|aborted|connection)\b/i.test(clean(error));
+}
+
 export function evaluateWeeklyPlanReadiness({
   parInitialized = false,
   recommendationGeneratedAt = "",
@@ -457,7 +461,14 @@ export function evaluateWeeklyPlanReadiness({
   if (!publishedPlanLocked && missingInventoryCount > 0) {
     blockers.push(`${missingInventoryCount} inventory item${missingInventoryCount === 1 ? " is" : "s are"} using an old baseline instead of a current saved count.`);
   }
-  if (!publishedPlanLocked && !newOperatingWeekStarted && recommendationError) blockers.push(`The latest update failed: ${clean(recommendationError)}`);
+  if (
+    !publishedPlanLocked
+    && !newOperatingWeekStarted
+    && recommendationError
+    && !isTransientWeeklyPlanConnectionError(recommendationError)
+  ) {
+    blockers.push(`The latest update failed: ${clean(recommendationError)}`);
+  }
 
   if (!publishedPlanLocked && weeklyUsageInitialized && !latestCompletedUsageSaved) {
     staleReasons.push("The latest completed Monday-Sunday usage report is not saved.");
