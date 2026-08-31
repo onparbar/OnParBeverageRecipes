@@ -12499,6 +12499,13 @@ function getPendingInventoryOperations() {
   ));
 }
 
+function canAutoRecoverInventoryOperation(kind, entry, currentRevision) {
+  const action = clean(entry?.payload?.action);
+  return kind === "field"
+    || action === "batch-update-fields"
+    || canSafelyRetryOperationalOutbox(entry, currentRevision);
+}
+
 function hasEarlierFailedInventoryOperation(entry) {
   return getPendingInventoryOperations().some(({ entry: candidate }) => (
     candidate.clientOrder < entry.clientOrder
@@ -12613,8 +12620,8 @@ async function loadSharedInventoryState() {
       applySharedInventoryState(state);
       if (getPendingInventoryOperations().length) {
         overlayInventoryOutboxes();
-        const safeToRetry = getPendingInventoryOperations().every(({ entry }) => (
-          canSafelyRetryOperationalOutbox(entry, state.revision)
+        const safeToRetry = getPendingInventoryOperations().every(({ kind, entry }) => (
+          canAutoRecoverInventoryOperation(kind, entry, state.revision)
         ));
         if (safeToRetry) {
           inventoryFieldOutbox = Object.fromEntries(Object.entries(inventoryFieldOutbox).map(([key, entry]) => [

@@ -230,9 +230,10 @@ test("retries revision conflicts so concurrent item edits are both preserved", a
   });
 });
 
-test("a recovered inventory field write is accepted only at its recorded base revision", async () => {
+test("a recovered inventory field write merges into the latest shared revision", async () => {
   const initialState = createEmptyInventoryState();
   initialState.initialized = true;
+  initialState.current.onHandOverrides.gin = "4";
   const fetchImpl = createSupabaseFetch(makeRow({
     revision: 4,
     initialized: true,
@@ -241,25 +242,39 @@ test("a recovered inventory field write is accepted only at its recorded base re
   }));
   const shared = createSharedInventoryStore({ env: makeEnvironment(), fetchImpl });
 
-  await assert.rejects(
-    shared.mutate(
-      "update-field",
-      { id: "vodka", field: "onHand", value: "2" },
-      "owner",
-      { expectedRevision: 3 },
-    ),
-    (error) => assertStoreError(error, "INVENTORY_STATE_REVISION_CONFLICT", 409),
-  );
-  assert.equal(fetchImpl.calls.filter((call) => call.method === "PATCH").length, 0);
-
   const saved = await shared.mutate(
     "update-field",
     { id: "vodka", field: "onHand", value: "2" },
     "owner",
-    { expectedRevision: 4 },
+    { expectedRevision: 3 },
   );
   assert.equal(saved.revision, 5);
   assert.equal(saved.current.onHandOverrides.vodka, "2");
+  assert.equal(saved.current.onHandOverrides.gin, "4");
+});
+
+test("a recovered batch of reviewed counts merges without replacing unrelated fields", async () => {
+  const initialState = createEmptyInventoryState();
+  initialState.initialized = true;
+  initialState.current.onHandOverrides.gin = "4";
+  const fetchImpl = createSupabaseFetch(makeRow({
+    revision: 8,
+    initialized: true,
+    initialized_at: "2026-07-31T14:00:00.000Z",
+    data: { current: initialState.current, snapshots: [] },
+  }));
+  const shared = createSharedInventoryStore({ env: makeEnvironment(), fetchImpl });
+
+  const saved = await shared.mutate(
+    "batch-update-fields",
+    { changes: [{ id: "vodka", field: "onHand", value: "3" }] },
+    "owner",
+    { expectedRevision: 7 },
+  );
+
+  assert.equal(saved.revision, 9);
+  assert.equal(saved.current.onHandOverrides.vodka, "3");
+  assert.equal(saved.current.onHandOverrides.gin, "4");
 });
 
 test("every recovered inventory mutation fails closed at a stale base revision", async () => {
