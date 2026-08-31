@@ -1,4 +1,6 @@
+import Script from "next/script";
 import "./globals.css";
+import "./identity.css";
 
 export const metadata = {
   title: "On Par Beverage Dashboard",
@@ -8,7 +10,10 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body suppressHydrationWarning>{children}</body>
+      <body suppressHydrationWarning>
+        {children}
+        <Script src="/dashboard-identity.js" strategy="afterInteractive" />
+      </body>
     </html>
   );
 }

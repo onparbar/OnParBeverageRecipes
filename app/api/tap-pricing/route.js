@@ -6,6 +6,11 @@ import { normalizePmbPortionItem } from "../../../lib/pmb-portion-price-update.m
 import { resolvePmbPortionSchema } from "../../../lib/pmb-portion-schema.mjs";
 import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
 import {
+  attachVerifiedPmbPortionIdentity,
+  getOwnerVerifiedPmbPortionRows,
+  VERIFIED_PMB_PORTION_SCHEMA,
+} from "../../../lib/verified-pmb-portions.mjs";
+import {
   buildCurrentTapAssignments,
   expandTapPricingAssignments,
   getTapPricingRepresentativeAssignment,
@@ -345,8 +350,18 @@ export async function GET() {
       throw new Error("PMB tap configuration returned no current physical taps.");
     }
 
-    const itemRows = Array.isArray(itemPrices.json?.itemlist) ? itemPrices.json.itemlist : [];
-    const portionSchema = resolvePmbPortionSchema(itemRows);
+    const rawItemRows = Array.isArray(itemPrices.json?.itemlist) ? itemPrices.json.itemlist : [];
+    const discoveredPortionSchema = resolvePmbPortionSchema(rawItemRows);
+    const verifiedItemRows = attachVerifiedPmbPortionIdentity(rawItemRows);
+    const ownerVerifiedRows = getOwnerVerifiedPmbPortionRows(rawItemRows);
+    const ownerVerifiedSchema = resolvePmbPortionSchema(ownerVerifiedRows, VERIFIED_PMB_PORTION_SCHEMA);
+    const portionSchema = discoveredPortionSchema.ok
+      ? discoveredPortionSchema
+      : ownerVerifiedSchema.ok
+        ? { ...ownerVerifiedSchema, source: "owner-verified" }
+        : discoveredPortionSchema;
+    const portionRows = discoveredPortionSchema.ok ? rawItemRows : verifiedItemRows;
+    const managementRows = discoveredPortionSchema.ok ? rawItemRows : ownerVerifiedRows;
     let portionManagement = {
       ok: false,
       code: portionSchema.code || "PMB_PORTION_SCHEMA_UNVERIFIED",
@@ -354,7 +369,7 @@ export async function GET() {
     };
     if (portionSchema.ok) {
       try {
-        portionManagement = await verifyPmbPortionManagementReadOnly(config, itemRows, portionSchema.schema);
+        portionManagement = await verifyPmbPortionManagementReadOnly(config, managementRows, portionSchema.schema);
       } catch (error) {
         portionManagement = {
           ok: false,
@@ -363,7 +378,7 @@ export async function GET() {
         };
       }
     }
-    const itemPricesByPlu = buildItemPriceMap(itemRows, portionSchema.ok ? portionSchema.schema : null);
+    const itemPricesByPlu = buildItemPriceMap(portionRows, portionSchema.ok ? portionSchema.schema : null);
     const currentTapAssignmentsByPlu = buildCurrentTapAssignments(tapConfigRows, tapLookup);
     const occupiedTapNumbers = new Set(
       [...currentTapAssignmentsByPlu.values()]

@@ -25,6 +25,10 @@ export function getVendorOrderBulkRemovalState(removableLines = []) {
   };
 }
 
+function resolveActor(value = "") {
+  return defaultClean(globalThis.onParDashboardIdentity?.name || value);
+}
+
 export function buildVendorOrderBulkRemovalPayload({ vendor, adjustedBy, selected = [] } = {}) {
   return {
     action: "set-order-adjustments",
@@ -152,7 +156,7 @@ export function bindVendorOrderController({
 
   adjustmentPanel?.querySelector("[data-order-adjustment-save]")?.addEventListener("click", async () => {
     const option = adjustmentProduct?.selectedOptions?.[0];
-    const adjustedBy = clean(adjustmentManager?.value);
+    const adjustedBy = resolveActor(adjustmentManager?.value);
     const reason = clean(adjustmentReason?.value);
     const quantity = Number(adjustmentQuantity?.value);
     const removing = adjustmentAction?.value === "remove";
@@ -173,7 +177,7 @@ export function bindVendorOrderController({
 
   adjustmentPanel?.querySelectorAll("[data-order-adjustment-remove]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const adjustedBy = clean(adjustmentManager?.value);
+      const adjustedBy = resolveActor(adjustmentManager?.value);
       if (!adjustedBy) {
         setMessage("Enter the manager removing this adjustment.");
         renderWeeklyPlan?.();
@@ -191,7 +195,7 @@ export function bindVendorOrderController({
   documentRef.querySelectorAll("[data-weekly-order-place]").forEach((button) => {
     button.addEventListener("click", async () => {
       const vendor = clean(button.dataset.weeklyOrderVendor);
-      const orderedBy = clean(button.dataset.weeklyOrderedBy);
+      const orderedBy = resolveActor(button.dataset.weeklyOrderedBy);
       if (!button.dataset.weeklyOrderVendorId || !orderedBy) return;
       if (!confirmDashboardAction?.(
         `Mark the ${vendor} order as placed?`,
@@ -233,7 +237,7 @@ export function bindVendorOrderController({
     });
     removableLines.forEach((input) => input.addEventListener("change", syncBulkRemoval));
     removeSelected?.addEventListener("click", async () => {
-      const adjustedBy = clean(managerInput?.value);
+      const adjustedBy = resolveActor(managerInput?.value);
       const selected = removableLines.filter((input) => input.checked);
       if (!adjustedBy) {
         managerInput?.setCustomValidity("Enter the manager adjusting this order.");
@@ -253,7 +257,7 @@ export function bindVendorOrderController({
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const approvedBy = clean(managerInput?.value);
+      const approvedBy = resolveActor(managerInput?.value);
       const confirmed = Boolean(form.querySelector("[data-order-draft-confirm]")?.checked);
       if (!approvedBy) {
         managerInput?.setCustomValidity("Enter the approving manager.");

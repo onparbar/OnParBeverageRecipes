@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
+import { requireDashboardRequestIdentity, requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
 import { readParAgentState, writeParAgentState } from "../../../lib/par-agent.mjs";
 import {
   applyWeeklyOrderTrackingUpdate,
@@ -71,12 +71,21 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const role = await requireDashboardRequestRole(request);
+    const identity = await requireDashboardRequestIdentity(request);
+    const role = identity.role;
     const state = await readParAgentState();
     if (!state.initialized || !buildWeeklyOrderTracking(state?.recommendations)) {
       return jsonResponse(unavailablePlan(state), 409);
     }
-    const body = await getBody(request);
+    const submittedBody = await getBody(request);
+    const body = {
+      ...submittedBody,
+      adjustedBy: identity.name,
+      approvedBy: identity.name,
+      createdBy: identity.name,
+      handledBy: identity.name,
+      orderedBy: identity.name,
+    };
     const priorTracking = buildWeeklyOrderTracking(state.recommendations);
     let effectiveBody = body;
     let updatedRecommendations = applyWeeklyOrderTrackingUpdate(

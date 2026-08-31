@@ -1,0 +1,38 @@
+.topbar h1.has-dashboard-identity {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.85rem;
+}
+
+.dashboard-current-user {
+  align-items: center;
+  background: rgba(47, 116, 101, 0.1);
+  border: 1px solid rgba(47, 116, 101, 0.25);
+  border-radius: 999px;
+  color: var(--green, #205d51);
+  display: inline-flex;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  padding: 0.5rem 0.75rem;
+  white-space: nowrap;
+}
+
+.identity-attribution-field {
+  display: none !important;
+}
+
+@media (max-width: 720px) {
+  .topbar h1.has-dashboard-identity {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .dashboard-current-user {
+    font-size: 0.76rem;
+    padding: 0.42rem 0.65rem;
+  }
+}

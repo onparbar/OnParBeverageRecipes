@@ -326,7 +326,6 @@ test("Weekly Plan previews live needs and locks from the current Monday inventor
   assert.match(dashboardSource, /getCurrentMondayInventorySnapshot\(inventoryHistory/);
   assert.match(dashboardSource, /getInventorySnapshotItems\(\)/);
   assert.match(dashboardSource, /parAgentState\.recommendations\.items/);
-  assert.match(dashboardSource, /Live needs/);
   assert.match(dashboardSource, /Save & Lock Plan/);
   assert.doesNotMatch(dashboardSource, /id="save-inventory-snapshot"/);
   assert.match(dashboardSource, /kegPlanSnapshot: mondaySnapshot\.kegPlanSnapshot/);

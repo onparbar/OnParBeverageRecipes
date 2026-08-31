@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
+import { requireDashboardRequestIdentity } from "../../../lib/dashboard-auth.mjs";
 import { readParAgentState, writeParAgentState } from "../../../lib/par-agent.mjs";
 import {
   isRecommendationForOperatingWeek,
@@ -69,7 +69,8 @@ function errorResponse(error) {
 
 export async function GET(request) {
   try {
-    const role = await requireDashboardRequestRole(request);
+    const identity = await requireDashboardRequestIdentity(request);
+    const role = identity.role;
     const state = await readParAgentState();
     const rehearsal = role === "owner"
       && new URL(request.url).searchParams.get("rehearsal") === "1";
@@ -90,7 +91,8 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const role = await requireDashboardRequestRole(request);
+    const identity = await requireDashboardRequestIdentity(request);
+    const role = identity.role;
     const state = await readParAgentState();
     const recommendations = getCurrentRecommendations(state);
     if (!state.initialized || !recommendations) {
@@ -101,7 +103,7 @@ export async function POST(request) {
     if (rawUpdates.length < 1 || rawUpdates.length > 100) {
       return jsonResponse({ error: "Choose between 1 and 100 checklist items to save." }, 400);
     }
-    const sharedPreparedBy = String(body.preparedBy || "").replace(/\s+/g, " ").trim().slice(0, 80);
+    const sharedPreparedBy = identity.name;
     const updatesByItem = new Map();
     rawUpdates.forEach((update) => {
       if (!update || typeof update !== "object") return;
@@ -110,7 +112,7 @@ export async function POST(request) {
         ...update,
         itemId,
         generatedAt: String(body.generatedAt || update.generatedAt || ""),
-        preparedBy: String(update.preparedBy || sharedPreparedBy).replace(/\s+/g, " ").trim().slice(0, 80),
+        preparedBy: sharedPreparedBy,
       });
     });
     const updates = [...updatesByItem.values()];

@@ -1,4 +1,11 @@
 import "./operations-learning-ui.mjs";
+import {
+  buildInventoryPosition,
+  buildStockGapRecommendation,
+  classifyPmbLevelState,
+  deriveWeeklyWorkflowState,
+  isOperationalProduct,
+} from "./operations-truth-model.mjs";
 
 import {
   getCanonicalTapDisplayName,
@@ -4186,9 +4193,6 @@ function renderShotPricing(visibleTapRows = []) {
   shotPricingTable.innerHTML = rows.map((row) => {
     const running = activePmbPortionPriceUpdateKey === row.key;
     const message = pmbPortionPriceUpdateMessages.get(row.key);
-    const affected = row.assignments.length > 1
-      ? `${formatNumber(row.assignments.length)} taps share this PMB product`
-      : row.wall ? `${row.wall} tap ${formatNumber(row.tapNumber)}` : `Tap ${formatNumber(row.tapNumber)}`;
     const currentPortions = row.portions.map((portion) => `
       <span><b>${escapeHtml(portion.name)}</b> ${money(portion.price)}${portion.quantityOz ? ` · ${formatNumber(portion.quantityOz)} oz` : ""}</span>
     `).join("");
@@ -4214,8 +4218,7 @@ function renderShotPricing(visibleTapRows = []) {
 
     return `
       <tr class="shot-pricing-row${row.canEdit ? "" : " shot-pricing-row--blocked"}" data-shot-pricing-key="${escapeHtml(row.key)}">
-        <td><strong>${formatNumber(row.tapNumber)}</strong>${row.wall ? `<span class="table-note">${escapeHtml(row.wall)}</span>` : ""}</td>
-        <td><strong>${escapeHtml(row.name)}</strong><span class="table-note">PMB PLU ${formatNumber(row.plu)} · ${escapeHtml(affected)}</span></td>
+        <td><strong>${escapeHtml(row.name)}</strong></td>
         <td><div class="portion-list">${currentPortions}</div></td>
         <td><div class="shot-pricing-fields">${editors}</div></td>
         <td>
@@ -4230,7 +4233,7 @@ function renderShotPricing(visibleTapRows = []) {
         </td>
       </tr>
     `;
-  }).join("") || '<tr><td colspan="6" class="empty-state">No PMB liquor portion rows match this search.</td></tr>';
+  }).join("") || '<tr><td colspan="5" class="empty-state">No PMB liquor portion rows match this search.</td></tr>';
 
   bindShotPricingControls();
 }
@@ -6100,7 +6103,8 @@ function renderDashboardOverview() {
     orders: {
       available: weeklyOrderTracking.available,
       vendors: weeklyOrderTracking.vendors,
-      notReceivedItems: weeklyOrderTracking.notReceivedItems,
+      notReceivedItems:
+        weeklyOrderTracking.activeNotReceivedItems || weeklyOrderTracking.notReceivedItems,
     },
     prep: dashboardStaffPrepPlan,
     recipes: { missingRecipeCount: recipeCoverage.missing.length },
@@ -6206,7 +6210,6 @@ function renderDashboardOverview() {
         }).join("")}
       </section>` : ""}
 
-    ${renderDashboardCompletedPrep()}
   `;
   renderDashboardBeveragePulse();
 }
@@ -6458,7 +6461,11 @@ function renderOnParInsights() {
       metric: isDollarRanking ? "profit" : "volume",
       getFullOunces: getWeeklyUsageFullOunces,
       getGrossProfitPerOz: isSalesRanking ? getWeeklyUsageItemSellingRate : getWeeklyUsageItemProfitRate,
-      isBottomEligible: (item) => currentPerformanceItems.has(item) && !isRetiredProduct(item),
+      isBottomEligible: (item) => (
+        currentPerformanceItems.has(item)
+        && !isRetiredProduct(item)
+        && isOperationalProduct(item)
+      ),
       recentWeekLimit,
       topLimit: sellerRankingListSize,
       bottomLimit: sellerRankingListSize,
@@ -7492,7 +7499,8 @@ function renderWeeklyPlan() {
   const mondayRun = getMondayRunModel(plan, freshness);
   const orderStep = mondayRun.steps.find((step) => step.id === "orders");
   const simpleSyrupNeed = getWeeklySimpleSyrupNeed(plan.prep.cocktails);
-  const updatedText = planLocked ? "Thursday delivery · locked through Sunday" : "Live needs";
+  const workflowState = deriveWeeklyWorkflowState({ planLocked, mondayRun });
+  const updatedText = workflowState.complete ? "Week complete" : workflowState.label;
   const demoToggle = ORDER_REHEARSAL_AVAILABLE && (planLocked || orderRehearsalMode)
     ? `<button class="ghost-button" id="toggle-order-rehearsal" type="button">${orderRehearsalMode ? "Exit Boss Demo" : "Boss Demo"}</button>`
     : "";
@@ -11868,7 +11876,8 @@ function getKegNeed(item) {
   if (!par) return 0;
   const liveFraction = isLiquorOunceTap(toNumber(item?.tapNumber)) ? 0 : getKegCurrentFraction(item, liveRow);
   if (liveFraction === null) return null;
-  return Math.max(0, Math.ceil(par - (onHand + liveFraction)));
+  const position = buildInventoryPosition({ connected: liveFraction, onHand });
+  return buildStockGapRecommendation({ target: par, position }).orderQuantity;
 }
 
 function renderKegNeedCell(item, need) {
@@ -11909,11 +11918,20 @@ function renderKegNeedCell(item, need) {
 
 function getKegLiveRow(item) {
   const row = kegTemplateAssignments.get(getKegItemKey(item)) || null;
-  if (!row || row.levelAvailable !== false) return row;
+  if (!row) return row;
+  const levelState = classifyPmbLevelState({
+    levelAvailable: row.levelAvailable,
+    levelPercent: row.fillLevelPercent,
+    stale: row.stale === true,
+    zeroVerified: row.zeroVerified === true,
+  });
+  if (levelState.usable) return row;
   return {
     ...row,
+    levelAvailable: false,
     fillLevelPercent: null,
     rawPercent: null,
+    levelIssue: levelState.reason,
   };
 }
 

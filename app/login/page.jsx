@@ -26,10 +26,7 @@ export default function LoginPage() {
         body: JSON.stringify({ password }),
       });
       const result = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(result?.error || "Could not log in.");
-      }
+      if (!response.ok) throw new Error(result?.error || "Could not log in.");
 
       const params = new URLSearchParams(window.location.search);
       const nextPath = getSafeDashboardNextPath(params.get("next"));
@@ -46,14 +43,15 @@ export default function LoginPage() {
       <section className="login-panel">
         <p className="eyebrow">On Par</p>
         <h1>Beverage Dashboard</h1>
-        <form className="login-form" onSubmit={handleSubmit}>
+        <form className="login-form" data-auth-form="clock-in" onSubmit={handleSubmit}>
           <label>
-            <span>Password</span>
+            <span>Clock-in number</span>
             <input
               autoComplete="current-password"
               autoFocus
+              inputMode="numeric"
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="Enter dashboard password"
+              placeholder="Enter your clock-in number"
               type="password"
               value={password}
             />
@@ -65,7 +63,7 @@ export default function LoginPage() {
         {setupIssue ? (
           <p className="login-message">
             {setupIssue === "missing-password"
-              ? "Set DASHBOARD_PASSWORD in the service environment to enable login."
+              ? "No dashboard administrator credential is configured."
               : setupIssue === "weak-session-secret"
                 ? "DASHBOARD_SESSION_SECRET must contain at least 32 characters."
                 : "Set DASHBOARD_SESSION_SECRET in the service environment, then restart the dashboard."}

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import {
   DASHBOARD_SESSION_COOKIE,
   DASHBOARD_SESSION_MAX_AGE_SECONDS,
-  matchDashboardRole,
+  matchDashboardIdentity,
   requireDashboardAuthConfiguration,
   signDashboardSession,
 } from "../../../lib/dashboard-auth.mjs";
@@ -53,8 +53,8 @@ export async function POST(request) {
     submittedPassword = "";
   }
 
-  const matchedRole = matchDashboardRole(submittedPassword);
-  if (!matchedRole) {
+  const identity = await matchDashboardIdentity(submittedPassword);
+  if (!identity) {
     const failure = dashboardLoginThrottle.recordFailure(clientKey);
     if (!failure.allowed) {
       return jsonResponse(
@@ -67,14 +67,23 @@ export async function POST(request) {
         { "Retry-After": String(failure.retryAfterSeconds) },
       );
     }
-    return jsonResponse({ error: "Incorrect password.", code: "LOGIN_FAILED" }, 401);
+    return jsonResponse({
+      error: "Clock-in number not recognized.",
+      code: "LOGIN_FAILED",
+    }, 401);
   }
 
   dashboardLoginThrottle.reset(clientKey);
-  const response = jsonResponse({ ok: true, role: matchedRole.role });
+  const response = jsonResponse({
+    ok: true,
+    role: identity.role,
+    access: identity.role === "owner" ? "admin" : "staff",
+    name: identity.name,
+    user: { id: identity.id, name: identity.name, role: identity.role },
+  });
   response.cookies.set({
     name: DASHBOARD_SESSION_COOKIE,
-    value: await signDashboardSession(matchedRole.role),
+    value: await signDashboardSession(identity),
     httpOnly: true,
     sameSite: "strict",
     secure: process.env.NODE_ENV === "production",

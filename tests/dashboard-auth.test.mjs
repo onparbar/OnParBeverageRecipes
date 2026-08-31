@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   getDashboardAuthStatus,
   getDashboardRequestRole,
+  getDashboardSessionIdentity,
   getDashboardSessionRole,
   matchDashboardRole,
   requireDashboardRequestRole,
@@ -27,13 +28,18 @@ test("requires a separate strong session secret", () => {
   assert.equal(getDashboardAuthStatus(env).ready, true);
 });
 
-test("creates expiring role sessions and rejects tampering or expiry", async () => {
+test("creates expiring identity sessions and rejects tampering or expiry", async () => {
   const issuedAt = new Date("2026-08-12T14:00:00.000Z");
   const session = await signDashboardSession("owner", { env, now: issuedAt });
   const secondSession = await signDashboardSession("owner", { env, now: issuedAt });
-  assert.match(session, /^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  assert.match(session, /^v2\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
   assert.notEqual(session, secondSession);
   assert.equal(await getDashboardSessionRole(session, { env, now: issuedAt }), "owner");
+  assert.deepEqual(await getDashboardSessionIdentity(session, { env, now: issuedAt }), {
+    id: "recovery-owner",
+    name: "Administrator",
+    role: "owner",
+  });
   assert.equal(await getDashboardSessionRole(`${session}x`, { env, now: issuedAt }), "");
   assert.equal(await getDashboardSessionRole(session, {
     env,
@@ -60,6 +66,18 @@ test("changing a role password revokes that role's sessions", async () => {
     env: { ...env, EMPLOYEE_DASHBOARD_PASSWORD: "changed" },
     now,
   }), "");
+});
+
+test("signed employee identities retain their verified name and access role", async () => {
+  const now = new Date("2026-08-12T14:00:00.000Z");
+  const identity = {
+    id: "molly-adams",
+    name: "Molly Adams",
+    role: "employee",
+  };
+  const session = await signDashboardSession(identity, { env, now });
+  assert.deepEqual(await getDashboardSessionIdentity(session, { env, now }), identity);
+  assert.equal(await getDashboardSessionRole(session, { env, now }), "employee");
 });
 
 test("shared request helpers enforce owner-only operations", async () => {

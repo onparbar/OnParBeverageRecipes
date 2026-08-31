@@ -344,7 +344,6 @@ export default function DashboardPage() {
               <table className="pricing-table shot-pricing__table">
                 <thead>
                   <tr>
-                    <th>Tap</th>
                     <th>Liquor</th>
                     <th>Current portions</th>
                     <th>New portion prices</th>
@@ -797,7 +796,7 @@ export default function DashboardPage() {
               <section className="inventory-block">
                 <div className="inventory-block__header">
                   <div>
-                    <h2>Needs To Be Ordered</h2>
+              <h2>Par Gap Reference</h2>
                     <p className="formula-note inventory-note">Orders round to full cases.</p>
                   </div>
                 </div>

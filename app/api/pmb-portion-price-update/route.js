@@ -19,6 +19,11 @@ import {
 } from "../../../lib/pmb-portion-price-update.mjs";
 import { resolvePmbPortionSchema } from "../../../lib/pmb-portion-schema.mjs";
 import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
+import {
+  attachVerifiedPmbPortionIdentity,
+  getOwnerVerifiedPmbPortionRows,
+  VERIFIED_PMB_PORTION_SCHEMA,
+} from "../../../lib/verified-pmb-portions.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -136,14 +141,23 @@ export async function POST(request) {
     const priceRequest = validatePmbPortionPriceUpdateInput(await request.json());
     const config = getConfig();
     const token = await getAuthtoken(config);
-    const [tapRows, itemRows] = await Promise.all([
+    const [tapRows, rawItemRows] = await Promise.all([
       getTapConfigRows(config),
       getItemList(config, token),
     ]);
-    const schemaState = resolvePmbPortionSchema(itemRows);
+    const discoveredSchema = resolvePmbPortionSchema(rawItemRows);
+    const verifiedItemRows = attachVerifiedPmbPortionIdentity(rawItemRows);
+    const ownerVerifiedRows = getOwnerVerifiedPmbPortionRows(rawItemRows);
+    const ownerVerifiedSchema = resolvePmbPortionSchema(ownerVerifiedRows, VERIFIED_PMB_PORTION_SCHEMA);
+    const schemaState = discoveredSchema.ok
+      ? discoveredSchema
+      : ownerVerifiedSchema.ok
+        ? { ...ownerVerifiedSchema, source: "owner-verified" }
+        : discoveredSchema;
     if (!schemaState.ok) {
       throw Object.assign(new Error(schemaState.message), { code: schemaState.code, status: 503 });
     }
+    const itemRows = discoveredSchema.ok ? rawItemRows : verifiedItemRows;
 
     const { affectedAssignments } = verifyPmbPortionTarget(tapRows, priceRequest);
     verifyPmbPortionItems(itemRows, priceRequest, schemaState.schema);
@@ -163,7 +177,13 @@ export async function POST(request) {
         await savePmbPortionManagementEdit(config, descriptor);
         saved.push(descriptor);
       }
-      verifyPmbPortionReadback(await getItemList(config, token), priceRequest, schemaState.schema);
+      verifyPmbPortionReadback(
+        discoveredSchema.ok
+          ? await getItemList(config, token)
+          : attachVerifiedPmbPortionIdentity(await getItemList(config, token)),
+        priceRequest,
+        schemaState.schema,
+      );
     } catch (error) {
       const rollback = await rollbackSavedEdits(config, saved);
       const rollbackComplete = rollback.every((result) => result.ok);

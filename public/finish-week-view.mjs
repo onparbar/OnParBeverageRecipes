@@ -119,7 +119,7 @@ export function renderFinishWeekPanel({
       <footer class="finish-week-actions">
         <label>
           <span>Completed by</span>
-          <input id="weekly-plan-finish-actor" type="text" maxlength="80" autocomplete="name" value="${escapeHtml(actor)}" placeholder="Manager name">
+          <input id="weekly-plan-finish-actor" data-current-user-name-input type="text" maxlength="80" autocomplete="name" value="${escapeHtml(actor)}" placeholder="Signed-in manager">
         </label>
         <button class="primary-button" id="weekly-plan-finish-save" type="button"${saving ? " disabled" : ""}>${saving ? "Saving..." : "Save selected"}</button>
         <p id="weekly-plan-finish-status" role="status" aria-live="polite"${message ? "" : " hidden"}>${escapeHtml(message)}</p>

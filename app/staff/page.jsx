@@ -113,7 +113,7 @@ export default function StaffRecipePage() {
               <p className="eyebrow">Delivery checklist</p>
               <h2 id="staff-order-title">Orders to receive</h2>
             </div>
-            <p id="staff-order-help">Check off a full delivery, or enter the quantity received when an order arrives short. Missing items alert the owner dashboard.</p>
+            <p id="staff-order-help">Check off a full delivery, or enter the quantity received when an order arrives short. Your signed-in name is saved automatically.</p>
           </div>
           <div id="staff-order-status" className="staff-recipe-status" role="status" aria-live="polite">
             Loading this week&apos;s order checklist...
@@ -130,7 +130,7 @@ export default function StaffRecipePage() {
               </label>
               <label>
                 <span>Checked by</span>
-                <input id="smart-receiving-name" type="text" maxLength="80" autoComplete="name" placeholder="Employee name" />
+                <input id="smart-receiving-name" data-current-user-name-input type="text" maxLength="80" autoComplete="name" placeholder="Signed-in employee" />
               </label>
             </div>
             <label className="smart-receiving__note-field">
