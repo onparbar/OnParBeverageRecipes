@@ -229,21 +229,43 @@ async function loadStaffRecipeSection() {
 }
 
 async function loadStaffPrepSection() {
-  const nextPlan = await fetchStaffPrepPlan();
-  prepPlanLoaded = true;
-  if (nextPlan.available || !prepPlan.available) prepPlan = nextPlan;
-  renderStaffPrepPlan();
-  renderStaffOverview();
-  updateStaffRetryState();
+  try {
+    const nextPlan = await fetchStaffPrepPlan();
+    if (nextPlan.available || !prepPlan.available) prepPlan = nextPlan;
+  } catch (error) {
+    if (!prepPlan.available) {
+      prepPlan = {
+        ...prepPlan,
+        available: false,
+        message: error?.message || "The weekly prep checklist could not be loaded.",
+      };
+    }
+  } finally {
+    prepPlanLoaded = true;
+    renderStaffOverview();
+    renderStaffPrepPlan();
+    updateStaffRetryState();
+  }
 }
 
 async function loadStaffOrderSection() {
-  const nextTracking = await fetchWeeklyOrderTracking();
-  orderTrackingLoaded = true;
-  if (nextTracking.available || !orderTracking.available) orderTracking = nextTracking;
-  renderWeeklyOrderTracking();
-  renderStaffOverview();
-  updateStaffRetryState();
+  try {
+    const nextTracking = await fetchWeeklyOrderTracking();
+    if (nextTracking.available || !orderTracking.available) orderTracking = nextTracking;
+  } catch (error) {
+    if (!orderTracking.available) {
+      orderTracking = {
+        ...orderTracking,
+        available: false,
+        message: error?.message || "The weekly delivery checklist could not be loaded.",
+      };
+    }
+  } finally {
+    orderTrackingLoaded = true;
+    renderStaffOverview();
+    renderWeeklyOrderTracking();
+    updateStaffRetryState();
+  }
 }
 
 async function loadStaffTapSheetSection() {
@@ -285,14 +307,16 @@ function inspectStaffBrowserProfile() {
     }
     return { safe: true, storageUnavailable: false };
   } catch {
-    return { safe: false, storageUnavailable: true };
+    // Private browsing can deny localStorage even though authenticated staff APIs
+    // remain available. Absence of readable owner data is not evidence of a conflict.
+    return { safe: true, storageUnavailable: true };
   }
 }
 
 function lockStaffRecipesForBrowserProfile(storageUnavailable) {
   if (overviewWeek) {
     overviewWeek.textContent = storageUnavailable
-      ? "Safari storage is unavailable. Use a regular staff browser profile."
+      ? "This browser profile cannot safely open Staff View."
       : "Open Staff View from the owner dashboard or use a separate staff browser profile.";
   }
   [overviewPrepValue, overviewLiquorValue, overviewOrderValue, overviewRecipeValue]
@@ -310,18 +334,12 @@ function lockStaffRecipesForBrowserProfile(storageUnavailable) {
   prepStatusPanel.textContent = "The staff prep checklist is locked in this browser profile.";
   orderStatusPanel.dataset.state = "error";
   orderStatusPanel.textContent = "The delivery checklist is locked in this browser profile.";
-  statusPanel.textContent = storageUnavailable
-    ? "Staff recipes are locked because this browser profile's site storage could not be checked. Use a dedicated staff browser profile."
-    : "Staff recipes are locked because this browser profile contains owner dashboard data. Use a separate browser profile reserved for staff.";
+  statusPanel.textContent = "Staff View is locked because this browser profile contains owner dashboard data. Use a separate browser profile reserved for staff.";
   recipeGrid.setAttribute("aria-busy", "false");
   prepList.setAttribute("aria-busy", "false");
   orderList.setAttribute("aria-busy", "false");
-  prepList.replaceChildren(createEmptyState(
-    "Open the staff page in a new, dedicated staff browser profile.",
-  ));
-  orderList.replaceChildren(createEmptyState(
-    "Open the staff page in a new, dedicated staff browser profile.",
-  ));
+  prepList.replaceChildren(createEmptyState("Open the staff page in a new, dedicated staff browser profile."));
+  orderList.replaceChildren(createEmptyState("Open the staff page in a new, dedicated staff browser profile."));
   recipeGrid.replaceChildren(createEmptyState(
     "Do not clear this profile's site data; it may contain unsynced owner edits. Open the staff page in a new, dedicated staff browser profile instead.",
   ));
