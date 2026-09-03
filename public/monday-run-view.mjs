@@ -65,7 +65,7 @@ export function buildMondayRunModel({
       label: "Save & lock plan",
       target: "weekly-plan",
       complete: planLocked,
-      status: planLocked ? "Locked" : mondaySnapshotSaved ? "Snapshot saved" : planActionable ? "Ready" : "Waiting",
+      status: planLocked ? "Locked" : mondaySnapshotSaved || planActionable ? "Ready to save & lock" : "Waiting",
     },
     {
       id: "orders",
@@ -127,7 +127,7 @@ export function renderMondayRun(run) {
         <ol class="monday-run__steps">
           ${run.steps.map((step, index) => `
             <li class="monday-run__step${step.complete ? " monday-run__step--done" : index === run.nextIndex ? " monday-run__step--current" : ""}">
-              <button type="button" data-monday-run-step="${escapeHtml(step.id)}" data-dashboard-target="${escapeHtml(step.target)}"${index === run.nextIndex ? ' aria-current="step"' : ""}>
+              <button type="button"${step.complete ? ' disabled aria-disabled="true"' : ` data-monday-run-step="${escapeHtml(step.id)}" data-dashboard-target="${escapeHtml(step.target)}"`}${index === run.nextIndex ? ' aria-current="step"' : ""}>
                 <span>${formatNumber(index + 1)}</span>
                 <strong>${escapeHtml(step.label)}</strong>
                 <small>${escapeHtml(step.complete ? "Done" : step.status)}</small>

@@ -136,6 +136,27 @@ test("Monday Run model preserves the five Monday operational steps and next-acti
   });
   assert.equal(locked.complete, true);
   assert.equal(locked.steps.find((step) => step.id === "orders").status, "Placed");
+
+  const lockedInProgress = buildMondayRunModel({
+    planLocked: true,
+    weeklyOrderTrackingAvailable: true,
+    vendorOrders: [{ ordered: false }],
+    orderLineCount: 1,
+    tapSheets: [{ isCurrent: false }],
+  });
+  const lockedHtml = renderMondayRun(lockedInProgress);
+  assert.match(lockedHtml, /<button type="button" disabled aria-disabled="true">\s*<span>1<\/span>/);
+  assert.match(lockedHtml, /<button type="button" disabled aria-disabled="true">\s*<span>2<\/span>/);
+  assert.match(lockedHtml, /<button type="button" disabled aria-disabled="true">\s*<span>3<\/span>/);
+  assert.match(lockedHtml, /data-monday-run-step="orders" data-dashboard-target="weekly-plan"/);
+
+  const snapshotOnly = buildMondayRunModel({
+    mondaySnapshotSaved: true,
+    planLocked: false,
+  });
+  assert.equal(snapshotOnly.steps.find((step) => step.id === "plan").complete, false);
+  assert.equal(snapshotOnly.steps.find((step) => step.id === "plan").status, "Ready to save & lock");
+  assert.doesNotMatch(renderMondayRun(snapshotOnly), /Snapshot saved/);
 });
 
 test("Monday Run renderers keep actionable data attributes and compact next-step text", () => {

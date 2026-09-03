@@ -5301,7 +5301,7 @@ async function publishCurrentWeeklyPlanSnapshot() {
       vendorProductName: item.vendorProductName,
       unitCost: item.unitCost,
     }));
-    const result = await requestParAgentState({
+    const buildPublishRequest = () => ({
       action: "publish-weekly-plan",
       expectedRevision: parAgentState.revision,
       inventoryItems: savedInventoryItems,
@@ -5309,6 +5309,15 @@ async function publishCurrentWeeklyPlanSnapshot() {
       recommendationPricing,
       kegPlanSnapshot: mondaySnapshot.kegPlanSnapshot,
     });
+    let result;
+    try {
+      result = await requestParAgentState(buildPublishRequest());
+    } catch (error) {
+      if (error?.code !== "KEG_STATE_REVISION_CONFLICT") throw error;
+      const latestState = await requestParAgentState();
+      applyParAgentState(latestState);
+      result = await requestParAgentState(buildPublishRequest());
+    }
     applyParAgentState(result);
     await loadWeeklyOrderTracking();
     await loadDashboardStaffPrepPlan();
@@ -11803,7 +11812,7 @@ async function runWeeklyPlanUpdate() {
   }
   weeklyPlanUpdating = true;
   parAgentError = "";
-  weeklyPlanRefreshMessage = "Saving the Monday snapshot and locking its order and cocktail plan...";
+  weeklyPlanRefreshMessage = "Saving and locking this week's plan...";
   renderWeeklyPlan();
   let lockedSuccessfully = false;
 
@@ -11820,15 +11829,15 @@ async function runWeeklyPlanUpdate() {
       throw new Error("The Monday snapshot does not include verified keg levels, on-hand kegs, and cocktail prep needs.");
     }
     const published = await publishCurrentWeeklyPlanSnapshot();
-    if (!published) throw new Error("The saved Monday snapshot could not be locked for the week.");
+    if (!published) throw new Error(weeklyPlanRefreshMessage || "Save & Lock Plan could not finish.");
 
     const summary = parAgentState?.recommendations?.summary || {};
-    weeklyPlanRefreshMessage = `Monday plan locked for Thursday delivery from the saved snapshot: ${formatNumber(summary.tapCount || 0)} tap recommendation${toNumber(summary.tapCount) === 1 ? "" : "s"}, including saved keg levels, on-hand kegs, and cocktail prep, will stay fixed through Sunday.`;
+    weeklyPlanRefreshMessage = `Weekly Plan saved and locked for Thursday delivery: ${formatNumber(summary.tapCount || 0)} tap recommendation${toNumber(summary.tapCount) === 1 ? "" : "s"}, including keg levels, on-hand kegs, and cocktail prep, will stay fixed through Sunday.`;
     parAgentError = "";
     lockedSuccessfully = true;
   } catch (error) {
     parAgentError = error.message || "Weekly Plan update failed.";
-    weeklyPlanRefreshMessage = `${parAgentError} The last successful plan remains visible and is marked not ready.`;
+    weeklyPlanRefreshMessage = `Save & Lock Plan did not finish: ${parAgentError} Press Save & Lock Plan to retry.`;
   } finally {
     weeklyPlanUpdating = false;
     renderWeeklyPlan();
