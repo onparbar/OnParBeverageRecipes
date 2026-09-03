@@ -212,7 +212,40 @@ export default function StaffRecipePage() {
         </section>
       </main>
 
-        <Script type="module" src="/staff-dashboard.js?v=20260830-2" strategy="afterInteractive" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.setTimeout(function () {
+                var week = document.getElementById("staff-overview-week");
+                if (!week || !/loading this week/i.test(week.textContent || "")) return;
+
+                week.textContent = "This week's plan could not load on this device.";
+                var retry = document.getElementById("staff-overview-retry");
+                if (retry) {
+                  retry.hidden = false;
+                  retry.disabled = false;
+                  retry.textContent = "Retry";
+                  retry.addEventListener("click", function () {
+                    window.location.reload();
+                  }, { once: true });
+                }
+
+                [
+                  ["staff-overview-prep-value", "staff-overview-prep-detail"],
+                  ["staff-overview-liquor-value", "staff-overview-liquor-detail"],
+                  ["staff-overview-order-value", "staff-overview-order-detail"],
+                  ["staff-overview-recipe-value", "staff-overview-recipe-detail"]
+                ].forEach(function (ids) {
+                  var value = document.getElementById(ids[0]);
+                  var detail = document.getElementById(ids[1]);
+                  if (value) value.textContent = "Unavailable";
+                  if (detail) detail.textContent = "Tap Retry to load again";
+                });
+              }, 12000);
+            `,
+          }}
+        />
+        <Script type="module" src="/staff-dashboard.js?v=20260903-1" strategy="afterInteractive" />
     </div>
   );
 }
