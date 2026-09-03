@@ -860,7 +860,7 @@ const MENU_ORDER = [
   ["WASHINGTON APPLE (CROWN ROYAL APPLE)", "Washington Apple (Whiskey)"],
   ["WHISKEY SOUR (JACK DANIELS)", "Whiskey Sour (Whiskey)"],
 ];
-const OPERATION_TAB_NAMES = ["keg-levels", "inventory", "weekly-plan"];
+const OPERATION_TAB_NAMES = ["keg-levels", "inventory", "weekly-plan", "weekly-snapshots"];
 const MENU_TAB_NAMES = ["performance", "weekly-usage", "recipes", "add", "pricing", "ingredients", "print"];
 const NEW_RECIPE_ORDER = [
   ["Bacardi Sunset", "Bacardi Sunset"],
@@ -3059,8 +3059,14 @@ function bindEvents() {
     const listSize = event.target.closest("[data-seller-ranking-list-size]");
     const period = event.target.closest("[data-seller-ranking-period]");
     const metric = event.target.closest("[data-seller-ranking-metric]");
-    if (category) sellerRankingCategory = clean(category.value).toLowerCase() || "all";
-    if (wall) sellerRankingWall = clean(wall.value).toLowerCase() || "main";
+    if (category) {
+      sellerRankingCategory = clean(category.value).toLowerCase() || "all";
+      keepSellerRankingFiltersCompatible({ categoryChanged: true });
+    }
+    if (wall) {
+      sellerRankingWall = clean(wall.value).toLowerCase() || "main";
+      keepSellerRankingFiltersCompatible({ wallChanged: true });
+    }
     if (listSize) sellerRankingListSize = Math.max(3, Math.min(25, Math.floor(toNumber(listSize.value) || 5)));
     if (period) sellerRankingPeriod = clean(period.value).toLowerCase() || "six-weeks";
     if (metric) {
@@ -3311,6 +3317,20 @@ function bindEvents() {
   window.setInterval(() => {
     if (document.visibilityState === "visible") void refreshDashboardStaffPrepPlan();
   }, 30_000);
+}
+
+function keepSellerRankingFiltersCompatible({ categoryChanged = false, wallChanged = false } = {}) {
+  if (categoryChanged) {
+    if (sellerRankingCategory === "liquor" && sellerRankingWall === "main") sellerRankingWall = "patio";
+    if (["beer", "cocktail"].includes(sellerRankingCategory) && sellerRankingWall === "patio") sellerRankingWall = "main";
+    return;
+  }
+  if (!wallChanged) return;
+  if (sellerRankingWall === "patio" && ["beer", "cocktail"].includes(sellerRankingCategory)) {
+    sellerRankingCategory = "liquor";
+  } else if (sellerRankingWall === "main" && sellerRankingCategory === "liquor") {
+    sellerRankingCategory = "all";
+  }
 }
 
 function switchAddProductType(productType, { focus = false } = {}) {
@@ -3680,6 +3700,7 @@ function getGlobalSearchSectionItems() {
     ["dashboard", "Dashboard", "Alerts, readiness, weekly priorities, and quick actions"],
     ["recipes", "Recipes", "Cocktails, batches, spirits, and ingredients", "current"],
     ["weekly-plan", "Weekly Plan", "Orders, beer kegs, and cocktails to make"],
+    ["weekly-snapshots", "Weekly Snapshots", "Saved inventory counts by week"],
     ["keg-levels", "Keg Levels", "Tap walls, current levels, pars, and on-deck products"],
     ["pricing", "Tap Pricing", "Pour prices, costs, and gross margins"],
     ["ingredients", "Ingredient & Keg Costs", "Bottle prices, keg prices, and vendor mappings"],
@@ -6558,6 +6579,32 @@ function renderSellerRankingPeriod(period, { title, allTime, metric, emptyMessag
     </article>`;
 }
 
+function getSellerRankingRowIdentity(row) {
+  const taps = (Array.isArray(row?.tapNumbers) ? row.tapNumbers : [])
+    .map((tapNumber) => toNumber(tapNumber))
+    .filter(Boolean)
+    .sort((a, b) => a - b)
+    .join(",");
+  return `${clean(row?.name).toLowerCase()}|${taps}`;
+}
+
+function getDisjointSellerRankingPeriod(period, requestedListSize) {
+  const allowedListSizes = [3, 5, 10, 15, 25];
+  const identities = new Set(
+    [...(period?.top || []), ...(period?.bottom || [])].map(getSellerRankingRowIdentity),
+  );
+  const maximumDisjointSize = Math.floor(identities.size / 2);
+  const listSize = allowedListSizes
+    .filter((size) => size <= requestedListSize && size <= maximumDisjointSize)
+    .at(-1) || Math.min(3, requestedListSize);
+  const top = (period?.top || []).slice(0, listSize);
+  const topIdentities = new Set(top.map(getSellerRankingRowIdentity));
+  const bottom = (period?.bottom || [])
+    .filter((row) => !topIdentities.has(getSellerRankingRowIdentity(row)))
+    .slice(0, listSize);
+  return { ...period, top, bottom, listSize };
+}
+
 function renderOhioComplianceAlert() {
   const watch = buildOhioComplianceWatchViewModel(beverageNewsPayload?.complianceWatch, {
     acknowledgedFingerprint: ohioComplianceAcknowledgement.fingerprint,
@@ -6606,8 +6653,8 @@ function renderOnParInsights() {
         && isOperationalProduct(item)
       ),
       recentWeekLimit,
-      topLimit: sellerRankingListSize,
-      bottomLimit: sellerRankingListSize,
+      topLimit: 25,
+      bottomLimit: 25,
     },
   );
   const emptyMessage = isDollarRanking
@@ -6615,9 +6662,11 @@ function renderOnParInsights() {
       ? "No products in this filter have enough exact PMB usage plus verified current pricing and costs."
       : "No products in this filter have enough exact PMB usage and verified current pricing."
     : "No positive poured usage is saved for this filter.";
-  const periodRankings = sellerRankingPeriod === "all-time"
+  const selectedPeriodRankings = sellerRankingPeriod === "all-time"
       ? rankings.allTime
       : rankings.recent;
+  const periodRankings = getDisjointSellerRankingPeriod(selectedPeriodRankings, sellerRankingListSize);
+  const displayedListSize = periodRankings.listSize;
   const periodTitle = sellerRankingPeriod === "all-time"
     ? "All saved usage weeks"
     : recentWeekLimit === 1
@@ -6642,7 +6691,7 @@ function renderOnParInsights() {
           <option value="patio"${sellerRankingWall === "patio" ? " selected" : ""}>Patio liquor wall</option>
         </select></label>
         <label class="select-field"><span>Show per list</span><select data-seller-ranking-list-size>
-          ${[3, 5, 10, 15, 25].map((size) => `<option value="${size}"${sellerRankingListSize === size ? " selected" : ""}>${size} drinks</option>`).join("")}
+          ${[3, 5, 10, 15, 25].map((size) => `<option value="${size}"${displayedListSize === size ? " selected" : ""}>${size} drinks</option>`).join("")}
         </select></label>
         <label class="select-field"><span>Period</span><select data-seller-ranking-period>
           <option value="one-week"${sellerRankingPeriod === "one-week" ? " selected" : ""}>1 week</option>
@@ -6660,7 +6709,7 @@ function renderOnParInsights() {
       </div>
     </header>
     <div class="onpar-insights__periods">
-      ${renderSellerRankingPeriod(periodRankings, { title: periodTitle, allTime: sellerRankingPeriod === "all-time", metric: sellerRankingMetric, emptyMessage, listSize: sellerRankingListSize })}
+      ${renderSellerRankingPeriod(periodRankings, { title: periodTitle, allTime: sellerRankingPeriod === "all-time", metric: sellerRankingMetric, emptyMessage, listSize: displayedListSize })}
     </div>`;
 }
 

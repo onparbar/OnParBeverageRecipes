@@ -39,6 +39,16 @@ test("the owner dashboard is the initial page and recipes appear later in naviga
   assert.doesNotMatch(dashboardSource, /data-order-draft-export/);
 });
 
+test("Performance keeps shot filters compatible and top and bottom lists distinct", () => {
+  assert.match(dashboardSource, /function keepSellerRankingFiltersCompatible/);
+  assert.match(dashboardSource, /sellerRankingCategory === "liquor" && sellerRankingWall === "main"/);
+  assert.match(dashboardSource, /sellerRankingWall = "patio"/);
+  assert.match(dashboardSource, /function getDisjointSellerRankingPeriod/);
+  assert.match(dashboardSource, /topLimit: 25/);
+  assert.match(dashboardSource, /bottomLimit: 25/);
+  assert.match(dashboardSource, /!topIdentities\.has\(getSellerRankingRowIdentity\(row\)\)/);
+});
+
 test("current and old recipes share one Recipes workspace", () => {
   assert.match(pageSource, /id="current-recipes-view"/);
   assert.match(pageSource, /id="old-recipes-view"/);

@@ -2680,7 +2680,35 @@ h1 {
 }
 
 .staff-stats-grid {
-  grid-template-columns: minmax(0, 220px);
+  display: flex;
+  width: max-content;
+  margin-bottom: 18px;
+}
+
+.staff-stats-grid .stat-card {
+  display: flex;
+  min-height: 0;
+  align-items: baseline;
+  gap: 6px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.staff-stats-grid .stat-card > * {
+  margin: 0;
+}
+
+.staff-stats-grid .stat-card strong {
+  font-family: "IBM Plex Sans", Arial, sans-serif;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.staff-stats-grid .stat-card span {
+  font-size: 0.72rem;
+  line-height: 1;
 }
 
 .recipe-card.staff-recipe-card {
@@ -8346,13 +8374,13 @@ td {
   }
 
   .staff-stats-grid {
-    grid-template-columns: 1fr;
+    width: auto;
     margin-bottom: 16px;
   }
 
   .staff-stats-grid .stat-card {
-    min-height: 82px;
-    padding: 14px;
+    min-height: 0;
+    padding: 0;
   }
 
   .staff-prep-item,
@@ -11507,4 +11535,16 @@ details.custom-inventory-editor[open] > summary {
   .inventory-history-card {
     transition: none;
   }
+}
+
+/* Keep the four Beverage Ops destinations balanced across two rows. */
+.operation-tabs.operation-tabs--four {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.operation-tabs.operation-tabs--four .operation-tab {
+  grid-column: auto;
+  justify-self: stretch;
+  width: 100%;
 }

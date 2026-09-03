@@ -6,12 +6,13 @@ const operationSections = [
   ["keg-levels", "Keg Levels"],
   ["inventory", "Inventory"],
   ["weekly-plan", "Weekly Plan"],
+  ["weekly-snapshots", "Weekly Snapshots"],
 ];
 
 function OperationsBar({ context }) {
   return (
     <div className="operations-bar">
-      <div className="operation-tabs" role="tablist" aria-label="Beverage operations sections">
+      <div className="operation-tabs operation-tabs--four" role="tablist" aria-label="Beverage operations sections">
         {operationSections.map(([id, label]) => (
           <button
             className={`operation-tab${id === "keg-levels" ? " is-active" : ""}`}
@@ -371,6 +372,20 @@ export default function DashboardPage() {
           <div id="weekly-plan" className="weekly-plan"></div>
         </section>
 
+        <section className="panel" id="weekly-snapshots-panel" role="tabpanel" aria-label="Weekly Snapshots">
+          <OperationsBar context="weekly-snapshots" />
+          <section className="inventory-block inventory-snapshots-block">
+            <div className="inventory-block__header inventory-snapshots-block__header">
+              <div>
+                <span className="inventory-snapshots-block__eyebrow">Weekly record</span>
+                <h2>Weekly Snapshots</h2>
+              </div>
+              <span className="inventory-snapshots-block__hint">Latest week first</span>
+            </div>
+            <div className="inventory-history-list" id="inventory-history-list"></div>
+          </section>
+        </section>
+
         <section className="panel" id="add-panel" aria-labelledby="add-tab">
           <div className="add-workspace">
           <div className="add-product-switcher" role="tablist" aria-label="Choose a product type">
@@ -716,17 +731,6 @@ export default function DashboardPage() {
               <input id="inventory-search" type="search" placeholder="Search liquor, mixers, reorder items..." />
             </label>
           </div>
-
-          <section className="inventory-block inventory-snapshots-block">
-            <div className="inventory-block__header inventory-snapshots-block__header">
-              <div>
-                <span className="inventory-snapshots-block__eyebrow">Weekly record</span>
-                <h2>Weekly Snapshots</h2>
-              </div>
-              <span className="inventory-snapshots-block__hint">Latest week first</span>
-            </div>
-            <div className="inventory-history-list" id="inventory-history-list"></div>
-          </section>
 
           <div className="inventory-layout">
             <aside className="inventory-summary" id="inventory-summary"></aside>
