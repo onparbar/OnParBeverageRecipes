@@ -32,10 +32,10 @@ export function buildMondayRunModel({
       label: "Refresh PMB & capture usage",
       target: "dashboard",
       complete: lockedPlanCapturedSetup || (pmbFeedsReady && weeklyUsageCaptured),
-      status: pmbRefreshPending
-        ? "Refreshing"
-        : !pmbFeedsReady
-          ? "Refresh PMB"
+      status: !pmbFeedsReady
+        ? "PMB sync issue"
+        : pmbRefreshPending
+          ? "Refreshing"
           : weeklyUsageCaptured
             ? "Ready"
             : "Capture usage",

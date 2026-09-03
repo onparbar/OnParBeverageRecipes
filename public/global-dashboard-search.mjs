@@ -108,20 +108,56 @@ export function searchDashboardItems(items, rawQuery, { limit = 12 } = {}) {
 }
 
 const DASHBOARD_QUERY_STOP_WORDS = new Set([
-  "a", "an", "and", "are", "at", "bar", "by", "can", "dashboard", "did", "drink",
+  "a", "all", "an", "and", "are", "at", "bar", "by", "can", "dashboard", "did", "drink",
   "drinks", "find", "for", "from", "had", "has", "have", "in", "is", "it", "last",
-  "latest", "me", "of", "on", "or", "please", "recent", "recently", "search", "show",
+  "latest", "me", "of", "on", "one", "or", "past", "please", "recent", "recently", "search", "show",
   "tap", "taps", "that", "the", "this", "to", "wall", "week", "weeks", "what",
-  "which", "with",
+  "which", "with", "four", "six", "eight", "twelve", "time", "history",
 ]);
 
 const DASHBOARD_QUERY_RULE_WORDS = new Set([
-  "above", "archived", "beer", "beers", "below", "cocktail", "cocktails", "current",
+  "above", "archived", "beer", "beers", "below", "best", "cocktail", "cocktails", "current",
   "dollar", "dollars", "equal", "exactly", "hidden", "highest", "karaoke", "least",
   "less", "liquor", "liquors", "lowest", "main", "most", "no", "ounce", "ounces",
   "over", "patio", "pour", "poured", "pours", "recent", "revenue", "sale", "sales",
-  "profit", "profits", "margin", "shot", "shots", "spirit", "spirits", "than", "top", "under", "usage", "volume",
+  "profit", "profits", "margin", "shot", "shots", "spirit", "spirits", "than", "top", "under", "usage", "volume", "worst",
 ]);
+
+const DASHBOARD_PERIOD_WEEK_VALUES = new Map([
+  ["one", 1], ["1", 1],
+  ["four", 4], ["4", 4],
+  ["six", 6], ["6", 6],
+  ["eight", 8], ["8", 8],
+  ["twelve", 12], ["12", 12],
+]);
+
+function getDashboardQueryPeriod(query) {
+  if (/\b(?:this|current) week\b/.test(query)) {
+    return { key: "this-week", explicit: true, matchedText: "" };
+  }
+  if (/\b(?:last|previous) week\b/.test(query)) {
+    return { key: "last-week", explicit: true, matchedText: "" };
+  }
+  if (/\b(?:all history|all time)\b/.test(query)) {
+    return { key: "all-time", explicit: true, matchedText: "" };
+  }
+
+  const windowMatch = query.match(/\b(?:last|past|recent)\s+(one|1|four|4|six|6|eight|8|twelve|12)\s+weeks?\b/);
+  if (windowMatch) {
+    const weeks = DASHBOARD_PERIOD_WEEK_VALUES.get(windowMatch[1]) || 6;
+    return {
+      key: weeks === 1 ? "one-week" : `${weeks === 4 ? "four" : weeks === 6 ? "six" : weeks === 8 ? "eight" : "twelve"}-weeks`,
+      explicit: true,
+      matchedText: windowMatch[0],
+    };
+  }
+
+  return {
+    key: "recent",
+    explicit: /\brecent(?:ly)?\b/.test(query),
+    matchedText: "",
+  };
+}
 
 function findDashboardQueryMatches(query, rules) {
   return rules.filter((rule) => rule.pattern.test(query)).map((rule) => rule.value);
@@ -208,7 +244,11 @@ export function parseDashboardDataQuery(rawQuery) {
     metric = "ounces";
   }
 
-  const hasNumber = /\b\d+(?:\.\d+)?\b/.test(query);
+  const periodSelection = getDashboardQueryPeriod(query);
+  const comparisonQuery = periodSelection.matchedText
+    ? query.replace(periodSelection.matchedText, " ")
+    : query;
+  const hasNumber = /\b\d+(?:\.\d+)?\b/.test(comparisonQuery);
   if (hasNumber && !comparison) {
     return {
       status: "needs-clarification",
@@ -224,18 +264,10 @@ export function parseDashboardDataQuery(rawQuery) {
     };
   }
 
-  const period = /\bthis week\b|\bcurrent week\b/.test(query)
-    ? "this-week"
-    : /\blast week\b|\bprevious week\b/.test(query)
-      ? "last-week"
-      : "recent";
-  const periodExplicit = period !== "recent" || /\brecent(?:ly)?\b|\blast (?:six|6) weeks\b/.test(query);
-  const sort = /\b(?:highest|top|largest)\b|\bmost\s+(?:poured|sales|volume|ounces)/.test(query)
-    ? "desc"
-    : /\b(?:lowest|least|bottom|smallest)\b/.test(query)
-      ? "asc"
-      : null;
-  if (sort && !periodExplicit) {
+  const wantsTop = /\b(?:best|highest|top|largest)\b|\bmost\s+(?:poured|sales|volume|ounces)/.test(query);
+  const wantsBottom = /\b(?:worst|lowest|least|bottom|smallest)\b/.test(query);
+  const sort = wantsTop && wantsBottom ? "both" : wantsTop ? "desc" : wantsBottom ? "asc" : null;
+  if (sort && !periodSelection.explicit) {
     return {
       status: "needs-clarification",
       question: "Which period should I rank: last week, this week, or recent history?",
@@ -261,7 +293,7 @@ export function parseDashboardDataQuery(rawQuery) {
       visibility: /\b(?:hidden|archived)\b/.test(query) ? "hidden" : "active",
       metric,
       comparison,
-      period,
+      period: periodSelection.key,
       sort,
       nameTerms,
     },
@@ -309,14 +341,33 @@ export function searchDashboardData(items, rawQuery, { limit = 50 } = {}) {
         periodLabel: period.label || "Selected period",
       };
     })
-    .filter(Boolean)
-    .sort((left, right) => {
-      if (intent.sort) {
-        const direction = intent.sort === "desc" ? -1 : 1;
-        return direction * (left.value - right.value) || String(left.name || "").localeCompare(String(right.name || ""));
-      }
-      return String(left.name || "").localeCompare(String(right.name || ""));
-    });
+    .filter(Boolean);
+
+  const compareNames = (left, right) => String(left.name || "").localeCompare(String(right.name || ""));
+  const compareValues = (direction) => (left, right) => direction * (left.value - right.value) || compareNames(left, right);
+
+  if (intent.sort === "both") {
+    const groupLimit = Math.min(5, safeLimit);
+    const top = [...matches]
+      .sort(compareValues(-1))
+      .slice(0, groupLimit)
+      .map((item, index) => ({ ...item, rankingGroup: "top", rankingPosition: index + 1 }));
+    const bottom = [...matches]
+      .sort(compareValues(1))
+      .slice(0, groupLimit)
+      .map((item, index) => ({ ...item, rankingGroup: "bottom", rankingPosition: index + 1 }));
+    return {
+      ...parsed,
+      results: [...top, ...bottom],
+      groups: { top, bottom },
+    };
+  }
+
+  matches.sort(intent.sort === "desc"
+    ? compareValues(-1)
+    : intent.sort === "asc"
+      ? compareValues(1)
+      : compareNames);
 
   return {
     ...parsed,

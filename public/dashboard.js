@@ -3511,8 +3511,9 @@ function getDashboardDataSearchPeriod(item, label, entries, sellingPricePerOz) {
 function buildDashboardDataSearchItems() {
   const sourceItems = [...weeklyUsageItems, ...weeklyUsageArchivedItems]
     .filter((item) => !isRetiredProduct(item));
-  const recentLabels = getWeeklyUsageHistoryHeaders(sourceItems).slice(0, 6);
-  const latestLabel = recentLabels[0] || "";
+  const historyLabels = getWeeklyUsageHistoryHeaders(sourceItems);
+  const recentLabels = historyLabels.slice(0, 6);
+  const latestLabel = historyLabels[0] || "";
 
   return sourceItems.map((item, index) => {
     const history = Array.isArray(item.history) ? item.history : [];
@@ -3520,6 +3521,14 @@ function buildDashboardDataSearchItems() {
     const recentEntries = recentLabels.map((label) => entriesByLabel.get(label)).filter(Boolean);
     const latestEntry = latestLabel ? entriesByLabel.get(latestLabel) : null;
     const sellingPricePerOz = toNumber(getWeeklyUsageItemSellingRate(item).sellingPricePerOz);
+    const getSavedWindow = (weekLimit, fallbackLabel) => {
+      const labels = historyLabels.slice(0, weekLimit);
+      const entries = labels.map((label) => entriesByLabel.get(label)).filter(Boolean);
+      const label = entries.length
+        ? `${entries.length}-week average`
+        : fallbackLabel;
+      return getDashboardDataSearchPeriod(item, label, entries, sellingPricePerOz);
+    };
     const currentOunces = Object.prototype.hasOwnProperty.call(item, "rawOz")
       && Number.isFinite(Number(item.rawOz))
       ? Number(item.rawOz)
@@ -3542,6 +3551,12 @@ function buildDashboardDataSearchItems() {
         "last-week": latestEntry
           ? getDashboardDataSearchPeriod(item, latestLabel, [latestEntry], sellingPricePerOz)
           : null,
+        "one-week": getSavedWindow(1, "Latest saved week"),
+        "four-weeks": getSavedWindow(4, "Last 4 saved weeks"),
+        "six-weeks": getSavedWindow(6, "Last 6 saved weeks"),
+        "eight-weeks": getSavedWindow(8, "Last 8 saved weeks"),
+        "twelve-weeks": getSavedWindow(12, "Last 12 saved weeks"),
+        "all-time": getSavedWindow(historyLabels.length, "All saved history"),
         recent: getDashboardDataSearchPeriod(
           item,
           recentLabels.length ? `Recent ${recentLabels.length}-week average` : "Recent history",
@@ -3569,13 +3584,15 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
     return;
   }
 
-  dashboardDataSearchFeedback.textContent = `${search.results.length} matching item${search.results.length === 1 ? "" : "s"}`;
+  dashboardDataSearchFeedback.textContent = search.groups
+    ? `Top ${search.groups.top.length} and bottom ${search.groups.bottom.length}`
+    : `${search.results.length} matching item${search.results.length === 1 ? "" : "s"}`;
   if (!search.results.length) {
     dashboardDataSearchResults.innerHTML = '<div class="dashboard-data-search-empty">No dashboard items match that search. Try another wall, period, or threshold.</div>';
     return;
   }
 
-  dashboardDataSearchResults.innerHTML = search.results.map((item) => {
+  const renderSearchRows = (rows) => rows.map((item) => {
     const dollarsAvailable = Number.isFinite(Number(item.dollars)) && Number(item.dollars) > 0;
     const primaryValue = search.intent.metric === "dollars"
       ? dollarsAvailable ? money(item.value) : "Sales unavailable"
@@ -3584,11 +3601,14 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
       ? item.ounces === null ? "Sales estimate" : `${formatNumber(item.ounces)} oz poured`
       : dollarsAvailable ? `${money(item.dollars)} estimated sales` : "Sales unavailable";
     const wallLabel = item.wall ? `${normalizeTitle(item.wall)} wall` : "Historical";
+    const rankingLabel = item.rankingGroup
+      ? `${item.rankingGroup === "top" ? "Top" : "Bottom"} #${formatNumber(item.rankingPosition)}`
+      : "";
     return `
       <article class="dashboard-data-search-result">
         <div class="dashboard-data-search-result__identity">
           <strong>${escapeHtml(item.name)}</strong>
-          <span>${escapeHtml(wallLabel)} · ${escapeHtml(getWeeklyUsagePerformanceCategoryLabel(item.category))}${item.tapNumber ? ` · Tap ${formatNumber(item.tapNumber)}` : ""}</span>
+          <span>${rankingLabel ? `${escapeHtml(rankingLabel)} · ` : ""}${escapeHtml(wallLabel)} · ${escapeHtml(getWeeklyUsagePerformanceCategoryLabel(item.category))}${item.tapNumber ? ` · Tap ${formatNumber(item.tapNumber)}` : ""}</span>
         </div>
         <div class="dashboard-data-search-result__value">
           <strong>${escapeHtml(primaryValue)}</strong>
@@ -3598,6 +3618,10 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
       </article>
     `;
   }).join("");
+  dashboardDataSearchResults.innerHTML = search.groups
+    ? `<section class="dashboard-data-search-group"><h3>Top ${formatNumber(search.groups.top.length)}</h3>${renderSearchRows(search.groups.top)}</section>
+       <section class="dashboard-data-search-group"><h3>Bottom ${formatNumber(search.groups.bottom.length)}</h3>${renderSearchRows(search.groups.bottom)}</section>`
+    : renderSearchRows(search.results);
 }
 
 function renderWhatIfPlan() {
@@ -6070,21 +6094,34 @@ function openMondayRunStep(stepId, target) {
   if (targetTab !== "weekly-plan") return;
 
   const selector = {
-    plan: "#run-weekly-plan-agent",
     orders: "#weekly-plan-orders",
     prep: ".weekly-plan-column--prep",
     finish: "#weekly-plan-finish-week",
     review: ".weekly-plan-header",
   }[stepId];
-  if (!selector) return;
+  if (stepId !== "plan" && !selector) return;
 
   requestAnimationFrame(() => {
-    const destination = weeklyPlan?.querySelector(selector);
+    const saveButton = weeklyPlan?.querySelector("#run-weekly-plan-agent");
+    const lateReason = weeklyPlan?.querySelector("#weekly-plan-late-reason");
+    const needsLateReason = stepId === "plan"
+      && lateReason instanceof HTMLInputElement
+      && saveButton instanceof HTMLButtonElement
+      && saveButton.disabled
+      && !clean(lateReason.value);
+    const destination = stepId === "plan"
+      ? needsLateReason ? lateReason : saveButton
+      : weeklyPlan?.querySelector(selector);
+    if (needsLateReason) {
+      weeklyPlanRefreshMessage = "Enter why this snapshot was saved outside Monday, then choose Save & Lock Plan.";
+      const status = weeklyPlan?.querySelector("#weekly-plan-live-status");
+      if (status) status.textContent = weeklyPlanRefreshMessage;
+    }
     if (destination instanceof HTMLDetailsElement) destination.open = true;
     const parentDetails = destination?.closest("details");
     if (parentDetails) parentDetails.open = true;
     destination?.scrollIntoView({ block: "center", behavior: "smooth" });
-    if (destination instanceof HTMLButtonElement && !destination.disabled) {
+    if (destination instanceof HTMLInputElement || (destination instanceof HTMLButtonElement && !destination.disabled)) {
       destination.focus({ preventScroll: true });
     }
   });
@@ -7201,10 +7238,36 @@ function getWeeklyPlanVendorLines(plan, deferredOrders = []) {
 
 function renderWeeklyPlanByVendor(plan, deferredOrders = []) {
   const groups = getWeeklyPlanVendorLines(plan, deferredOrders);
-  const activeOrders = groups.map((group) => renderWeeklyPlanGroup(
-    `${group.vendor} Order`,
-    sum(group.items.map((item) => toNumber(item.quantity))),
-    `<div class="weekly-plan-vendor-summary"><strong>${group.hasCompletePricing ? money(group.estimatedCost) : `${money(group.estimatedCost)} subtotal`}</strong></div><div class="weekly-plan-list">${group.items.map((item) => {
+  const adjustmentsByCatalogId = new Map(weeklyOrderTracking.adjustments.map((item) => [item.catalogId, item]));
+  const activeOrders = [];
+  const manuallyDeferred = [];
+  groups.forEach((group) => {
+    const catalogItems = [...new Map(group.items.map((item) => {
+      const catalogItem = findDraftLineAdjustmentCatalogItem(item, group.vendor);
+      return catalogItem ? [catalogItem.catalogId, catalogItem] : null;
+    }).filter(Boolean)).values()];
+    const canDeferEntireOrder = catalogItems.length === group.items.length && catalogItems.length <= 100;
+    const vendorIsDeferred = canDeferEntireOrder && catalogItems.every((item) => {
+      const adjustment = adjustmentsByCatalogId.get(item.catalogId);
+      return Boolean(adjustment) && toNumber(adjustment.quantity) === 0;
+    });
+    if (vendorIsDeferred) {
+      const deferral = adjustmentsByCatalogId.get(catalogItems[0].catalogId);
+      manuallyDeferred.push(renderWeeklyPlanGroup(
+        `${group.vendor} deferred`,
+        0,
+        `<div class="weekly-plan-vendor-summary"><strong>${money(group.estimatedCost)}</strong><span>${escapeHtml(deferral?.reason || `Entire ${group.vendor} order deferred for this week.`)}</span></div>`,
+        "held",
+      ));
+      return;
+    }
+    const deferAction = canDeferEntireOrder
+      ? `<button class="mini-button" type="button" data-weekly-plan-defer-vendor="${escapeHtml(group.vendor)}" data-weekly-plan-defer-lines="${escapeHtml(JSON.stringify(catalogItems.map((item) => item.catalogId)))}">Defer entire order</button>`
+      : "";
+    activeOrders.push(renderWeeklyPlanGroup(
+      `${group.vendor} Order`,
+      sum(group.items.map((item) => toNumber(item.quantity))),
+      `<div class="weekly-plan-vendor-summary"><strong>${group.hasCompletePricing ? money(group.estimatedCost) : `${money(group.estimatedCost)} subtotal`}</strong>${deferAction}</div><div class="weekly-plan-list">${group.items.map((item) => {
       const details = [
         item.tapNumbers?.length ? `Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.map(formatNumber).join(", ")}` : "",
         item.hasKnownPrice === false ? "Price needed" : "",
@@ -7218,16 +7281,19 @@ function renderWeeklyPlanByVendor(plan, deferredOrders = []) {
           <b>${escapeHtml(item.quantityLabel)}</b>
         </div>
       `;
-    }).join("")}</div>`,
-  )).join("");
+      }).join("")}</div>`,
+    ));
+  });
   const deferred = deferredOrders.map((item) => renderWeeklyPlanGroup(
     `${item.vendor} skipped`,
     0,
     `<div class="weekly-plan-vendor-summary"><strong>${money(item.estimatedTotal)}</strong><span>${escapeHtml(item.reason)}</span></div>`,
     "held",
   )).join("");
-  return activeOrders || deferred
-    ? `${activeOrders}${deferred}`
+  const active = activeOrders.join("");
+  const deferredForWeek = manuallyDeferred.join("");
+  return active || deferredForWeek || deferred
+    ? `${active}${deferredForWeek}${deferred}`
     : '<p class="weekly-plan-empty">No active purchasing lines. Review held and excluded items below before concluding no order is needed.</p>';
 }
 
@@ -7511,6 +7577,43 @@ function bindOwnerWeeklyOrderTrackingEvents() {
       const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
       return getCurrentVendorOrderPolicy(plan, snapshot);
     },
+  });
+  weeklyPlan?.querySelectorAll("[data-weekly-plan-defer-vendor]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const vendor = clean(button.dataset.weeklyPlanDeferVendor);
+      let catalogIds = [];
+      try {
+        catalogIds = JSON.parse(button.dataset.weeklyPlanDeferLines || "[]").map(clean).filter(Boolean);
+      } catch {
+        catalogIds = [];
+      }
+      if (!vendor || !catalogIds.length) {
+        weeklyOrderTrackingMessage = "This vendor order is still loading. Try again in a moment.";
+        renderWeeklyPlan();
+        return;
+      }
+      if (!confirmDashboardAction(
+        `Defer the entire ${vendor} order for this week?`,
+        [
+          `${catalogIds.length} order line${catalogIds.length === 1 ? "" : "s"} will be removed from this week's order.`,
+          "The normal products and ordering rules will stay unchanged for future weeks.",
+        ],
+        "You can still undo these changes from Adjust order before approval.",
+      )) return;
+      const adjustedBy = clean(globalThis.onParDashboardIdentity?.name || dashboardFinishWeekActor || "Manager");
+      button.disabled = true;
+      await saveVendorOrderDraftAction({
+        action: "set-order-adjustments",
+        vendor,
+        adjustedBy,
+        adjustments: catalogIds.map((catalogId) => ({
+          catalogId,
+          vendor,
+          quantity: 0,
+          reason: `Entire ${vendor} order deferred for this week.`,
+        })),
+      });
+    });
   });
 }
 
@@ -14350,11 +14453,8 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
   }
 
   const realityCheck = getInventoryRealityCheckModel();
-  const unreviewedRealityIssues = realityCheck.reviews.filter((issue) => !inventoryRealityAcceptedIssueIds.has(issue.id));
-  if (realityCheck.blockers.length || unreviewedRealityIssues.length) {
-    inventorySharedMessage = realityCheck.blockers.length
-      ? "Monday snapshot not saved: finish the required Inventory Reality Check items."
-      : "Review the unusual counts before saving the Monday snapshot.";
+  if (realityCheck.blockers.length) {
+    inventorySharedMessage = "Monday snapshot not saved: finish the required Inventory Reality Check items.";
     renderInventoryPanels();
     renderInventoryRealityCheck(realityCheck, { scroll: true });
     return false;
