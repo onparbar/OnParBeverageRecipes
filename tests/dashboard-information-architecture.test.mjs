@@ -301,9 +301,10 @@ test("retired Bottle Service inventory is removed without removing liquor-cabine
 });
 
 test("voice inventory can focus matching on the liquor and mixer cabinets", () => {
-  assert.match(dashboardSource, /data-speech-inventory-scope="cabinet"/);
-  assert.match(dashboardSource, /inventorySpeechInventoryScope !== "cabinet"/);
-  assert.match(dashboardSource, /\["liquor cabinet", "mixer cabinet"\]\.includes/);
+  assert.match(dashboardSource, /data-speech-inventory-scope="liquor"/);
+  assert.match(dashboardSource, /data-speech-inventory-scope="mixer"/);
+  assert.match(dashboardSource, /inventoryGroup === "liquor cabinet"/);
+  assert.match(dashboardSource, /inventoryGroup === "mixer cabinet"/);
   assert.match(dashboardSource, /item\.id === "korbel-brut"/);
 });
 

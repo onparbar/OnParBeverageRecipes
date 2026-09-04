@@ -1083,7 +1083,7 @@ let inventorySpeechApplying = false;
 let inventorySpeechRecognition = null;
 let inventorySpeechMicrophoneAuthorized = false;
 let inventorySpeechKegScope = "main";
-let inventorySpeechInventoryScope = "all";
+let inventorySpeechInventoryScope = "liquor";
 let inventorySourceRows = [];
 let inventorySharedUpdatedAt = "";
 let inventorySharedMessage = "Loading shared inventory...";
@@ -13405,15 +13405,24 @@ function renderInventorySpeechAssistant() {
     const selectedWalls = inventorySpeechKegScope === "karaoke" ? new Set(["karaoke"]) : new Set(["main", "patio"]);
     const sourceItems = getInventorySpeechSourceItems().filter((item) => {
       if (!kegOnly) {
-        return item.target === "inventory"
-          && (inventorySpeechInventoryScope !== "cabinet"
-            || ["liquor cabinet", "mixer cabinet"].includes(String(item.group || "").trim().toLowerCase())
-            || item.id === "korbel-brut");
+        const inventoryGroup = String(item.group || "").trim().toLowerCase();
+        const inventoryName = String(item.name || "").trim().toLowerCase();
+        const isSharedCabinetItem = [
+          "sour mix",
+          "non alcoholic beer",
+          "simple syrup",
+          "vanilla syrup",
+        ].includes(inventoryName);
+        if (item.target !== "inventory") return false;
+        if (inventorySpeechInventoryScope === "mixer") {
+          return inventoryGroup === "mixer cabinet" || isSharedCabinetItem;
+        }
+        return inventoryGroup === "liquor cabinet" || item.id === "korbel-brut" || isSharedCabinetItem;
       }
       return item.target === "keg" && selectedWalls.has(String(item.wall || "").toLowerCase());
     });
     const catalog = buildSpeechInventoryCatalog(sourceItems);
-    assistant.dataset.speechContext = kegOnly ? inventorySpeechKegScope : "inventory";
+    assistant.dataset.speechContext = kegOnly ? inventorySpeechKegScope : inventorySpeechInventoryScope;
     const wasOpen = assistant.open || inventorySpeechListening || inventorySpeechProposals.length > 0;
     const orderedProposals = [...inventorySpeechProposals].sort((left, right) => (
       Number(speechProposalNeedsReview(right)) - Number(speechProposalNeedsReview(left))
@@ -13469,12 +13478,12 @@ function renderInventorySpeechAssistant() {
             <button class="ghost-button${inventorySpeechKegScope === "karaoke" ? " is-active" : ""}" data-speech-scope="karaoke" type="button" aria-pressed="${inventorySpeechKegScope === "karaoke"}">Karaoke cooler</button>
           </div>` : `
           <div class="inventory-speech__scope" role="group" aria-label="Inventory area">
-            <button class="ghost-button${inventorySpeechInventoryScope === "all" ? " is-active" : ""}" data-speech-inventory-scope="all" type="button" aria-pressed="${inventorySpeechInventoryScope === "all"}">All inventory</button>
-            <button class="ghost-button${inventorySpeechInventoryScope === "cabinet" ? " is-active" : ""}" data-speech-inventory-scope="cabinet" type="button" aria-pressed="${inventorySpeechInventoryScope === "cabinet"}">Cabinets</button>
+            <button class="ghost-button${inventorySpeechInventoryScope === "liquor" ? " is-active" : ""}" data-speech-inventory-scope="liquor" type="button" aria-pressed="${inventorySpeechInventoryScope === "liquor"}">Liquor cabinet</button>
+            <button class="ghost-button${inventorySpeechInventoryScope === "mixer" ? " is-active" : ""}" data-speech-inventory-scope="mixer" type="button" aria-pressed="${inventorySpeechInventoryScope === "mixer"}">Mixer cabinet</button>
           </div>`}
         <label>
           <span class="sr-only">Spoken inventory transcript</span>
-          <textarea class="inventory-speech-transcript" aria-label="Spoken inventory transcript" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" placeholder="${kegOnly ? "Main wall: one Guinness, two Modelo, add another Angry Orchard" : inventorySpeechInventoryScope === "cabinet" ? "Three Tito's, two sour mix, one pomegranate" : "Guinness one, Modelo two, Garage Lime three"}">${escapeHtml(inventorySpeechTranscript)}</textarea>
+          <textarea class="inventory-speech-transcript" aria-label="Spoken inventory transcript" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" placeholder="${kegOnly ? "Main wall: one Guinness, two Modelo, add another Angry Orchard" : inventorySpeechInventoryScope === "mixer" ? "Two sour mix, one pomegranate, three lime juice" : "Three Tito's, two Kahlua, one Crown Apple"}">${escapeHtml(inventorySpeechTranscript)}</textarea>
         </label>
         <div class="inventory-speech__actions">
           <button class="ghost-button inventory-speech-listen" type="button"${SpeechRecognition ? "" : " disabled"}>${inventorySpeechListening ? "Finish count" : "Start count"}</button>
@@ -13508,13 +13517,13 @@ function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
   });
   assistant.querySelectorAll("[data-speech-inventory-scope]").forEach((button) => {
     button.addEventListener("click", () => {
-      const nextScope = button.dataset.speechInventoryScope === "cabinet" ? "cabinet" : "all";
+      const nextScope = button.dataset.speechInventoryScope === "mixer" ? "mixer" : "liquor";
       if (nextScope === inventorySpeechInventoryScope) return;
       stopInventorySpeechRecognition();
       inventorySpeechInventoryScope = nextScope;
       inventorySpeechTranscript = "";
       inventorySpeechProposals = [];
-      inventorySpeechMessage = nextScope === "cabinet" ? "Cabinets selected." : "All inventory selected.";
+      inventorySpeechMessage = nextScope === "mixer" ? "Mixer cabinet selected." : "Liquor cabinet selected.";
       renderInventorySpeechAssistant();
     });
   });
@@ -17619,6 +17628,19 @@ function parseInventory(rows) {
     excludeFromInventoryValue: true,
   });
 
+  ensureInventoryPlaceholder(items, {
+    name: "Simple Syrup",
+    group: "Other",
+    note: "128 oz container",
+  });
+
+  ensureInventoryPlaceholder(items, {
+    id: "vanilla",
+    name: "Vanilla Syrup",
+    group: "Other",
+    note: "25 oz bottle",
+  });
+
   return items;
 }
 
@@ -17966,7 +17988,7 @@ function formatUsageDisplay(value, unit) {
 }
 
 function ensureInventoryPlaceholder(items, config) {
-  const id = slugify(config.name);
+  const id = config.id || slugify(config.name);
   if (items.some((item) => item.id === id)) return;
 
   const item = {

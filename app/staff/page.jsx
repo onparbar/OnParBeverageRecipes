@@ -245,7 +245,7 @@ export default function StaffRecipePage() {
             `,
           }}
         />
-        <Script type="module" src="/staff-dashboard.js?v=20260903-1" strategy="afterInteractive" />
+        <Script type="module" src="/staff-dashboard.js?v=20260904-1" strategy="afterInteractive" />
     </div>
   );
 }
