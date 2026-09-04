@@ -7256,8 +7256,7 @@ td {
   list-style: none;
 }
 
-.inventory-history-items > summary::-webkit-details-marker,
-.inventory-history-archive > summary::-webkit-details-marker {
+.inventory-history-items > summary::-webkit-details-marker {
   display: none;
 }
 
@@ -7266,32 +7265,38 @@ td {
   padding-top: 10px;
 }
 
-.inventory-history-archive > summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 46px;
-  padding: 0 4px;
+.inventory-history-archive__picker {
+  display: grid;
+  gap: 7px;
   color: var(--juniper-dark);
-  font-weight: 850;
-  cursor: pointer;
-  list-style: none;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.inventory-history-archive > summary strong {
-  display: grid;
-  min-width: 30px;
-  min-height: 30px;
-  place-items: center;
-  border-radius: 999px;
-  color: var(--paper-strong);
-  background: var(--juniper-dark);
-  font-size: 0.74rem;
+.inventory-history-archive__select {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 46px 0 16px;
+  border: 1px solid rgba(31, 95, 84, 0.28);
+  border-radius: 14px;
+  color: var(--ink);
+  background-color: var(--paper-strong);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
-.inventory-history-archive__list {
+.inventory-history-archive__select:focus-visible {
+  outline: 3px solid rgba(31, 95, 84, 0.2);
+  outline-offset: 2px;
+}
+
+.inventory-history-archive__selection {
   display: grid;
-  gap: 10px;
   padding-top: 10px;
 }
 

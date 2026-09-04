@@ -14740,23 +14740,40 @@ function renderInventoryHistory() {
   inventoryHistoryList.innerHTML = `
     ${renderSnapshotCard(latestSnapshot, { latest: true })}
     ${earlierSnapshots.length ? `
-      <details class="inventory-history-archive">
-        <summary>
+      <div class="inventory-history-archive">
+        <label class="inventory-history-archive__picker">
           <span>Earlier snapshots</span>
-          <strong>${formatNumber(earlierSnapshots.length)}</strong>
-        </summary>
-        <div class="inventory-history-archive__list">
-          ${earlierSnapshots.map((snapshot) => renderSnapshotCard(snapshot)).join("")}
+          <select class="inventory-history-archive__select" aria-label="Choose an earlier weekly snapshot">
+            ${earlierSnapshots.map((snapshot) => `
+              <option value="${escapeHtml(snapshot.id)}">Week of ${escapeHtml(formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot)))}</option>
+            `).join("")}
+          </select>
+        </label>
+        <div class="inventory-history-archive__selection">
+          ${renderSnapshotCard(earlierSnapshots[0])}
         </div>
-      </details>
+      </div>
     ` : ""}
   `;
 
-  inventoryHistoryList.querySelectorAll(".inventory-history-restore").forEach((button) => {
-    button.addEventListener("click", () => restoreInventorySnapshot(button.dataset.snapshotId));
-  });
-  inventoryHistoryList.querySelectorAll(".inventory-history-delete").forEach((button) => {
-    button.addEventListener("click", () => deleteInventorySnapshot(button.dataset.snapshotId));
+  const bindSnapshotActions = (scope) => {
+    scope.querySelectorAll(".inventory-history-restore").forEach((button) => {
+      button.addEventListener("click", () => restoreInventorySnapshot(button.dataset.snapshotId));
+    });
+    scope.querySelectorAll(".inventory-history-delete").forEach((button) => {
+      button.addEventListener("click", () => deleteInventorySnapshot(button.dataset.snapshotId));
+    });
+  };
+
+  bindSnapshotActions(inventoryHistoryList);
+
+  const earlierSnapshotSelect = inventoryHistoryList.querySelector(".inventory-history-archive__select");
+  earlierSnapshotSelect?.addEventListener("change", () => {
+    const selectedSnapshot = earlierSnapshots.find((snapshot) => snapshot.id === earlierSnapshotSelect.value);
+    const selectedSnapshotContainer = inventoryHistoryList.querySelector(".inventory-history-archive__selection");
+    if (!selectedSnapshot || !selectedSnapshotContainer) return;
+    selectedSnapshotContainer.innerHTML = renderSnapshotCard(selectedSnapshot);
+    bindSnapshotActions(selectedSnapshotContainer);
   });
 }
 
