@@ -5752,6 +5752,37 @@ function getWeeklySimpleSyrupNeed(cocktails = []) {
   });
 }
 
+function getInventorySnapshotSimpleSyrupNeed(snapshot) {
+  const frozenPlanItems = snapshot?.kegPlanSnapshot?.items;
+  if (!Array.isArray(frozenPlanItems)) return null;
+
+  const activeRecipes = getActiveRecipes();
+  const plannedCocktails = frozenPlanItems
+    .filter((item) => item.actionType === "make" && toNumber(item.orderQty) > 0)
+    .map((item) => {
+      const recipe = findRecipeForWallProduct(activeRecipes, item.name);
+      return {
+        name: item.name,
+        quantity: toNumber(item.orderQty),
+        batchSizeOz: recipe ? getRecipeTotals(recipe).oz : 0,
+      };
+    });
+
+  return getWeeklySimpleSyrupNeed(plannedCocktails);
+}
+
+function formatInventorySnapshotSimpleSyrupNeed(snapshot) {
+  const need = getInventorySnapshotSimpleSyrupNeed(snapshot);
+  if (!need) return "Not recorded";
+  if (!need.complete) {
+    return need.totalOz > 0
+      ? `${formatNumber(need.gallons)} gal plus recipe review`
+      : "Recipe review needed";
+  }
+  if (need.totalOz <= 0) return "0 gal";
+  return `${formatNumber(need.gallons)} gal`;
+}
+
 function renderWeeklyPlanLiquorTapRows(items) {
   return renderWeeklyPlanLiquorTapRowsView(items);
 }
@@ -14687,6 +14718,8 @@ function renderInventoryHistory() {
     const totalValue = sum(snapshot.items.map((item) => item.totalValue));
     const reorderCost = sum(reorderItems.map((item) => toNumber(item.orderDisplay) * item.unitCost));
     const valueSummary = snapshot.summary;
+    const outsideMondayReason = clean(snapshot?.captureMetadata?.outsideMondayReason);
+    const simpleSyrupNeeded = formatInventorySnapshotSimpleSyrupNeed(snapshot);
     const totalBeverageValue = valueSummary
       ? toNumber(valueSummary.totalBeverageInventoryValue)
       : totalValue;
@@ -14698,6 +14731,8 @@ function renderInventoryHistory() {
             ${latest ? '<span class="inventory-history-heading__label">Current weekly snapshot</span>' : ""}
             <strong>Week of ${escapeHtml(formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot)))}</strong>
             <span>Saved ${escapeHtml(formatUpdatedAt(snapshot.savedAt))}</span>
+            ${outsideMondayReason ? `<span><strong>Submitted late:</strong> ${escapeHtml(outsideMondayReason)}</span>` : ""}
+            <span><strong>Simple syrup needed:</strong> ${escapeHtml(simpleSyrupNeeded)}</span>
           </div>
           <div class="inventory-history-stats">
             <span><strong>${money(totalBeverageValue)}</strong><small>Total beverage</small></span>
