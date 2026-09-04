@@ -61,6 +61,7 @@ function resolveCategory(item) {
 }
 
 function isInSelectedWall(category, itemWall, selectedWall) {
+  if (selectedWall === "all") return true;
   if (category !== "liquor") return itemWall === selectedWall;
   if (selectedWall === "karaoke" || selectedWall === "patio") {
     return itemWall === selectedWall;

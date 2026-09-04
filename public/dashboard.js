@@ -6294,14 +6294,9 @@ function renderDashboardOverview() {
       : [];
     const ordersComplete = weeklyOrderTracking.available === true
       && currentOrderVendors.every((vendor) => vendor?.ordered === true);
-    const currentCocktailTasks = Array.isArray(dashboardStaffPrepPlan.items)
-      ? dashboardStaffPrepPlan.items
-      : [];
-    const cocktailsComplete = dashboardStaffPrepPlan.available === true
-      && currentCocktailTasks.every((item) => item?.completed === true);
     const visibleKpis = overview.kpis.filter((kpi) => {
       if (kpi.id === "items-to-order") return !ordersComplete;
-      if (kpi.id === "cocktails-to-make") return !cocktailsComplete;
+      if (kpi.id === "cocktails-to-make") return false;
       return true;
     });
 
@@ -6918,7 +6913,7 @@ function renderDashboardBeveragePulse() {
   const projectedSalesMix = buildLastWeekProjectedSalesMix(
     [...weeklyUsageItems, ...weeklyUsageArchivedItems],
     {
-      wall: sellerRankingWall,
+      wall: "all",
       period: recentWeekLimit,
       getFullOunces: getWeeklyUsageFullOunces,
       getSellingPricePerOz: getWeeklyUsageItemSellingRate,
@@ -6963,7 +6958,15 @@ function renderDashboardBeveragePulse() {
     </header>
     ${renderOhioComplianceAlert()}
     <div class="dashboard-pulse-detail">
-        ${renderDashboardPulseCategoryLeaders({ pourLeaders, wallLabel })}
+        ${renderDashboardPulseCategoryLeaders({
+          pourLeaders,
+          wallLabel,
+          categories: sellerRankingWall === "patio"
+            ? ["liquor"]
+            : sellerRankingWall === "main"
+              ? ["beer", "cocktail"]
+              : ["beer", "cocktail", "liquor"],
+        })}
         ${renderDashboardProjectedSalesMix(projectedSalesMix)}
     </div>
     <div class="dashboard-pulse-stories">
