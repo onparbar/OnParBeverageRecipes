@@ -10803,6 +10803,7 @@ function bindKegLevelEvents() {
   document.querySelector("#run-par-agent")?.addEventListener("click", () => {
     runKegParAgent();
   });
+  document.querySelector("#recover-keg-counts")?.addEventListener("click", recoverConflictingKegCounts);
   document.querySelector("#clear-keg-on-hand")?.addEventListener("click", clearAllKegOnHand);
   document.querySelector("#initialize-shared-keg-levels")?.addEventListener("click", () => {
     initializeSharedKegLevelsFromServiceComputer();
@@ -11709,6 +11710,7 @@ function renderParAgentPanel() {
     <div class="sync-panel sync-panel--par-agent">
       ${parAgentError ? `
         <div class="sync-actions par-agent-actions">
+          ${parAgentStateOutbox?.conflict ? '<button class="primary-button" id="recover-keg-counts" type="button">Resolve unsaved keg counts</button>' : ""}
           <button class="primary-button" id="run-par-agent" type="button"${parAgentRunning ? " disabled" : ""}>${parAgentRunning ? "Updating..." : "Try again"}</button>
         </div>
       ` : ""}
@@ -11778,6 +11780,65 @@ function scheduleParAgentStateSync({ immediate = false } = {}) {
   renderWeeklyPlan();
 }
 
+async function recoverConflictingKegCounts() {
+  const button = document.querySelector("#recover-keg-counts");
+  if (button) button.disabled = true;
+  try {
+    clearTimeout(parAgentStateSyncTimer);
+    parAgentStateSyncTimer = null;
+    await parAgentStateSyncQueue;
+    const latest = await requestParAgentState();
+    const entry = normalizeOperationalOutboxEntry(parAgentStateOutbox);
+    if (!entry || !latest?.initialized) return;
+    const local = getKegLevelInputPayload(entry.payload);
+    const remote = getKegLevelInputPayload(latest);
+    const merged = reconcileKegLevelInputs(entry.payload.baseInputs, local, remote);
+    const missingBaseline = merged.conflicts.includes("missing-baseline");
+    const resolved = merged.ok ? merged.data : {};
+    const differences = [];
+    const labels = { onHandOverrides: "On hand", parOverrides: "Par", onDeckOverrides: "On Deck", settings: "Setting" };
+    if (!merged.ok) {
+      for (const field of Object.keys(local)) {
+        resolved[field] = { ...remote[field] };
+        for (const key of new Set([...Object.keys(local[field]), ...Object.keys(remote[field])])) {
+          const ours = local[field][key];
+          const theirs = remote[field][key];
+          if (JSON.stringify(ours) === JSON.stringify(theirs)) continue;
+          const base = entry.payload.baseInputs ? getKegLevelInputPayload(entry.payload.baseInputs)[field][key] : undefined;
+          if (!missingBaseline && JSON.stringify(ours) === JSON.stringify(base)) continue;
+          if (ours === undefined) delete resolved[field][key];
+          else resolved[field][key] = ours;
+          differences.push(`${labels[field]} ${key}: saved ${JSON.stringify(theirs) ?? "blank"}; this browser ${JSON.stringify(ours) ?? "blank"}`);
+        }
+      }
+    }
+    if (!confirmDashboardAction(
+      "Save this browser's pending keg inputs?",
+      differences.length ? differences : ["Your pending inputs can be combined with the saved version without conflicting changes."],
+      missingBaseline
+        ? "The original comparison copy is unavailable. Confirm only if this browser's counts, pars, and On Deck choices are correct. The listed saved values will be replaced."
+        : "The listed differences will use this browser's values. Unchanged inputs keep the saved values. No weekly snapshot will be locked by this action.",
+    )) return;
+    parAgentStateMutationVersion += 1;
+    parAgentStateOutbox = createOperationalOutboxEntry({
+      baseRevision: latest.revision,
+      payload: { ...entry.payload, ...resolved, baseInputs: remote },
+      updatedAt: new Date().toISOString(),
+    });
+    if (!saveKegLevelsOutbox()) return;
+    restoreKegLevelsOutbox(latest);
+    parAgentStateSyncQueue = parAgentStateSyncQueue.then(() => syncParAgentState({ silent: false }));
+    const saved = await parAgentStateSyncQueue;
+    if (saved && !parAgentStateOutbox) parAgentMessage = "Keg counts saved. You can return to Weekly Plan and Save & Lock Plan.";
+  } catch (error) {
+    parAgentError = error.message || "Keg count recovery could not finish. Your pending inputs have not been discarded.";
+    parAgentMessage = parAgentError;
+  } finally {
+    renderKegLevels();
+    renderWeeklyPlan();
+  }
+}
+
 function tryRebaseKegLevelsOutbox(state) {
   const entry = normalizeOperationalOutboxEntry(parAgentStateOutbox);
   if (!entry || !state?.initialized) return false;
@@ -11793,7 +11854,9 @@ function tryRebaseKegLevelsOutbox(state) {
     ? { ok: true, data: getKegLevelInputPayload(entry.payload) }
     : reconcileKegLevelInputs(entry.payload.baseInputs, entry.payload, state);
   if (!merged.ok) {
-    parAgentError = "Saved keg counts differ from this browser. Your local counts are preserved; no newer counts were overwritten.";
+    parAgentError = merged.conflicts.includes("missing-baseline")
+      ? "This older pending save has no original comparison copy. Your inputs are preserved. Choose Resolve unsaved keg counts to confirm which values to save."
+      : "Saved keg inputs conflict with this browser. Your inputs are preserved. Choose Resolve unsaved keg counts to see the differences before saving.";
     parAgentMessage = parAgentError;
     parAgentStateOutbox = markOperationalOutboxFailure(entry, {
       conflict: true, currentRevision: state.revision, message: parAgentError,
@@ -14682,7 +14745,7 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
     return false;
   }
   if (!await flushPendingParAgentStateSync()) {
-    await failCapture("backup/on-hand keg counts could not be saved.", "KEG_COUNTS_NOT_READY");
+    await failCapture(parAgentError || "Backup/on-hand keg counts are still pending. Open Keg Levels to resolve the save before locking the plan.", "KEG_COUNTS_NOT_READY");
     return false;
   }
   const levelsLoaded = await runKegLevelSync();
