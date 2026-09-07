@@ -52,7 +52,7 @@ test("projects last-week category sales from exact pours and verified per-ounce 
   );
 });
 
-test("keeps beer and cocktails on the selected wall while including venue liquor", () => {
+test("keeps category totals and missing-price counts on the selected wall", () => {
   const items = [
     item({ id: "main-beer", tapNumber: 21, history: [pmb(latestLabel, 100)] }),
     item({ id: "main-cocktail", tapNumber: 47, type: "Cocktail", history: [pmb(latestLabel, 50)] }),
@@ -65,16 +65,16 @@ test("keeps beer and cocktails on the selected wall while including venue liquor
   });
 
   assert.equal(mix.projectedSales, 200);
-  assert.equal(mix.capturedTapCount, 3);
+  assert.equal(mix.capturedTapCount, 2);
   assert.equal(mix.pricedTapCount, 1);
-  assert.equal(mix.unpricedTapCount, 2);
+  assert.equal(mix.unpricedTapCount, 1);
   assert.deepEqual(
     mix.categories.map((row) => [row.category, row.sharePercent]),
-    [["cocktail", 0], ["beer", 100], ["liquor", 0]],
+    [["cocktail", 0], ["beer", 100]],
   );
 });
 
-test("includes Patio and Karaoke liquor in a Main projected sales mix", () => {
+test("excludes other walls from Main sales mix but retains venue-wide wall totals", () => {
   const mix = buildLastWeekProjectedSalesMix([
     item({ id: "main-beer", tapNumber: 21, history: [pmb(latestLabel, 100)] }),
     item({ id: "patio-liquor", tapNumber: 1, type: "Shots", displayUnit: "oz", history: [pmb(latestLabel, 20)] }),
@@ -88,10 +88,13 @@ test("includes Patio and Karaoke liquor in a Main projected sales mix", () => {
     mix.categories.map((row) => [row.category, row.projectedSales, row.sharePercent]),
     [
       ["cocktail", 0, 0],
-      ["beer", 200, 44],
-      ["liquor", 250, 56],
+      ["beer", 200, 100],
     ],
   );
+  assert.equal(mix.projectedSales, 200);
+  assert.deepEqual(mix.walls.map((row) => [row.wall, row.projectedSales]), [
+    ["main", 200], ["karaoke", 150], ["patio", 100],
+  ]);
 });
 
 test("returns an honest unavailable state when last-week pours have no current prices", () => {
@@ -122,7 +125,7 @@ test("uses authoritative tap ranges when PMB type labels are not category names"
   assert.equal(mix.projectedSales, 300);
   assert.deepEqual(
     mix.categories.map((row) => [row.category, row.projectedSales]),
-    [["cocktail", 100], ["beer", 200], ["liquor", 0]],
+    [["cocktail", 100], ["beer", 200]],
   );
 });
 

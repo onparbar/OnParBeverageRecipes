@@ -256,9 +256,9 @@ export function buildLastWeekPourLeaders(
 
 /**
  * Estimates the latest saved weekly sales from PMB poured ounces and the
- * caller's saved or current selling price per ounce. All categories follow a selected
- * wall that has liquor taps. Main combines venue liquor because it has no
- * liquor wall of its own. The caller may mark a historical fallback as estimated.
+ * caller's saved or current selling price per ounce. Category totals use only
+ * the selected physical wall; the wall breakdown remains venue-wide.
+ * The caller may mark a historical fallback as estimated.
  */
 export function buildLastWeekProjectedSalesMix(
   items = [],
@@ -307,7 +307,7 @@ export function buildLastWeekProjectedSalesMix(
   sourceItems.forEach((item) => {
       const category = resolveCategory(item);
       const itemWall = resolveWall(item);
-      const inSelectedWall = isInSelectedWall(category, itemWall, selectedWall);
+      const inSelectedWall = selectedWall === "all" || itemWall === selectedWall;
       const entries = (Array.isArray(item?.history) ? item.history : [])
         .filter((entry) => selectedWeekTimeSet.has(getWeekStartTime(entry?.label)));
       const pouredValuesByWeek = new Map();
@@ -354,7 +354,10 @@ export function buildLastWeekProjectedSalesMix(
     label: CATEGORY_LABELS[category],
     projectedSales: round(categorySales[category]),
     sharePercent: percentages[index],
-  }));
+  })).filter(({ category }) => (
+    (selectedWall !== "main" || category !== "liquor")
+    && (selectedWall !== "patio" || category === "liquor")
+  ));
   const wallPercentages = allocateWholePercentages(wallOrder.map((wallKey) => wallSales[wallKey]));
   const walls = wallOrder.map((wallKey, index) => ({
     wall: wallKey,

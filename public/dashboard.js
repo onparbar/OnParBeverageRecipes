@@ -7942,7 +7942,6 @@ function renderWeeklyPlan() {
   const liveWeeklyPlanBody = `
     <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(getWeeklyPlanManagerMessage(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : "")))}</p>
     ${renderMondayRun(mondayRun)}
-    ${renderWeeklyPlanFinishWeek(planLocked)}
     ${renderWeeklyPlanReadiness(freshness.readiness)}
     <details class="weekly-plan-details">
       <summary>Plan details</summary>
@@ -7976,6 +7975,7 @@ function renderWeeklyPlan() {
     ${planLocked && !orderStep?.complete
       ? `<details class="weekly-plan-phase weekly-plan-phase--orders" id="weekly-plan-orders" open><summary><span>Place orders</span><strong>${escapeHtml(orderStep?.status || "Review")}</strong></summary>${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)}</details>`
       : ""}
+    ${renderWeeklyPlanFinishWeek(planLocked)}
     ${renderWeeklyPlanReview(plan)}` : `<section class="weekly-plan-empty" role="status"><h2>This week's plan has not been generated</h2><p>The previous plan is saved in Weekly Snapshots. Use Save &amp; Lock Plan after the current PMB usage and counts are ready.</p></section>`}
   `;
   let weeklyPlanBody = liveWeeklyPlanBody;
