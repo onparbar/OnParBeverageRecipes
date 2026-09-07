@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import {
   DASHBOARD_SESSION_COOKIE,
   DASHBOARD_SESSION_MAX_AGE_SECONDS,
@@ -8,6 +9,7 @@ import {
 } from "../../../lib/dashboard-auth.mjs";
 import {
   dashboardLoginThrottle,
+  dashboardLoginNetworkThrottle,
   getLoginClientKey,
 } from "../../../lib/login-rate-limit.mjs";
 
@@ -32,11 +34,11 @@ export async function POST(request) {
   }
 
   const clientKey = getLoginClientKey(request);
-  const rateLimit = dashboardLoginThrottle.check(clientKey);
+  const rateLimit = dashboardLoginNetworkThrottle.check(clientKey);
   if (!rateLimit.allowed) {
     return jsonResponse(
       {
-        error: "Too many incorrect login attempts. Try again later.",
+        error: `Too many attempts from this network. Try again in ${Math.ceil(rateLimit.retryAfterSeconds / 60)} minute(s).`,
         code: "LOGIN_RATE_LIMITED",
         retryAfterSeconds: rateLimit.retryAfterSeconds,
       },
@@ -53,13 +55,24 @@ export async function POST(request) {
     submittedPassword = "";
   }
 
+  // Never retain the submitted clock-in number in the throttle map.
+  const attemptKey = `${clientKey}:${createHash("sha256").update(submittedPassword).digest("hex")}`;
+  const individualLimit = dashboardLoginThrottle.check(attemptKey);
+  if (!individualLimit.allowed) {
+    return jsonResponse({
+      error: `Too many attempts with this clock-in number. Try again in ${Math.ceil(individualLimit.retryAfterSeconds / 60)} minute(s).`,
+      code: "LOGIN_RATE_LIMITED",
+      retryAfterSeconds: individualLimit.retryAfterSeconds,
+    }, 429, { "Retry-After": String(individualLimit.retryAfterSeconds) });
+  }
   const identity = await matchDashboardIdentity(submittedPassword);
   if (!identity) {
-    const failure = dashboardLoginThrottle.recordFailure(clientKey);
+    dashboardLoginNetworkThrottle.recordFailure(clientKey);
+    const failure = dashboardLoginThrottle.recordFailure(attemptKey);
     if (!failure.allowed) {
       return jsonResponse(
         {
-          error: "Too many incorrect login attempts. Try again later.",
+          error: `Too many attempts with this clock-in number. Try again in ${Math.ceil(failure.retryAfterSeconds / 60)} minute(s).`,
           code: "LOGIN_RATE_LIMITED",
           retryAfterSeconds: failure.retryAfterSeconds,
         },
@@ -73,7 +86,7 @@ export async function POST(request) {
     }, 401);
   }
 
-  dashboardLoginThrottle.reset(clientKey);
+  dashboardLoginThrottle.reset(attemptKey);
   const response = jsonResponse({
     ok: true,
     role: identity.role,
