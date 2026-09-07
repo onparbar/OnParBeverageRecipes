@@ -1,4 +1,5 @@
 import { clean, escapeHtml, formatNumber, toNumber } from "./dashboard-formatters.mjs";
+import { kegDestination } from "./keg-destination.mjs";
 
 export function renderFinishWeekChecklistItems(items, kind) {
   if (!items.length) return '<p class="finish-week-empty">Nothing scheduled. This part is complete automatically.</p>';
@@ -14,6 +15,7 @@ export function renderFinishWeekChecklistItems(items, kind) {
           <input type="checkbox" data-finish-prep-item="${escapeHtml(item.id)}" data-finish-prep-kind="${escapeHtml(kind)}" data-completed="${completed}"${completed ? " checked" : ""}>
           <span>
             <strong>${escapeHtml(item.displayName || item.name)}</strong>
+            ${!isLiquor ? `<small>${escapeHtml(kegDestination(item, { cocktail: true }))}</small>` : ""}
             <small>${escapeHtml([isLiquor ? `${formatNumber(item.quantity)} bottle${toNumber(item.quantity) === 1 ? "" : "s"}` : `${formatNumber(item.quantity)} batch${toNumber(item.quantity) === 1 ? "" : "es"}`, taps].filter(Boolean).join(" · "))}</small>
           </span>
         </label>
@@ -48,7 +50,7 @@ export function renderFinishWeekDeliveries(weeklyOrderTracking = {}) {
         return `
           <label class="finish-week-item${reviewed ? " is-complete" : ""}">
             <input type="checkbox" data-finish-delivery-item="${escapeHtml(item.id)}" data-vendor-id="${escapeHtml(vendor.id)}" data-quantity="${escapeHtml(String(item.quantity || 0))}" data-completed="${reviewed}"${reviewed ? " checked disabled" : ""}>
-            <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(result)}</small></span>
+            <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(result)}</small>${kegDestination(item) ? `<small>${escapeHtml(kegDestination(item))}</small>` : ""}</span>
           </label>
         `;
       }).join("")}

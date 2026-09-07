@@ -1,4 +1,5 @@
 import { parseSmartReceivingTranscript } from "./smart-receiving.mjs";
+import { kegDestination } from "./keg-destination.mjs";
 import "./staff-resilience.mjs";
 
 import {
@@ -643,6 +644,12 @@ function createOrderReceiptItem(item) {
     : "";
   meta.textContent = `${formatNumber(item.quantity)} ${clean(item.unit)}${taps}`;
   details.append(heading, meta);
+  const destination = kegDestination(item);
+  if (destination) {
+    const cooler = document.createElement("p");
+    cooler.textContent = destination;
+    details.append(cooler);
+  }
   if (item.status !== "pending" && item.updatedAt) {
     const saved = document.createElement("small");
     const receiptSummary = item.status === "received"
@@ -1306,7 +1313,7 @@ function createStaffPrepItem(item) {
       `${formatNumber(item.quantity)} bottle${number(item.quantity) === 1 ? "" : "s"}`,
     ].filter(Boolean)
     : [
-      item.wall ? `${clean(item.wall)} wall` : "",
+      kegDestination(item, { cocktail: true }),
       number(item.batchSizeOz) > 0 ? `${formatNumber(item.batchSizeOz)} oz` : "",
       number(item.quantity) > 1 ? `${formatNumber(item.quantity)} labels` : "",
     ].filter(Boolean);

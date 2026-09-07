@@ -178,7 +178,7 @@ test("weekly prep is a wall-specific cocktail label list without redundant order
   assert.match(dashboardSource, /function renderWeeklyPlanCocktailRows\(/);
   assert.match(dashboardSource, /batchSizeOz/);
   assert.match(dashboardSource, /label\${item\.quantity === 1 \? "" : "s"}/);
-  assert.match(staffDashboardSource, /item\.wall.*wall/);
+  assert.match(staffDashboardSource, /kegDestination\(item, \{ cocktail: true \}\)/);
   assert.match(staffDashboardSource, /item\.batchSizeOz/);
 
   const vendorRendererStart = dashboardSource.indexOf("function renderWeeklyPlanByVendor");
@@ -351,7 +351,7 @@ test("Weekly Plan previews live needs and locks from the current Monday inventor
   assert.doesNotMatch(dashboardSource, /id="save-inventory-snapshot"/);
   assert.match(dashboardSource, /kegPlanSnapshot: mondaySnapshot\.kegPlanSnapshot/);
   assert.match(dashboardSource, /tapInputs: \(parAgentState\.recommendations\.items \|\| \[\]\)\.map/);
-  assert.match(dashboardSource, /backup\/on-hand keg fields are cleared for the next count/);
+  assert.match(dashboardSource, /Keg on-hand counts remain visible until the next Monday 7 a\.m\. Eastern reset/);
   const lockStart = dashboardSource.indexOf("async function runWeeklyPlanUpdate()");
   const lockEnd = dashboardSource.indexOf("async function initializeSharedKegLevelsFromServiceComputer", lockStart);
   const lockSource = dashboardSource.slice(lockStart, lockEnd);

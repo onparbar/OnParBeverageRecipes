@@ -722,14 +722,17 @@ const INVENTORY_PROVI_MAPPINGS = {
   "non-alcoholic-beer": {
     vendor: "Heidelberg",
     syncVendor: "Provi",
-    productName: "Athletic Brewing Upside Dawn Golden Ale Non-Alcoholic Beer 12oz 24pk",
-    preferredSku: "013452-C",
+    productName: "Athletic Brewing Upside Dawn Non-Alcoholic Golden",
+    preferredSku: "13452",
     bottleOz: 12,
     packSize: 24,
-    unitPrice: 0,
-    casePrice: 0,
+    unitPrice: 31.99 / 24,
+    casePrice: 31.99,
+    priceCheckedAt: "2026-09-07",
+    distributorIds: [898],
     distributorHints: KEG_PROVI_DISTRIBUTOR_HINTS.Heidelberg,
     searchAliases: [
+      "Athletic Brewing Upside Dawn Non-Alcoholic Golden",
       "Upside Dawn 24 pack",
       "Athletic Upside Dawn",
       "Athletic Brewing Upside Dawn Golden Ale",
@@ -5364,9 +5367,12 @@ async function publishCurrentWeeklyPlanSnapshot() {
       result = await requestParAgentState(buildPublishRequest());
     }
     applyParAgentState(result);
-    await loadWeeklyOrderTracking();
-    await loadDashboardStaffPrepPlan();
-    return Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations));
+    const locked = Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations));
+    if (locked) {
+      void loadWeeklyOrderTracking().then(() => renderWeeklyPlan()).catch(() => {});
+      void loadDashboardStaffPrepPlan().catch(() => {});
+    }
+    return locked;
   } catch (error) {
     weeklyPlanRefreshMessage = error?.message || "The Monday plan could not be locked for the week.";
     return false;
@@ -11659,8 +11665,8 @@ async function loadParAgentState() {
       }
       parAgentError = parAgentStateOutbox?.lastError || "Pending Keg Levels recovery needs review.";
       parAgentMessage = parAgentStateOutbox?.conflict
-        ? `Keg Levels conflict: this browser restored its unsynced inputs from revision ${parAgentStateOutbox.baseRevision} instead of overwriting them with shared revision ${parAgentStateOutbox.currentRevision}. Review the local and shared versions before publishing.`
-        : `Keg Levels recovery is still pending. This browser restored the unsynced inputs from revision ${parAgentStateOutbox?.baseRevision}; ordering remains blocked until they save successfully.`;
+        ? parAgentError
+        : "Your keg counts are kept on this device. Saving could not finish; choose Try again.";
       return;
     }
     parAgentError = "";
@@ -11841,7 +11847,7 @@ async function recoverConflictingKegCounts() {
         }
       }
     }
-    if (!confirmDashboardAction(
+    if (!merged.ok && !confirmDashboardAction(
       "Save this browser's pending keg inputs?",
       differences.length ? differences : ["Your pending inputs can be combined with the saved version without conflicting changes."],
       missingBaseline
@@ -12131,6 +12137,7 @@ async function runWeeklyPlanUpdate() {
     weeklyPlanRefreshMessage = `Save & Lock Plan did not finish: ${parAgentError} Press Save & Lock Plan to retry.`;
   } finally {
     weeklyPlanUpdating = false;
+    inventorySharedSaving = inventoryFieldSyncPendingCount > 0 || inventoryFieldSyncTimers.size > 0;
     renderWeeklyPlan();
     if (lockedSuccessfully) openMondayRunStep("orders", "weekly-plan");
   }
@@ -14780,7 +14787,7 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
   }).format(now);
   const outsideMondayReason = easternWeekday === "Mon" ? "" : clean(weeklyPlanOutsideMondayReason);
   const recordCaptureEvent = async (event, code = "") => {
-    await fetch("/api/dashboard-activity", {
+    void fetch("/api/dashboard-activity", {
       method: "POST",
       credentials: "same-origin",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
@@ -14798,11 +14805,6 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
       await failCapture("a reason is required when saving outside Monday.", "MONDAY_SNAPSHOT_REASON_REQUIRED");
       return false;
     }
-    if (!confirmDashboardAction(
-      "Save this week's Monday snapshot outside Monday?",
-      [`Reason: ${outsideMondayReason}`],
-      "All normal data checks will still run.",
-    )) return false;
   }
   if (getCurrentMondayInventorySnapshot(inventoryHistory, now) && !replaceExisting) {
     inventorySharedMessage = "This Monday snapshot is already saved.";
@@ -14818,17 +14820,28 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
     return false;
   }
 
-  const realityCheck = getInventoryRealityCheckModel();
-  if (realityCheck.blockers.length) {
-    inventorySharedMessage = "Monday snapshot not saved: finish the required Inventory Reality Check items.";
-    renderInventoryPanels();
-    renderInventoryRealityCheck(realityCheck, { scroll: true });
-    return false;
-  }
   document.querySelector("#inventory-reality-check")?.remove();
 
   await recordCaptureEvent("monday_snapshot_attempt");
 
+  weeklyPlanRefreshMessage = "Saving inventory counts...";
+  renderWeeklyPlan();
+  if (inventoryActionOutbox.some((entry) => entry.payload?.action === "save-snapshot")) {
+    await reconcileInventorySnapshotConflict();
+  }
+  if (!await flushPendingInventorySyncs()) {
+    await failCapture(inventorySharedSaveError || "Your counts are preserved, but could not be saved. Retry Save & Lock Plan.", "INVENTORY_NOT_READY");
+    return false;
+  }
+  try {
+    await refreshInventoryRevisionForSnapshot();
+  } catch (error) {
+    await failCapture(error.message, "INVENTORY_REVISION_REVIEW_REQUIRED");
+    return false;
+  }
+
+  weeklyPlanRefreshMessage = "Checking saved usage and keg counts...";
+  renderWeeklyPlan();
   setInventorySharedStatus("Checking Weekly Usage and PMB keg levels for the Monday snapshot...", true);
   const sharedUsageReady = await refreshSharedWeeklyUsageBeforeMondaySnapshot();
   const usageResult = sharedUsageReady
@@ -14845,6 +14858,8 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
     await failCapture(parAgentError || "Backup/on-hand keg counts are still pending. Open Keg Levels to resolve the save before locking the plan.", "KEG_COUNTS_NOT_READY");
     return false;
   }
+  weeklyPlanRefreshMessage = "Checking PMB keg levels...";
+  renderWeeklyPlan();
   const levelsLoaded = await runKegLevelSync();
   const summary = getInventorySnapshotSummary();
   if (!levelsLoaded || summary.liveTapCount !== summary.tapCount) {
@@ -14859,6 +14874,8 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
   }
 
   setInventorySharedStatus("Calculating and freezing Monday keg orders and cocktail prep...", true);
+  weeklyPlanRefreshMessage = "Calculating this week's orders and cocktail prep...";
+  renderWeeklyPlan();
   const recommendationsSaved = await runKegParAgent();
   const kegPlanSnapshot = recommendationsSaved && parAgentState?.recommendations?.generatedAt
     ? {
@@ -14895,6 +14912,8 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
     return false;
   }
 
+  weeklyPlanRefreshMessage = "Saving this week's snapshot and locking the plan...";
+  renderWeeklyPlan();
   const state = await runSharedInventoryAction(
     {
       action: "save-snapshot",
@@ -14935,13 +14954,7 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
   );
   if (state) {
     weeklyPlanOutsideMondayReason = "";
-    kegOnHandOverrides = createClearedKegOnHandOverrides(kegWallItems, getKegItemKey);
-    saveKegOnHandOverrides();
-    scheduleParAgentStateSync({ immediate: true });
-    const clearedCountsSaved = await flushPendingParAgentStateSync();
-    inventorySharedMessage = clearedCountsSaved
-      ? "Monday snapshot saved. Bottle and backup/on-hand keg fields are cleared for the next count; the locked inputs remain in the snapshot."
-      : "Monday snapshot saved, but the cleared backup/on-hand keg fields still need to finish syncing.";
+    inventorySharedMessage = "Monday snapshot saved. Keg on-hand counts remain visible until the next Monday 7 a.m. Eastern reset; the saved snapshot stays unchanged.";
     renderInventoryHistory();
     renderInventoryPanels();
     return true;

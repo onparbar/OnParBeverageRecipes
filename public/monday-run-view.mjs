@@ -67,7 +67,7 @@ export function buildMondayRunModel({
         && !inventorySaving
         && !inventorySharedSaveError
       ),
-      status: inventorySharedSaveError
+      status: lockedPlanCapturedSetup ? "Done" : inventorySharedSaveError
         ? "Save recovery needed"
         : inventorySaving
           ? "Saving"

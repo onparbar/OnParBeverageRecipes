@@ -19,11 +19,18 @@ function normalizeMap(value) {
 }
 
 export function getKegLevelInputPayload(value = {}) {
+  const numericMap = (input) => Object.fromEntries(Object.entries(normalizeMap(input)).map(([key, entry]) => {
+    const number = typeof entry === "string" ? Number(entry) : NaN;
+    return [key, Number.isFinite(number) ? String(number) : entry];
+  }));
+  // The server owns the counting-week marker; it is not an editable count.
+  const settings = normalizeMap(value.settings);
+  delete settings.kegCountWeek;
   return {
-    onHandOverrides: normalizeMap(value.onHandOverrides),
-    parOverrides: normalizeMap(value.parOverrides),
+    onHandOverrides: numericMap(value.onHandOverrides),
+    parOverrides: numericMap(value.parOverrides),
     onDeckOverrides: normalizeMap(value.onDeckOverrides),
-    settings: normalizeMap(value.settings),
+    settings,
   };
 }
 
@@ -32,6 +39,9 @@ export function haveKegLevelInputsChanged(current = {}, candidate = {}) {
 }
 
 export function reconcileKegLevelInputs(base, local, remote) {
+  if (!haveKegLevelInputsChanged(local, remote)) {
+    return { ok: true, data: getKegLevelInputPayload(remote), conflicts: [] };
+  }
   if (!base || typeof base !== "object") return { ok: false, data: null, conflicts: ["missing-baseline"] };
   const before = getKegLevelInputPayload(base);
   const ours = getKegLevelInputPayload(local);
