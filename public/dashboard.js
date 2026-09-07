@@ -13059,6 +13059,13 @@ async function loadSharedInventoryState() {
           }
         } else {
           markInventoryOutboxConflicts(state.revision);
+          const pending = getPendingInventoryOperations();
+          if (pending.every(({ kind, entry }) => kind === "action" && entry.payload.action === "save-snapshot")
+            && inventoryFieldSyncPendingCount === 0
+            && inventorySnapshotInputsMatch(getLocalInventorySnapshotInputs(), state.current)) {
+            await reconcileInventorySnapshotConflict();
+            if (!getPendingInventoryOperations().length) return;
+          }
         }
         const pendingEntry = getPendingInventoryOperations()[0]?.entry;
         inventorySharedSaveError = pendingEntry?.lastError || "Pending Inventory recovery needs review.";
