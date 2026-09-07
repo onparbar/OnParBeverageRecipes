@@ -308,10 +308,13 @@ test("voice inventory can focus matching on the liquor and mixer cabinets", () =
   assert.match(dashboardSource, /item\.id === "korbel-brut"/);
 });
 
-test("voice inventory reuses granted microphone access for later counts", () => {
-  assert.match(dashboardSource, /let inventorySpeechMicrophoneAuthorized = false/);
-  assert.match(dashboardSource, /if \(!inventorySpeechMicrophoneAuthorized\)/);
-  assert.match(dashboardSource, /inventorySpeechMicrophoneAuthorized = true/);
+test("voice inventory starts directly and offers phone keyboard dictation", () => {
+  assert.doesNotMatch(dashboardSource, /inventorySpeechMicrophoneAuthorized/);
+  assert.match(dashboardSource, /function startInventorySpeechRecognition\(\)/);
+  assert.doesNotMatch(dashboardSource, /async function startInventorySpeechRecognition/);
+  assert.match(dashboardSource, /Use keyboard dictation/);
+  assert.match(dashboardSource, /transcriptInput\?\.focus\(\)/);
+  assert.match(dashboardSource, /event\.stopPropagation\(\)/);
   assert.match(dashboardSource, /function cleanInventorySpeechRecognitionText/);
   assert.match(dashboardSource, /const words = cleanInventorySpeechRecognitionText/);
 });

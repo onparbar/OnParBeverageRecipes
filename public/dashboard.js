@@ -1084,7 +1084,6 @@ let inventorySpeechMessage = "";
 let inventorySpeechListening = false;
 let inventorySpeechApplying = false;
 let inventorySpeechRecognition = null;
-let inventorySpeechMicrophoneAuthorized = false;
 let inventorySpeechKegScope = "main";
 let inventorySpeechInventoryScope = "liquor";
 let inventorySourceRows = [];
@@ -13617,11 +13616,11 @@ function renderInventorySpeechAssistant() {
           <textarea class="inventory-speech-transcript" aria-label="Spoken inventory transcript" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" placeholder="${kegOnly ? "Main wall: one Guinness, two Modelo, add another Angry Orchard" : inventorySpeechInventoryScope === "mixer" ? "Two sour mix, one pomegranate, three lime juice" : "Three Tito's, two Kahlua, one Crown Apple"}">${escapeHtml(inventorySpeechTranscript)}</textarea>
         </label>
         <div class="inventory-speech__actions">
-          <button class="ghost-button inventory-speech-listen" type="button"${SpeechRecognition ? "" : " disabled"}>${inventorySpeechListening ? "Finish count" : "Start count"}</button>
+          <button class="ghost-button inventory-speech-listen" type="button">${inventorySpeechListening ? "Finish count" : SpeechRecognition ? "Start count" : "Use keyboard dictation"}</button>
           <button class="primary-button inventory-speech-review" type="button">Review</button>
           <button class="ghost-button inventory-speech-clear" type="button">Clear</button>
         </div>
-        <p class="sync-status">${escapeHtml(inventorySpeechMessage || (SpeechRecognition ? "Nothing changes until you review and apply." : "Voice input is unavailable here. Type or paste the count instead."))}</p>
+        <p class="sync-status" role="status">${escapeHtml(inventorySpeechMessage || "Nothing changes until you review and apply. On a phone, you can also tap the text box and use your keyboard's microphone, if available. Tap Review when finished.")}</p>
         ${inventorySpeechProposals.length ? `
           <div class="inventory-speech__review">${reviewCards}</div>
           <button class="primary-button inventory-speech-apply" type="button"${inventorySpeechApplying || !applicableCount ? " disabled" : ""}>${inventorySpeechApplying ? "Applying..." : `Apply ${applicableCount}`}</button>
@@ -13658,12 +13657,21 @@ function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
       renderInventorySpeechAssistant();
     });
   });
-  transcriptInput?.addEventListener("input", () => {
+  transcriptInput?.addEventListener("input", (event) => {
+    // Keep the live-speech helper from rebuilding the field during phone dictation.
+    event.stopPropagation();
     inventorySpeechTranscript = transcriptInput.value;
+    inventorySpeechProposals = [];
+    assistant.querySelector(".inventory-speech-apply")?.setAttribute("disabled", "");
   });
   assistant.querySelector(".inventory-speech-listen")?.addEventListener("click", () => {
     if (inventorySpeechListening) stopInventorySpeechRecognition();
-    else startInventorySpeechRecognition();
+    else if (window.SpeechRecognition || window.webkitSpeechRecognition) startInventorySpeechRecognition();
+    else {
+      transcriptInput?.focus();
+      const status = assistant.querySelector(".sync-status");
+      if (status) status.textContent = "Use your phone keyboard's microphone, if available, to dictate here. Then tap Review. Nothing is applied automatically.";
+    }
   });
   assistant.querySelector(".inventory-speech-review")?.addEventListener("click", () => {
     inventorySpeechTranscript = transcriptInput?.value || inventorySpeechTranscript;
@@ -13723,47 +13731,12 @@ function cleanInventorySpeechRecognitionText(value) {
     .trim();
 }
 
-async function startInventorySpeechRecognition() {
+function startInventorySpeechRecognition() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition || inventorySpeechListening) return;
 
-  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
-    inventorySpeechMessage = "Microphone access is not available in this browser. Open the dashboard in Chrome or Safari.";
-    renderInventorySpeechAssistant();
-    return;
-  }
-
+  // Start directly from the tap gesture; recognition requests its own permission.
   inventorySpeechListening = true;
-  if (!inventorySpeechMicrophoneAuthorized) {
-    inventorySpeechMessage = "Waiting for microphone access...";
-    renderInventorySpeechAssistant();
-
-    try {
-      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      permissionStream.getTracks().forEach((track) => track.stop());
-      inventorySpeechMicrophoneAuthorized = true;
-    } catch (error) {
-      inventorySpeechListening = false;
-      if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
-        inventorySpeechMessage = "Microphone access was not allowed. Allow it for this site, then try again.";
-      } else if (error?.name === "NotFoundError") {
-        inventorySpeechMessage = "No microphone was found.";
-      } else if (error?.name === "NotReadableError") {
-        inventorySpeechMessage = "The microphone is busy. Close anything else using it, then try again.";
-      } else {
-        inventorySpeechMessage = "Microphone access could not start. Check the browser's site settings, then try again.";
-      }
-      renderInventorySpeechAssistant();
-      return;
-    }
-  }
-
-  if (!inventorySpeechListening) {
-    inventorySpeechMessage = "";
-    renderInventorySpeechAssistant();
-    return;
-  }
-
   inventorySpeechRecognition = new SpeechRecognition();
   inventorySpeechRecognition.lang = "en-US";
   inventorySpeechRecognition.continuous = true;
@@ -13774,6 +13747,7 @@ async function startInventorySpeechRecognition() {
     renderInventorySpeechAssistant();
   };
   inventorySpeechRecognition.onresult = (event) => {
+    inventorySpeechProposals = [];
     const additions = [];
     const interim = [];
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
@@ -13809,7 +13783,7 @@ async function startInventorySpeechRecognition() {
     inventorySpeechRecognition = null;
     if (endedWhileListening && inventorySpeechMessage === "Listening...") {
       inventorySpeechMessage = inventorySpeechTranscript.trim()
-        ? "Ready to review."
+        ? "Count kept. Tap Start count to continue, or Review when finished."
         : "I didn't hear anything. Try again, or type the count below.";
     }
     renderInventorySpeechAssistant();
