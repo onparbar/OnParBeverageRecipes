@@ -8790,7 +8790,7 @@ function renderWeeklyUsage() {
     <tr>
       <th>Tap #</th>
       <th>Product</th>
-      <th class="weekly-usage-average">Avg weekly</th>
+      <th class="weekly-usage-average" title="Average of reported values in the displayed weeks. Recorded zeros are included; missing values are excluded.">Avg weekly</th>
       ${historyHeaders.map((label) => `<th class="weekly-usage-week">${formatWeeklyUsageHeader(label)}</th>`).join("")}
     </tr>
   `;
@@ -8817,8 +8817,8 @@ function renderWeeklyUsage() {
           return `<td class="weekly-usage-week">${escapeHtml(formatUsageDisplay(getDisplayValue(match), displayUnit))}</td>`;
         })
         .join("");
-      const displayHistoryValues = item.history
-        .map(getDisplayValue)
+      const displayHistoryValues = historyHeaders
+        .map((label) => getDisplayValue(item.history.find((entry) => entry.label === label)))
         .filter((value) => Number.isFinite(value));
       const averageDisplay = displayHistoryValues.length
         ? formatUsageDisplay(calculateAverage(displayHistoryValues), displayUnit)
