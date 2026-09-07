@@ -4,12 +4,18 @@ export function buildMondayRunModel({
   kegFeed = {},
   pricingFeed = {},
   inventoryMissingCount = 0,
+  inventoryCountedThisWeek = false,
   inventorySaving = false,
   inventorySharedInitialized = false,
   inventorySharedSaveError = "",
   mondaySnapshotSaved = false,
   planLocked = false,
   weeklyUsageCaptured = false,
+  weeklyUsageSavePending = false,
+  weeklyUsageSaveError = "",
+  weeklyUsageSyncError = "",
+  kegCountSaveError = "",
+  tapRepairRefreshPending = false,
   pmbRefreshPending = false,
   vendorOrders = [],
   weeklyOrderTrackingAvailable = false,
@@ -19,6 +25,20 @@ export function buildMondayRunModel({
 } = {}) {
   const lockedPlanCapturedSetup = planLocked;
   const pmbFeedsReady = kegFeed.status === "online" && pricingFeed.status === "online";
+  const feedIssue = (feed, label) => {
+    if (feed.status === "online") return "";
+    if (feed.status === "partial") return `${label}: ${formatNumber(feed.capturedCount)} of ${formatNumber(feed.expectedCount)} taps`;
+    if (feed.status === "stale") return `${label} need a fresh reading`;
+    if (feed.status === "offline") return `${label} unavailable - retry refresh`;
+    return `${label} need refreshing`;
+  };
+  const pmbStatus = weeklyUsageSaveError ? "Weekly usage save issue - retry refresh"
+    : kegCountSaveError ? "Keg counts need save recovery"
+      : tapRepairRefreshPending ? "Tap repair sent - waiting to refresh"
+        : weeklyUsageSyncError ? "Weekly usage report needs attention"
+          : pmbRefreshPending ? "Refreshing PMB"
+            : feedIssue(kegFeed, "Keg levels") || feedIssue(pricingFeed, "Tap prices")
+              || (weeklyUsageSavePending ? "Saving weekly usage" : !weeklyUsageCaptured ? "Capture last week's usage" : "Ready");
   const outstandingVendorCount = vendorOrders.filter((vendor) => vendor?.ordered !== true).length;
   const normalizedOrderLineCount = toNumber(orderLineCount);
   const ordersPlaced = planLocked && (
@@ -31,14 +51,10 @@ export function buildMondayRunModel({
       id: "pmb",
       label: "Refresh PMB & capture usage",
       target: "dashboard",
-      complete: lockedPlanCapturedSetup || (pmbFeedsReady && weeklyUsageCaptured),
-      status: !pmbFeedsReady
-        ? "PMB sync issue"
-        : pmbRefreshPending
-          ? "Refreshing"
-          : weeklyUsageCaptured
-            ? "Ready"
-            : "Capture usage",
+      complete: lockedPlanCapturedSetup || (pmbFeedsReady && weeklyUsageCaptured
+        && !weeklyUsageSavePending && !weeklyUsageSaveError && !weeklyUsageSyncError
+        && !kegCountSaveError && !tapRepairRefreshPending && !pmbRefreshPending),
+      status: lockedPlanCapturedSetup ? "Done" : pmbStatus,
     },
     {
       id: "inventory",
@@ -46,6 +62,7 @@ export function buildMondayRunModel({
       target: "inventory",
       complete: lockedPlanCapturedSetup || (
         inventorySharedInitialized
+        && inventoryCountedThisWeek
         && inventoryMissingCount === 0
         && !inventorySaving
         && !inventorySharedSaveError
@@ -57,7 +74,7 @@ export function buildMondayRunModel({
         : inventoryMissingCount > 0
           ? `${formatNumber(inventoryMissingCount)} left`
           : inventorySharedInitialized
-            ? "Counted"
+            ? inventoryCountedThisWeek ? "Counted" : "Count needed"
             : "Set up",
     },
     {

@@ -119,6 +119,7 @@ test("Monday Run model preserves the five Monday operational steps and next-acti
     pricingFeed: { status: "online" },
     weeklyUsageCaptured: true,
     inventorySharedInitialized: true,
+    inventoryCountedThisWeek: true,
     planActionable: true,
     tapSheets: [{ isCurrent: false }, { isCurrent: true }],
   });
@@ -165,6 +166,7 @@ test("Monday Run renderers keep actionable data attributes and compact next-step
     pricingFeed: { status: "online" },
     weeklyUsageCaptured: true,
     inventorySharedInitialized: true,
+    inventoryCountedThisWeek: true,
     tapSheets: [{ isCurrent: true }],
   });
   const full = renderMondayRun(run);

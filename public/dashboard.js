@@ -76,6 +76,7 @@ import {
   canSafelyRetryOperationalOutbox,
   createOperationalOutboxEntry,
   markOperationalOutboxFailure,
+  mergeOperationalRecord,
   normalizeOperationalOutboxEntry,
   normalizeOperationalOutboxList,
   normalizeOperationalOutboxMap,
@@ -169,7 +170,7 @@ import {
   normalizeProductPriceKey,
   productPriceKeysMatch,
 } from "./product-price-matching.mjs";
-import { haveKegLevelInputsChanged } from "./keg-level-state.mjs";
+import { getKegLevelInputPayload, haveKegLevelInputsChanged, reconcileKegLevelInputs } from "./keg-level-state.mjs";
 import {
   buildSpeechInventoryCatalog,
   buildSpeechInventoryChanges,
@@ -1041,6 +1042,8 @@ let weeklyUsageCurrentOverrides = loadWeeklyUsageCurrentOverrides();
 let weeklyUsageHistoryOverrides = loadWeeklyUsageHistoryOverrides();
 let weeklyUsageArchivedItems = loadWeeklyUsageArchivedItems();
 let weeklyUsageSyncLoading = false;
+let weeklyUsageSyncError = "";
+let weeklyUsageSharedBaseline = null;
 let weeklyUsageSyncMessage = "Open Weekly Usage on the work network to check Pour My Beer. After the service-computer import, saved reports remain available anywhere.";
 let weeklyUsageLastSyncAt = loadWeeklyUsageLastSyncAt();
 let weeklyUsageSyncAttempted = false;
@@ -1086,6 +1089,7 @@ let inventorySpeechKegScope = "main";
 let inventorySpeechInventoryScope = "liquor";
 let inventorySourceRows = [];
 let inventorySharedUpdatedAt = "";
+let inventorySharedCountedAt = "";
 let inventorySharedMessage = "Loading shared inventory...";
 let inventorySharedSaving = false;
 let inventorySharedSaveError = "";
@@ -1422,12 +1426,21 @@ function releaseOwnerLoginSyncLock(token) {
 }
 
 let unifiedPmbRefreshRunning = false;
+let tapRepairRefreshTimer = null;
 
 async function runUnifiedPmbRefresh() {
   if (isEmployeeDashboard || unifiedPmbRefreshRunning) return;
   const button = document.querySelector("#refresh-all-pmb");
   const lockToken = acquireOwnerLoginSyncLock();
-  if (!lockToken) return;
+  if (!lockToken) {
+    weeklyPlanRefreshMessage = "PMB is already refreshing in another dashboard tab. Your counts are unchanged; retry shortly.";
+    renderWeeklyPlan();
+    return;
+  }
+  if (tapRepairRefreshTimer) {
+    window.clearTimeout(tapRepairRefreshTimer);
+    tapRepairRefreshTimer = null;
+  }
   unifiedPmbRefreshRunning = true;
   if (button) {
     button.disabled = true;
@@ -1435,22 +1448,30 @@ async function runUnifiedPmbRefresh() {
   }
   try {
     await dashboardRenderCoordinator.batch(async () => {
-      await Promise.allSettled([
+      // Recover pending writes before replacing locally cached PMB reports.
+      await flushPendingSharedWeeklyUsageSave();
+      if (!weeklyUsageSharedOutbox) await loadSharedWeeklyUsageState();
+      const refreshResults = await Promise.allSettled([
         runKegLevelSync(),
         runTapPricingSync(),
         runPmbWeeklyUsageSync({ automatic: true }),
         checkPmbQueueConnection(),
       ]);
-      await Promise.allSettled([
+      const saveResults = await Promise.allSettled([
         flushPendingSharedWeeklyUsageSave(),
         flushPendingInventoryFieldSyncs(),
         flushPendingParAgentStateSync(),
       ]);
-      if (!getCurrentMondayKegPlanSnapshot() && !hasPublishedWeeklyPlanRecommendations()) {
+      const inputsReady = refreshResults.slice(0, 3).every((result, index) => result.status === "fulfilled"
+        && (index === 2 ? result.value?.ok === true : result.value === true))
+        && saveResults.every((result) => result.status === "fulfilled" && result.value !== false);
+      if (inputsReady && !getCurrentMondayKegPlanSnapshot() && !hasPublishedWeeklyPlanRecommendations()) {
         await runKegParAgent();
       }
       renderDashboardOverview();
     });
+  } catch (error) {
+    weeklyPlanRefreshMessage = `PMB refresh did not finish: ${error.message || "connection interrupted"}. Your saved counts remain unchanged.`;
   } finally {
     releaseOwnerLoginSyncLock(lockToken);
     unifiedPmbRefreshRunning = false;
@@ -1458,6 +1479,8 @@ async function runUnifiedPmbRefresh() {
       button.disabled = false;
       button.textContent = "Refresh PMB";
     }
+    renderWeeklyPlan();
+    renderDashboardOverview();
   }
 }
 
@@ -6104,8 +6127,12 @@ function getMondayRunModel(plan, freshness) {
   const inventoryMissingCount = getWeeklyPlanMissingInventoryCount();
   const inventorySaving = inventorySharedSaving
     || inventoryFieldSyncPendingCount > 0
-    || inventoryFieldSyncTimers.size > 0;
+    || inventoryFieldSyncTimers.size > 0
+    || Object.keys(inventoryFieldOutbox).length > 0
+    || inventoryActionOutbox.length > 0;
   const mondaySnapshotSaved = Boolean(getCurrentMondayInventorySnapshot(inventoryHistory, new Date()));
+  const inventoryCountedThisWeek = mondaySnapshotSaved
+    || isRecommendationForOperatingWeek(inventorySharedCountedAt, new Date());
   const planLocked = hasPublishedWeeklyPlanRecommendations();
   const weeklyUsageCaptured = freshness.latestCompletedUsageSaved === true && !weeklyUsageSharedSaveError;
   const pmbRefreshPending = unifiedPmbRefreshRunning
@@ -6122,12 +6149,19 @@ function getMondayRunModel(plan, freshness) {
     kegFeed,
     pricingFeed,
     inventoryMissingCount,
+    inventoryCountedThisWeek,
     inventorySaving,
     inventorySharedInitialized,
     inventorySharedSaveError,
     mondaySnapshotSaved,
     planLocked,
     weeklyUsageCaptured,
+    weeklyUsageSavePending: weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites > 0
+      || Boolean(weeklyUsageSharedSaveTimer || weeklyUsageSharedOutbox),
+    weeklyUsageSaveError: weeklyUsageSharedSaveError,
+    weeklyUsageSyncError,
+    kegCountSaveError: parAgentStateOutbox ? parAgentError : "",
+    tapRepairRefreshPending: Boolean(tapRepairRefreshTimer),
     pmbRefreshPending,
     vendorOrders,
     weeklyOrderTrackingAvailable: weeklyOrderTracking.available,
@@ -8933,6 +8967,7 @@ function stageWeeklyUsageSharedOutbox() {
     payload: {
       action: "replace",
       data: getSharedWeeklyUsageData(),
+      baseData: prior ? prior.payload?.baseData ?? null : weeklyUsageSharedBaseline,
     },
     updatedAt: new Date().toISOString(),
   });
@@ -8988,6 +9023,7 @@ function getSharedWeeklyUsageData() {
 
 function applySharedWeeklyUsageState(state) {
   const data = state?.data || {};
+  weeklyUsageSharedBaseline = cloneWeeklyUsageValue(data);
   weeklyUsageApplyingSharedState = true;
   try {
     weeklyUsageSharedRevision = Number(state.revision) || 0;
@@ -9037,15 +9073,9 @@ async function loadSharedWeeklyUsageState() {
           const recovered = await queueSharedWeeklyUsageSave();
           if (recovered) return;
         } else {
-          // Weekly Usage is reproducible from PMB, so a newer shared revision is
-          // authoritative. Keeping an older browser recovery copy here creates a
-          // permanent false blocker even though no unique inventory input is lost.
-          weeklyUsageSharedOutbox = null;
-          saveWeeklyUsageSharedOutbox();
-          applySharedWeeklyUsageState(state);
-          weeklyUsageSharedSaveError = "";
-          weeklyUsageSharedMessage = "Loaded the newest shared Weekly Usage.";
-          return;
+          if (tryRebaseWeeklyUsageOutbox(state)) {
+            if (!weeklyUsageSharedOutbox || await queueSharedWeeklyUsageSave()) return;
+          }
         }
         weeklyUsageSharedSaveError = weeklyUsageSharedOutbox?.lastError || "Pending Weekly Usage recovery needs review.";
         weeklyUsageSharedMessage = weeklyUsageSharedOutbox?.conflict
@@ -9098,21 +9128,70 @@ function scheduleSharedWeeklyUsageSave() {
   renderWeeklyPlan();
 }
 
+function tryRebaseWeeklyUsageOutbox(state) {
+  const entry = normalizeOperationalOutboxEntry(weeklyUsageSharedOutbox);
+  if (!entry || !state?.initialized) return false;
+  if (areDashboardStateValuesEqual(entry.payload.data, state.data)) {
+    weeklyUsageSharedOutbox = null;
+    saveWeeklyUsageSharedOutbox();
+    applySharedWeeklyUsageState(state);
+    weeklyUsageSharedSaveError = "";
+    weeklyUsageSharedMessage = "The pending Weekly Usage report was already saved by another dashboard tab.";
+    return true;
+  }
+  const merged = entry.baseRevision === Number(state.revision)
+    ? { ok: true, data: entry.payload.data }
+    : mergeOperationalRecord(entry.payload.baseData, entry.payload.data, state.data);
+  if (!merged.ok) {
+    weeklyUsageSharedSaveError = "Weekly usage differs from the shared report. Your local report is preserved; no newer report was overwritten.";
+    weeklyUsageSharedOutbox = markOperationalOutboxFailure(entry, {
+      conflict: true, currentRevision: state.revision, message: weeklyUsageSharedSaveError,
+    });
+    saveWeeklyUsageSharedOutbox();
+    return false;
+  }
+  weeklyUsageSharedOutbox = {
+    ...entry, baseRevision: Number(state.revision), conflict: false, currentRevision: null, lastError: "",
+    payload: { ...entry.payload, data: merged.data, baseData: cloneWeeklyUsageValue(state.data) },
+  };
+  weeklyUsageSharedRevision = Number(state.revision);
+  weeklyUsageSharedBaseline = cloneWeeklyUsageValue(state.data);
+  weeklyUsageSharedSaveError = "";
+  restoreWeeklyUsageFromOutbox();
+  return saveWeeklyUsageSharedOutbox();
+}
+
 function queueSharedWeeklyUsageSave() {
   if (!weeklyUsageSharedOutbox) stageWeeklyUsageSharedOutbox();
   const initialEntry = normalizeOperationalOutboxEntry(weeklyUsageSharedOutbox);
-  if (!initialEntry || initialEntry.conflict) return Promise.resolve(false);
+  if (!initialEntry) return Promise.resolve(false);
   let activeEntry = initialEntry;
   weeklyUsageSharedPendingWrites += 1;
   weeklyUsageSharedWriteQueue = weeklyUsageSharedWriteQueue.then(async () => {
-    activeEntry = normalizeOperationalOutboxEntry(weeklyUsageSharedOutbox) || initialEntry;
-    if (activeEntry.conflict) return false;
     try {
-      const state = await requestSharedWeeklyUsage({
-        action: "replace",
-        expectedRevision: activeEntry.baseRevision,
-        data: activeEntry.payload.data,
+      // A preceding queued save may already have acknowledged this report.
+      if (!weeklyUsageSharedOutbox) return true;
+      activeEntry = normalizeOperationalOutboxEntry(weeklyUsageSharedOutbox);
+      if (activeEntry.conflict) {
+        const latest = await requestSharedWeeklyUsage();
+        if (!tryRebaseWeeklyUsageOutbox(latest)) return false;
+        if (!weeklyUsageSharedOutbox) return true;
+        activeEntry = normalizeOperationalOutboxEntry(weeklyUsageSharedOutbox);
+      }
+      const write = () => requestSharedWeeklyUsage({
+        action: "replace", expectedRevision: activeEntry.baseRevision, data: activeEntry.payload.data,
       });
+      let state;
+      try {
+        state = await write();
+      } catch (error) {
+        if (error.code !== "WEEKLY_USAGE_STATE_REVISION_CONFLICT") throw error;
+        const latest = await requestSharedWeeklyUsage();
+        if (!tryRebaseWeeklyUsageOutbox(latest)) return false;
+        if (!weeklyUsageSharedOutbox) return true;
+        activeEntry = normalizeOperationalOutboxEntry(weeklyUsageSharedOutbox);
+        state = await write();
+      }
       if (weeklyUsageSharedOutbox?.id === activeEntry.id) {
         weeklyUsageSharedOutbox = null;
         saveWeeklyUsageSharedOutbox();
@@ -9120,12 +9199,14 @@ function queueSharedWeeklyUsageSave() {
         weeklyUsageSharedSaveError = "";
         weeklyUsageSharedMessage = "Shared Weekly Usage saved.";
       } else {
+        weeklyUsageSharedOutbox.payload.baseData = cloneWeeklyUsageValue(state.data);
         weeklyUsageSharedOutbox = rebaseOperationalOutboxAfterOwnCommit(weeklyUsageSharedOutbox, {
           committedBaseRevision: activeEntry.baseRevision,
           nextRevision: state.revision,
         });
         saveWeeklyUsageSharedOutbox();
         weeklyUsageSharedRevision = Number(state.revision) || weeklyUsageSharedRevision;
+        weeklyUsageSharedBaseline = cloneWeeklyUsageValue(state.data);
         weeklyUsageSharedMessage = "An earlier Weekly Usage save completed; a newer local edit is still pending.";
       }
       return true;
@@ -9165,12 +9246,11 @@ async function flushPendingSharedWeeklyUsageSave() {
       && weeklyUsageSharedOutboxDurable;
   }
   if (weeklyUsageSharedOutbox) {
-    if (!canSafelyRetryOperationalOutbox(weeklyUsageSharedOutbox, weeklyUsageSharedRevision)) return false;
     const recovered = await queueSharedWeeklyUsageSave();
-    return recovered !== false && !weeklyUsageSharedOutbox && weeklyUsageSharedOutboxDurable;
+    return recovered !== false && !weeklyUsageSharedOutbox && !weeklyUsageSharedSaveError && weeklyUsageSharedOutboxDurable;
   }
-  const result = await weeklyUsageSharedWriteQueue;
-  return result !== false && weeklyUsageSharedPendingWrites === 0 && !weeklyUsageSharedSaving && !weeklyUsageSharedSaveError && weeklyUsageSharedOutboxDurable;
+  await weeklyUsageSharedWriteQueue;
+  return weeklyUsageSharedPendingWrites === 0 && !weeklyUsageSharedSaving && !weeklyUsageSharedSaveError && !weeklyUsageSharedOutbox && weeklyUsageSharedOutboxDurable;
 }
 
 async function initializeSharedWeeklyUsageFromServiceComputer() {
@@ -9263,6 +9343,7 @@ async function refreshSharedWeeklyUsageBeforeMondaySnapshot() {
 
 async function runPmbWeeklyUsageSync({ automatic = false } = {}) {
   if (weeklyUsageSyncLoading) return { ok: false, error: "Weekly Usage is already refreshing." };
+  weeklyUsageSyncError = "";
   weeklyUsageSyncAttempted = true;
 
   const weekStarts = getPmbSyncWeekStarts();
@@ -9318,6 +9399,7 @@ async function runPmbWeeklyUsageSync({ automatic = false } = {}) {
         });
         const overallReason = clean(result.reviewReason || result.reason || result.error);
         if (automatic) {
+          weeklyUsageSyncError = "The PMB weekly report needs owner attention.";
           weeklyUsageSyncAttempted = false;
           weeklyUsageSyncMessage = [
             "Automatic PMB check paused for owner review.",
@@ -9375,6 +9457,7 @@ async function runPmbWeeklyUsageSync({ automatic = false } = {}) {
   } catch (error) {
     weeklyUsageSyncAttempted = false;
     const message = getPmbConnectionErrorMessage(error, "Could not pull PMB weekly usage.");
+    weeklyUsageSyncError = message;
     weeklyUsageSyncMessage = automatic
       ? `${message} Existing saved usage remains visible.`
       : message;
@@ -9383,6 +9466,8 @@ async function runPmbWeeklyUsageSync({ automatic = false } = {}) {
     weeklyUsageSyncLoading = false;
     renderWeeklyUsage();
     renderKegLevels();
+    renderWeeklyPlan();
+    renderDashboardOverview();
   }
 }
 
@@ -10672,14 +10757,14 @@ async function pushKegLevelAdjustment(key) {
   }
 }
 
-function clearAllKegOnHand() {
+function clearAllKegOnHand({ skipConfirmation = false } = {}) {
   const activeNonZeroCount = kegWallItems.filter((item) => (
     toNumber(kegOnHandOverrides[getKegItemKey(item)]) > 0
   )).length;
   const assignedOnDeck = Object.entries(kegOnDeckOverrides).filter(([, item]) => item && typeof item === "object");
   const onDeckNonZeroCount = assignedOnDeck.filter(([, item]) => toNumber(item.onHand) > 0).length;
   const nonZeroCount = activeNonZeroCount + onDeckNonZeroCount;
-  if (!confirmDashboardAction(
+  if (!skipConfirmation && !confirmDashboardAction(
     "Clear every Keg Levels on-hand count?",
     [
       `All ${kegWallItems.length} current and ${assignedOnDeck.length} On Deck counts will be set to zero.`,
@@ -10697,6 +10782,7 @@ function clearAllKegOnHand() {
   kegSyncMessage = "Cleared all current and On Deck counts to zero.";
   scheduleParAgentStateSync({ immediate: true });
   renderKegLevels();
+  return true;
 }
 
 function bindKegLevelEvents() {
@@ -11479,6 +11565,7 @@ function stageKegLevelsOutbox() {
       parOverrides: { ...kegParOverrides },
       onDeckOverrides: getShareableKegOnDeckOverrides(),
       settings: getParAgentSettings(),
+      baseInputs: prior ? prior.payload?.baseInputs ?? null : getKegLevelInputPayload(parAgentState),
     },
     updatedAt: new Date().toISOString(),
   });
@@ -11537,12 +11624,9 @@ async function loadParAgentState() {
         const recovered = await syncParAgentState({ silent: false });
         if (recovered) return;
       } else {
-        parAgentStateOutbox = markOperationalOutboxFailure(parAgentStateOutbox, {
-          conflict: true,
-          currentRevision: result.revision,
-          message: `Shared Keg Levels is now revision ${result.revision}, but this browser's recovery copy was based on revision ${parAgentStateOutbox.baseRevision}.`,
-        });
-        saveKegLevelsOutbox();
+        if (tryRebaseKegLevelsOutbox(result)) {
+          if (!parAgentStateOutbox || await syncParAgentState({ silent: false })) return;
+        }
       }
       parAgentError = parAgentStateOutbox?.lastError || "Pending Keg Levels recovery needs review.";
       parAgentMessage = parAgentStateOutbox?.conflict
@@ -11564,6 +11648,10 @@ async function loadParAgentState() {
 }
 
 function applyParAgentState(state, { hydrate = false } = {}) {
+  if (parAgentStateOutbox) {
+    restoreKegLevelsOutbox(state);
+    return;
+  }
   parAgentState = state || {};
   if (!parAgentState.initialized) {
     parAgentMessage = "Setup needed: import Keg Levels only from the service computer. Counts and par choices stay on this device until then.";
@@ -11691,6 +11779,39 @@ function scheduleParAgentStateSync({ immediate = false } = {}) {
   renderWeeklyPlan();
 }
 
+function tryRebaseKegLevelsOutbox(state) {
+  const entry = normalizeOperationalOutboxEntry(parAgentStateOutbox);
+  if (!entry || !state?.initialized) return false;
+  if (!haveKegLevelInputsChanged(state, entry.payload)) {
+    parAgentStateOutbox = null;
+    parAgentInputsChangedAt = "";
+    saveKegLevelsOutbox();
+    parAgentError = "";
+    applyParAgentState(state);
+    return true;
+  }
+  const merged = entry.baseRevision === Number(state.revision)
+    ? { ok: true, data: getKegLevelInputPayload(entry.payload) }
+    : reconcileKegLevelInputs(entry.payload.baseInputs, entry.payload, state);
+  if (!merged.ok) {
+    parAgentError = "Saved keg counts differ from this browser. Your local counts are preserved; no newer counts were overwritten.";
+    parAgentMessage = parAgentError;
+    parAgentStateOutbox = markOperationalOutboxFailure(entry, {
+      conflict: true, currentRevision: state.revision, message: parAgentError,
+    });
+    saveKegLevelsOutbox();
+    return false;
+  }
+  parAgentStateOutbox = {
+    ...entry, baseRevision: Number(state.revision), conflict: false, currentRevision: null, lastError: "",
+    payload: { ...entry.payload, ...merged.data, baseInputs: getKegLevelInputPayload(state) },
+  };
+  restoreKegLevelsOutbox(state);
+  parAgentError = "";
+  parAgentMessage = "Recovered non-conflicting Keg Levels changes. Saving your counts...";
+  return saveKegLevelsOutbox();
+}
+
 async function syncParAgentState({ silent = false, mutationVersion = parAgentStateMutationVersion } = {}) {
   if (!parAgentState?.initialized) {
     if (!silent) {
@@ -11700,8 +11821,8 @@ async function syncParAgentState({ silent = false, mutationVersion = parAgentSta
     return false;
   }
   if (!parAgentStateOutbox) stageKegLevelsOutbox();
-  const sentEntry = normalizeOperationalOutboxEntry(parAgentStateOutbox);
-  if (!sentEntry || sentEntry.conflict) {
+  let sentEntry = normalizeOperationalOutboxEntry(parAgentStateOutbox);
+  if (!sentEntry) {
     parAgentError = sentEntry?.lastError || "Keg Levels has an unresolved recovery conflict.";
     parAgentMessage = parAgentError;
     if (!silent) renderKegLevels();
@@ -11709,15 +11830,32 @@ async function syncParAgentState({ silent = false, mutationVersion = parAgentSta
     return false;
   }
   try {
-    const result = await requestParAgentState({
-      ...sentEntry.payload,
-      expectedRevision: sentEntry.baseRevision,
-    });
+    if (sentEntry.conflict) {
+      const latest = await requestParAgentState();
+      if (!tryRebaseKegLevelsOutbox(latest)) return false;
+      if (!parAgentStateOutbox) return true;
+      sentEntry = normalizeOperationalOutboxEntry(parAgentStateOutbox);
+      mutationVersion = parAgentStateMutationVersion;
+    }
+    const write = () => requestParAgentState({ ...sentEntry.payload, expectedRevision: sentEntry.baseRevision });
+    let result;
+    try {
+      result = await write();
+    } catch (error) {
+      if (error.code !== "KEG_STATE_REVISION_CONFLICT") throw error;
+      const latest = await requestParAgentState();
+      if (!tryRebaseKegLevelsOutbox(latest)) return false;
+      if (!parAgentStateOutbox) return true;
+      sentEntry = normalizeOperationalOutboxEntry(parAgentStateOutbox);
+      mutationVersion = parAgentStateMutationVersion;
+      result = await write();
+    }
     if (parAgentStateOutbox?.id === sentEntry.id && mutationVersion === parAgentStateMutationVersion) {
       parAgentStateOutbox = null;
       saveKegLevelsOutbox();
       applyParAgentState(result);
     } else {
+      parAgentStateOutbox.payload.baseInputs = getKegLevelInputPayload(result);
       parAgentStateOutbox = rebaseOperationalOutboxAfterOwnCommit(parAgentStateOutbox, {
         committedBaseRevision: sentEntry.baseRevision,
         nextRevision: result.revision,
@@ -11768,32 +11906,11 @@ async function flushPendingParAgentStateSync() {
     enqueued = true;
   }
   if (parAgentStateOutbox && !enqueued) {
-    if (!canSafelyRetryOperationalOutbox(parAgentStateOutbox, parAgentState?.revision)) {
+    if (parAgentStateOutbox.conflict || !canSafelyRetryOperationalOutbox(parAgentStateOutbox, parAgentState?.revision)) {
       try {
         const latestState = await requestParAgentState();
-        if (!haveKegLevelInputsChanged(latestState, parAgentStateOutbox.payload)) {
-          parAgentStateOutbox = null;
-          parAgentInputsChangedAt = "";
-          saveKegLevelsOutbox();
-          parAgentError = "";
-          applyParAgentState(latestState);
-          return true;
-        }
-        if (!haveKegLevelInputsChanged(parAgentState, latestState)) {
-          parAgentStateOutbox = rebaseOperationalOutboxAfterOwnCommit(parAgentStateOutbox, {
-            committedBaseRevision: parAgentStateOutbox.baseRevision,
-            nextRevision: latestState.revision,
-          });
-          saveKegLevelsOutbox();
-          parAgentState = {
-            ...(parAgentState || {}),
-            revision: latestState.revision,
-            initialized: latestState.initialized,
-            updatedAt: latestState.updatedAt,
-          };
-        } else {
-          return false;
-        }
+        if (!tryRebaseKegLevelsOutbox(latestState)) return false;
+        if (!parAgentStateOutbox) return true;
       } catch (error) {
         parAgentError = error.message || "Could not check the latest shared Keg Levels.";
         return false;
@@ -11804,8 +11921,8 @@ async function flushPendingParAgentStateSync() {
       .then(() => syncParAgentState({ silent: false, mutationVersion }))
       .catch(() => false);
   }
-  const result = await parAgentStateSyncQueue;
-  return result !== false && !parAgentStateOutbox && parAgentStateOutboxDurable;
+  await parAgentStateSyncQueue;
+  return !parAgentStateOutbox && parAgentStateOutboxDurable;
 }
 
 async function runKegParAgent() {
@@ -12102,6 +12219,12 @@ async function runKegConfigUpdate() {
     }
 
     kegSyncMessage = result.message || "Configuration update sent.";
+    window.clearTimeout(tapRepairRefreshTimer);
+    kegSyncMessage += " Fresh PMB readings will be checked automatically in one minute; the tap repair will not be repeated.";
+    tapRepairRefreshTimer = window.setTimeout(() => {
+      tapRepairRefreshTimer = null;
+      void runUnifiedPmbRefresh();
+    }, 60_000);
   } catch (error) {
     kegSyncMessage = getPmbConnectionErrorMessage(
       error,
@@ -12111,6 +12234,7 @@ async function runKegConfigUpdate() {
   } finally {
     kegConfigUpdateRunning = false;
     renderKegLevels();
+    renderWeeklyPlan();
   }
 }
 
@@ -12625,6 +12749,7 @@ function stageInventoryActionOutbox(payload, options = {}) {
     baseRevision: inventorySharedRevision,
     payload: {
       ...payload,
+      countedAt: new Date().toISOString(),
       recoveryOptions: {
         applyState: options.applyState !== false,
         rebuild: options.rebuild === true,
@@ -12660,7 +12785,7 @@ function stageInventoryFieldOutbox(key, payload) {
   const prior = inventoryFieldOutbox[key];
   const entry = createOperationalOutboxEntry({
     baseRevision: prior?.baseRevision ?? inventorySharedRevision,
-    payload,
+    payload: { ...payload, countedAt: new Date().toISOString() },
     updatedAt: new Date().toISOString(),
     clientOrder: nextInventoryOutboxClientOrder(),
   });
@@ -12913,6 +13038,7 @@ function applySharedInventoryState(state, { rebuild = false } = {}) {
   inventoryItemOrder = Array.isArray(state.current?.itemOrder) ? state.current.itemOrder : [];
   inventoryHistory = Array.isArray(state.snapshots) ? state.snapshots : [];
   inventorySharedUpdatedAt = state.current?.updatedAt || "";
+  inventorySharedCountedAt = state.current?.countedAt || "";
   saveInventoryOnHandOverrides();
   saveInventoryParOverrides();
   saveCustomInventoryItems();
@@ -13044,6 +13170,7 @@ function queueInventoryActionSync(operationId) {
       });
       inventorySharedRevision = Number(state.revision) || inventorySharedRevision;
       inventorySharedUpdatedAt = state.current?.updatedAt || inventorySharedUpdatedAt;
+      inventorySharedCountedAt = state.current?.countedAt || "";
       inventoryActionOutbox = inventoryActionOutbox.filter((entry) => entry.id !== activeEntry.id);
       inventoryActionOutbox = inventoryActionOutbox.map((entry) => rebaseOperationalOutboxAfterOwnCommit(entry, {
         committedBaseRevision: activeEntry.baseRevision,
@@ -13155,6 +13282,7 @@ function queueInventoryFieldSync(key, payload) {
       });
       inventorySharedRevision = Number(state.revision) || inventorySharedRevision;
       inventorySharedUpdatedAt = state.current?.updatedAt || inventorySharedUpdatedAt;
+      inventorySharedCountedAt = state.current?.countedAt || "";
       if (inventoryFieldOutbox[key]?.id === activeEntry.id) delete inventoryFieldOutbox[key];
       else {
         inventoryFieldOutbox[key] = rebaseOperationalOutboxAfterOwnCommit(inventoryFieldOutbox[key], {
@@ -13295,14 +13423,17 @@ async function clearAllInventoryOnHand() {
     "Clear every Inventory on-hand field?",
     [
       `${changes.length} on-hand field${changes.length === 1 ? "" : "s"} will be cleared.`,
-      `${populatedCount} currently contain a value. Pars, prices, and snapshots stay unchanged.`,
+      `${populatedCount} currently contain a value. Current-keg backup and On Deck counts will also be reset to zero.`,
+      "Pars, prices, PMB live levels, and snapshots stay unchanged.",
     ],
     "Cleared fields remain blank until a new count is entered.",
   )) return;
-  await runSharedInventoryAction(
+  const inventoryClearSucceeded = await runSharedInventoryAction(
     { action: "batch-update-fields", changes, source: "clear-on-hand" },
-    { successMessage: "All Inventory on-hand fields were cleared.", rebuild: true },
+    { successMessage: "All cabinet, current-keg backup, and On Deck on-hand fields were cleared.", rebuild: true },
   );
+  if (!inventoryClearSucceeded) return;
+  clearAllKegOnHand({ skipConfirmation: true });
 }
 
 function getKegSpeechAliases(value) {

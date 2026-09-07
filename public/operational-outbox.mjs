@@ -16,6 +16,41 @@ function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+function comparableValue(value) {
+  if (Array.isArray(value)) return value.map(comparableValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, comparableValue(entry)]));
+  }
+  return value;
+}
+
+// Merge only independent edits. Arrays and nested records remain atomic so a
+// changed product cannot accidentally inherit another product's saved count.
+export function mergeOperationalRecord(base, local, remote) {
+  if (![base, local, remote].every((value) => value && typeof value === "object" && !Array.isArray(value))) {
+    return { ok: false, data: null, conflicts: ["missing-baseline"] };
+  }
+  const equal = (left, right) => JSON.stringify(comparableValue(left)) === JSON.stringify(comparableValue(right));
+  const entries = [];
+  const conflicts = [];
+  for (const key of new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(remote)])) {
+    const before = Object.hasOwn(base, key) ? base[key] : undefined;
+    const ours = Object.hasOwn(local, key) ? local[key] : undefined;
+    const theirs = Object.hasOwn(remote, key) ? remote[key] : undefined;
+    let value;
+    if (equal(ours, theirs) || equal(before, theirs)) value = ours;
+    else if (equal(before, ours)) value = theirs;
+    else {
+      conflicts.push(key);
+      continue;
+    }
+    if (value !== undefined) entries.push([key, cloneJson(value)]);
+  }
+  return { ok: conflicts.length === 0, data: conflicts.length ? null : Object.fromEntries(entries), conflicts };
+}
+
 export function buildOperationalRecovery({
   message = "",
   conflict = false,
