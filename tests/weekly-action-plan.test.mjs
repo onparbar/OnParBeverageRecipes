@@ -12,6 +12,7 @@ import {
   getCurrentWeeklyPlanSnapshot,
   groupWeeklyPlanOrdersByVendor,
   hasCompleteWeeklyUsageRows,
+  isWeeklyUsageRequiredItem,
   hasWeeklyUsagePhysicalIdentityConflict,
   isRecommendationForOperatingWeek,
   isWeeklyUsageNameFallbackEligible,
@@ -577,6 +578,11 @@ test("latest completed Weekly Usage coverage requires every active row", () => {
   assert.equal(hasCompleteWeeklyUsageRows(activeRows, (item) => item.saved), false);
   assert.equal(hasCompleteWeeklyUsageRows(activeRows.map((item) => ({ ...item, saved: true })), (item) => item.saved), true);
   assert.equal(hasCompleteWeeklyUsageRows([], () => true), false);
+});
+
+test("Coming Soon placeholders do not block weekly usage readiness", () => {
+  assert.equal(isWeeklyUsageRequiredItem({ name: "Coming Soon! 1" }), false);
+  assert.equal(isWeeklyUsageRequiredItem({ name: "Voodoo Ranger IPA 1" }), true);
 });
 
 test("recommendations are current only for the immediately published source revision", () => {

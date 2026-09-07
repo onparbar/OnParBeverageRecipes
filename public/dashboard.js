@@ -67,6 +67,7 @@ import {
   hasCompleteWeeklyUsageRows,
   hasWeeklyUsagePhysicalIdentityConflict,
   isRecommendationForOperatingWeek,
+  isWeeklyUsageRequiredItem,
   isWeeklyUsageNameFallbackEligible,
   isRecommendationSourceRevisionCurrent,
   normalizeLiquorTapProductName,
@@ -5117,7 +5118,7 @@ function getWeeklyPlanInventoryItems({ live = false } = {}) {
   const frozenKegPlan = getCurrentMondayKegPlanSnapshot();
   const recommendationItems = Array.isArray(frozenKegPlan?.items)
     ? frozenKegPlan.items
-    : live && Array.isArray(parAgentState?.recommendations?.items)
+    : live && isRecommendationForOperatingWeek(parAgentState?.recommendations?.generatedAt, new Date()) && Array.isArray(parAgentState?.recommendations?.items)
       ? parAgentState.recommendations.items
       : [];
   const liquorBottleNeeds = getLiquorCabinetWeeklyBottleNeeds({
@@ -5191,7 +5192,7 @@ function getWeeklyPlanRecommendations({ live = false } = {}) {
   const frozenKegPlan = getCurrentMondayKegPlanSnapshot();
   const sourceItems = Array.isArray(frozenKegPlan?.items)
     ? frozenKegPlan.items
-    : live && Array.isArray(parAgentState?.recommendations?.items)
+    : live && isRecommendationForOperatingWeek(parAgentState?.recommendations?.generatedAt, new Date()) && Array.isArray(parAgentState?.recommendations?.items)
       ? parAgentState.recommendations.items
       : [];
   const nettedSourceItems = netLiquorTapRecommendations({
@@ -5836,14 +5837,21 @@ function getWeeklyPlanMissingInventoryCount() {
 function getWeeklyPlanFreshness(plan) {
   const latestCompletedWeek = getCompletedMondayWeekStarts(1)[0] || null;
   const latestCompletedTime = latestCompletedWeek?.getTime() || 0;
+  const requiredWeeklyUsageItems = weeklyUsageItems.filter(isWeeklyUsageRequiredItem);
   const latestCompletedUsageRowCount = latestCompletedTime
-    ? weeklyUsageItems.filter((item) => (
+    ? requiredWeeklyUsageItems.filter((item) => (
       (item.history || []).some((entry) => getWeeklyUsageLabelTime(entry.label) === latestCompletedTime)
     )).length
     : 0;
-  const requiredUsageRows = Math.max(1, weeklyUsageItems.length);
+  const requiredUsageRows = Math.max(1, requiredWeeklyUsageItems.length);
+  const missingUsageItems = requiredWeeklyUsageItems.filter((item) => !(item.history || []).some(
+    (entry) => getWeeklyUsageLabelTime(entry.label) === latestCompletedTime,
+  ));
+  const usageCoverageMessage = missingUsageItems.length
+    ? `${latestCompletedUsageRowCount}/${requiredUsageRows} active taps have saved usage. Missing: ${missingUsageItems.map((item) => `Tap ${item.tapNumber} (${item.name})`).join(", ")}.`
+    : "";
   const latestCompletedUsageSaved = latestCompletedTime > 0 && hasCompleteWeeklyUsageRows(
-    weeklyUsageItems,
+    requiredWeeklyUsageItems,
     (item) => (item.history || []).some((entry) => getWeeklyUsageLabelTime(entry.label) === latestCompletedTime),
   );
   const mondayKegPlan = getCurrentMondayKegPlanSnapshot();
@@ -5868,6 +5876,7 @@ function getWeeklyPlanFreshness(plan) {
     weeklyUsageSavePending: lockedSnapshot ? false : weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites > 0 || Boolean(weeklyUsageSharedSaveTimer) || Boolean(weeklyUsageSharedOutbox),
     weeklyUsageSaveError: lockedSnapshot ? "" : weeklyUsageSharedSaveError || (!weeklyUsageSharedOutboxDurable ? "Pending Weekly Usage could not be stored durably in this browser." : ""),
     latestCompletedUsageSaved: lockedSnapshot ? true : latestCompletedUsageSaved,
+    usageCoverageMessage,
     weeklyUsageLastSyncAt: mondayKegPlan?.generatedAt || weeklyUsageLastSyncAt,
     inventoryInitialized: inventorySharedInitialized,
     inventorySnapshotCurrent: lockedSnapshot || inventorySnapshotCurrent,
@@ -5884,6 +5893,7 @@ function getWeeklyPlanFreshness(plan) {
     latestCompletedUsageSaved,
     latestCompletedUsageRowCount,
     requiredUsageRows,
+    usageCoverageMessage,
     lockedSnapshot,
     readiness,
   };
@@ -6158,7 +6168,7 @@ function getMondayRunModel(plan, freshness) {
     weeklyUsageSavePending: weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites > 0
       || Boolean(weeklyUsageSharedSaveTimer || weeklyUsageSharedOutbox),
     weeklyUsageSaveError: weeklyUsageSharedSaveError,
-    weeklyUsageSyncError,
+    weeklyUsageSyncError: weeklyUsageCaptured ? "" : freshness.usageCoverageMessage || weeklyUsageSyncError,
     kegCountSaveError: parAgentStateOutbox ? parAgentError : "",
     tapRepairRefreshPending: Boolean(tapRepairRefreshTimer),
     pmbRefreshPending,
@@ -7314,21 +7324,26 @@ function renderWeeklyPlanReadiness(readiness) {
   `;
 }
 
-function renderWeeklyPlanProvenance({ latestCompletedWeek, latestCompletedUsageSaved, latestCompletedUsageRowCount }) {
+function renderWeeklyPlanProvenance({ latestCompletedWeek, latestCompletedUsageSaved, latestCompletedUsageRowCount, requiredUsageRows, usageCoverageMessage }) {
   const recommendations = parAgentState?.recommendations;
   const planLocked = hasPublishedWeeklyPlanRecommendations();
+  const currentPlanAvailable = planLocked
+    || Boolean(getCurrentMondayKegPlanSnapshot())
+    || isRecommendationForOperatingWeek(recommendations?.generatedAt, new Date());
   const priceTime = getLatestPriceTimestamp();
   const missingCounts = getWeeklyPlanMissingInventoryCount();
   return `
     <section class="weekly-plan-provenance" aria-label="Weekly plan source freshness">
       <div class="weekly-plan-provenance__item">
         <span>Plan</span>
-        <strong>${planLocked ? "Locked · " : ""}${recommendations?.generatedAt ? escapeHtml(formatUpdatedAt(recommendations.generatedAt)) : "Not generated"}</strong>
+        <strong>${currentPlanAvailable ? `${planLocked ? "Locked · " : ""}${recommendations?.generatedAt ? escapeHtml(formatUpdatedAt(recommendations.generatedAt)) : "Current inputs saved"}` : "Not generated for this week"}</strong>
+        ${!currentPlanAvailable && recommendations?.generatedAt ? `<small>Previous plan from ${escapeHtml(formatUpdatedAt(recommendations.generatedAt))} is available in Weekly Snapshots.</small>` : ""}
       </div>
       <div class="weekly-plan-provenance__item">
         <span>Weekly Usage</span>
         <strong>${weeklyUsageSharedSaveError ? "Needs refresh" : weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites || weeklyUsageSharedSaveTimer || weeklyUsageSharedOutbox ? "Saving changes" : latestCompletedWeek ? `Week of ${escapeHtml(formatIsoDate(latestCompletedWeek))}` : "No completed week"}</strong>
-        ${weeklyUsageSharedSaveError ? `<small>${escapeHtml(getWeeklyPlanManagerMessage(weeklyUsageSharedSaveError))}</small>` : !latestCompletedUsageSaved ? `<small>${formatNumber(latestCompletedUsageRowCount)}/${formatNumber(weeklyUsageItems.length)} taps saved</small>` : ""}
+        ${weeklyUsageSharedSaveError ? `<small>${escapeHtml(getWeeklyPlanManagerMessage(weeklyUsageSharedSaveError))}</small>` : `<small>${latestCompletedUsageSaved ? `${formatNumber(latestCompletedUsageRowCount)}/${formatNumber(requiredUsageRows)} active taps saved` : escapeHtml(usageCoverageMessage)}</small>`}
+        ${weeklyUsageItems.some((item) => !isWeeklyUsageRequiredItem(item)) ? "<small>Coming Soon placeholders do not require sales history.</small>" : ""}
       </div>
       <div class="weekly-plan-provenance__item">
         <span>Inventory</span>
@@ -7880,6 +7895,9 @@ function renderWeeklyPlan() {
   const freshness = getWeeklyPlanFreshness(plan);
   const vendorOrderModel = getVendorOrderDraftModel(plan, freshness);
   const planLocked = Boolean(getCurrentWeeklyPlanSnapshot(recommendations, new Date()));
+  const currentWeekPlanAvailable = planLocked
+    || Boolean(getCurrentMondayKegPlanSnapshot())
+    || isRecommendationForOperatingWeek(recommendations?.generatedAt, new Date());
   const {
     activeOrderLines,
     priceNote,
@@ -7919,7 +7937,7 @@ function renderWeeklyPlan() {
       <summary>Plan details</summary>
       ${renderWeeklyPlanProvenance(freshness)}
     </details>
-    <div class="weekly-plan-stats">
+    ${currentWeekPlanAvailable ? `<div class="weekly-plan-stats">
       <div><span>Items to order</span><strong>${formatNumber(summary.orderLineCount)}</strong></div>
       <div><span>Beer kegs</span><strong>${formatNumber(summary.beerKegTotal)}</strong></div>
       <div><span>Bottles for liquor taps</span><strong>${formatNumber(summary.liquorTapBottleTotal)}</strong></div>
@@ -7947,7 +7965,7 @@ function renderWeeklyPlan() {
     ${planLocked && !orderStep?.complete
       ? `<details class="weekly-plan-phase weekly-plan-phase--orders" id="weekly-plan-orders" open><summary><span>Place orders</span><strong>${escapeHtml(orderStep?.status || "Review")}</strong></summary>${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)}</details>`
       : ""}
-    ${renderWeeklyPlanReview(plan)}
+    ${renderWeeklyPlanReview(plan)}` : `<section class="weekly-plan-empty" role="status"><h2>This week's plan has not been generated</h2><p>The previous plan is saved in Weekly Snapshots. Use Save &amp; Lock Plan after the current PMB usage and counts are ready.</p></section>`}
   `;
   let weeklyPlanBody = liveWeeklyPlanBody;
   if (orderRehearsalMode) {
@@ -8479,7 +8497,7 @@ function hasWeeklyUsageKnownActiveHistory(item, label) {
 function shouldApplyWeeklyUsageReportItemToItem(item, reportItem, label) {
   if (!isWeeklyUsageItemActiveForLabel(item, label)) return false;
   const isCurrentTapZero = reportItem?.isCurrentTap && toNumber(reportItem?.volumeOz) === 0;
-  if (isCurrentTapZero && !hasWeeklyUsageKnownActiveHistory(item, label)) return false;
+  if (isCurrentTapZero && !hasWeeklyUsageKnownActiveHistory(item, label) && isWeeklyUsageRequiredItem(item)) return false;
   return true;
 }
 

@@ -35,7 +35,7 @@ export function buildMondayRunModel({
   const pmbStatus = weeklyUsageSaveError ? "Weekly usage save issue - retry refresh"
     : kegCountSaveError ? "Keg counts need save recovery"
       : tapRepairRefreshPending ? "Tap repair sent - waiting to refresh"
-        : weeklyUsageSyncError ? "Weekly usage report needs attention"
+        : weeklyUsageSyncError ? weeklyUsageSyncError
           : pmbRefreshPending ? "Refreshing PMB"
             : feedIssue(kegFeed, "Keg levels") || feedIssue(pricingFeed, "Tap prices")
               || (weeklyUsageSavePending ? "Saving weekly usage" : !weeklyUsageCaptured ? "Capture last week's usage" : "Ready");

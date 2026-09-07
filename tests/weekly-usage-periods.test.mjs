@@ -39,5 +39,6 @@ test("requires every active tap to include the latest completed week", () => {
   assert.deepEqual(getMissingLatestCompletedUsageTaps([
     { tapNumber: 21, history: [{ label: "7/13/26 - 7/19/26", value: 0 }] },
     { tapNumber: 22, history: [{ label: "7/6/26 - 7/12/26", value: 1 }] },
+    { tapNumber: 42, name: "Coming Soon!", history: [] },
   ], fridayJuly24), [22]);
 });

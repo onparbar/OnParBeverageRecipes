@@ -319,6 +319,12 @@ test("voice inventory starts directly and offers phone keyboard dictation", () =
   assert.match(dashboardSource, /const words = cleanInventorySpeechRecognitionText/);
 });
 
+test("Weekly Plan hides recommendations from a previous operating week", () => {
+  assert.match(dashboardSource, /const currentWeekPlanAvailable = planLocked/);
+  assert.match(dashboardSource, /This week's plan has not been generated/);
+  assert.match(dashboardSource, /Previous plan from/);
+});
+
 test("inventory keeps advanced controls behind one row Edit action and retires Bubbly", () => {
   assert.match(dashboardSource, /inventory-row-edit-toggle/);
   assert.doesNotMatch(dashboardSource, /inventory-par-toggle/);

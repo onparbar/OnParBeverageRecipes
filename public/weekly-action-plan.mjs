@@ -16,6 +16,11 @@ export function normalizeWeeklyPlanProductName(value) {
   return clean(value).replace(/\s+[123]\s*$/, "").trim();
 }
 
+export function isWeeklyUsageRequiredItem(item = {}) {
+  const name = normalizeWeeklyPlanProductName(item.name || item.brand || item.product);
+  return !/^coming soon!?$/i.test(name);
+}
+
 export function getCocktailPrepLabelName(value, wall = "") {
   const original = clean(value);
   const trailingNumberMatch = original.match(/([123])\s*$/);
@@ -425,6 +430,7 @@ export function evaluateWeeklyPlanReadiness({
   weeklyUsageSavePending = false,
   weeklyUsageSaveError = "",
   latestCompletedUsageSaved = false,
+  usageCoverageMessage = "",
   weeklyUsageLastSyncAt = "",
   inventoryInitialized = false,
   inventorySnapshotCurrent = true,
@@ -471,7 +477,7 @@ export function evaluateWeeklyPlanReadiness({
   }
 
   if (!publishedPlanLocked && weeklyUsageInitialized && !latestCompletedUsageSaved) {
-    staleReasons.push("The latest completed Monday-Sunday usage report is not saved.");
+    staleReasons.push(clean(usageCoverageMessage) || "The latest completed Monday-Sunday usage report is not saved.");
   }
   if (generatedTime && !operatingWeekCurrent && !recommendationSourceCurrent) {
     staleReasons.push("Keg Levels inputs changed after these recommendations; the old order and prep quantities are hidden until refreshed.");
