@@ -1,4 +1,5 @@
 import "./operations-learning-ui.mjs";
+import { inventorySnapshotInputsMatch } from "./inventory-snapshot-recovery.mjs";
 import {
   buildInventoryPosition,
   buildStockGapRecommendation,
@@ -6893,7 +6894,7 @@ function renderDashboardProjectedWallMix(rows = []) {
   return `
     <div style="margin-top:18px;padding-top:16px;border-top:1px solid rgba(34, 68, 60, 0.16);">
       <div class="dashboard-pulse-sales-mix__header"><h3>By wall</h3></div>
-      <div class="dashboard-pulse-mix-bar" aria-label="Projected sales mix by wall">
+      <div class="dashboard-pulse-mix-bar" aria-label="Sales mix by wall">
         ${visibleRows.filter((row) => row.sharePercent > 0).map((row) => `<i style="--mix-share:${row.sharePercent}%;background:${wallColors[row.wall] || "#718078"}"></i>`).join("")}
       </div>
       <div class="dashboard-pulse-mix-legend">
@@ -6914,7 +6915,7 @@ function renderDashboardProjectedSalesMix(mix) {
     return `
       <aside class="dashboard-pulse-sales-mix">
         <div class="dashboard-pulse-sales-mix__header">
-          <h3>Projected sales mix</h3>
+          <h3>Sales mix</h3>
           <small>${escapeHtml(mix.weekLabel || "Last week")}</small>
         </div>
         <p class="dashboard-pulse-empty">Current PMB prices are needed to project last week’s category mix.</p>
@@ -6924,10 +6925,10 @@ function renderDashboardProjectedSalesMix(mix) {
   return `
     <aside class="dashboard-pulse-sales-mix">
       <div class="dashboard-pulse-sales-mix__header">
-        <h3>Projected sales mix</h3>
+        <h3>Sales mix</h3>
         <small>${escapeHtml(mix.weekLabel || "Last week")}</small>
       </div>
-      <div class="dashboard-pulse-mix-bar" aria-label="Projected sales mix for ${escapeHtml(mix.weekLabel || "last week")}">
+      <div class="dashboard-pulse-mix-bar" aria-label="Sales mix for ${escapeHtml(mix.weekLabel || "last week")}">
         ${mix.categories.filter((row) => row.sharePercent > 0).map((row) => `<i class="dashboard-pulse-mix-bar__${escapeHtml(row.category)}" style="--mix-share:${row.sharePercent}%"></i>`).join("")}
       </div>
       <div class="dashboard-pulse-mix-legend">
@@ -6984,7 +6985,7 @@ function renderDashboardBeveragePulse() {
       limit: 3,
     },
   );
-  const projectedSalesMix = buildLastWeekProjectedSalesMix(
+  const venueSalesMix = buildLastWeekProjectedSalesMix(
     [...weeklyUsageItems, ...weeklyUsageArchivedItems],
     {
       wall: "all",
@@ -6993,6 +6994,16 @@ function renderDashboardBeveragePulse() {
       getSellingPricePerOz: getWeeklyUsageItemSellingRate,
     },
   );
+  const selectedWallSalesMix = buildLastWeekProjectedSalesMix(
+    [...weeklyUsageItems, ...weeklyUsageArchivedItems],
+    {
+      wall: sellerRankingWall,
+      period: recentWeekLimit,
+      getFullOunces: getWeeklyUsageFullOunces,
+      getSellingPricePerOz: getWeeklyUsageItemSellingRate,
+    },
+  );
+  const projectedSalesMix = { ...selectedWallSalesMix, walls: venueSalesMix.walls };
   const favorite = leaders[0] || null;
   const favoriteName = clean(favorite?.name).toLowerCase();
   const rising = [
@@ -13465,6 +13476,65 @@ async function flushPendingInventorySyncs() {
     && inventoryActionOutboxDurable;
 }
 
+function getLocalInventorySnapshotInputs() {
+  return {
+    onHandOverrides: inventoryOnHandOverrides,
+    parOverrides: inventoryParOverrides,
+    customItems: customInventoryItems,
+    itemOrder: inventoryItemOrder,
+  };
+}
+
+async function refreshInventoryRevisionForSnapshot() {
+  const state = await requestSharedInventory();
+  if (!state.initialized || !inventorySnapshotInputsMatch(getLocalInventorySnapshotInputs(), state.current)) {
+    throw new Error("Shared inventory counts or settings differ from this browser. Your local values are preserved; compare the changes before saving a snapshot.");
+  }
+  inventorySharedRevision = Number(state.revision);
+  inventorySharedUpdatedAt = state.current.updatedAt || "";
+  inventorySharedCountedAt = state.current.countedAt || "";
+  return state;
+}
+
+async function reconcileInventorySnapshotConflict() {
+  if (inventorySharedSaving) return;
+  const pending = getPendingInventoryOperations();
+  if (!pending.length || pending.some(({ kind, entry }) => kind !== "action" || entry.payload.action !== "save-snapshot")) {
+    inventorySharedMessage = "Other inventory edits are pending. They must be reconciled before recovering the snapshot attempt.";
+    renderInventoryPanels();
+    return;
+  }
+  setInventorySharedStatus("Comparing your counts with saved inventory...", true);
+  try {
+    const state = await refreshInventoryRevisionForSnapshot();
+    // Preserve the failed capture for recovery, but never replay stale PMB,
+    // pricing, or weekly-plan inputs against a newer inventory revision.
+    localStorage.setItem(`onpar-inventory-snapshot-recovery-${Date.now()}`, JSON.stringify({
+      recoveredAt: new Date().toISOString(),
+      sharedRevision: state.revision,
+      inventory: getLocalInventorySnapshotInputs(),
+      operations: pending,
+    }));
+    const previousOutbox = inventoryActionOutbox;
+    inventoryActionOutbox = [];
+    if (!saveInventoryActionOutbox()) {
+      inventoryActionOutbox = previousOutbox;
+      throw new Error("The browser could not persist the recovery. The blocked attempt and your counts are preserved.");
+    }
+    inventorySharedSaveError = "";
+    inventoryFieldSyncFailures.clear();
+    applySharedInventoryState(state, { rebuild: true });
+    inventorySharedMessage = "Your counts match saved inventory. The blocked snapshot attempt was backed up and removed. Use Save & Lock Plan to capture a fresh plan; existing snapshots were not changed.";
+  } catch (error) {
+    inventorySharedSaveError = error.message || "Snapshot recovery could not finish.";
+    inventorySharedMessage = inventorySharedSaveError;
+  } finally {
+    inventorySharedSaving = false;
+    renderInventoryPanels();
+    renderWeeklyPlan();
+  }
+}
+
 function renderInventorySummary(visibleItems, reorderItems) {
   const totalValue = sum(visibleItems.filter((item) => !item.excludeFromInventoryValue).map((item) => item.totalValue));
   const reorderCost = sum(reorderItems.filter((item) => !item.excludeFromInventoryValue).map((item) => getInventoryRoundedOrderQuantity(item) * item.unitCost));
@@ -13478,7 +13548,8 @@ function renderInventorySummary(visibleItems, reorderItems) {
     <div class="summary-line"><span>Estimated purchase</span><strong data-inventory-estimated-purchase>${Number.isFinite(Number(globalThis.onParWeeklyPlanEstimatedPurchaseCost)) ? money(Number(globalThis.onParWeeklyPlanEstimatedPurchaseCost)) : "—"}</strong></div>
     <div class="sync-panel inventory-actions-panel">
       ${inventorySharedProvisioned && !inventorySharedInitialized ? '<button class="ghost-button" id="initialize-shared-inventory" type="button">Import from service computer</button>' : ""}
-      ${inventorySharedSaveError || !inventorySharedInitialized ? `<p class="sync-status">${escapeHtml(inventorySharedMessage)}</p>` : ""}
+      ${inventorySharedMessage ? `<p class="sync-status">${escapeHtml(inventorySharedMessage)}</p>` : ""}
+      ${inventoryActionOutbox.some((entry) => entry.conflict && entry.payload.action === "save-snapshot") ? `<button class="ghost-button" id="reconcile-inventory-snapshot" type="button" ${inventorySharedSaving ? "disabled" : ""}>Recover snapshot save (keep counts)</button>` : ""}
       <p class="sync-status">${latestSnapshot ? `Last snapshot: ${escapeHtml(formatInventorySnapshotLabel(getInventorySnapshotDate(latestSnapshot)))}` : "No snapshots yet"}</p>
     </div>
   `;
@@ -13489,6 +13560,7 @@ function renderInventorySummary(visibleItems, reorderItems) {
 }
 
 function bindInventorySummaryEvents() {
+  document.querySelector("#reconcile-inventory-snapshot")?.addEventListener("click", reconcileInventorySnapshotConflict);
   document.querySelector("#clear-inventory-on-hand")?.addEventListener("click", clearAllInventoryOnHand);
   document.querySelector("#initialize-shared-inventory")?.addEventListener(
     "click",
@@ -14802,6 +14874,17 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
     : null;
   if (!kegPlanSnapshot) {
     await failCapture(parAgentMessage || "keg and cocktail recommendations could not be calculated.", "RECOMMENDATIONS_NOT_READY");
+    return false;
+  }
+
+  if (!await flushPendingInventorySyncs()) {
+    await failCapture("Inventory changes are pending. Recover any blocked snapshot attempt from Inventory before saving again.", "INVENTORY_NOT_READY");
+    return false;
+  }
+  try {
+    await refreshInventoryRevisionForSnapshot();
+  } catch (error) {
+    await failCapture(error.message, "INVENTORY_REVISION_REVIEW_REQUIRED");
     return false;
   }
 

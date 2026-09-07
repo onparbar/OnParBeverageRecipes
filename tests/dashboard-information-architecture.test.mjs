@@ -381,8 +381,10 @@ test("the initial Dashboard uses a light visual beverage pulse and change-only O
   assert.match(pulseSource, /Rank by/);
   assert.match(pulseSource, /buildLastWeekPourLeaders/);
   assert.match(pulseSource, /No liquor pours were saved for the Patio or Karaoke wall last week/);
-  assert.match(pulseSource, /Projected sales mix/);
-  assert.match(pulseSource, /const projectedSalesMix = buildLastWeekProjectedSalesMix\(/);
+  assert.match(pulseSource, /Sales mix/);
+  assert.match(pulseSource, /const venueSalesMix = buildLastWeekProjectedSalesMix\(/);
+  assert.match(pulseSource, /const selectedWallSalesMix = buildLastWeekProjectedSalesMix\(/);
+  assert.match(pulseSource, /const projectedSalesMix = \{ \.\.\.selectedWallSalesMix, walls: venueSalesMix\.walls \}/);
   assert.doesNotMatch(pulseSource, /PMB ounces × saved\/current prices/);
   assert.match(pulseSource, /dashboard-pulse-bar/);
   assert.match(pulseSource, /data-seller-ranking-wall/);
