@@ -635,7 +635,7 @@ async function submitSearch(state, lineIndex) {
   const destination = vendorSearchUrl(state.vendor, term);
   if (destination) {
     location.assign(destination);
-    return true;
+    return "navigating";
   }
   const input = searchInput();
   if (!input) return false;
@@ -647,10 +647,11 @@ async function submitSearch(state, lineIndex) {
   return true;
 }
 
-async function waitForResults(timeout = 10000) {
+async function waitForResults(timeout = 10000, line = null, state = null) {
   const started = Date.now();
   while (Date.now() - started < timeout) {
-    if (addButtons().length) return true;
+    if (state?.status === "cancelled") return false;
+    if (line ? exactMatches(line).length : addButtons().length) return true;
     await delay(250);
   }
   return false;
@@ -872,6 +873,9 @@ async function start() {
       renderOverlay(state, `Finding an exact match for ${line.name}...`);
       if (state.phase !== "search-results") {
         const submitted = await submitSearch(state, lineIndex);
+        // A full-page navigation destroys this worker. Resume from the saved
+        // cursor in the destination page instead of inspecting the old page.
+        if (submitted === "navigating") return;
         if (!submitted) {
           state.results.push({ lineIndex, name: line.name, status: "unmatched", message: "The vendor search control was not available." });
           state.searchCursor += 1;
@@ -880,7 +884,16 @@ async function start() {
           continue;
         }
       }
-      await waitForResults();
+      renderOverlay(state, `Waiting for Proof to load ${line.name} (up to 90 seconds)...`);
+      const found = await waitForResults(90000, line, state);
+      if (state.status === "cancelled") return;
+      if (!found) {
+        addResultOnce(state, { lineIndex, name: line.name, status: "unmatched", message: "The exact Proof product and quantity controls were not detected within 90 seconds. Review this item manually; previously added items remain in the cart." });
+        state.searchCursor += 1;
+        state.phase = "start";
+        await saveState(state);
+        continue;
+      }
       state.results.push(await addExactMatch(state, lineIndex));
       state.searchCursor += 1;
       state.phase = "start";
