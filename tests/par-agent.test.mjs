@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  buildRawRecommendation,
+  buildRawRecommendation as buildRawRecommendationImpl,
   fetchPmbSnapshot,
   getCocktailRecipeYieldOz,
   getKegFullOunces,
@@ -10,6 +10,19 @@ import {
   getTapStateKey,
 } from "../lib/par-agent.mjs";
 import { COCKTAIL_RECIPE_YIELDS } from "../public/cocktail-recipe-yields.mjs";
+
+function buildRawRecommendation(...args) {
+  if (args[5]?.history) {
+    const today = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+    today.setDate(today.getDate() - (today.getDay() + 6) % 7);
+    args[5] = { ...args[5], history: args[5].history.map((entry, index) => {
+      const date = new Date(today);
+      date.setDate(date.getDate() - (index + 1) * 7);
+      return { ...entry, label: entry.label || `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}` };
+    }) };
+  }
+  return buildRawRecommendationImpl(...args);
+}
 
 function cocktailTap(name, tapNumber) {
   return {

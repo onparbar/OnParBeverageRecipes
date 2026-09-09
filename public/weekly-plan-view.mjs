@@ -6,6 +6,7 @@ import {
   toNumber,
 } from "./dashboard-formatters.mjs";
 import { getCocktailPrepDisplayName } from "./weekly-action-plan.mjs";
+import { kegDestination } from "./keg-destination.mjs";
 
 export function getWeeklyPlanTapContext(item, unit, { compact = false } = {}) {
   const taps = item.tapNumbers.length
@@ -49,6 +50,7 @@ export function renderWeeklyPlanTapRows(items, {
       <div>
         <strong>${escapeHtml(item.displayName || item.name)}</strong>
         <span>${escapeHtml(getWeeklyPlanTapContext(item, unit === "refills" ? "oz" : "kegs", { compact: true }))}</span>
+        ${unit !== "refills" ? `<span>${escapeHtml(kegDestination({ ...item, unit: "kegs", wall: item.walls?.[0] }))}</span>` : ""}
       </div>
       <b>${escapeHtml(action)} ${formatNumber(item.quantity)} ${escapeHtml(unit === "refills" ? `refill${item.quantity === 1 ? "" : "s"}` : `keg${item.quantity === 1 ? "" : "s"}`)}</b>
     </div>
@@ -64,7 +66,7 @@ export function renderWeeklyPlanCocktailRows(items) {
   return `<div class="weekly-plan-list weekly-plan-label-list">${orderedItems.map((item) => {
     const wall = clean(item.walls?.[0]);
     const details = [
-      wall ? `${wall} wall` : "Wall unavailable",
+      kegDestination({ ...item, wall }, { cocktail: true }),
       toNumber(item.batchSizeOz) > 0 ? `${formatNumber(item.batchSizeOz)} oz` : "Batch ounces unavailable",
     ].join(" · ");
     return `

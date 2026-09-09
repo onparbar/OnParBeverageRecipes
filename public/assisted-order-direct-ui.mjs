@@ -28,7 +28,9 @@ export function buildAssistedOrderView(draft, saved = {}, options = {}) {
   const lateOrderWarning = (draft?.warnings || [])
     .find((item) => item?.code === "ORDER_CUTOFF_PASSED")?.message || "";
   let note = "Approve the draft first.";
-  if (order.preview) note = "Resolve the draft blockers first.";
+  if (order.preview) note = order.blockers.length
+    ? order.blockers.join(" ")
+    : "Resolve the draft blockers first.";
   else if (rehearsal) note = "Fills the vendor cart for review only. Nothing is submitted.";
   else if (order.status === "manually_completed") note = "Marked completed.";
   else if (order.actionsEnabled && order.vendorKey === "bonbright") {

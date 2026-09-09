@@ -7882,6 +7882,14 @@ function renderWeeklyPlanTrends() {
   `;
 }
 
+const weeklyPlanDisclosureState = new Map();
+
+function getWeeklyPlanDisclosureKey(details) {
+  const vendor = details.closest("[data-vendor-order-draft-id]")?.dataset.vendorOrderDraftId || "";
+  const identity = details.id || details.className || details.querySelector("summary")?.textContent?.trim() || "details";
+  return `${orderRehearsalMode ? "rehearsal" : "live"}:${vendor}:${identity}`;
+}
+
 function isEasternMonday(now = new Date()) {
   return new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
@@ -8000,6 +8008,9 @@ function renderWeeklyPlan() {
     weeklyPlanBody = renderBossDemo(demoModel, { orderWorkspace });
   }
 
+  weeklyPlan.querySelectorAll("details").forEach((details) => {
+    weeklyPlanDisclosureState.set(getWeeklyPlanDisclosureKey(details), details.open);
+  });
   weeklyPlan.innerHTML = `
     <header class="weekly-plan-header">
       <div>
@@ -8022,6 +8033,14 @@ function renderWeeklyPlan() {
   const planDetails = weeklyPlan.querySelector("details.weekly-plan-details");
   const prepPhase = weeklyPlan.querySelector("details.weekly-plan-phase--prep");
   if (planDetails && prepPhase) planDetails.append(prepPhase);
+
+  weeklyPlan.querySelectorAll("details").forEach((details) => {
+    const key = getWeeklyPlanDisclosureKey(details);
+    if (weeklyPlanDisclosureState.has(key)) details.open = weeklyPlanDisclosureState.get(key);
+    details.addEventListener("toggle", () => {
+      if (details.isConnected) weeklyPlanDisclosureState.set(key, details.open);
+    });
+  });
 
   weeklyPlan.querySelector("[data-weekly-plan-reload]")?.addEventListener("click", () => window.location.reload());
 
@@ -9529,7 +9548,9 @@ function applyPmbWeeklyUsageSync(result) {
 }
 
 function applyPmbWeeklyUsageReport(report) {
-  const reportItems = Array.isArray(report?.items) ? report.items : [];
+  const reportItems = Array.isArray(report?.items)
+    ? report.items.filter((item) => item.hasValue !== false)
+    : [];
   const label = clean(report?.label) || buildWeeklyUsageSaveLabel();
   const usedReportIds = new Set();
   let matched = 0;
@@ -9635,6 +9656,7 @@ function getPmbWeeklyUsageMatch(item, reportItems, usedReportIds = new Set(), la
 function applyCurrentTapZeroUsageRows(label, reportItems, usedReportIds) {
   const zeroReportItems = reportItems.filter((reportItem) => (
     reportItem?.isCurrentTap
+    && reportItem.hasValue !== false
     && toNumber(reportItem.tapNumber)
     && toNumber(reportItem.volumeOz) === 0
   ));

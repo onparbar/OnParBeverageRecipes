@@ -192,7 +192,7 @@ function validateProductRules(vendorKey, line, blockers) {
 
   if (product.includes("don julio")) {
     const largerSize =
-      /1\.75\s*l|1750\s*ml|59(?:\.2)?\s*oz|larger?\s+size/i.test(pack);
+      /\b1\.75\s*l\b|\b1750\s*ml\b|\b59(?:\.2|\.17\d*)?\s*oz\b/i.test(`${product} ${pack}`);
     if (!largerSize) {
       addUnique(blockers, `${label}: use the larger Don Julio size for shot-wall refills.`);
     }
