@@ -180,7 +180,7 @@ function normalizeInventoryOrders(items) {
           || item.requiredBeforeNextDelivery
           || cocktailPrepShortageUnits > 0
         ),
-        reasons: cocktailPrepShortageUnits > 0
+        reasons: clean(item.rollingPlanReason) ? [clean(item.rollingPlanReason)] : cocktailPrepShortageUnits > 0
           ? [`Cocktail prep needs ${cocktailPrepRequiredBottles} bottle${cocktailPrepRequiredBottles === 1 ? "" : "s"}; ${number(item.onHand)} counted on hand.`]
           : [],
       };
@@ -511,7 +511,8 @@ export function evaluateWeeklyPlanReadiness({
 
 export function buildWeeklyActionPlan({ inventoryItems = [], recommendations = [] } = {}) {
   const orderingInventoryItems = inventoryItems.filter((item) => (
-    !Object.hasOwn(item || {}, "par")
+    item.rollingIngredientVersion === 1
+    || !Object.hasOwn(item || {}, "par")
     || number(item.par) > 0
     || number(item.cocktailPrepShortageUnits) > 0
   ));

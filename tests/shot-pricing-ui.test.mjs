@@ -11,9 +11,10 @@ const [page, dashboard, updateRoute, tapPricingRoute, itemManagement, portionSch
   readFile("lib/pmb-portion-schema.mjs", "utf8"),
 ]);
 
-test("shot pricing is a separate two-portion owner workflow", () => {
-  assert.match(page, /id="shot-pricing-title">Shot pricing/);
-  assert.match(page, /id="shot-pricing-table"/);
+test("shot pricing edits both portions inside the unified tap pricing table", () => {
+  assert.doesNotMatch(page, /id="shot-pricing-title"/);
+  assert.doesNotMatch(page, /id="shot-pricing-table"/);
+  assert.match(dashboard, /const shotPricingTable = document.querySelector\("#pricing-table"\)/);
   assert.match(dashboard, /buildShotPricingRows/);
   assert.match(dashboard, /Update both in PMB/);
   assert.match(dashboard, /Update both shot prices/);

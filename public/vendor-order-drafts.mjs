@@ -45,7 +45,7 @@ export function normalizeVendorOrderPolicy(policy = {}) {
         vendorSku,
         vendorProductName: clean(item?.vendorProductName || item?.name).slice(0, 240),
         casePackaged: !PROOF_INDIVIDUAL_UNIT_SKUS.has(vendorSku) && item?.casePackaged !== false,
-        shelfStable: true,
+        shelfStable: item?.shelfStable === true,
         packSize: Math.max(1, Math.floor(numberOrNull(item?.packSize) || 1)),
         projectedPrepUseUnits: Math.max(0, Math.ceil(numberOrNull(item?.projectedPrepUseUnits) || 0)),
         projectedPrepUseOz: Math.max(0, numberOrNull(item?.projectedPrepUseOz) || 0),
@@ -53,6 +53,12 @@ export function normalizeVendorOrderPolicy(policy = {}) {
         parUnits: Math.max(0, numberOrNull(item?.parUnits) || 0),
         replacementNeedUnits: Math.max(0, Math.ceil(numberOrNull(item?.replacementNeedUnits) || 0)),
         unitCost: Math.max(0, numberOrNull(item?.unitCost) || 0),
+        forecastDemands: (Array.isArray(item?.forecastDemands) ? item.forecastDemands : [])
+          .filter((entry) => Number.isInteger(entry?.week) && entry.week >= 0 && entry.week < 4
+            && numberOrNull(entry.units) !== null && Number(entry.units) >= 0)
+          .map((entry) => ({ week: entry.week, units: Math.ceil(Number(entry.units)) }))
+          .sort((a, b) => a.week - b.week),
+        forecastSource: clean(item?.forecastSource).slice(0, 240),
       };
     })
     .filter((item) => item.id && item.name && item.vendorSku && item.unitCost > 0);
@@ -439,16 +445,20 @@ function selectProofMinimumTopUps(candidates = [], subtotal = 0, minimum = 350, 
   const eligible = candidates.map((item) => {
     const packSize = Math.max(1, Number(item.packSize) || 1);
     const unitCost = numberOrNull(item.unitCost);
-    const replacementNeedUnits = Math.floor(Number(item.replacementNeedUnits ?? item.projectedPrepUseUnits) || 0);
+    // Recompute from demand, not a saved par-based shortage or deferred quantity.
+    const replacementNeedUnits = Math.max(0,
+      Math.ceil(Number(item.projectedPrepUseUnits) || 0) - Math.max(0, Number(item.onHandUnits) || 0));
     const identity = clean(item.id || item.internalId).toLowerCase();
     const alreadyOrderedUnits = existingLines
-      .filter((line) => line.internalId.toLowerCase() === identity)
+      .filter((line) => clean(line.internalId).toLowerCase() === identity
+        || (clean(item.vendorSku) && clean(line.vendorSku) === clean(item.vendorSku)))
       .reduce((total, line) => total + (Number(line.requestedUnits) || 0), 0);
     const additionalNeedUnits = Math.max(0, replacementNeedUnits - alreadyOrderedUnits);
     return {
       ...item,
       packSize,
       unitCost,
+      alreadyOrderedUnits,
       maxCases: Math.ceil(additionalNeedUnits / packSize),
       caseCostCents: unitCost === null ? 0 : Math.round(unitCost * packSize * 100),
     };
@@ -461,6 +471,36 @@ function selectProofMinimumTopUps(candidates = [], subtotal = 0, minimum = 350, 
     && item.maxCases > 0
     && item.caseCostCents > 0
   )).sort((a, b) => clean(a.name).localeCompare(clean(b.name)));
+
+  if (eligible.some((item) => item.forecastDemands?.length)) {
+    const selected = new Map();
+    let addedCents = 0;
+    // Recompute the next uncovered prep week after every case. A case already
+    // ordered covers that demand; it must not win the next selection again.
+    for (let count = 0; count < 100 && addedCents < gapCents; count += 1) {
+      const ranked = eligible.flatMap((item) => {
+        const cases = selected.get(item.id)?.caseCount || 0;
+        if (cases >= item.maxCases) return [];
+        const available = Number(item.onHandUnits || 0) + item.alreadyOrderedUnits + cases * item.packSize;
+        const demand = item.forecastDemands?.find((entry) => entry.units > available);
+        return demand ? [{ item, week: demand.week }] : [];
+      }).sort((a, b) => a.week - b.week
+        || a.item.caseCostCents - b.item.caseCostCents
+        || clean(a.item.name).localeCompare(clean(b.item.name)));
+      if (!ranked.length) break;
+      const { item, week } = ranked[0];
+      const caseCount = (selected.get(item.id)?.caseCount || 0) + 1;
+      const quantity = caseCount * item.packSize;
+      selected.set(item.id, {
+        ...item, quantity, caseCount, estimatedCost: quantity * item.unitCost,
+        hasKnownPrice: true,
+        reason: `Minimum top-up; replaces projected cocktail prep usage for Thursday ${week + 1} of the four-week look-ahead. ${clean(item.forecastSource)}`,
+      });
+      addedCents += item.caseCostCents;
+    }
+    // Do not add ineffective filler if justified purchases cannot reach $350.
+    return addedCents >= gapCents ? [...selected.values()] : [];
+  }
 
   let combinations = new Map([[0, new Map()]]);
   eligible.forEach((item) => {
@@ -502,7 +542,7 @@ function applyProofMinimumTopUps(lines, candidates, subtotal, minimum, sourceDat
       existing.requestedUnits += item.quantity;
       existing.requestedCases = (existing.requestedCases || 0) + item.caseCount;
       existing.extendedCost += item.estimatedCost;
-      existing.reason = `${existing.reason} Minimum top-up replaces projected cocktail prep usage.`;
+      existing.reason = `${existing.reason} ${item.reason}`;
       return;
     }
     lines.push(buildDraftLine(item, "Proof", sourceDate));
@@ -528,6 +568,18 @@ export function buildVendorOrderDrafts(plan = {}, {
   const normalizedBudget = numberOrNull(budgetLimit);
   const duplicateKeys = new Map();
   const adjustedPlan = applyManualOrderAdjustments(plan, manualCatalog, manualAdjustments);
+  // A zero quantity defers the item; future demand may justify it again.
+  // Positive manager quantities remain fixed and are never silently increased.
+  const adjustedProducts = manualAdjustments.filter((adjustment) => Number(adjustment.quantity) > 0)
+    .map((adjustment) => manualCatalog.find((item) => (
+      clean(item.catalogId) === clean(adjustment.catalogId)
+    ))).filter(Boolean);
+  const allowedProofCandidates = proofMinimumCandidates.filter((candidate) => !adjustedProducts.some((item) => (
+    normalizeVendor(item.vendor) === "Proof" && (
+      clean(item.internalId || item.id) === clean(candidate.id)
+      || (clean(item.vendorSku) && clean(item.vendorSku) === clean(candidate.vendorSku))
+    )
+  )));
   const groups = groupWeeklyPlanOrdersByVendor(adjustedPlan).map((group) => {
     const vendor = normalizeVendor(group.vendor);
     const lines = group.items.map((item) => buildDraftLine(item, vendor, sourceDate));
@@ -562,7 +614,7 @@ export function buildVendorOrderDrafts(plan = {}, {
     });
     const preTopUpSubtotal = lines.reduce((total, line) => total + (numberOrNull(line.extendedCost) || 0), 0);
     const proofTopUps = vendor === "Proof"
-      ? applyProofMinimumTopUps(lines, proofMinimumCandidates, preTopUpSubtotal, proofMinimum, sourceDate)
+      ? applyProofMinimumTopUps(lines, allowedProofCandidates, preTopUpSubtotal, proofMinimum, sourceDate)
       : [];
     const estimatedTotal = lines.reduce((total, line) => total + (numberOrNull(line.extendedCost) || 0), 0);
     const deliveryLocation = clean(deliveryLocations[vendor] || deliveryLocations[group.vendor]);

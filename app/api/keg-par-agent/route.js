@@ -8,6 +8,7 @@ import {
 } from "../../../lib/par-agent.mjs";
 import { DASHBOARD_SESSION_COOKIE, getDashboardSessionRole } from "../../../lib/dashboard-auth.mjs";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
+import { editSharedKegParAgentInputs } from "../../../lib/keg-par-agent-shared-store.mjs";
 
 export const runtime = "nodejs";
 
@@ -61,6 +62,10 @@ export async function POST(request) {
     const role = await requireOwner(request);
     const body = await getBody(request);
     const action = String(body.action || "sync-state");
+    if (action === "sync-input-edits") {
+      const shared = await editSharedKegParAgentInputs(body.edits, role);
+      return jsonResponse({ ...shared.data, revision: shared.revision, initialized: shared.initialized, initializedAt: shared.initializedAt, updatedAt: shared.updatedAt, updatedByRole: shared.updatedByRole });
+    }
     const patch = {
       onHandOverrides: body.onHandOverrides,
       parOverrides: body.parOverrides,
@@ -71,7 +76,7 @@ export async function POST(request) {
     if (action === "run") {
       const state = await runParAgentUpdate({
         dryRun: Boolean(body.dryRun),
-        patch,
+        patch: null,
         expectedRevision: body.expectedRevision,
         role,
       });

@@ -99,6 +99,7 @@ import {
   filterCurrentTapPricingItems,
 } from "./keg-pricing-scope.mjs";
 import { REQUIRED_INGREDIENT_PRICE_DEFAULTS } from "./ingredient-price-defaults.mjs";
+import { isPricingPlaceholder } from "./pricing-placeholders.mjs";
 import {
   getPreparedIngredientCost,
   getPreparedIngredientCanonicalName,
@@ -147,7 +148,6 @@ import {
 } from "./dashboard-beverage-pulse.mjs";
 import {
   buildShotPricingRows,
-  summarizeShotPricingRows,
   validateShotPricePair,
 } from "./shot-pricing-view.mjs";
 import {
@@ -160,6 +160,7 @@ import {
   normalizeVendorOrderPolicy,
 } from "./vendor-order-drafts.mjs";
 import { buildProofPrepOrderContext } from "./proof-prep-replacements.mjs";
+import { buildRollingCocktailIngredientOrders, netRollingLiquorTapRecommendations } from "./rolling-cocktail-ingredients.mjs";
 import {
   getLiquorCabinetOrderQuantity,
   getLiquorCabinetWeeklyBottleNeeds,
@@ -173,6 +174,7 @@ import {
   productPriceKeysMatch,
 } from "./product-price-matching.mjs";
 import { getKegLevelInputPayload, haveKegLevelInputsChanged, reconcileKegLevelInputs } from "./keg-level-state.mjs";
+import { buildKegInputEdits, overlayKegInputEdits } from "./keg-input-edits.mjs";
 import {
   buildSpeechInventoryCatalog,
   buildSpeechInventoryChanges,
@@ -951,8 +953,7 @@ const pricingSummary = document.querySelector("#pricing-summary");
 const pricingAdvisorSummary = document.querySelector("#pricing-advisor-summary");
 const pricingAdvisorTable = document.querySelector("#pricing-advisor-table");
 const pricingAdvisorToggle = document.querySelector("#pricing-advisor-toggle");
-const shotPricingSummary = document.querySelector("#shot-pricing-summary");
-const shotPricingTable = document.querySelector("#shot-pricing-table");
+const shotPricingTable = document.querySelector("#pricing-table");
 const ingredientSearch = document.querySelector("#ingredient-search");
 const ingredientTable = document.querySelector("#ingredient-table");
 const kegPricingTable = document.querySelector("#keg-pricing-table");
@@ -980,7 +981,6 @@ const weeklyUsageHead = document.querySelector("#weekly-usage-head");
 const pullPmbWeeklyUsageButton = document.querySelector("#pull-pmb-weekly-usage");
 const weeklyUsageSummary = document.querySelector("#weekly-usage-summary");
 const weeklyUsageTable = document.querySelector("#weekly-usage-table");
-const clearPricesButton = document.querySelector("#clear-prices");
 const clearKegPricesButton = document.querySelector("#clear-keg-prices");
 const clearChargesButton = document.querySelector("#clear-charges");
 const recipeForm = document.querySelector("#recipe-form");
@@ -1264,6 +1264,7 @@ let sellerRankingWall = "main";
 // fallback; the owner Dashboard now intentionally exposes only the wall choice.
 let sellerRankingCategory = "all";
 let sellerRankingMetric = "volume";
+let dashboardMixMetric = "sales";
 let sellerRankingPeriod = "six-weeks";
 let sellerRankingListSize = 5;
 let activeOperationsTab = "keg-levels";
@@ -1350,6 +1351,7 @@ async function init() {
   syncRecipeBuilderSummary();
   clearBeerLookupResult();
   render();
+  void refreshPmbMorningRepairStatus();
   void hydrateComingSoonLiquorItemsFromUntappd();
   loadBeverageNews();
   void runOwnerLoginSync();
@@ -3098,7 +3100,7 @@ function bindEvents() {
     if (period) sellerRankingPeriod = clean(period.value).toLowerCase() || "six-weeks";
     if (metric) {
       const selectedMetric = clean(metric.value).toLowerCase();
-      sellerRankingMetric = ["sales", "profit"].includes(selectedMetric) ? selectedMetric : "volume";
+      sellerRankingMetric = ["profit", "margin"].includes(selectedMetric) ? selectedMetric : "volume";
     }
     renderOnParInsights();
   });
@@ -3168,6 +3170,12 @@ function bindEvents() {
     switchTab(target.dataset.dashboardTarget);
   });
   const handleDashboardPulseChange = (event) => {
+    const mixControl = event.target.closest("[data-dashboard-mix-metric]");
+    if (mixControl) {
+      dashboardMixMetric = mixControl.value === "profit" ? "profit" : "sales";
+      renderDashboardBeveragePulse();
+      return;
+    }
     const periodControl = event.target.closest("[data-dashboard-pulse-period]");
     if (periodControl) {
       const nextPeriod = clean(periodControl.value).toLowerCase();
@@ -3294,16 +3302,6 @@ function bindEvents() {
   shufflePmbProductDescriptionButton?.addEventListener("click", () => {
     shuffleBeerLookupDescription();
   });
-  clearPricesButton.addEventListener("click", () => {
-    if (!confirmDashboardAction(
-      "Clear every bottle-cost override?",
-      [`${Object.keys(priceOverrides).length} saved price entries will be reset to dashboard defaults.`],
-      "This cannot be undone from the dashboard.",
-    )) return;
-    priceOverrides = {};
-    saveOverrides();
-    render();
-  });
   clearKegPricesButton?.addEventListener("click", () => {
     if (!confirmDashboardAction(
       "Clear every keg-cost override?",
@@ -3343,6 +3341,7 @@ function bindEvents() {
   });
   window.setInterval(() => {
     if (document.visibilityState === "visible") void refreshDashboardStaffPrepPlan();
+    if (document.visibilityState === "visible" && document.querySelector("#keg-levels-panel.is-active")) void refreshPmbMorningRepairStatus();
   }, 30_000);
 }
 
@@ -3404,6 +3403,11 @@ function confirmDashboardAction(title, details = [], warning = "") {
 }
 
 function switchTab(tabName) {
+  if (tabName === "search") {
+    dashboardDataSearchInput?.scrollIntoView({ block: "center" });
+    dashboardDataSearchInput?.focus();
+    return;
+  }
   const requestedTab = tabName === "operations" ? activeOperationsTab : tabName;
   const isOperationTab = OPERATION_TAB_NAMES.includes(requestedTab);
   const isMenuTab = MENU_TAB_NAMES.includes(requestedTab);
@@ -3445,6 +3449,7 @@ function switchTab(tabName) {
     runTapPricingSync();
   }
   if (requestedTab === "dashboard") renderDashboardOverview();
+  if (requestedTab === "keg-levels") void refreshPmbMorningRepairStatus();
   if (requestedTab === "insights") renderDashboardBeveragePulse();
   if (requestedTab === "print") renderTapPrintWorkspace();
 }
@@ -3514,7 +3519,36 @@ function bindGlobalSearchEvents() {
   });
 }
 
+function setHeaderSearchResultsVisible(visible) {
+  const results = document.querySelector("#header-search-results");
+  if (results) results.hidden = !visible;
+  dashboardDataSearchInput?.setAttribute("aria-expanded", String(visible));
+}
+
 function bindDashboardDataSearchEvents() {
+  document.querySelector("#header-search-close")?.addEventListener("click", () => {
+    setHeaderSearchResultsVisible(false);
+    dashboardDataSearchInput?.focus();
+  });
+  dashboardDataSearchInput?.addEventListener("input", () => {
+    if (!clean(dashboardDataSearchInput.value)) {
+      setHeaderSearchResultsVisible(false);
+      dashboardDataSearchFeedback.textContent = "";
+      dashboardDataSearchResults.innerHTML = "";
+    }
+  });
+  document.querySelector(".header-search")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    setHeaderSearchResultsVisible(false);
+    dashboardDataSearchInput?.focus();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (isEmployeeDashboard || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") return;
+    event.preventDefault();
+    dashboardDataSearchInput?.scrollIntoView({ block: "center" });
+    dashboardDataSearchInput?.focus();
+  });
   dashboardDataSearchForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     renderDashboardDataSearch({ submitted: true });
@@ -3522,6 +3556,7 @@ function bindDashboardDataSearchEvents() {
   dashboardDataSearchResults?.addEventListener("click", (event) => {
     const link = event.target.closest("[data-dashboard-data-search-name]");
     if (!link || !weeklyUsageSearch) return;
+    setHeaderSearchResultsVisible(false);
     weeklyUsageSearch.value = link.dataset.dashboardDataSearchName || "";
     renderWeeklyUsage();
     switchTab("weekly-usage");
@@ -3617,6 +3652,7 @@ function buildDashboardDataSearchItems() {
 
 function renderDashboardDataSearch({ submitted = false } = {}) {
   if (!dashboardDataSearchInput || !dashboardDataSearchResults || !dashboardDataSearchFeedback) return;
+  if (submitted) setHeaderSearchResultsVisible(true);
   const query = clean(dashboardDataSearchInput.value);
   if (!query) {
     dashboardDataSearchFeedback.textContent = submitted ? "Enter a question to search dashboard data." : "";
@@ -3958,7 +3994,11 @@ function activateGlobalSearchResult(item) {
 }
 
 function renderStats() {
-  const activeRecipes = getActiveRecipes();
+  const selectedCategory = categoryFilter.value || "all";
+  const activeRecipes = getActiveRecipes().filter((recipe) => (
+    selectedCategory === "all"
+    || normalizeRecipeCategory(recipe.category) === normalizeRecipeCategory(selectedCategory)
+  ));
   const totals = activeRecipes.map(getRecipeTotals);
   const recipeCount = activeRecipes.length;
   const totalCost = sum(totals.map((total) => total.cost));
@@ -3988,6 +4028,7 @@ function renderStats() {
 }
 
 function renderRecipes() {
+  renderStats();
   const searchTerm = recipeSearch.value.trim().toLowerCase();
   const category = categoryFilter.value;
   const activeRecipes = getActiveRecipes();
@@ -4259,48 +4300,25 @@ function renderPricing() {
   const visibleTapRows = getLiveTapPricingRows(searchTerm);
 
   renderPricingSummary(visibleTapRows);
-  renderShotPricing(visibleTapRows);
   renderPricingAdvisor(visibleTapRows);
   pricingTable.innerHTML = "";
 
   visibleTapRows.forEach((tapRow) => {
     pricingTable.append(renderTapPricingRow(tapRow));
   });
+  renderShotPricing(visibleTapRows);
 }
 
 function renderShotPricing(visibleTapRows = []) {
-  if (!shotPricingSummary || !shotPricingTable) return;
+  if (!shotPricingTable) return;
   const rows = buildShotPricingRows(visibleTapRows, shotPricingCapability);
-  const summary = summarizeShotPricingRows(rows);
   shotPricingRowsByKey = new Map(rows.map((row) => [row.key, row]));
-
-  shotPricingSummary.innerHTML = rows.length
-    ? `
-      <div class="shot-pricing__summary-counts">
-        <span><strong>${formatNumber(summary.total)}</strong> liquor products</span>
-        <span><strong>${formatNumber(summary.editable)}</strong> ready to edit</span>
-        <span><strong>${formatNumber(summary.setupRequired)}</strong> need one-time setup</span>
-      </div>
-      <p class="shot-pricing__setup-note shot-pricing__setup-note--${summary.editable ? "ready" : "setup"}">
-        <strong>${summary.editable ? "Live two-price review is ready." : "Live saves remain safely locked."}</strong>
-        ${escapeHtml(summary.editable
-          ? "Every change still requires owner confirmation and exact readback of both PMB portions."
-          : shotPricingCapability.message || "Connect on-site once so PMB's portion IDs and edit form can be verified. Existing prices remain untouched.")}
-      </p>
-    `
-    : `
-      <p class="shot-pricing__setup-note">
-        <strong>No live shot portions are loaded yet.</strong>
-        Refresh PMB prices while connected to the work network to load both portion prices for each liquor tap.
-      </p>
-    `;
-
-  shotPricingTable.innerHTML = rows.map((row) => {
+  rows.forEach((row) => {
+    const index = visibleTapRows.findIndex((tap) => (tap.livePrice || tap) === row.livePrice);
+    const chargeCell = shotPricingTable.children[index]?.children[3];
+    if (!chargeCell) return;
     const running = activePmbPortionPriceUpdateKey === row.key;
     const message = pmbPortionPriceUpdateMessages.get(row.key);
-    const currentPortions = row.portions.map((portion) => `
-      <span><b>${escapeHtml(portion.name)}</b> ${money(portion.price)}${portion.quantityOz ? ` · ${formatNumber(portion.quantityOz)} oz` : ""}</span>
-    `).join("");
     const editors = row.portions.slice(0, 2).map((portion, index) => `
       <label class="shot-pricing-field">
         <span>${escapeHtml(portion.name)}</span>
@@ -4317,29 +4335,20 @@ function renderShotPricing(visibleTapRows = []) {
         ></span>
       </label>
     `).join("");
-    const issue = row.canEdit
-      ? row.blockers[0] || "Both portions and the physical PMB identity passed the safety checks."
-      : "";
 
-    return `
-      <tr class="shot-pricing-row${row.canEdit ? "" : " shot-pricing-row--blocked"}" data-shot-pricing-key="${escapeHtml(row.key)}">
-        <td><strong>${escapeHtml(row.name)}</strong></td>
-        <td><div class="portion-list">${currentPortions}</div></td>
-        <td><div class="shot-pricing-fields">${editors}</div></td>
-        <td>
-          <span class="pricing-advisor-status pricing-advisor-status--${row.canEdit ? "ready" : "review"}">${row.canEdit ? "Ready" : "Setup needed"}</span>
-          ${issue ? `<span class="table-note">${escapeHtml(issue)}</span>` : ""}
-        </td>
-        <td>
-          <div class="pricing-advisor-action">
-            <button class="mini-button" type="button" data-shot-price-update="${escapeHtml(row.key)}"${!row.canEdit || activePmbPortionPriceUpdateKey ? " disabled" : ""}>${running ? "Updating both..." : "Update both in PMB"}</button>
-            ${message ? `<span class="pricing-advisor-action__message pricing-advisor-action__message--${escapeHtml(message.tone)}" role="status">${escapeHtml(message.text)}</span>` : ""}
-          </div>
-        </td>
-      </tr>
-    `;
-  }).join("") || '<tr><td colspan="5" class="empty-state">No PMB liquor portion rows match this search.</td></tr>';
-
+    const editor = document.createElement("details");
+    editor.dataset.shotPricingKey = row.key;
+    editor.open = running || Boolean(message);
+    editor.innerHTML = `
+      <summary>Edit portion prices</summary>
+      <div class="shot-pricing-fields">${editors}</div>
+      <p class="table-note">${escapeHtml(row.canEdit ? "Both portion prices are verified with PMB before and after saving." : row.blockers.join(" "))}</p>
+      <div class="pricing-advisor-action">
+        <button class="mini-button" type="button" data-shot-price-update="${escapeHtml(row.key)}"${!row.canEdit || activePmbPortionPriceUpdateKey ? " disabled" : ""}>${running ? "Updating both..." : "Update both in PMB"}</button>
+        ${message ? `<span class="pricing-advisor-action__message pricing-advisor-action__message--${escapeHtml(message.tone)}" role="status">${escapeHtml(message.text)}</span>` : ""}
+      </div>`;
+    chargeCell.append(editor);
+  });
   bindShotPricingControls();
 }
 
@@ -5005,6 +5014,7 @@ function renderIngredients() {
     return haystack.includes(searchTerm);
   });
   const visibleKegs = kegPricingItems.filter((item) => {
+    if (isPricingPlaceholder(item.name)) return false;
     const haystack = `${item.name} ${item.wall} ${item.tapNumber} ${item.tapSummary} ${item.vendor}`.toLowerCase();
     return haystack.includes(searchTerm);
   });
@@ -5130,7 +5140,7 @@ function getWeeklyPlanInventoryItems({ live = false } = {}) {
     inventoryItems,
     recipes,
   });
-  return sourceItems
+  const pricedItems = sourceItems
     .map((snapshotItem) => {
       if (!/liquor/i.test(clean(snapshotItem.group)) || !liquorBottleNeeds) return snapshotItem;
       const requiredBottles = liquorBottleNeeds.get(clean(snapshotItem.id))?.requiredBottles || 0;
@@ -5184,8 +5194,16 @@ function getWeeklyPlanInventoryItems({ live = false } = {}) {
         orderHoldReason: "",
         cocktailPrepRequiredBottles: toNumber(snapshotItem.cocktailPrepRequiredBottles),
         cocktailPrepShortageUnits: toNumber(snapshotItem.cocktailPrepShortageUnits),
+        bottleOz: toNumber(item?.bottleOz || vendorProduct?.bottleOz || getRecipeBuilderPackageConfig(snapshotItem.name)?.sizeOz),
       };
     });
+  const savedCounts = new Map(sourceItems.map((item) => [item.id, item.onHandDisplay]));
+  return buildRollingCocktailIngredientOrders({
+    inventoryItems: pricedItems.map((item) => ({ ...item, hasCurrentCount: clean(savedCounts.get(item.id)) !== "" })),
+    tapInputs: frozenKegPlan?.tapInputs?.length ? frozenKegPlan.tapInputs : recommendationItems,
+    recipes,
+    recipeAliases: Object.fromEntries([...MENU_ORDER, ...NEW_RECIPE_ORDER]),
+  });
 }
 
 function getCurrentMondayKegPlanSnapshot(now = new Date()) {
@@ -5199,11 +5217,7 @@ function getWeeklyPlanRecommendations({ live = false } = {}) {
     : live && isRecommendationForOperatingWeek(parAgentState?.recommendations?.generatedAt, new Date()) && Array.isArray(parAgentState?.recommendations?.items)
       ? parAgentState.recommendations.items
       : [];
-  const nettedSourceItems = netLiquorTapRecommendations({
-    recommendations: sourceItems,
-    inventoryItems,
-    recipes,
-  });
+  const nettedSourceItems = netRollingLiquorTapRecommendations(sourceItems, getWeeklyPlanInventoryItems({ live }));
   return nettedSourceItems.map((item) => {
     if (item.isLiquorTap) {
       const orderProductName = normalizeIngredientAlias(
@@ -5337,6 +5351,8 @@ async function publishCurrentWeeklyPlanSnapshot() {
   if (!mondaySnapshot?.kegPlanSnapshot || !parAgentState?.initialized) return false;
   try {
     const savedInventoryItems = getWeeklyPlanInventoryItems();
+    const rollingIssue = savedInventoryItems.find((item) => item.rollingIngredientVersion === 1 && item.orderHoldReason);
+    if (rollingIssue) throw new Error(rollingIssue.orderHoldReason);
     const savedRecommendations = getWeeklyPlanRecommendations();
     const savedPlan = buildWeeklyActionPlan({
       inventoryItems: savedInventoryItems,
@@ -6085,7 +6101,7 @@ function getMissingPriceAlerts() {
     const liveRow = getKegLiveRow(item);
     const resolution = getKegCanonicalResolution(item, liveRow);
     const product = String(resolution.product?.name || "").trim();
-    if (!product || /^coming\s+soon!?$/i.test(product) || !resolution.operationallyVerified) return;
+    if (!product || isPricingPlaceholder(product) || !resolution.operationallyVerified) return;
     const pricing = getKegWallPricing(item, product);
     const location = `${item.wall || "Wall"} tap ${item.tapNumber || "?"}`;
     const productKey = product.toLowerCase();
@@ -6101,7 +6117,7 @@ function getMissingPriceAlerts() {
   getWeeklyPlanInventoryItems().forEach((item) => {
     const name = clean(item?.name);
     const productKey = normalizeProductPriceKey(name);
-    if (!name || !productKey || toNumber(item?.par) <= 0 || toNumber(item?.unitCost) > 0 || seenCosts.has(productKey)) return;
+    if (!name || isPricingPlaceholder(name) || !productKey || toNumber(item?.par) <= 0 || toNumber(item?.unitCost) > 0 || seenCosts.has(productKey)) return;
     seenCosts.add(productKey);
     missingCosts.push(`${name} · ${clean(item?.group) || "Inventory"}`);
   });
@@ -6616,18 +6632,74 @@ function getWeeklyUsageItemProfitRate(item) {
   return sellingRates[0] - costPerOz;
 }
 
+function getPerformanceProductCostPerOz(item) {
+  const category = getWeeklyUsagePerformanceCategory(item);
+  const livePrice = getWeeklyUsageLivePrice(item);
+  const names = getTapPriceAliases(item?.name || "");
+  const matchesName = (name) => getTapPriceAliases(name || "").some((alias) => names.includes(alias));
+  if (category === "beer") {
+    const product = getKegPricingItem(item?.name);
+    const cost = product ? getKegCatalogUnitCost(product) : 0;
+    return cost > 0 ? cost : null;
+  }
+  if (category === "cocktail") {
+    const matches = recipes.filter((recipe) => matchesName(recipe.title) || matchesName(recipe.sourceTitle));
+    if (matches.length !== 1) return null;
+    const recipe = matches[0];
+    const missingCost = recipe.ingredients.some((ingredient) => (
+      toNumber(ingredient.oz) > 0
+      && normalizeIngredientAlias(ingredient.name).toLowerCase() !== "water"
+      && !(getIngredientCost(ingredient).cost > 0)
+    ));
+    const cost = missingCost ? 0 : getRecipeTotals(recipe).costPerOz;
+    return cost > 0 ? cost : null;
+  }
+  const exactIngredient = livePrice ? getIngredientForLiveTapPrice(livePrice) : null;
+  const matches = exactIngredient ? [exactIngredient] : ingredients.filter((ingredient) => matchesName(ingredient.name));
+  const cost = matches.length === 1 ? getCatalogUnitCost(matches[0]) : 0;
+  return cost > 0 ? cost : null;
+}
+
+function getPerformanceEstimatedProfitRate(item, context = {}) {
+  const selling = getWeeklyUsageItemSellingRate(item, context);
+  const sellingPricePerOz = toNumber(selling?.sellingPricePerOz);
+  const category = getWeeklyUsagePerformanceCategory(item);
+  let costPerOz = getPerformanceProductCostPerOz(item);
+  let costSource = "product recipe or bottle/keg cost";
+  if (!(costPerOz > 0)) {
+    const costsByProduct = new Map();
+    weeklyUsageItems.filter((candidate) => getWeeklyUsagePerformanceCategory(candidate) === category)
+      .forEach((candidate) => {
+        const cost = getPerformanceProductCostPerOz(candidate);
+        if (cost > 0) costsByProduct.set(normalizeTapPriceKey(candidate.name), cost);
+      });
+    const costs = [...costsByProduct.values()];
+    costPerOz = costs.length ? sum(costs) / costs.length : null;
+    costSource = `${category} category-average cost`;
+  }
+  if (!(sellingPricePerOz > 0) || !(costPerOz > 0)) {
+    return { grossProfitPerOz: null, reason: "Neither product pricing nor a usable same-category price/cost estimate is available." };
+  }
+  return {
+    grossProfitPerOz: sellingPricePerOz - costPerOz,
+    sellingPricePerOz,
+    estimated: true,
+    reason: `Estimated using ${selling.source || "available selling rates"} and ${costSource}; liquor uses average portion pricing when needed.`,
+  };
+}
+
 function renderSellerRankingList(rows, metric, emptyMessage = "There is not enough saved PMB history for a seller list yet.") {
   if (!rows.length) {
     return `<p class="onpar-ranking-empty">${escapeHtml(emptyMessage)}</p>`;
   }
   return `<ol class="onpar-ranking-list">${rows.map((row, index) => {
     const average = metric === "volume" ? toNumber(row.averageWeeklyOz) : toNumber(row.averageWeeklyValue);
-    const value = metric === "volume" ? `${formatNumber(average)} oz` : money(average);
+    const value = metric === "volume" ? `${formatNumber(average)} oz` : metric === "margin" ? `${formatNumber(average)}%` : money(average);
     const location = [...(row.walls || []), ...(row.tapNumbers?.length ? [`Tap${row.tapNumbers.length === 1 ? "" : "s"} ${row.tapNumbers.join(", ")}`] : [])].join(" · ");
     return `
       <li>
         <span class="onpar-ranking-list__rank">${index + 1}</span>
-        <span class="onpar-ranking-list__product"><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(location || `${row.sampleWeekCount} recorded weeks`)}</small></span>
+        <span class="onpar-ranking-list__product"><strong>${escapeHtml(row.name)}</strong><small>${metric === "profit" || metric === "margin" ? "Estimated · " : ""}${escapeHtml(location || `${row.sampleWeekCount} recorded weeks`)}</small></span>
         <span class="onpar-ranking-list__value">${escapeHtml(value)}</span>
       </li>`;
   }).join("")}</ol>`;
@@ -6645,11 +6717,11 @@ function renderSellerRankingPeriod(period, { title, allTime, metric, emptyMessag
       </header>
       <div class="onpar-insights-period__body">
         <section class="onpar-ranking" aria-label="Top ${formatNumber(listSize)} sellers">
-          <div class="onpar-ranking__title"><h4>Top ${formatNumber(listSize)}</h4><span>${metric === "sales" ? "Avg projected sales" : metric === "profit" ? "Avg projected profit" : "Avg poured volume"}</span></div>
+          <div class="onpar-ranking__title"><h4>Top ${formatNumber(period.top.length)}</h4><span>${metric === "margin" ? "Profit margin" : metric === "sales" ? "Avg projected sales" : metric === "profit" ? "Avg projected profit" : "Avg poured volume"}</span></div>
           ${renderSellerRankingList(period.top, metric, emptyMessage)}
         </section>
         <section class="onpar-ranking" aria-label="Bottom ${formatNumber(listSize)} sellers">
-          <div class="onpar-ranking__title"><h4>Bottom ${formatNumber(listSize)}</h4><span>${metric === "sales" ? "Avg projected sales" : metric === "profit" ? "Avg projected profit" : "Avg poured volume"}</span></div>
+          <div class="onpar-ranking__title"><h4>Bottom ${formatNumber(period.bottom.length)}</h4><span>${metric === "margin" ? "Profit margin" : metric === "sales" ? "Avg projected sales" : metric === "profit" ? "Avg projected profit" : "Avg poured volume"}</span></div>
           ${renderSellerRankingList(period.bottom, metric, emptyMessage)}
         </section>
       </div>
@@ -6665,21 +6737,13 @@ function getSellerRankingRowIdentity(row) {
   return `${clean(row?.name).toLowerCase()}|${taps}`;
 }
 
-function getDisjointSellerRankingPeriod(period, requestedListSize) {
-  const allowedListSizes = [3, 5, 10, 15, 25];
-  const identities = new Set(
-    [...(period?.top || []), ...(period?.bottom || [])].map(getSellerRankingRowIdentity),
-  );
-  const maximumDisjointSize = Math.floor(identities.size / 2);
-  const listSize = allowedListSizes
-    .filter((size) => size <= requestedListSize && size <= maximumDisjointSize)
-    .at(-1) || Math.min(3, requestedListSize);
+function getSellerRankingPeriod(period, requestedListSize) {
+  const listSize = [3, 5, 10, 15, 25].includes(requestedListSize) ? requestedListSize : 5;
   const top = (period?.top || []).slice(0, listSize);
   const topIdentities = new Set(top.map(getSellerRankingRowIdentity));
-  const bottom = (period?.bottom || [])
-    .filter((row) => !topIdentities.has(getSellerRankingRowIdentity(row)))
-    .slice(0, listSize);
-  return { ...period, top, bottom, listSize };
+  const bottom = (period?.bottom || []).slice(0, listSize);
+  const overlapping = bottom.some((row) => topIdentities.has(getSellerRankingRowIdentity(row)));
+  return { ...period, top, bottom, listSize, overlapping };
 }
 
 function renderOhioComplianceAlert() {
@@ -6714,6 +6778,7 @@ function renderOnParInsights() {
   }[sellerRankingPeriod] || 6;
   const isSalesRanking = sellerRankingMetric === "sales";
   const isProfitRanking = sellerRankingMetric === "profit";
+  const isMarginRanking = sellerRankingMetric === "margin";
   const isDollarRanking = isSalesRanking || isProfitRanking;
   const currentPerformanceItems = new Set(weeklyUsageItems);
   const rankings = buildWeeklyUsageSellerRankings(
@@ -6721,9 +6786,13 @@ function renderOnParInsights() {
     {
       category: sellerRankingCategory,
       wall: sellerRankingWall,
-      metric: isDollarRanking ? "profit" : "volume",
+      metric: isMarginRanking ? "margin" : isDollarRanking ? "profit" : "volume",
       getFullOunces: getWeeklyUsageFullOunces,
-      getGrossProfitPerOz: isSalesRanking ? getWeeklyUsageItemSellingRate : getWeeklyUsageItemProfitRate,
+      getGrossProfitPerOz: isSalesRanking ? getWeeklyUsageItemSellingRate : getPerformanceEstimatedProfitRate,
+      getSellingPricePerOz: (item) => {
+        const livePrice = getWeeklyUsageLivePrice(item);
+        return livePrice ? getWeeklyUsageLiveSellingRate(livePrice, getWeeklyUsagePerformanceCategory(item)) : null;
+      },
       isBottomEligible: (item) => (
         currentPerformanceItems.has(item)
         && !isRetiredProduct(item)
@@ -6734,15 +6803,15 @@ function renderOnParInsights() {
       bottomLimit: 25,
     },
   );
-  const emptyMessage = isDollarRanking
-    ? isProfitRanking
-      ? "No products in this filter have enough exact PMB usage plus verified current pricing and costs."
+  const emptyMessage = isDollarRanking || isMarginRanking
+    ? isProfitRanking || isMarginRanking
+      ? "No products in this filter have recorded usage and a usable product or same-category price/cost estimate."
       : "No products in this filter have enough exact PMB usage and verified current pricing."
     : "No positive poured usage is saved for this filter.";
   const selectedPeriodRankings = sellerRankingPeriod === "all-time"
       ? rankings.allTime
       : rankings.recent;
-  const periodRankings = getDisjointSellerRankingPeriod(selectedPeriodRankings, sellerRankingListSize);
+  const periodRankings = getSellerRankingPeriod(selectedPeriodRankings, sellerRankingListSize);
   const displayedListSize = periodRankings.listSize;
   const periodTitle = sellerRankingPeriod === "all-time"
     ? "All saved usage weeks"
@@ -6763,6 +6832,7 @@ function renderOnParInsights() {
           <option value="liquor"${sellerRankingCategory === "liquor" ? " selected" : ""}>Liquor</option>
         </select></label>
         <label class="select-field"><span>Wall</span><select data-seller-ranking-wall>
+          <option value="all"${sellerRankingWall === "all" ? " selected" : ""}>All walls</option>
           <option value="main"${sellerRankingWall === "main" ? " selected" : ""}>Main wall</option>
           <option value="karaoke"${sellerRankingWall === "karaoke" ? " selected" : ""}>Karaoke wall</option>
           <option value="patio"${sellerRankingWall === "patio" ? " selected" : ""}>Patio liquor wall</option>
@@ -6780,12 +6850,14 @@ function renderOnParInsights() {
         </select></label>
         <label class="select-field"><span>Rank by</span><select data-seller-ranking-metric>
           <option value="volume"${sellerRankingMetric === "volume" ? " selected" : ""}>Poured volume</option>
-          <option value="sales"${sellerRankingMetric === "sales" ? " selected" : ""}>Projected sales</option>
           <option value="profit"${sellerRankingMetric === "profit" ? " selected" : ""}>Projected profit</option>
+          <option value="margin"${sellerRankingMetric === "margin" ? " selected" : ""}>Profit margin</option>
         </select></label>
       </div>
     </header>
     <div class="onpar-insights__periods">
+      ${periodRankings.overlapping ? '<p class="onpar-ranking-empty">Top and bottom lists overlap because fewer drinks qualify than the combined list sizes. Your selected list size is unchanged.</p>' : ""}
+      ${isProfitRanking || isMarginRanking ? '<p class="onpar-ranking-empty">Estimates, not recorded sales: average weekly poured ounces multiplied by estimated profit per ounce. Product prices and costs are preferred; missing pricing uses available same-category averages. Liquor may use average Single/Double pricing because the actual portion mix is unknown. Margin is total estimated profit divided by total estimated sales.</p>' : ""}
       ${renderSellerRankingPeriod(periodRankings, { title: periodTitle, allTime: sellerRankingPeriod === "all-time", metric: sellerRankingMetric, emptyMessage, listSize: displayedListSize })}
     </div>`;
 }
@@ -6890,7 +6962,7 @@ function renderDashboardPulseCategoryLeaders({
   `;
 }
 
-function renderDashboardProjectedWallMix(rows = []) {
+function renderDashboardProjectedWallMix(rows = [], isProfit = false) {
   const wallColors = {
     main: "#bf604c",
     karaoke: "#2f7ca3",
@@ -6901,7 +6973,7 @@ function renderDashboardProjectedWallMix(rows = []) {
   return `
     <div style="margin-top:18px;padding-top:16px;border-top:1px solid rgba(34, 68, 60, 0.16);">
       <div class="dashboard-pulse-sales-mix__header"><h3>By wall</h3></div>
-      <div class="dashboard-pulse-mix-bar" aria-label="Sales mix by wall">
+      <div class="dashboard-pulse-mix-bar" aria-label="${isProfit ? "Projected profit" : "Sales"} mix by wall">
         ${visibleRows.filter((row) => row.sharePercent > 0).map((row) => `<i style="--mix-share:${row.sharePercent}%;background:${wallColors[row.wall] || "#718078"}"></i>`).join("")}
       </div>
       <div class="dashboard-pulse-mix-legend">
@@ -6909,33 +6981,38 @@ function renderDashboardProjectedWallMix(rows = []) {
           <div>
             <span aria-hidden="true" style="background:${wallColors[row.wall] || "#718078"}"></span>
             <strong>${formatNumber(row.sharePercent)}%</strong>
-            <small>${escapeHtml(row.label)}</small>
+            <small>${escapeHtml(row.label)}${isProfit ? ` · ${money(row.projectedSales)}` : ""}</small>
           </div>
         `).join("")}
       </div>
+      ${isProfit ? `<small>All walls. Percentages show positive wall contributions; dollar totals include losses.</small>` : ""}
     </div>
   `;
 }
 
 function renderDashboardProjectedSalesMix(mix) {
+  const isProfit = mix.metric === "profit";
+  const title = isProfit ? "Projected profit mix" : "Sales mix";
+  const controls = `<label class="dashboard-pulse-wall"><span>Mix by</span>
+    <select data-dashboard-mix-metric aria-label="Sales mix measure">
+      <option value="sales"${!isProfit ? " selected" : ""}>Sales</option>
+      <option value="profit"${isProfit ? " selected" : ""}>Projected profit</option>
+    </select></label>`;
+  const header = `<div class="dashboard-pulse-sales-mix__header">
+    <h3>${title}</h3><small>${escapeHtml(mix.weekLabel || "Selected period")}</small>
+  </div>${controls}`;
   if (!mix.available) {
-    return `
-      <aside class="dashboard-pulse-sales-mix">
-        <div class="dashboard-pulse-sales-mix__header">
-          <h3>Sales mix</h3>
-          <small>${escapeHtml(mix.weekLabel || "Last week")}</small>
-        </div>
-        <p class="dashboard-pulse-empty">Current PMB prices are needed to project last week’s category mix.</p>
-      </aside>
-    `;
+    return `<aside class="dashboard-pulse-sales-mix">${header}
+      <p class="dashboard-pulse-empty">${isProfit
+        ? "Not enough verified usage, PMB prices and product costs to calculate this wall's profit mix."
+        : "Recorded usage and current PMB prices are needed to project this period's category mix."}</p>
+    </aside>`;
   }
   return `
     <aside class="dashboard-pulse-sales-mix">
-      <div class="dashboard-pulse-sales-mix__header">
-        <h3>Sales mix</h3>
-        <small>${escapeHtml(mix.weekLabel || "Last week")}</small>
-      </div>
-      <div class="dashboard-pulse-mix-bar" aria-label="Sales mix for ${escapeHtml(mix.weekLabel || "last week")}">
+      ${header}
+      ${isProfit ? `<p><strong>${money(mix.projectedProfit)}</strong> projected gross profit</p>` : ""}
+      <div class="dashboard-pulse-mix-bar" aria-label="${title} for ${escapeHtml(mix.weekLabel || "selected period")}">
         ${mix.categories.filter((row) => row.sharePercent > 0).map((row) => `<i class="dashboard-pulse-mix-bar__${escapeHtml(row.category)}" style="--mix-share:${row.sharePercent}%"></i>`).join("")}
       </div>
       <div class="dashboard-pulse-mix-legend">
@@ -6943,11 +7020,16 @@ function renderDashboardProjectedSalesMix(mix) {
           <div class="dashboard-pulse-mix-legend__${escapeHtml(row.category)}">
             <span aria-hidden="true"></span>
             <strong>${formatNumber(row.sharePercent)}%</strong>
-            <small>${escapeHtml(row.label)}</small>
+            <small>${escapeHtml(row.label)}${isProfit ? ` · ${money(row.projectedSales)}` : ""}</small>
           </div>
         `).join("")}
       </div>
-      ${renderDashboardProjectedWallMix(mix.walls)}
+      ${isProfit ? `<p class="dashboard-pulse-empty">Recorded pours × (current selling price minus product cost), before labor and overhead.
+        ${mix.unpricedTapCount ? `${mix.unpricedTapCount} tap(s) excluded: verified pricing or cost data is unavailable.` : ""}
+        ${mix.hasLosses ? "Losses are included in the dollar totals; percentages show positive category contributions only." : ""}
+      </p>` : ""}
+      ${renderDashboardProjectedWallMix(mix.walls, isProfit)}
+      ${isProfit && mix.venueUnpricedTapCount ? `<p class="dashboard-pulse-empty">Venue-wide wall mix excludes ${mix.venueUnpricedTapCount} tap(s) with unavailable pricing or costs.</p>` : ""}
     </aside>
   `;
 }
@@ -6958,7 +7040,7 @@ function renderDashboardBeveragePulse() {
     document.querySelector("#dashboard-guest-favorites"),
   ].filter(Boolean);
   if (!containers.length || isEmployeeDashboard) return;
-  const wallItems = weeklyUsageItems.filter((item) => getDashboardPulseWall(item) === sellerRankingWall);
+  const wallItems = weeklyUsageItems.filter((item) => sellerRankingWall === "all" || getDashboardPulseWall(item) === sellerRankingWall);
   const trends = buildWeeklyPlanTrends(wallItems, { now: new Date(), limit: 3 });
   const recentWeekLimit = {
     "one-week": 1,
@@ -6999,6 +7081,8 @@ function renderDashboardBeveragePulse() {
       period: recentWeekLimit,
       getFullOunces: getWeeklyUsageFullOunces,
       getSellingPricePerOz: getWeeklyUsageItemSellingRate,
+      metric: dashboardMixMetric,
+      getGrossProfitPerOz: getWeeklyUsageItemProfitRate,
     },
   );
   const selectedWallSalesMix = buildLastWeekProjectedSalesMix(
@@ -7008,9 +7092,11 @@ function renderDashboardBeveragePulse() {
       period: recentWeekLimit,
       getFullOunces: getWeeklyUsageFullOunces,
       getSellingPricePerOz: getWeeklyUsageItemSellingRate,
+      metric: dashboardMixMetric,
+      getGrossProfitPerOz: getWeeklyUsageItemProfitRate,
     },
   );
-  const projectedSalesMix = { ...selectedWallSalesMix, walls: venueSalesMix.walls };
+  const projectedSalesMix = { ...selectedWallSalesMix, walls: venueSalesMix.walls, venueUnpricedTapCount: venueSalesMix.unpricedTapCount };
   const favorite = leaders[0] || null;
   const favoriteName = clean(favorite?.name).toLowerCase();
   const rising = [
@@ -7020,7 +7106,7 @@ function renderDashboardBeveragePulse() {
     || null;
   const lowSignal = trends.sections.emergingLow.items?.[0] || null;
   const cooling = lowSignal || trends.sections.movers.fallers?.[0] || null;
-  const wallLabel = sellerRankingWall === "patio"
+  const wallLabel = sellerRankingWall === "all" ? "All walls" : sellerRankingWall === "patio"
     ? "Patio liquor wall"
     : sellerRankingWall === "karaoke"
       ? "Karaoke wall"
@@ -7034,6 +7120,7 @@ function renderDashboardBeveragePulse() {
       </div>
       <div class="dashboard-pulse-controls">
         <label class="dashboard-pulse-wall"><span>Wall</span><select data-seller-ranking-wall>
+          <option value="all"${sellerRankingWall === "all" ? " selected" : ""}>All walls</option>
           <option value="main"${sellerRankingWall === "main" ? " selected" : ""}>Main wall</option>
           <option value="karaoke"${sellerRankingWall === "karaoke" ? " selected" : ""}>Karaoke wall</option>
           <option value="patio"${sellerRankingWall === "patio" ? " selected" : ""}>Patio liquor wall</option>
@@ -7491,15 +7578,20 @@ function getCurrentVendorOrderPolicy(plan, snapshot = null) {
     return normalizeVendorOrderPolicy(snapshot.orderPolicy);
   }
   const savedInventoryItems = getWeeklyPlanInventoryItems();
+  const savedKegPlan = getCurrentMondayKegPlanSnapshot();
+  const forecastTapInputs = savedKegPlan?.tapInputs?.length
+    ? savedKegPlan.tapInputs
+    : savedKegPlan?.items || [];
   const proofPrep = buildProofPrepOrderContext({
     cocktails: plan?.prep?.cocktails,
     recipes,
     inventoryItems,
     savedInventoryItems,
     recipeAliases: Object.fromEntries([...MENU_ORDER, ...NEW_RECIPE_ORDER]),
+    tapInputs: forecastTapInputs,
   });
   const cocktailIngredientMinimumOrders = savedInventoryItems
-    .filter((item) => toNumber(item.cocktailPrepShortageUnits) > 0)
+    .filter((item) => item.group === "Liquor Cabinet" && !item.orderHoldReason && toNumber(item.cocktailPrepShortageUnits) > 0)
     .map((item) => {
       const packSize = normalizePackSize(item.packSize || 1);
       const shortageUnits = Math.ceil(toNumber(item.cocktailPrepShortageUnits));
@@ -7523,7 +7615,7 @@ function getCurrentVendorOrderPolicy(plan, snapshot = null) {
         excludeFromOrderCost: item.excludeFromOrderCost,
         onHand: item.onHand,
         par: item.par,
-        reason: `Cocktail prep needs ${formatNumber(item.cocktailPrepRequiredBottles)} bottle${toNumber(item.cocktailPrepRequiredBottles) === 1 ? "" : "s"}; ${formatNumber(item.onHand)} counted on hand.`,
+        reason: item.rollingPlanReason || `Cocktail prep needs ${formatNumber(item.cocktailPrepRequiredBottles)} bottle${toNumber(item.cocktailPrepRequiredBottles) === 1 ? "" : "s"}; ${formatNumber(item.onHand)} counted on hand.`,
       };
     });
   return normalizeVendorOrderPolicy({
@@ -7586,7 +7678,7 @@ function renderAssistedOrderPanel(draft, saved) {
       <div class="assisted-order-handoff__header"><strong>Place order</strong><span class="assisted-order-handoff__status assisted-order-handoff__status--${escapeHtml(view.order.status)}">${escapeHtml(view.statusLabel)}</span></div>
       <span class="assisted-order-handoff__summary">${formatNumber(view.order.lineCount)} line${view.order.lineCount === 1 ? "" : "s"} · ${money(view.order.expectedTotal)}</span>
       <div class="assisted-order-handoff__actions">
-        <button class="assisted-order-handoff__button" type="button" data-assisted-order-copy="${escapeHtml(view.order.id)}"${disabled ? " disabled" : ""}>${escapeHtml(view.copyLabel)}</button>
+        ${view.order.vendorKey === "bonbright" || view.order.rehearsal ? `<button class="assisted-order-handoff__button" type="button" data-assisted-order-copy="${escapeHtml(view.order.id)}"${disabled ? " disabled" : ""}>${escapeHtml(view.copyLabel)}</button>` : ""}
         ${view.vendorActionLabel ? `<button class="assisted-order-handoff__button" type="button" data-assisted-order-open="${escapeHtml(view.order.id)}"${disabled ? " disabled" : ""}>${escapeHtml(view.vendorActionLabel)}</button>` : ""}
       </div>
       <small class="assisted-order-handoff__note">${escapeHtml(view.note)}</small>
@@ -11615,7 +11707,7 @@ function saveKegLevelsOutbox() {
   }
 }
 
-function stageKegLevelsOutbox() {
+function stageKegLevelsOutbox({ deliberate = false } = {}) {
   const prior = parAgentStateOutbox;
   const entry = createOperationalOutboxEntry({
     baseRevision: prior?.baseRevision ?? parAgentState?.revision,
@@ -11630,6 +11722,16 @@ function stageKegLevelsOutbox() {
     updatedAt: new Date().toISOString(),
   });
   if (!entry) return null;
+  entry.payload.edits = buildKegInputEdits(prior?.payload || parAgentState, entry.payload, {
+    editedAt: entry.updatedAt,
+    idPrefix: entry.id,
+    pending: prior?.payload?.edits || [],
+  });
+  if (prior && !Array.isArray(prior.payload?.edits) && !deliberate) {
+    entry.payload.edits = buildKegInputEdits(prior.payload?.baseInputs || parAgentState, prior.payload, {
+      editedAt: prior.updatedAt, idPrefix: prior.id,
+    });
+  }
   parAgentStateOutbox = {
     ...entry,
     ...(prior?.conflict ? {
@@ -11667,6 +11769,13 @@ function restoreKegLevelsOutbox(result = {}) {
 async function loadParAgentState() {
   try {
     const result = await requestParAgentState();
+    if (parAgentStateOutbox && !Array.isArray(parAgentStateOutbox.payload?.edits)) {
+      parAgentStateOutbox.payload.edits = buildKegInputEdits(parAgentStateOutbox.payload.baseInputs || result, parAgentStateOutbox.payload, {
+        editedAt: parAgentStateOutbox.updatedAt,
+        idPrefix: parAgentStateOutbox.id,
+      });
+      saveKegLevelsOutbox();
+    }
     if (parAgentStateOutbox && !haveKegLevelInputsChanged(result, parAgentStateOutbox.payload)) {
       parAgentStateOutbox = null;
       parAgentInputsChangedAt = "";
@@ -11765,12 +11874,14 @@ function getParAgentSettings() {
   return maxOrderPerTap == null ? {} : { maxOrderPerTap };
 }
 
+let kegCountsNeedReview = false;
+
 function renderParAgentPanel() {
   return `
     <div class="sync-panel sync-panel--par-agent">
       ${parAgentError ? `
         <div class="sync-actions par-agent-actions">
-          ${parAgentStateOutbox?.conflict ? '<button class="primary-button" id="recover-keg-counts" type="button">Resolve unsaved keg counts</button>' : ""}
+          ${parAgentStateOutbox?.conflict && kegCountsNeedReview ? '<button class="primary-button" id="recover-keg-counts" type="button">Review conflicting counts</button>' : ""}
           <button class="primary-button" id="run-par-agent" type="button"${parAgentRunning ? " disabled" : ""}>${parAgentRunning ? "Updating..." : "Try again"}</button>
         </div>
       ` : ""}
@@ -11822,13 +11933,12 @@ function scheduleParAgentStateSync({ immediate = false } = {}) {
   scheduleLiveWeeklyPlanRefresh();
   parAgentStateMutationVersion += 1;
   const mutationVersion = parAgentStateMutationVersion;
-  const staged = stageKegLevelsOutbox();
+  const staged = stageKegLevelsOutbox({ deliberate: true });
   if (staged?.conflict) {
-    parAgentError = staged.lastError || "Keg Levels has an unresolved revision conflict.";
-    parAgentMessage = "This Keg Levels change remains saved locally for explicit conflict review; it will not overwrite the newer shared revision.";
+    kegCountsNeedReview = false;
+    parAgentError = "";
+    parAgentMessage = "Checking the latest saved keg counts and combining changes automatically...";
     renderKegLevels();
-    renderWeeklyPlan();
-    return;
   }
   clearTimeout(parAgentStateSyncTimer);
   parAgentStateSyncTimer = setTimeout(() => {
@@ -11902,7 +12012,16 @@ async function recoverConflictingKegCounts() {
 function tryRebaseKegLevelsOutbox(state) {
   const entry = normalizeOperationalOutboxEntry(parAgentStateOutbox);
   if (!entry || !state?.initialized) return false;
+  if (Array.isArray(entry.payload.edits)) {
+    // The server reconciles these original, timestamped field edits atomically.
+    // Never restamp a restored tab's old input as a new deliberate edit.
+    parAgentStateOutbox = { ...entry, conflict: false, lastError: "", currentRevision: null };
+    kegCountsNeedReview = false;
+    parAgentError = "";
+    return saveKegLevelsOutbox();
+  }
   if (!haveKegLevelInputsChanged(state, entry.payload)) {
+    kegCountsNeedReview = false;
     parAgentStateOutbox = null;
     parAgentInputsChangedAt = "";
     saveKegLevelsOutbox();
@@ -11914,9 +12033,10 @@ function tryRebaseKegLevelsOutbox(state) {
     ? { ok: true, data: getKegLevelInputPayload(entry.payload) }
     : reconcileKegLevelInputs(entry.payload.baseInputs, entry.payload, state);
   if (!merged.ok) {
+    kegCountsNeedReview = true;
     parAgentError = merged.conflicts.includes("missing-baseline")
-      ? "This older pending save has no original comparison copy. Your inputs are preserved. Choose Resolve unsaved keg counts to confirm which values to save."
-      : "Saved keg inputs conflict with this browser. Your inputs are preserved. Choose Resolve unsaved keg counts to see the differences before saving.";
+      ? "Your counts are preserved, but this older save has no comparison copy. Review conflicting counts once so no saved entries are silently replaced."
+      : "Different values were entered for the same keg inputs. Your counts are preserved; review those differences before saving.";
     parAgentMessage = parAgentError;
     parAgentStateOutbox = markOperationalOutboxFailure(entry, {
       conflict: true, currentRevision: state.revision, message: parAgentError,
@@ -11928,6 +12048,7 @@ function tryRebaseKegLevelsOutbox(state) {
     ...entry, baseRevision: Number(state.revision), conflict: false, currentRevision: null, lastError: "",
     payload: { ...entry.payload, ...merged.data, baseInputs: getKegLevelInputPayload(state) },
   };
+  kegCountsNeedReview = false;
   restoreKegLevelsOutbox(state);
   parAgentError = "";
   parAgentMessage = "Recovered non-conflicting Keg Levels changes. Saving your counts...";
@@ -11952,6 +12073,30 @@ async function syncParAgentState({ silent = false, mutationVersion = parAgentSta
     return false;
   }
   try {
+    if (Array.isArray(sentEntry.payload.edits)) {
+      const result = await requestParAgentState({ action: "sync-input-edits", edits: sentEntry.payload.edits });
+      if (parAgentStateOutbox?.id === sentEntry.id && mutationVersion === parAgentStateMutationVersion) {
+        parAgentStateOutbox = null;
+        parAgentInputsChangedAt = "";
+        saveKegLevelsOutbox();
+        applyParAgentState(result);
+      } else if (parAgentStateOutbox) {
+        const acknowledged = new Set(sentEntry.payload.edits.map((edit) => edit.id));
+        const edits = (parAgentStateOutbox.payload.edits || []).filter((edit) => !acknowledged.has(edit.id));
+        parAgentStateOutbox = {
+          ...parAgentStateOutbox, baseRevision: result.revision, conflict: false, currentRevision: null, lastError: "",
+          payload: { ...parAgentStateOutbox.payload, ...overlayKegInputEdits(result, edits), edits, baseInputs: getKegLevelInputPayload(result) },
+        };
+        saveKegLevelsOutbox();
+        restoreKegLevelsOutbox(result);
+      }
+      kegCountsNeedReview = false;
+      parAgentError = "";
+      parAgentMessage = parAgentStateOutbox ? "Saving your latest count changes..." : "Keg counts saved.";
+      renderKegLevels();
+      renderWeeklyPlan();
+      return true;
+    }
     if (sentEntry.conflict) {
       const latest = await requestParAgentState();
       if (!tryRebaseKegLevelsOutbox(latest)) return false;
@@ -13681,6 +13826,7 @@ function getInventorySpeechSourceItems() {
       id: `keg:${key}`,
       name,
       target: "keg",
+      kegKind: isBeerTapPosition(item) ? "beer" : "cocktail",
       group: `${item.wall} tap ${formatNumber(item.tapNumber)}`,
       wall: item.wall,
       unit: "kegs",
@@ -13705,6 +13851,7 @@ function getInventorySpeechSourceItems() {
       id: `keg-on-deck:${key}`,
       name: onDeck.name,
       target: "keg",
+      kegKind: normalizeTitle(onDeck.kind),
       group: `${item.wall} tap ${formatNumber(item.tapNumber)} · On Deck`,
       wall: item.wall,
       unit: normalizeTitle(onDeck.kind) === "liquor" ? "oz" : "kegs",
@@ -13718,6 +13865,24 @@ function getInventorySpeechSourceItems() {
     }];
   });
   return [...inventorySources, ...kegSources, ...onDeckSources];
+}
+
+function getKegSpeechCountSummary(sourceItems) {
+  const sources = new Map(sourceItems.map((item) => [item.id, item]));
+  const proposals = inventorySpeechProposals.filter((proposal) => !speechProposalNeedsReview(proposal)
+    && proposal.quantity !== null && proposal.quantity !== "");
+  // Applying multiple corrections to one field leaves its last value, not a sum.
+  const changes = new Map(buildSpeechInventoryChanges(proposals).map((change) => [change.id, change]));
+  const totals = { beer: 0, cocktail: 0, other: 0 };
+  for (const change of changes.values()) {
+    const item = sources.get(change.id);
+    if (!item || item.target !== "keg" || item.unit !== "kegs") continue;
+    const kind = ["beer", "cocktail"].includes(item.kegKind) ? item.kegKind : "other";
+    totals[kind] += Number(change.value);
+  }
+  const label = (quantity, kind) => `${formatNumber(quantity)} ${kind} keg${quantity === 1 ? "" : "s"}`;
+  const reviewCount = inventorySpeechProposals.filter(speechProposalNeedsReview).length;
+  return `Heard ${label(totals.beer, "beer")} and ${label(totals.cocktail, "cocktail")}${totals.other ? `; ${label(totals.other, "other")}` : ""}.${reviewCount ? ` ${reviewCount} entr${reviewCount === 1 ? "y needs" : "ies need"} review and ${reviewCount === 1 ? "is" : "are"} not included yet.` : ""}`;
 }
 
 function renderInventorySpeechAssistant() {
@@ -13814,8 +13979,9 @@ function renderInventorySpeechAssistant() {
         </div>
         <p class="sync-status" role="status">${escapeHtml(inventorySpeechMessage || "Nothing changes until you review and apply. On a phone, you can also tap the text box and use your keyboard's microphone, if available. Tap Review when finished.")}</p>
         ${inventorySpeechProposals.length ? `
+          ${kegOnly ? `<p class="sync-status" data-keg-speech-totals role="status">${escapeHtml(getKegSpeechCountSummary(sourceItems))}</p>` : ""}
           <div class="inventory-speech__review">${reviewCards}</div>
-          <button class="primary-button inventory-speech-apply" type="button"${inventorySpeechApplying || !applicableCount ? " disabled" : ""}>${inventorySpeechApplying ? "Applying..." : `Apply ${applicableCount}`}</button>
+          <button class="primary-button inventory-speech-apply" type="button"${inventorySpeechApplying || !applicableCount ? " disabled" : ""}>${inventorySpeechApplying ? "Applying..." : kegOnly ? "Apply keg counts" : `Apply ${applicableCount}`}</button>
         ` : ""}
       </div>`;
     assistant.open = wasOpen;
@@ -13872,7 +14038,7 @@ function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
     const reviewItems = parsed.proposals.filter(speechProposalNeedsReview);
     const needsReview = reviewItems.length;
     inventorySpeechMessage = parsed.proposals.length
-      ? `${parsed.proposals.length} count${parsed.proposals.length === 1 ? "" : "s"} found${needsReview ? ` · Review: ${reviewItems.map((proposal) => `“${proposal.phrase}”`).join("; ")}` : " · Ready to apply"}.`
+      ? `${assistant.id === "keg-speech-assistant" ? "Keg counts recognized" : `${parsed.proposals.length} count${parsed.proposals.length === 1 ? "" : "s"} found`}${needsReview ? ` · Review: ${reviewItems.map((proposal) => `“${proposal.phrase}”`).join("; ")}` : " · Ready to apply"}.`
       : "No inventory counts were recognized.";
     renderInventorySpeechAssistant();
   });
@@ -13908,6 +14074,8 @@ function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
     row.querySelector(".speech-quantity-input")?.addEventListener("input", (event) => {
       const value = Number(event.currentTarget.value);
       proposal.quantity = Number.isFinite(value) && value >= 0 ? value : null;
+      const totals = assistant.querySelector("[data-keg-speech-totals]");
+      if (totals) totals.textContent = getKegSpeechCountSummary(sourceItems);
     });
     row.querySelector(".speech-remove-proposal")?.addEventListener("click", () => {
       inventorySpeechProposals = inventorySpeechProposals.filter((entry) => entry.id !== proposal.id);
@@ -14917,6 +15085,9 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
           currentStockOunces: item.currentStockOunces,
           avgWeeklyKegs: item.avgWeeklyKegs,
           avgWeeklyOunces: item.avgWeeklyOunces,
+          variabilityCushionPct: item.variabilityCushionPct,
+          preThursdayUsageSharePct: item.preThursdayUsageSharePct,
+          inventoryStateMissing: item.inventoryStateMissing,
         })),
         summary: parAgentState.recommendations.summary,
       }
@@ -15305,7 +15476,7 @@ async function addCustomRecipe(event) {
     id: editingRecipeId || `custom-${Date.now()}-${slugify(title)}`,
     title,
     batch: DEFAULT_BATCH_LABEL,
-    category: clean(document.querySelector("#new-recipe-category").value) || "Other",
+    category: normalizeRecipeCategory(document.querySelector("#new-recipe-category").value),
     defaultChargePerOz: toNumber(document.querySelector("#new-recipe-charge").value),
     description: clean(newRecipeDescriptionInput?.value),
     imageUrl: clean(newRecipeImageInput?.value),
@@ -17031,7 +17202,7 @@ function resetRecipeForm() {
 }
 
 function hydrateCategoryFilter(sourceRecipes) {
-  const categories = [...new Set(sourceRecipes.map((recipe) => recipe.category))].sort();
+  const categories = [...new Set(sourceRecipes.map((recipe) => normalizeRecipeCategory(recipe.category)))].sort();
   categories.forEach((category) => {
     const option = document.createElement("option");
     option.value = category;
@@ -17075,6 +17246,7 @@ function applyRecipeEdits(recipe) {
   const presentedRecipe = {
     ...recipe,
     ...presentationFields,
+    category: normalizeRecipeCategory(presentationFields.category || recipe.category),
     title: clean(canonicalTitle) || recipe.title,
     description: clean(recipe.description) || clean(presentationFields.description),
     imageUrl: clean(recipe.imageUrl) || clean(presentationFields.imageUrl),
@@ -17099,6 +17271,7 @@ function applyRecipeEdits(recipe) {
   return {
     ...presentedRecipe,
     ...edits,
+    category: normalizeRecipeCategory(edits.category || presentedRecipe.category),
     title: clean(canonicalTitle) || clean(edits.title) || presentedRecipe.title,
     description: clean(edits.description) || presentedRecipe.description,
     imageUrl: clean(edits.imageUrl) || presentedRecipe.imageUrl,
@@ -17819,7 +17992,7 @@ function groupIngredientsForDisplay(sourceIngredients) {
 
 function isHiddenPricingIngredient(ingredient) {
   const normalized = clean(ingredient?.name).toLowerCase();
-  return getIngredientGroup(ingredient?.name) === "Other";
+  return isPricingPlaceholder(normalized) || getIngredientGroup(ingredient?.name) === "Other";
 }
 
 function getActiveRecipes() {
@@ -18386,9 +18559,15 @@ function isFoodDepartmentOrderedInventoryItem(name) {
   return normalizeIngredientAlias(name) === "Sour Mix";
 }
 
+function normalizeRecipeCategory(category) {
+  const value = clean(category);
+  if (/^tito['\u2019]?s(?:\s+(?:handmade\s+)?vodka)?$/i.test(value) || /^vodka$/i.test(value)) return "Vodka";
+  return value.replace("Tequilla", "Tequila") || "Other";
+}
+
 function inferCategory(title) {
   const match = title.match(/\(([^)]+)\)/);
-  if (match) return clean(match[1]).replace("Tequilla", "Tequila");
+  if (match) return normalizeRecipeCategory(match[1]);
   if (/margarita|marg|senorita/i.test(title)) return "Tequila";
   if (/martini|cran|lemonade|palmer|blue dot/i.test(title)) return "Vodka";
   if (/whiskey|jack|old fashioned|apple jack|smash|sour|on par tee/i.test(title)) return "Whiskey";

@@ -33,7 +33,7 @@ test("projects exact Proof bottle replacement needs from locked cocktail batches
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].projectedPrepUseOz, 540);
   assert.equal(candidates[0].projectedPrepUseUnits, 16);
-  assert.equal(candidates[0].replacementNeedUnits, 16);
+  assert.equal(candidates[0].replacementNeedUnits, 4);
   assert.equal(candidates[0].unitCost, 5);
   assert.equal(candidates[0].shelfStable, true);
 });
@@ -77,8 +77,7 @@ test("defers a sub-minimum Proof order when inventory covers prep even if prep w
   });
 
   assert.equal(context.requirement, "not-required");
-  assert.equal(context.candidates[0].projectedPrepUseUnits, 8);
-  assert.equal(context.candidates[0].replacementNeedUnits, 10);
+  assert.deepEqual(context.candidates, []);
 });
 
 test("uses the saved Monday count after current inventory fields are cleared", () => {
@@ -146,14 +145,15 @@ test("matches wall cocktail names through the existing recipe aliases", () => {
       packSize: 12,
       caseCost: 60,
       matchedSku: "PROOF-LIME-12",
-      onHandDisplay: "28",
+      onHandDisplay: "4",
       parDisplay: "40",
       vendorProduct: { vendor: "Proof", productName: "Lime Juice", bottleOz: 33.814 },
     }],
   });
 
-  assert.equal(context.requirement, "not-required");
+  assert.equal(context.requirement, "required");
   assert.equal(context.candidates[0].projectedPrepUseUnits, 8);
+  assert.equal(context.candidates[0].replacementNeedUnits, 4);
 });
 
 test("skips candidates with ambiguous identity or missing ordering data", () => {

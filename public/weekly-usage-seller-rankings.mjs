@@ -4,7 +4,7 @@ import {
 } from "./weekly-usage-performance.mjs";
 
 const RANKING_CATEGORIES = new Set(["all", "beer", "cocktail", "liquor"]);
-const RANKING_METRICS = new Set(["volume", "profit"]);
+const RANKING_METRICS = new Set(["volume", "profit", "margin"]);
 const RANKING_WALLS = new Set(["all", "patio", "main", "karaoke"]);
 
 export const WEEKLY_USAGE_SELLER_RANKING_DATA_BOUNDARY = Object.freeze({
@@ -159,7 +159,7 @@ function getDistinctSample(samples) {
   if (!samples.length) return null;
   const first = samples[0];
   return samples.every((sample) => (
-    sample.pouredOz === first.pouredOz && sample.value === first.value
+    sample.pouredOz === first.pouredOz && sample.value === first.value && sample.revenue === first.revenue
   )) ? first : null;
 }
 
@@ -186,13 +186,14 @@ function resolveGrossProfitPerOz(getGrossProfitPerOz, item, context) {
   return {
     rate: finiteNumber(objectResult ? objectResult.grossProfitPerOz : result),
     reason: clean(objectResult?.reason),
+    sellingPricePerOz: finiteNumber(objectResult?.sellingPricePerOz),
   };
 }
 
 function getItemHistoryByWeek(
   item,
   itemIndex,
-  { getFullOunces, getGrossProfitPerOz, metric },
+  { getFullOunces, getGrossProfitPerOz, getSellingPricePerOz, metric },
   quality,
 ) {
   const samplesByTime = new Map();
@@ -219,7 +220,8 @@ function getItemHistoryByWeek(
     if (!savedLabel || compareText(label, savedLabel) < 0) quality.labelsByTime.set(time, label);
 
     let value = pouredOz;
-    if (metric === "profit") {
+    let revenue = 0;
+    if (metric === "profit" || metric === "margin") {
       const resolvedRate = resolveGrossProfitPerOz(getGrossProfitPerOz, item, {
         entry,
         weekStartTime: time,
@@ -233,10 +235,25 @@ function getItemHistoryByWeek(
         return;
       }
       value = pouredOz * resolvedRate.rate;
+      if (metric === "margin") {
+        let sellingRate = null;
+        try {
+          const result = resolvedRate.sellingPricePerOz ?? getSellingPricePerOz(item, { entry, weekStartTime: time, weekLabel: label });
+          sellingRate = finiteNumber(result && typeof result === "object" ? result.sellingPricePerOz : result);
+        } catch { /* Missing pricing excludes the sample, rather than inventing a margin. */ }
+        if (!(sellingRate > 0)) {
+          quality.unavailableProfitSampleCount += 1;
+          quality.unavailableProfitItems.add(getUnavailableItemKey(item, itemIndex));
+          addUnavailableReason(quality, "Profit margin requires a verified selling price on the same basis as the profit rate.");
+          unavailableTimes.add(time);
+          return;
+        }
+        revenue = pouredOz * sellingRate;
+      }
     }
 
     const samples = samplesByTime.get(time) || [];
-    samples.push({ pouredOz, value });
+    samples.push({ pouredOz, value, revenue });
     samplesByTime.set(time, samples);
   });
 
@@ -309,10 +326,11 @@ function buildProducts(items, options, quality) {
           product.unavailableTimes.add(time);
           return;
         }
-        const current = productValuesByTime.get(time) || { pouredOz: 0, value: 0 };
+        const current = productValuesByTime.get(time) || { pouredOz: 0, value: 0, revenue: 0 };
         productValuesByTime.set(time, {
           pouredOz: current.pouredOz + sample.pouredOz,
           value: current.value + sample.value,
+          revenue: current.revenue + sample.revenue,
         });
       });
     });
@@ -360,7 +378,9 @@ function buildWeeklyTrendSeries(product, periods, metric) {
   const points = orderedPeriods.map((period) => {
     const sample = product.valuesByTime.get(period.startTime);
     if (sample) {
-      const value = round(sample.value);
+      const value = metric === "margin"
+        ? sample.revenue > 0 ? round(sample.value / sample.revenue * 100) : null
+        : round(sample.value);
       const pouredOz = round(sample.pouredOz);
       return {
         weekLabel: period.label,
@@ -369,7 +389,7 @@ function buildWeeklyTrendSeries(product, periods, metric) {
         value,
         pouredOz,
         volumeOz: pouredOz,
-        grossProfit: metric === "profit" ? value : null,
+        grossProfit: metric === "profit" || metric === "margin" ? round(sample.value) : null,
       };
     }
 
@@ -391,7 +411,7 @@ function buildWeeklyTrendSeries(product, periods, metric) {
   return {
     seriesId: product.id,
     metric,
-    unit: metric === "profit" ? "USD" : "oz",
+    unit: metric === "margin" ? "%" : metric === "profit" ? "USD" : "oz",
     order: "oldest-to-newest",
     wall: product.wall,
     wallLabel: getWallLabel(product.wall),
@@ -421,6 +441,8 @@ function buildWindow(products, periods, { metric, topLimit, bottomLimit }) {
 
     const totalPouredOz = samples.reduce((total, sample) => total + sample.pouredOz, 0);
     const totalValue = samples.reduce((total, sample) => total + sample.value, 0);
+    const totalRevenue = samples.reduce((total, sample) => total + sample.revenue, 0);
+    if (metric === "margin" && !(totalRevenue > 0)) return null;
     const row = {
       id: product.id,
       name: product.name,
@@ -430,7 +452,7 @@ function buildWindow(products, periods, { metric, topLimit, bottomLimit }) {
       tapNumbers: product.tapNumbers,
       walls: product.walls,
       metric,
-      averageWeeklyValue: round(totalValue / samples.length),
+      averageWeeklyValue: round(metric === "margin" ? totalValue / totalRevenue * 100 : totalValue / samples.length),
       totalValue: round(totalValue),
       averageWeeklyPouredOz: round(totalPouredOz / samples.length),
       totalPouredOz: round(totalPouredOz),
@@ -439,7 +461,11 @@ function buildWindow(products, periods, { metric, topLimit, bottomLimit }) {
       windowWeekCount: periods.length,
       weeklyTrend: buildWeeklyTrendSeries(product, periods, metric),
     };
-    if (metric === "profit") {
+    if (metric === "margin") {
+      row.averageProfitMargin = row.averageWeeklyValue;
+      row.totalGrossProfit = round(totalValue);
+      row.totalProjectedSales = round(totalRevenue);
+    } else if (metric === "profit") {
       row.averageWeeklyGrossProfit = row.averageWeeklyValue;
       row.totalGrossProfit = row.totalValue;
     } else {
@@ -485,14 +511,16 @@ function buildMetricMetadata(metric, quality) {
     .sort((left, right) => right[1] - left[1] || compareText(left[0], right[0]))
     .map(([reason, count]) => ({ reason, count }));
   return {
-    key: "profit",
-    label: "Estimated profit at today's rates",
-    unit: "USD",
-    averageField: "averageWeeklyGrossProfit",
+    key: metric,
+    label: metric === "margin" ? "Profit margin at today's rates" : "Estimated profit at today's rates",
+    unit: metric === "margin" ? "%" : "USD",
+    averageField: metric === "margin" ? "averageProfitMargin" : "averageWeeklyGrossProfit",
     totalField: "totalGrossProfit",
     requiresExactPmbVolume: false,
     requiresVerifiedPriceAndCost: true,
-    calculation: "Saved poured ounces × caller-verified gross profit per ounce, resolved per tap and week; older keg history uses keg-size conversions.",
+    calculation: metric === "margin"
+      ? "Total projected gross profit divided by total projected sales, multiplied by 100; revenue-weighted across recorded weeks using verified rates."
+      : "Saved poured ounces × caller-verified gross profit per ounce, resolved per tap and week; older keg history uses keg-size conversions.",
     historicalRatesInferred: false,
     unavailableItemCount: quality.unavailableProfitItems.size,
     unavailableSampleCount: quality.unavailableProfitSampleCount,
@@ -524,6 +552,7 @@ export function buildWeeklyUsageSellerRankings(
     metric = "volume",
     getFullOunces = () => 0,
     getGrossProfitPerOz = () => null,
+    getSellingPricePerOz = () => null,
     isBottomEligible = () => true,
     recentWeekLimit = 6,
     topLimit = 5,
@@ -565,6 +594,7 @@ export function buildWeeklyUsageSellerRankings(
   const products = buildProducts(selectedSourceItems, {
     getFullOunces,
     getGrossProfitPerOz,
+    getSellingPricePerOz,
     isBottomEligible: resolveBottomEligibility,
     metric: normalizedMetric,
   }, quality);

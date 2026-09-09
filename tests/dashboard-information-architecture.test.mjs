@@ -17,7 +17,8 @@ test("the owner dashboard is the initial page and recipes appear later in naviga
 
   assert.ok(dashboardTab >= 0);
   assert.ok(dashboardTab < operationsTab);
-  assert.ok(operationsTab < searchTab);
+  assert.equal(searchTab, -1);
+  assert.match(pageSource, /className="header-search dashboard-owner-only"/);
   assert.match(pageSource, /className="dashboard-menu dashboard-owner-only"/);
   assert.match(pageSource, /data-menu-tab="weekly-usage"/);
   assert.match(pageSource, /data-menu-tab="performance"/);
@@ -39,14 +40,16 @@ test("the owner dashboard is the initial page and recipes appear later in naviga
   assert.doesNotMatch(dashboardSource, /data-order-draft-export/);
 });
 
-test("Performance keeps shot filters compatible and top and bottom lists distinct", () => {
+test("Performance keeps shot filters compatible and preserves the requested ranking size", () => {
   assert.match(dashboardSource, /function keepSellerRankingFiltersCompatible/);
   assert.match(dashboardSource, /sellerRankingCategory === "liquor" && sellerRankingWall === "main"/);
   assert.match(dashboardSource, /sellerRankingWall = "patio"/);
-  assert.match(dashboardSource, /function getDisjointSellerRankingPeriod/);
+  assert.match(dashboardSource, /function getSellerRankingPeriod/);
   assert.match(dashboardSource, /topLimit: 25/);
   assert.match(dashboardSource, /bottomLimit: 25/);
-  assert.match(dashboardSource, /!topIdentities\.has\(getSellerRankingRowIdentity\(row\)\)/);
+  assert.match(dashboardSource, /const bottom = \(period\?\.bottom \|\| \[\]\)\.slice\(0, listSize\)/);
+  assert.match(dashboardSource, /All walls/);
+  assert.match(dashboardSource, /option value="margin"/);
 });
 
 test("current and old recipes share one Recipes workspace", () => {
@@ -384,7 +387,7 @@ test("the initial Dashboard uses a light visual beverage pulse and change-only O
   assert.match(pulseSource, /Sales mix/);
   assert.match(pulseSource, /const venueSalesMix = buildLastWeekProjectedSalesMix\(/);
   assert.match(pulseSource, /const selectedWallSalesMix = buildLastWeekProjectedSalesMix\(/);
-  assert.match(pulseSource, /const projectedSalesMix = \{ \.\.\.selectedWallSalesMix, walls: venueSalesMix\.walls \}/);
+  assert.match(pulseSource, /const projectedSalesMix = \{ \.\.\.selectedWallSalesMix, walls: venueSalesMix\.walls, venueUnpricedTapCount: venueSalesMix\.unpricedTapCount \}/);
   assert.doesNotMatch(pulseSource, /PMB ounces × saved\/current prices/);
   assert.match(pulseSource, /dashboard-pulse-bar/);
   assert.match(pulseSource, /data-seller-ranking-wall/);

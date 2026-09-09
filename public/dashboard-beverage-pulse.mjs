@@ -267,8 +267,11 @@ export function buildLastWeekProjectedSalesMix(
     period = 1,
     getFullOunces = () => 0,
     getSellingPricePerOz = () => null,
+    metric = "sales",
+    getGrossProfitPerOz = () => null,
   } = {},
 ) {
+  const isProfit = metric === "profit";
   const sourceItems = Array.isArray(items) ? items.filter(Boolean) : [];
   const labelsByTime = new Map();
   sourceItems.forEach((item) => {
@@ -335,20 +338,34 @@ export function buildLastWeekProjectedSalesMix(
         weekStartTime: latestTime,
         entry: entries[0] || null,
       };
-      const sellingPricePerOz = resolveSellingPricePerOz(getSellingPricePerOz, item, priceContext);
-      if (wallOrder.includes(itemWall) && sellingPricePerOz > 0) {
+      let sellingPricePerOz = null;
+    if (isProfit) {
+      try {
+        const result = getGrossProfitPerOz(item, priceContext);
+        const value = result && typeof result === "object" ? result.grossProfitPerOz : result;
+        if (value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value))) {
+          sellingPricePerOz = Number(value);
+        }
+      } catch {
+        // Missing or unverifiable costs stay unknown, never zero-cost profit.
+      }
+    } else {
+      sellingPricePerOz = resolveSellingPricePerOz(getSellingPricePerOz, item, priceContext);
+    }
+    const hasRate = isProfit ? sellingPricePerOz !== null : sellingPricePerOz > 0;
+      if (wallOrder.includes(itemWall) && hasRate) {
         wallSales[itemWall] += pouredOz * sellingPricePerOz;
       }
       if (!inSelectedWall) return;
       capturedTapCount += 1;
-      if (!(sellingPricePerOz > 0)) return;
+      if (!hasRate) return;
       pricedTapCount += 1;
       if (priceContext.estimated === true) estimatedTapCount += 1;
       categorySales[category] += pouredOz * sellingPricePerOz;
     });
 
   const projectedSales = round(CATEGORY_ORDER.reduce((total, category) => total + categorySales[category], 0));
-  const percentages = allocateWholePercentages(CATEGORY_ORDER.map((category) => categorySales[category]));
+  const percentages = allocateWholePercentages(CATEGORY_ORDER.map((category) => Math.max(0, categorySales[category])));
   const categories = CATEGORY_ORDER.map((category, index) => ({
     category,
     label: CATEGORY_LABELS[category],
@@ -358,7 +375,7 @@ export function buildLastWeekProjectedSalesMix(
     (selectedWall !== "main" || category !== "liquor")
     && (selectedWall !== "patio" || category === "liquor")
   ));
-  const wallPercentages = allocateWholePercentages(wallOrder.map((wallKey) => wallSales[wallKey]));
+  const wallPercentages = allocateWholePercentages(wallOrder.map((wallKey) => Math.max(0, wallSales[wallKey])));
   const walls = wallOrder.map((wallKey, index) => ({
     wall: wallKey,
     label: wallLabels[wallKey],
@@ -367,7 +384,10 @@ export function buildLastWeekProjectedSalesMix(
   }));
 
   return {
-    available: projectedSales > 0,
+    available: isProfit ? pricedTapCount > 0 : projectedSales > 0,
+    metric: isProfit ? "profit" : "sales",
+    projectedProfit: isProfit ? projectedSales : null,
+    hasLosses: isProfit && Object.values(categorySales).some((value) => value < 0),
     wall: clean(wall).toLowerCase(),
     weekLabel,
     weekStartTime: latestTime,

@@ -124,11 +124,51 @@ export default function DashboardPage() {
             <a className="logout-link" href="/api/logout" aria-label={`Log out of the ${sessionRole} dashboard`}>Log out</a>
           </div>
         </div>
+        <section className="header-search dashboard-owner-only" aria-label="Dashboard search">
+          <div className="dashboard-data-search">
+            <form className="dashboard-data-search__form" id="dashboard-data-search-form" role="search">
+              <label className="sr-only" htmlFor="dashboard-data-search-input">Search dashboard data</label>
+              <div>
+                <input
+                  id="dashboard-data-search-input"
+                  placeholder="Search dashboard data or ask a question..."
+                  aria-controls="header-search-results"
+                  aria-expanded="false"
+                  type="search"
+                  autoComplete="off"
+                />
+                <button className="primary-button" type="submit">Search</button>
+              </div>
+            </form>
+            <div id="header-search-results" className="header-search-results" hidden>
+              <button id="header-search-close" className="mini-button header-search-close" type="button">Close results</button>
+            <p className="dashboard-data-search__feedback" id="dashboard-data-search-feedback" aria-live="polite"></p>
+            <div className="dashboard-data-search__results" id="dashboard-data-search-results"></div>
+            <details className="what-if-planner">
+              <summary>What-if planning</summary>
+              <form className="what-if-planner__form" id="what-if-planner-form">
+                <label htmlFor="what-if-planner-input">What should we preview?</label>
+                <div>
+                  <input
+                    id="what-if-planner-input"
+                    type="search"
+                    autoComplete="off"
+                    placeholder="What if pours are 20% higher next week?"
+                  />
+                  <button className="primary-button" type="submit">Preview</button>
+                </div>
+              </form>
+              <p className="what-if-planner__feedback" id="what-if-planner-feedback" aria-live="polite"></p>
+              <div className="what-if-planner__results" id="what-if-planner-results"></div>
+            </details>
+            </div>
+          </div>
+        </section>
+
         <div className="topbar-actions">
           <div className="top-actions dashboard-owner-only" aria-label="Dashboard sections">
             <button className="tab-button is-active" id="dashboard-tab" data-tab="dashboard" type="button">Home</button>
             <button className="tab-button" id="operations-tab" data-tab="operations" type="button">Beverage Ops</button>
-            <button className="tab-button" id="search-tab" data-tab="search" type="button">Search</button>
           </div>
           <details className="dashboard-menu dashboard-owner-only">
             <summary className="dashboard-menu-trigger" aria-label="Menu">
@@ -174,40 +214,6 @@ export default function DashboardPage() {
           <section className="dashboard-beverage-pulse" id="dashboard-guest-favorites" aria-label="Guest favorites"></section>
         </section>
 
-        <section className="panel" id="search-panel" role="tabpanel" aria-labelledby="search-tab">
-          <div className="dashboard-data-search">
-            <form className="dashboard-data-search__form" id="dashboard-data-search-form">
-              <label htmlFor="dashboard-data-search-input">What do you want to know?</label>
-              <div>
-                <input
-                  id="dashboard-data-search-input"
-                  type="search"
-                  autoComplete="off"
-                />
-                <button className="primary-button" type="submit">Search</button>
-              </div>
-            </form>
-            <p className="dashboard-data-search__feedback" id="dashboard-data-search-feedback" aria-live="polite"></p>
-            <div className="dashboard-data-search__results" id="dashboard-data-search-results"></div>
-            <details className="what-if-planner">
-              <summary>What-if planning</summary>
-              <form className="what-if-planner__form" id="what-if-planner-form">
-                <label htmlFor="what-if-planner-input">What should we preview?</label>
-                <div>
-                  <input
-                    id="what-if-planner-input"
-                    type="search"
-                    autoComplete="off"
-                    placeholder="What if pours are 20% higher next week?"
-                  />
-                  <button className="primary-button" type="submit">Preview</button>
-                </div>
-              </form>
-              <p className="what-if-planner__feedback" id="what-if-planner-feedback" aria-live="polite"></p>
-              <div className="what-if-planner__results" id="what-if-planner-results"></div>
-            </details>
-          </div>
-        </section>
 
         <section className="panel" id="performance-panel" role="tabpanel" aria-label="Performance">
           <div id="search-performance-view">
@@ -335,25 +341,6 @@ export default function DashboardPage() {
                   <tbody id="pricing-table"></tbody>
                 </table>
               </div>
-            </div>
-          </details>
-
-          <details className="shot-pricing">
-            <summary className="shot-pricing__header"><span id="shot-pricing-title">Shot pricing</span></summary>
-            <div className="shot-pricing__summary" id="shot-pricing-summary" aria-live="polite"></div>
-            <div className="pricing-table-wrap">
-              <table className="pricing-table shot-pricing__table">
-                <thead>
-                  <tr>
-                    <th>Liquor</th>
-                    <th>Current portions</th>
-                    <th>New portion prices</th>
-                    <th>Status</th>
-                    <th>Owner action</th>
-                  </tr>
-                </thead>
-                <tbody id="shot-pricing-table"></tbody>
-              </table>
             </div>
           </details>
 
@@ -666,7 +653,6 @@ export default function DashboardPage() {
               <span>Find pricing item</span>
               <input id="ingredient-search" type="search" placeholder="Search ingredient or keg pricing..." />
             </label>
-            <button className="ghost-button" id="clear-prices" type="button">Clear bottle overrides</button>
           </div>
 
           <div className="ingredient-layout">
