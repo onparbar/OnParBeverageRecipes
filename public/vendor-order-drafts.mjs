@@ -95,6 +95,13 @@ export function normalizeVendorOrderPolicy(policy = {}) {
     .filter((item) => item.id && item.name && item.vendor && item.quantity > 0);
   return {
     version: 2,
+    cutoffConfirmations: Object.fromEntries(Object.entries(policy?.cutoffConfirmations || {})
+      .filter(([vendor, entry]) => CONFIGURED_VENDORS.has(vendor) && entry && clean(entry.generatedAt) && clean(entry.confirmedBy) && clean(entry.confirmedAt))
+      .map(([vendor, entry]) => [vendor, {
+        generatedAt: clean(entry.generatedAt).slice(0, 80),
+        confirmedBy: clean(entry.confirmedBy).slice(0, 120),
+        confirmedAt: clean(entry.confirmedAt).slice(0, 80),
+      }])),
     proofMinimum: proofMinimum !== null && proofMinimum >= 0 ? proofMinimum : 350,
     proofPrepRequirement: PROOF_PREP_REQUIREMENTS.has(requirement) ? requirement : "unknown",
     proofMinimumCandidates,
@@ -164,7 +171,7 @@ export function buildUnifiedVendorOrderModel(plan, options = {}) {
     plan,
     policy.cocktailIngredientMinimumOrders,
   );
-  return buildVendorOrderDrafts(ingredientSafePlan, {
+  const model = buildVendorOrderDrafts(ingredientSafePlan, {
     ...draftOptions,
     generatedAt: clean(draftOptions.generatedAt || snapshot?.generatedAt),
     sourceDate: clean(draftOptions.sourceDate || snapshot?.publishedAt),
@@ -172,6 +179,14 @@ export function buildUnifiedVendorOrderModel(plan, options = {}) {
     proofPrepRequirement: policy.proofPrepRequirement,
     proofMinimumCandidates: policy.proofMinimumCandidates,
   });
+  model.drafts.forEach((draft) => {
+    const confirmation = policy.cutoffConfirmations[draft.vendor];
+    if (!confirmation || confirmation.generatedAt !== draft.generatedAt) return;
+    draft.warnings = draft.warnings.filter((entry) => entry.code !== "ORDER_CUTOFF_PASSED");
+    draft.cutoffConfirmation = confirmation;
+    draft.status = draft.canApprove ? (draft.warnings.length ? "review" : "ready") : "blocked";
+  });
+  return model;
 }
 
 function slug(value) {

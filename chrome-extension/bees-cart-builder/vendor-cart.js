@@ -328,11 +328,14 @@ async function waitForAddConfirmation(previousCart, timeout = 8000) {
 }
 
 function ohlqCatalogRows() {
-  const productCards = [...document.querySelectorAll(".product-item--minimal-previously-purchased")];
-  const rows = productCards.length ? productCards : [...document.querySelectorAll("tr")];
+  const rows = [...document.querySelectorAll(".product-item--minimal-previously-purchased, tr")];
   return rows
-    .map((row) => ({ row, quantity: quantityControl(row), text: clean(row.innerText) }))
-    .filter((entry) => entry.quantity && /(?:^|\s)[0-9]{4}[a-z](?:\s|$)/i.test(entry.text));
+    .map((row) => {
+      const skuLink = [...row.querySelectorAll('a[href*="product-detail/"]')]
+        .find((link) => /^[0-9]{4}[a-z]$/i.test(clean(link.textContent)));
+      return { row, quantity: quantityControl(row), text: clean(row.innerText), sku: clean(skuLink?.textContent).toUpperCase() };
+    })
+    .filter((entry) => entry.quantity && (entry.sku || /(?:^|\s)[0-9]{4}[a-z](?:\s|$)/i.test(entry.text)));
 }
 
 function exactOhlqRows(line) {
@@ -340,7 +343,7 @@ function exactOhlqRows(line) {
   if (!/^[A-Z0-9]+$/.test(sku)) return [];
   const escapedSku = sku.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(`(?:^|\\s)${escapedSku}(?:\\s|$)`, "i");
-  return ohlqCatalogRows().filter((entry) => pattern.test(entry.text));
+  return ohlqCatalogRows().filter((entry) => entry.sku ? entry.sku === sku : pattern.test(entry.text));
 }
 
 function ohlqProductId(line) {
@@ -488,7 +491,7 @@ async function runOhlqCatalog(state) {
   }
 
   if (!await waitForOhlqCatalog()) {
-    throw new Error("OHLQ did not load the purchased-product catalog.");
+    throw new Error("No orderable OHLQ product rows were detected. If the catalog is visible, reload the On Par Vendor Cart Builder extension and refresh this page before retrying.");
   }
 
   const staged = [];
