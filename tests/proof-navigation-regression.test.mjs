@@ -68,3 +68,65 @@ test("Proof waits for the requested product despite unrelated Add buttons", asyn
   assert.equal(elapsed, 30000);
   assert.equal(await context.waitForResults(90000, { vendorSku: "38000" }, { status: "cancelled" }), false);
 });
+
+test("Proof stops on an uncertain addition without navigating to another item", async () => {
+  const state = order("search-results");
+  const h = harness(state);
+  let finished;
+  h.context.addExactMatch = async () => ({ lineIndex: 0, status: "unconfirmed" });
+  h.context.finish = async (_, status) => { finished = status; };
+  await h.context.start();
+  assert.equal(finished, "needs_review");
+  assert.deepEqual(h.destinations, []);
+  assert.equal(state.searchCursor, 0);
+  assert.equal(state.results[0].status, "unconfirmed");
+});
+
+test("Proof never repeats an addition interrupted by a page reload", async () => {
+  const state = order("search-results");
+  state.pendingAdd = { lineIndex: 0, name: "Bitters" };
+  const h = harness(state);
+  let finished;
+  h.context.finish = async (_, status) => { finished = status; };
+  await h.context.start();
+  assert.equal(finished, "needs_review");
+  assert.deepEqual(h.added, []);
+  assert.deepEqual(h.destinations, []);
+  assert.equal(state.results[0].status, "unconfirmed");
+});
+
+const confirmationSource = source.slice(source.indexOf("function proofCartQuantity("), source.indexOf("async function waitForAddConfirmation("));
+
+function confirmationHarness(textAt) {
+  let elapsed = 0;
+  const context = {
+    clean: (value) => String(value ?? "").replace(/\s+/g, " ").trim(),
+    exactMatches: () => [{ root: { innerText: textAt(elapsed) } }],
+    Date: { now: () => elapsed },
+    delay: async (ms) => { elapsed += ms; },
+  };
+  runInNewContext(confirmationSource, context);
+  return context;
+}
+
+test("Proof confirms a delayed item-specific cart increase without a toast or header change", async () => {
+  const h = confirmationHarness((elapsed) => elapsed >= 12000 ? "Bitters 1 Case In Cart" : "Bitters Add to Cart");
+  const line = { quantityKind: "cases", quantity: 1 };
+  const before = h.proofCartQuantity(line);
+  assert.equal(before, 0);
+  assert.equal(await h.waitForProofAddConfirmation(line, before), true);
+});
+
+test("Proof does not count an unchanged existing cart badge as a successful addition", async () => {
+  const h = confirmationHarness(() => "Bitters 1 Case In Cart");
+  const line = { quantityKind: "cases", quantity: 1 };
+  assert.equal(await h.waitForProofAddConfirmation(line, h.proofCartQuantity(line)), false);
+});
+
+test("Proof distinguishes cases and bottles and rejects unknown cart badge wording", () => {
+  const h = confirmationHarness(() => "Bitters 2 Cases In Cart 3 Bottles In Cart");
+  assert.equal(h.proofCartQuantity({ quantityKind: "cases" }), 2);
+  assert.equal(h.proofCartQuantity({ quantityKind: "units" }), 3);
+  const unknown = confirmationHarness(() => "Bitters In Cart");
+  assert.equal(unknown.proofCartQuantity({ quantityKind: "cases" }), null);
+});

@@ -323,6 +323,32 @@ function cartLinkSnapshot() {
     .join("|");
 }
 
+function proofCartQuantity(line) {
+  const matches = exactMatches(line);
+  if (matches.length !== 1) return null;
+  const text = clean(matches[0].root.innerText);
+  const quantities = { cases: 0, units: 0 };
+  const badges = [...text.matchAll(/(\d+)\s*(cases?|units?|bottles?)\s+in\s+cart\b/gi)];
+  // Unknown wording must not be interpreted as an empty cart.
+  if (!badges.length && /in\s+cart/i.test(text)) return null;
+  for (const badge of badges) {
+    const kind = /^case/i.test(badge[2]) ? "cases" : "units";
+    quantities[kind] += Number(badge[1]);
+  }
+  return quantities[line.quantityKind === "cases" ? "cases" : "units"];
+}
+
+async function waitForProofAddConfirmation(line, previousQuantity, timeout = 30000) {
+  const started = Date.now();
+  const expected = previousQuantity + Number(line.quantity);
+  while (Date.now() - started < timeout) {
+    const current = proofCartQuantity(line);
+    if (current !== null && current === expected) return true;
+    await delay(250);
+  }
+  return false;
+}
+
 async function waitForAddConfirmation(previousCart, timeout = 8000) {
   const started = Date.now();
   while (Date.now() - started < timeout) {
@@ -615,9 +641,23 @@ async function addExactMatch(state, lineIndex) {
     return { lineIndex, name: line.name, status: "unmatched", message: "The vendor did not enable Add to Cart after the requested quantity was entered. Review the quantity and availability." };
   }
   const previousCart = cartLinkSnapshot();
+  const isProof = state.vendor === "proof";
+  const previousProofQuantity = isProof ? proofCartQuantity(line) : null;
+  if (isProof) {
+    if (previousProofQuantity === null) {
+      return { lineIndex, name: line.name, status: "unmatched", message: "Could not read this product's current cart quantity safely. Nothing was added for this item." };
+    }
+    // A page reload after clicking must not silently repeat the addition.
+    state.pendingAdd = { lineIndex, name: line.name };
+    await saveState(state);
+    renderOverlay(state, `Adding ${line.name}; waiting for Proof to confirm its cart quantity...`);
+  }
   match.button.click();
-  if (!await waitForAddConfirmation(previousCart)) {
-    return { lineIndex, name: line.name, status: "unmatched", message: "The vendor did not confirm that this item was added." };
+  const confirmed = isProof
+    ? await waitForProofAddConfirmation(line, previousProofQuantity)
+    : await waitForAddConfirmation(previousCart);
+  if (!confirmed) {
+    return { lineIndex, name: line.name, status: isProof ? "unconfirmed" : "unmatched", message: isProof ? "Proof may have added this item, but its cart quantity could not be confirmed. Check the cart before retrying; no further items were attempted." : "The vendor did not confirm that this item was added." };
   }
   await delay(250);
   const quantityLabel = line.quantityKind === "cases"
@@ -863,6 +903,13 @@ async function start() {
   state.searchCursor = Number.isInteger(state.searchCursor) ? state.searchCursor : 0;
   await saveState(state);
   try {
+    if (vendor === "proof" && state.pendingAdd) {
+      if (!state.results.some((result) => result.lineIndex === state.pendingAdd.lineIndex)) {
+        state.results.push({ ...state.pendingAdd, status: "unconfirmed", message: "Proof navigated during an add. Check this item's cart quantity before retrying; it may already be in the cart." });
+      }
+      await finish(state, "needs_review", "Cart confirmation was interrupted. Check the cart before retrying; no further items were attempted.");
+      return;
+    }
     if (vendor === "ohlq") {
       await runOhlqCatalog(state);
       return;
@@ -894,7 +941,15 @@ async function start() {
         await saveState(state);
         continue;
       }
-      state.results.push(await addExactMatch(state, lineIndex));
+      const addResult = await addExactMatch(state, lineIndex);
+      if (state.status === "cancelled") return;
+      state.results.push(addResult);
+      state.pendingAdd = null;
+      await saveState(state);
+      if (addResult.status === "unconfirmed") {
+        await finish(state, "needs_review", "Stopped: the last item may already be in your cart. Check its quantity before retrying. Nothing was submitted.");
+        return;
+      }
       state.searchCursor += 1;
       state.phase = "start";
       await saveState(state);
