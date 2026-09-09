@@ -95,7 +95,34 @@ async function broadcastResult(result) {
   )));
 }
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message?.type === "CHECK_PROOF_CART") {
+    return (async () => {
+      if (!sender?.tab?.id || !/^https:\/\/shop\.sgproof\.com\//i.test(sender.url || "")) {
+        throw new Error("Cart checks must come from the Proof cart builder.");
+      }
+      const stored = await temporaryStorage.get(ORDER_KEY);
+      const state = stored[ORDER_KEY];
+      if (!state || state.vendor !== "proof" || state.requestId !== message.requestId || !["pending", "working"].includes(state.status)) {
+        throw new Error("This Proof cart request is no longer active.");
+      }
+      // This tab only reads quantities. It never runs the cart-building worker.
+      const tab = await chrome.tabs.create({ url: "https://shop.sgproof.com/sgws/en/usd/cart#onpar-cart-check", active: false });
+      try {
+        await waitForTabComplete(tab.id, 90000);
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          try {
+            return await chrome.tabs.sendMessage(tab.id, { type: "READ_PROOF_CART", state });
+          } catch (error) {
+            if (attempt === 9) throw error;
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+        }
+      } finally {
+        await chrome.tabs.remove(tab.id).catch(() => {});
+      }
+    })().catch((error) => ({ ok: false, message: error.message }));
+  }
   if (message?.type === "START_VENDOR_CART") {
     return (async () => {
       const config = VENDORS[message.payload?.vendor];

@@ -164,7 +164,7 @@ export async function POST(request) {
     } else {
       saved = await persist();
     }
-    if (["create-draft", "approve-draft", "review-and-approve", "record-handoff", "set-ordered", "set-order-adjustment", "set-order-adjustments", "remove-order-adjustment"].includes(body.action)) {
+    if (["reopen-draft", "create-draft", "approve-draft", "review-and-approve", "record-handoff", "set-ordered", "set-order-adjustment", "set-order-adjustments", "remove-order-adjustment"].includes(body.action)) {
       const trackedVendor = String(
         body.vendor
         || priorTracking?.vendors?.find((vendor) => vendor.id === body.vendorId)?.vendor
@@ -176,6 +176,8 @@ export async function POST(request) {
           ? "adjusted vendor order"
           : body.action === "remove-order-adjustment"
             ? "removed vendor order adjustment"
+        : body.action === "reopen-draft"
+          ? "reopened vendor draft"
         : body.action === "create-draft"
           ? "created vendor draft"
           : body.action === "record-handoff"

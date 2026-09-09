@@ -119,3 +119,31 @@ test("rehearsal copy remains local and does not record a live handoff", async ()
 test("vendor order controller fails closed without a document surface", () => {
   assert.equal(bindVendorOrderController({ documentRef: null }), false);
 });
+
+test("reopening sends the correct draft and quantity shortcut selects a real option", async () => {
+  const reopen = new FakeButton({ orderDraftActor: "Sam" });
+  const edit = new FakeButton();
+  const form = new FakeButton({ vendorOrderDraft: "Proof", vendorOrderDraftId: "draft-proof" });
+  form.querySelector = (selector) => ({ "[data-order-draft-reopen]": reopen, "[data-order-draft-edit-quantities]": edit })[selector] || null;
+  form.querySelectorAll = () => [];
+  const action = new FakeButton();
+  action.value = "remove";
+  const vendor = new FakeButton();
+  const option = { value: "lime", dataset: { orderAdjustmentVendor: "Proof", orderAdjustmentCurrentQuantity: "1" } };
+  const product = new FakeButton();
+  product.focus = () => {};
+  product.options = [option];
+  product.selectedOptions = [option];
+  const panel = { open: false, querySelector: (selector) => ({ "[data-order-adjustment-action]": action, "[data-order-adjustment-vendor-filter]": vendor, "[data-order-adjustment-product]": product })[selector] || null, querySelectorAll: () => [] };
+  const calls = [];
+  bindVendorOrderController({
+    documentRef: { querySelector: () => panel, querySelectorAll: (selector) => selector === "[data-vendor-order-draft]" ? [form] : [] },
+    saveVendorOrderDraftAction: async (payload) => calls.push(payload),
+  });
+  await reopen.dispatch("click");
+  assert.deepEqual(calls, [{ action: "reopen-draft", vendor: "Proof", draftId: "draft-proof", adjustedBy: "Sam" }]);
+  await edit.dispatch("click");
+  assert.equal(action.value, "add");
+  assert.equal(vendor.value, "Proof");
+  assert.equal(panel.open, true);
+});

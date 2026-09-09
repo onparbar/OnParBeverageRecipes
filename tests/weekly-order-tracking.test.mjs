@@ -11,6 +11,41 @@ import {
 const generatedAt = "2026-08-10T14:00:00.000Z";
 const clock = () => new Date("2026-08-13T16:30:00.000Z");
 
+function approvedFixture() {
+  const now = () => new Date("2026-08-10T15:00:00.000Z");
+  let state = recommendations();
+  state.items = [ { ...state.items[0], id: "bud-light", vendorSku: "HD-BUD-1", vendorProductName: "Bud Light Half Barrel" } ];
+  state.weeklyPlanSnapshot = createWeeklyPlanSnapshot({ generatedAt, recommendations: state.items, publishedAt: generatedAt });
+  state = applyWeeklyOrderTrackingUpdate(state, { action: "review-and-approve", generatedAt, vendor: "Heidelberg", approvedBy: "Sam", confirmed: true }, { role: "owner", now });
+  return { state, now, draft: buildWeeklyOrderTracking(state, now()).drafts[0] };
+}
+
+test("reopen invalidates approval and handoff while preserving the plan and approval history", () => {
+  let { state, now, draft } = approvedFixture();
+  state = applyWeeklyOrderTrackingUpdate(state, { action: "record-handoff", generatedAt, vendor: draft.vendor, draftId: draft.id, event: "opened_vendor" }, { role: "owner", now });
+  const snapshot = JSON.stringify(state.weeklyPlanSnapshot);
+  const reopened = applyWeeklyOrderTrackingUpdate(state, { action: "reopen-draft", generatedAt, vendor: draft.vendor, draftId: draft.id, adjustedBy: "Sam" }, { role: "owner", now });
+  const result = buildWeeklyOrderTracking(reopened, now()).drafts[0];
+  assert.equal(result.status, "ready_for_review");
+  assert.equal(result.approvedAt, undefined);
+  assert.equal(result.openedAt, undefined);
+  assert.equal(result.reopenHistory[0].approvedBy, "Sam");
+  assert.equal(JSON.stringify(reopened.weeklyPlanSnapshot), snapshot);
+  assert.throws(() => applyWeeklyOrderTrackingUpdate(reopened, { action: "record-handoff", generatedAt, vendor: draft.vendor, draftId: draft.id, event: "opened_vendor" }, { role: "owner", now }), (error) => error.code === "ORDER_DRAFT_NOT_APPROVED");
+  const reapproved = applyWeeklyOrderTrackingUpdate(reopened, { action: "review-and-approve", generatedAt, vendor: draft.vendor, approvedBy: "Sam", confirmed: true }, { role: "owner", now });
+  assert.equal(buildWeeklyOrderTracking(reapproved, now()).drafts[0].status, "reviewed");
+});
+
+test("reopening rejects staff, stale plans, and orders already placed", () => {
+  const { state, now, draft } = approvedFixture();
+  const payload = { action: "reopen-draft", generatedAt, vendor: draft.vendor, draftId: draft.id, adjustedBy: "Sam" };
+  assert.throws(() => applyWeeklyOrderTrackingUpdate(state, payload, { role: "employee", now }), (error) => error.code === "OWNER_ORDER_DRAFT_REQUIRED");
+  assert.throws(() => applyWeeklyOrderTrackingUpdate(state, { ...payload, generatedAt: "2026-08-03T14:00:00.000Z" }, { role: "owner", now }), (error) => error.code === "WEEKLY_ORDER_PLAN_CHANGED");
+  const vendor = buildWeeklyOrderTracking(state, now()).vendors[0];
+  const placed = applyWeeklyOrderTrackingUpdate(state, { action: "set-ordered", generatedAt, vendorId: vendor.id, ordered: true, orderedBy: "Sam" }, { role: "owner", now });
+  assert.throws(() => applyWeeklyOrderTrackingUpdate(placed, payload, { role: "owner", now }), (error) => error.code === "ORDER_ALREADY_PLACED");
+});
+
 function recommendations(overrides = {}) {
   const items = [
     {

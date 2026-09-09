@@ -5709,6 +5709,7 @@ async function saveVendorOrderDraftAction(payload) {
     weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
     weeklyOrderTrackingMessage = approving
       ? "Vendor order approved and ready for handoff."
+      : payload.action === "reopen-draft" ? "Draft reopened. Remove unwanted items or use Change quantities, then review and approve again. Existing vendor carts are unchanged."
       : adjusting ? "Weekly Plan updated." : "Vendor draft saved for review.";
     await loadParAgentState();
   } catch (error) {
@@ -7667,6 +7668,7 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
             <form class="vendor-order-draft-card vendor-order-draft-card--${approved ? "approved" : draft.status}" data-vendor-order-draft="${escapeHtml(draft.vendor)}" data-vendor-order-draft-id="${escapeHtml(draft.id)}" data-vendor-order-draft-status="${escapeHtml(saved.status || draft.status)}">
               <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(draft.lineCount)} item${draft.lineCount === 1 ? "" : "s"} · ${money(draft.estimatedTotal)}</p></div><span>${escapeHtml(workflow.label)}</span></header>
               ${renderVendorWorkflowProgress(workflow)}
+              ${approved && !orderRehearsalMode && !vendor?.ordered ? `<div class="vendor-order-draft-actions"><button class="mini-button" type="button" data-order-draft-reopen data-order-draft-actor="${escapeHtml(manager)}">Reopen draft</button><small>Edit this draft and approve it again. This does not change an existing vendor cart.</small></div>` : ""}
               <details class="vendor-order-draft-lines"${!approved || draft.blockers.length ? " open" : ""}>
                 <summary>${approved ? "View order" : `Review ${formatNumber(draft.lineCount)} item${draft.lineCount === 1 ? "" : "s"}`}</summary>
                 ${draft.lines.map((line) => {
@@ -7679,6 +7681,7 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
               ${draft.blockers.length ? `<div class="vendor-order-draft-issues vendor-order-draft-issues--blocked"><strong>Approval blockers</strong>${draft.blockers.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
               ${!approved && draft.warnings.length ? `<div class="vendor-order-draft-issues"><strong>Review</strong>${draft.warnings.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
               ${!approved ? `
+                ${!orderRehearsalMode ? '<div class="vendor-order-draft-actions"><button class="mini-button" type="button" data-order-draft-edit-quantities>Change quantities</button></div>' : ""}
                 ${removableLineCount ? `<div class="vendor-order-draft-bulk"><label><input type="checkbox" data-order-draft-select-all><span>Select all</span></label><button class="mini-button" type="button" data-order-draft-remove-selected disabled>Remove selected</button></div>` : ""}
                 <div class="vendor-order-draft-fields"><label><span>Reviewed by</span><input type="text" maxlength="80" autocomplete="name" data-order-draft-manager value="${escapeHtml(manager)}" placeholder="Manager name"></label></div>
                 <label class="vendor-order-draft-confirm"><input type="checkbox" data-order-draft-confirm><span>Confirm ${escapeHtml(draft.vendor)} · ${money(draft.estimatedTotal)} · ${formatNumber(draft.lineCount)} items</span></label>

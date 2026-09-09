@@ -209,6 +209,33 @@ export function bindVendorOrderController({
   documentRef.querySelectorAll("[data-vendor-order-draft]").forEach((form) => {
     const vendor = form.dataset.vendorOrderDraft;
     const managerInput = form.querySelector("[data-order-draft-manager]");
+    const reopenButton = form.querySelector("[data-order-draft-reopen]");
+    reopenButton?.addEventListener("click", async () => {
+      const adjustedBy = resolveActor(reopenButton.dataset.orderDraftActor);
+      if (!adjustedBy) {
+        setMessage("Your manager identity is needed to reopen this draft.");
+        renderWeeklyPlan?.();
+        return;
+      }
+      reopenButton.disabled = true;
+      await saveVendorOrderDraftAction?.({
+        action: "reopen-draft",
+        vendor,
+        draftId: form.dataset.vendorOrderDraftId,
+        adjustedBy,
+      });
+    });
+    form.querySelector("[data-order-draft-edit-quantities]")?.addEventListener("click", () => {
+      if (!adjustmentPanel) return;
+      if (adjustmentVendor) adjustmentVendor.value = vendor;
+      if (adjustmentAction) adjustmentAction.value = "add";
+      syncAdjustmentProducts();
+      if ("open" in adjustmentPanel) adjustmentPanel.open = true;
+      const details = adjustmentPanel.closest?.("details");
+      if (details) details.open = true;
+      adjustmentPanel.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      adjustmentProduct?.focus();
+    });
     managerInput?.addEventListener("change", () => {
       const manager = clean(managerInput.value);
       if (!manager) return;

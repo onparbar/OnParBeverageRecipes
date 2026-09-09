@@ -661,10 +661,9 @@ async function addExactMatch(state, lineIndex) {
   }
   match.button.click();
   if (isProof) {
-    // Do not depend on the search page's optional or stale In Cart badge.
-    // The destination worker confirms the SKU and quantity before continuing.
+    // The background cart reader confirms the SKU and quantity without
+    // navigating the manager away from the product being added.
     await delay(1500);
-    if (state.status !== "cancelled") location.assign("https://shop.sgproof.com/sgws/en/usd/cart");
     return { lineIndex, name: line.name, status: "verifying" };
   }
   const confirmed = await waitForAddConfirmation(previousCart);
@@ -913,23 +912,11 @@ function proofCartCounts(state) {
 async function checkProofCart(state) {
   const needsCheck = state.pendingAdd || !Array.isArray(state.proofCartCounts);
   if (!needsCheck) return false;
-  renderOverlay(state, "Checking the actual Proof cart so existing items are not added twice...");
-  if (!/^\/sgws\/en\/usd\/cart\/?$/.test(location.pathname)) {
-    state.phase = state.pendingAdd ? "proof-cart-confirm" : "proof-cart-baseline";
-    await saveState(state);
-    location.assign("https://shop.sgproof.com/sgws/en/usd/cart");
-    return true;
-  }
-  const deadline = Date.now() + 90000;
-  let counts = null;
-  while (Date.now() < deadline) {
-    if (state.status === "cancelled") return true;
-    counts = proofCartCounts(state);
-    const pending = state.pendingAdd;
-    const target = pending ? Number(pending.targetQuantity ?? state.lines[pending.lineIndex].quantity) : 0;
-    if (counts && (!pending || counts[pending.lineIndex] >= target)) break;
-    await delay(500);
-  }
+  renderOverlay(state, "Checking cart quantities in the background...");
+  await saveState(state);
+  const response = await chrome.runtime.sendMessage({ type: "CHECK_PROOF_CART", requestId: state.requestId });
+  if (state.status === "cancelled") return true;
+  const counts = response?.ok && Array.isArray(response.counts) ? response.counts : null;
   const pending = state.pendingAdd;
   const target = pending ? Number(pending.targetQuantity ?? state.lines[pending.lineIndex].quantity) : 0;
   if (!counts || (pending && counts[pending.lineIndex] < target)) {
@@ -963,6 +950,7 @@ function startSafely() {
 }
 
 async function start() {
+  if (currentVendor() === "proof" && location.hash === "#onpar-cart-check") return;
   if (isOhlqCheckoutPage()) {
     try {
       await fillOhlqCheckoutDelivery();
@@ -1032,7 +1020,10 @@ async function start() {
       }
       const addResult = await addExactMatch(state, lineIndex);
       if (state.status === "cancelled") return;
-      if (addResult.status === "verifying") return;
+      if (addResult.status === "verifying") {
+        if (await checkProofCart(state)) return;
+        continue;
+      }
       state.results.push(addResult);
       state.pendingAdd = null;
       await saveState(state);
@@ -1054,6 +1045,20 @@ async function start() {
 }
 
 chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "READ_PROOF_CART" && currentVendor() === "proof" && location.hash === "#onpar-cart-check") {
+    return (async () => {
+      const state = message.state;
+      const deadline = Date.now() + 90000;
+      while (Date.now() < deadline) {
+        const counts = proofCartCounts(state);
+        const pending = state.pendingAdd;
+        const target = pending ? Number(pending.targetQuantity ?? state.lines[pending.lineIndex].quantity) : 0;
+        if (counts && (!pending || counts[pending.lineIndex] >= target)) return { ok: true, counts };
+        await delay(500);
+      }
+      return { ok: false, message: "Proof's cart quantities could not be read in time." };
+    })();
+  }
   if (message?.type === "VENDOR_CART_START") startSafely();
 });
 

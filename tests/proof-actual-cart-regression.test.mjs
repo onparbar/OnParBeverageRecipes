@@ -34,6 +34,11 @@ function checkpoint(countsAt, pathname = "/sgws/en/usd/cart") {
     Date: { now: () => elapsed }, delay: async (ms) => { elapsed += ms; },
     location: { pathname, assign: (url) => destinations.push(url) },
     proofCartCounts: () => countsAt(elapsed), renderOverlay: () => {},
+    chrome: { runtime: { sendMessage: async () => {
+      elapsed = 90000;
+      const counts = countsAt(elapsed);
+      return { ok: counts !== null, counts };
+    } } },
     saveState: async (state) => saved.push(JSON.parse(JSON.stringify(state))),
     addResultOnce: (state, result) => state.results.push(result),
     finish: async (_, status) => finished.push(status),
@@ -43,11 +48,11 @@ function checkpoint(countsAt, pathname = "/sgws/en/usd/cart") {
 }
 
 test("a new Proof run checks the actual cart before searching or adding", async () => {
-  const h = checkpoint(() => null, "/search");
+  const h = checkpoint(() => [1], "/search");
   const state = { lines: [line], results: [] };
-  assert.equal(await h.context.checkProofCart(state), true);
-  assert.equal(h.saved[0].phase, "proof-cart-baseline");
-  assert.deepEqual(h.destinations, ["https://shop.sgproof.com/sgws/en/usd/cart"]);
+  assert.equal(await h.context.checkProofCart(state), false);
+  assert.deepEqual(state.proofCartCounts, [1]);
+  assert.deepEqual(h.destinations, []);
 });
 
 test("an interrupted add resumes by confirming the actual cart and advancing once", async () => {
@@ -58,7 +63,7 @@ test("an interrupted add resumes by confirming the actual cart and advancing onc
   assert.equal(state.searchCursor, 1);
   assert.equal(state.pendingAdd, null);
   assert.deepEqual(h.destinations, []);
-  assert.equal(h.saved.length, 1);
+  assert.equal(h.saved.length, 2);
 });
 
 test("insufficient or unreadable actual-cart quantities stop without a retry", async () => {
@@ -72,7 +77,7 @@ test("insufficient or unreadable actual-cart quantities stop without a retry", a
   }
 });
 
-test("Proof adds only the missing quantity, persists before clicking, and opens the actual cart", async () => {
+test("Proof adds only the missing quantity and stays on the product during verification", async () => {
   const events = [];
   const control = {};
   const button = { disabled: false, click: () => events.push("click") };
@@ -88,6 +93,6 @@ test("Proof adds only the missing quantity, persists before clicking, and opens 
   const state = { vendor: "proof", lines: [{ ...line, quantity: 3 }], proofCartCounts: [1] };
   const result = await context.addExactMatch(state, 0);
   assert.equal(result.status, "verifying");
-  assert.deepEqual(events, [["quantity", 2], ["saved", 3], "click", ["navigate", "https://shop.sgproof.com/sgws/en/usd/cart"]]);
+  assert.deepEqual(events, [["quantity", 2], ["saved", 3], "click"]);
   assert.equal(state.lines[0].quantity, 3);
 });
