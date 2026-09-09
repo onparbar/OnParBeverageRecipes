@@ -609,7 +609,18 @@ async function runOhlqCatalog(state) {
 }
 
 async function addExactMatch(state, lineIndex) {
-  const line = state.lines[lineIndex];
+  const requestedLine = state.lines[lineIndex];
+  const isProof = state.vendor === "proof";
+  const existingQuantity = isProof ? state.proofCartCounts?.[lineIndex] : 0;
+  if (isProof && !Number.isFinite(existingQuantity)) {
+    return { lineIndex, name: requestedLine.name, status: "unconfirmed", message: "The existing cart quantity must be checked before adding this item." };
+  }
+  const line = isProof
+    ? { ...requestedLine, quantity: Math.max(0, Number(requestedLine.quantity) - existingQuantity) }
+    : requestedLine;
+  if (isProof && line.quantity === 0) {
+    return { lineIndex, name: line.name, status: "added", quantity: requestedLine.quantity, quantityKind: line.quantityKind, message: "The requested quantity is already in the cart; nothing extra was added." };
+  }
   const matches = exactMatches(line);
   if (matches.length !== 1) {
     return {
@@ -641,21 +652,22 @@ async function addExactMatch(state, lineIndex) {
     return { lineIndex, name: line.name, status: "unmatched", message: "The vendor did not enable Add to Cart after the requested quantity was entered. Review the quantity and availability." };
   }
   const previousCart = cartLinkSnapshot();
-  const isProof = state.vendor === "proof";
-  const previousProofQuantity = isProof ? proofCartQuantity(line) : null;
   if (isProof) {
-    if (previousProofQuantity === null) {
-      return { lineIndex, name: line.name, status: "unmatched", message: "Could not read this product's current cart quantity safely. Nothing was added for this item." };
-    }
     // A page reload after clicking must not silently repeat the addition.
-    state.pendingAdd = { lineIndex, name: line.name };
+    state.pendingAdd = { lineIndex, name: line.name, targetQuantity: Number(requestedLine.quantity) };
+    state.phase = "proof-cart-confirm";
     await saveState(state);
-    renderOverlay(state, `Adding ${line.name}; waiting for Proof to confirm its cart quantity...`);
+    renderOverlay(state, `Adding ${line.name}; checking the actual Proof cart next...`);
   }
   match.button.click();
-  const confirmed = isProof
-    ? await waitForProofAddConfirmation(line, previousProofQuantity)
-    : await waitForAddConfirmation(previousCart);
+  if (isProof) {
+    // Do not depend on the search page's optional or stale In Cart badge.
+    // The destination worker confirms the SKU and quantity before continuing.
+    await delay(1500);
+    if (state.status !== "cancelled") location.assign("https://shop.sgproof.com/sgws/en/usd/cart");
+    return { lineIndex, name: line.name, status: "verifying" };
+  }
+  const confirmed = await waitForAddConfirmation(previousCart);
   if (!confirmed) {
     return { lineIndex, name: line.name, status: isProof ? "unconfirmed" : "unmatched", message: isProof ? "Proof may have added this item, but its cart quantity could not be confirmed. Check the cart before retrying; no further items were attempted." : "The vendor did not confirm that this item was added." };
   }
@@ -861,6 +873,82 @@ async function fillOhlqCheckoutDelivery() {
   }
 }
 
+function proofCartCounts(state) {
+  const pageText = clean(document.body?.innerText);
+  if (!/order summary/i.test(pageText) || !/total items\s*:/i.test(pageText)) return null;
+  const productLinks = [...document.querySelectorAll('a[href*="/p/"]')];
+  const counts = [];
+  for (const line of state.lines) {
+    const sku = clean(line.vendorSku);
+    if (!sku) return null;
+    const links = productLinks.filter((link) => {
+      try {
+        return new URL(link.href, location.href).pathname.split("/p/")[1]?.replace(/\/$/, "") === sku;
+      } catch {
+        return false;
+      }
+    });
+    if (!links.length) {
+      counts.push(0);
+      continue;
+    }
+    let root = links[0].parentElement;
+    let quantity = null;
+    for (let depth = 0; root && depth < 12; depth += 1, root = root.parentElement) {
+      const controls = quantityControls(root);
+      if (controls.length > 2) break;
+      if (controls.length !== 2) continue;
+      const control = quantityControlForKind(root, line.quantityKind);
+      if (!control || clean(control.value) === "") continue;
+      const value = Number(control.value);
+      if (Number.isInteger(value) && value >= 0) quantity = value;
+      break;
+    }
+    if (quantity === null) return null;
+    counts.push(quantity);
+  }
+  return counts;
+}
+
+async function checkProofCart(state) {
+  const needsCheck = state.pendingAdd || !Array.isArray(state.proofCartCounts);
+  if (!needsCheck) return false;
+  renderOverlay(state, "Checking the actual Proof cart so existing items are not added twice...");
+  if (!/^\/sgws\/en\/usd\/cart\/?$/.test(location.pathname)) {
+    state.phase = state.pendingAdd ? "proof-cart-confirm" : "proof-cart-baseline";
+    await saveState(state);
+    location.assign("https://shop.sgproof.com/sgws/en/usd/cart");
+    return true;
+  }
+  const deadline = Date.now() + 90000;
+  let counts = null;
+  while (Date.now() < deadline) {
+    if (state.status === "cancelled") return true;
+    counts = proofCartCounts(state);
+    const pending = state.pendingAdd;
+    const target = pending ? Number(pending.targetQuantity ?? state.lines[pending.lineIndex].quantity) : 0;
+    if (counts && (!pending || counts[pending.lineIndex] >= target)) break;
+    await delay(500);
+  }
+  const pending = state.pendingAdd;
+  const target = pending ? Number(pending.targetQuantity ?? state.lines[pending.lineIndex].quantity) : 0;
+  if (!counts || (pending && counts[pending.lineIndex] < target)) {
+    if (pending) addResultOnce(state, { ...pending, status: "unconfirmed", message: "The actual cart could not confirm the requested quantity. Nothing was retried; review the cart before continuing." });
+    await finish(state, "needs_review", "Stopped because Proof's actual cart quantity could not be confirmed. No automatic retry was made.");
+    return true;
+  }
+  state.proofCartCounts = counts;
+  if (pending) {
+    const line = state.lines[pending.lineIndex];
+    addResultOnce(state, { lineIndex: pending.lineIndex, name: line.name, status: "added", quantity: target, quantityKind: line.quantityKind, message: "Requested quantity confirmed in the actual Proof cart." });
+    state.searchCursor = pending.lineIndex + 1;
+    state.pendingAdd = null;
+  }
+  state.phase = "start";
+  await saveState(state);
+  return false;
+}
+
 let running = false;
 function startSafely() {
   void start().catch((error) => {
@@ -903,13 +991,7 @@ async function start() {
   state.searchCursor = Number.isInteger(state.searchCursor) ? state.searchCursor : 0;
   await saveState(state);
   try {
-    if (vendor === "proof" && state.pendingAdd) {
-      if (!state.results.some((result) => result.lineIndex === state.pendingAdd.lineIndex)) {
-        state.results.push({ ...state.pendingAdd, status: "unconfirmed", message: "Proof navigated during an add. Check this item's cart quantity before retrying; it may already be in the cart." });
-      }
-      await finish(state, "needs_review", "Cart confirmation was interrupted. Check the cart before retrying; no further items were attempted.");
-      return;
-    }
+    if (vendor === "proof" && await checkProofCart(state)) return;
     if (vendor === "ohlq") {
       await runOhlqCatalog(state);
       return;
@@ -917,6 +999,13 @@ async function start() {
     while (state.searchCursor < state.lines.length) {
       const lineIndex = state.searchCursor;
       const line = state.lines[lineIndex];
+      if (vendor === "proof" && state.proofCartCounts[lineIndex] >= Number(line.quantity)) {
+        addResultOnce(state, { lineIndex, name: line.name, status: "added", quantity: line.quantity, quantityKind: line.quantityKind, message: "Already in the cart; nothing extra was added." });
+        state.searchCursor += 1;
+        state.phase = "start";
+        await saveState(state);
+        continue;
+      }
       renderOverlay(state, `Finding an exact match for ${line.name}...`);
       if (state.phase !== "search-results") {
         const submitted = await submitSearch(state, lineIndex);
@@ -943,6 +1032,7 @@ async function start() {
       }
       const addResult = await addExactMatch(state, lineIndex);
       if (state.status === "cancelled") return;
+      if (addResult.status === "verifying") return;
       state.results.push(addResult);
       state.pendingAdd = null;
       await saveState(state);

@@ -20,6 +20,8 @@ function harness(state) {
     vendorSearchUrl: (_, sku) => `https://shop.sgproof.com/search?text=${sku}`,
     location: { assign: (url) => destinations.push(url) },
     renderOverlay: () => {},
+    checkProofCart: async () => false,
+    addResultOnce: (value, result) => value.results.push(result),
     VENDOR_CONFIG: { proof: { label: "Proof" } },
     waitForResults: async (...args) => { waits.push(args); return true; },
     addExactMatch: async (_, index) => { added.push(index); return { lineIndex: index, status: "added" }; },
@@ -31,7 +33,7 @@ function harness(state) {
 }
 
 function order(phase = "start") {
-  return { vendor: "proof", status: "pending", phase, searchCursor: 0, results: [], lines: [{ name: "Bitters", vendorSku: "38000" }, { name: "Watermelon", vendorSku: "49357" }] };
+  return { vendor: "proof", status: "pending", phase, searchCursor: 0, results: [], proofCartCounts: [0, 0], lines: [{ name: "Bitters", vendorSku: "38000", quantity: 1, quantityKind: "cases" }, { name: "Watermelon", vendorSku: "49357", quantity: 1, quantityKind: "cases" }] };
 }
 
 test("Proof saves the cursor and stops immediately when search navigation starts", async () => {
@@ -82,17 +84,26 @@ test("Proof stops on an uncertain addition without navigating to another item", 
   assert.equal(state.results[0].status, "unconfirmed");
 });
 
-test("Proof never repeats an addition interrupted by a page reload", async () => {
+test("Proof hands an interrupted addition to the cart checkpoint before attempting anything", async () => {
   const state = order("search-results");
   state.pendingAdd = { lineIndex: 0, name: "Bitters" };
   const h = harness(state);
-  let finished;
-  h.context.finish = async (_, status) => { finished = status; };
+  let checked;
+  h.context.checkProofCart = async (value) => { checked = value.pendingAdd; return true; };
   await h.context.start();
-  assert.equal(finished, "needs_review");
+  assert.equal(checked.lineIndex, 0);
   assert.deepEqual(h.added, []);
   assert.deepEqual(h.destinations, []);
-  assert.equal(state.results[0].status, "unconfirmed");
+});
+
+test("Proof skips bitters already confirmed in the cart and searches for the next item", async () => {
+  const state = order();
+  state.proofCartCounts = [1, 0];
+  const h = harness(state);
+  await h.context.start();
+  assert.deepEqual(h.added, []);
+  assert.equal(state.results[0].status, "added");
+  assert.deepEqual(h.destinations, ["https://shop.sgproof.com/search?text=49357"]);
 });
 
 const confirmationSource = source.slice(source.indexOf("function proofCartQuantity("), source.indexOf("async function waitForAddConfirmation("));
