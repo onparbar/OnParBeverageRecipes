@@ -52,6 +52,9 @@ function canonical(value) {
 
 function productIdentity(line) {
   const name = canonical(line.name);
+  if (/upside\s+dawn/.test(name) || (String(line.vendorSku).toUpperCase() === "013452-C" && name.includes("non alcoholic"))) {
+    return { include: ["athletic", "upside", "dawn", "golden"], upsideDawnCase: true };
+  }
   const configured = PRODUCT_IDENTITIES[name];
   if (configured) return configured;
   return {
@@ -60,11 +63,15 @@ function productIdentity(line) {
   };
 }
 
-function productText(link) {
+function productLabel(link) {
   const imageName = [...link.querySelectorAll("img[alt]")]
     .map((image) => clean(image.alt))
     .find((value) => value && !/tag icon/i.test(value));
-  return canonical(imageName || link.textContent);
+  return clean(imageName || link.textContent);
+}
+
+function productText(link) {
+  return canonical(productLabel(link));
 }
 
 function matchesLine(link, line) {
@@ -74,6 +81,14 @@ function matchesLine(link, line) {
     return false;
   }
   if ((identity.exclude || []).some((word) => candidate.includes(word))) return false;
+  if (identity.upsideDawnCase) {
+    const label = productLabel(link);
+    // The approved case is 24 twelve-ounce cans, not a single 12-pack or a keg.
+    return /\b(?:2\s*[x\u00d7]\s*12\s*(?:pack|pk)|24\s*(?:pack|pk))\b/i.test(label)
+      && /\b12\s*(?:oz|ounce)\b/i.test(label)
+      && /\bcans?\b/i.test(label)
+      && !/\bkeg\b/i.test(label);
+  }
   const pack = canonical(line.packSize);
   if (pack.includes("keg") && !candidate.includes("keg")) return false;
   if (pack.includes("can") && !candidate.includes("can")) return false;
@@ -145,10 +160,10 @@ function renderOverlay(state, message) {
       <p>${clean(message)}</p>
       <p class="count">${added} of ${state.lines.length} added</p>
       ${missed.length ? `<ul>${missed.map((item) => `<li class="warn">${clean(item.name)}: ${clean(item.message)}</li>`).join("")}</ul>` : ""}
-      <button type="button" data-onpar-stop>${state.status === "ready" ? "Close" : "Stop"}</button>
+      <button type="button" data-onpar-stop>${["ready", "needs_review", "cancelled"].includes(state.status) ? "Close" : "Stop"}</button>
     </div>`;
   host.shadowRoot.querySelector("[data-onpar-stop]")?.addEventListener("click", async () => {
-    if (state.status !== "ready") {
+    if (!["ready", "needs_review", "cancelled"].includes(state.status)) {
       await finish(state, "cancelled", "Stopped before checkout.");
     }
     host.remove();
@@ -189,6 +204,11 @@ async function addExactMatch(state, lineIndex) {
 }
 
 async function finish(state, status = "ready", message = "Cart ready for your review. Nothing was submitted.") {
+  const added = new Set((state.results || []).filter((item) => item.status === "added").map((item) => item.lineIndex)).size;
+  if (status === "ready" && (added !== state.lines.length || (state.results || []).some((item) => item.status !== "added"))) {
+    status = "needs_review";
+    message = `Cart incomplete: ${added} of ${state.lines.length} added. Review the missing items; do not rebuild the full cart without checking existing quantities. Nothing was submitted.`;
+  }
   const result = {
     requestId: state.requestId,
     orderId: state.orderId,

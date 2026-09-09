@@ -206,7 +206,9 @@ function vendorSearchUrl(vendor, term) {
 function addButtons() {
   return [...document.querySelectorAll('button, input[type="button"], input[type="submit"]')].filter((button) => {
     const label = clean(button.textContent || button.value);
-    return visible(button) && /^(?:add|add item|add to cart)$/i.test(label);
+    // Some vendors disable Add until a quantity is entered. The button still
+    // identifies the product card; check whether it is enabled after filling.
+    return Boolean(button.getClientRects().length) && /^(?:add|add item|add to cart)$/i.test(label);
   });
 }
 
@@ -258,18 +260,24 @@ function quantityControlForKind(root, quantityKind) {
   return null;
 }
 
-function candidateForButton(button) {
+function candidateForButton(button, line) {
   let root = button.parentElement;
   let fallback = null;
+  const ohlqSku = currentVendor() === "ohlq" ? clean(line?.vendorSku) : "";
+  const skuPattern = /^[0-9]{4}[a-z]$/i.test(ohlqSku)
+    ? new RegExp(`(?:^|[^a-z0-9])${ohlqSku}(?:[^a-z0-9]|$)`, "i")
+    : null;
   for (let depth = 0; root && depth < 8; depth += 1, root = root.parentElement) {
     const text = clean(root.innerText);
     if (text.length <= 10 || text.length >= 2200) continue;
     const quantity = quantityControl(root);
     const candidate = { root, button, quantity, text: canonical(text) };
-    if (quantity) return candidate;
+    if (quantity && (ohlqSku
+      ? skuPattern && skuPattern.test(text)
+      : lineScore(candidate, line) > 0)) return candidate;
     if (!fallback && depth >= 2) fallback = candidate;
   }
-  return fallback;
+  return !ohlqSku && fallback && lineScore(fallback, line) > 0 ? fallback : null;
 }
 
 function lineScore(candidate, line) {
@@ -287,7 +295,7 @@ function lineScore(candidate, line) {
 
 function exactMatches(line) {
   const matches = addButtons()
-    .map(candidateForButton)
+    .map((button) => candidateForButton(button, line))
     .filter(Boolean)
     .map((candidate) => ({ ...candidate, score: lineScore(candidate, line) }))
     .filter((candidate) => candidate.score > 0);
@@ -586,10 +594,15 @@ async function addExactMatch(state, lineIndex) {
     };
   }
   const match = matches[0];
-  if (match.button.disabled || /out of stock|unavailable/i.test(match.root.innerText)) {
+  if (/out of stock|unavailable/i.test(match.root.innerText)) {
     return { lineIndex, name: line.name, status: "unmatched", message: "The product is unavailable." };
   }
-  const requestedQuantityControl = quantityControlForKind(match.root, line.quantityKind);
+  const controls = quantityControls(match.root);
+  // OHLQ's exact-SKU detail page labels its single bottle input "Quantity",
+  // not "Units". Never interpret this fallback as a case quantity.
+  const requestedQuantityControl = state.vendor === "ohlq" && line.quantityKind === "units" && controls.length === 1
+    ? controls[0]
+    : quantityControlForKind(match.root, line.quantityKind);
   if (!requestedQuantityControl) {
     const label = line.quantityKind === "cases" ? "case" : "unit";
     return { lineIndex, name: line.name, status: "unmatched", message: `Could not identify one ${label} quantity control safely.` };
@@ -598,6 +611,9 @@ async function addExactMatch(state, lineIndex) {
     return { lineIndex, name: line.name, status: "unmatched", message: "The requested quantity is not available in the matching vendor control." };
   }
   await delay(750);
+  if (match.button.disabled) {
+    return { lineIndex, name: line.name, status: "unmatched", message: "The vendor did not enable Add to Cart after the requested quantity was entered. Review the quantity and availability." };
+  }
   const previousCart = cartLinkSnapshot();
   match.button.click();
   if (!await waitForAddConfirmation(previousCart)) {

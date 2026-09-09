@@ -68,6 +68,6 @@ test("older verified OHLQ items use exact product pages without substitutions", 
 
 test("exact product pages prefer the ancestor that owns the quantity control", () => {
   assert.match(vendorCart, /let fallback = null/);
-  assert.match(vendorCart, /if \(quantity\) return candidate/);
-  assert.match(vendorCart, /return fallback/);
+  assert.match(vendorCart, /skuPattern\.test\(text\)/);
+  assert.match(vendorCart, /lineScore\(candidate, line\) > 0/);
 });
