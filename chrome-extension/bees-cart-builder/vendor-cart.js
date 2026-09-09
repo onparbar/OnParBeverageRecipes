@@ -366,10 +366,12 @@ function buttonWithExactLabel(label) {
     .find((button) => visible(button) && clean(button.textContent || button.value).toLowerCase() === label.toLowerCase()) || null;
 }
 
-async function waitForOhlqCatalog(timeout = 12000) {
+async function waitForOhlqCatalog(state, timeout = 90000, isReady = () => ohlqCatalogRows().length > 0) {
   const started = Date.now();
+  renderOverlay(state, "Waiting for OHLQ's catalog to load (up to 90 seconds). Nothing has been added yet.");
   while (Date.now() - started < timeout) {
-    if (ohlqCatalogRows().length) return true;
+    if (state.status === "cancelled") return false;
+    if (isReady()) return true;
     await delay(250);
   }
   return false;
@@ -477,6 +479,14 @@ async function runOhlqCatalog(state) {
   }
 
   if (state.phase !== "ohlq-filtered") {
+    const filtersReady = await waitForOhlqCatalog(state, 90000, () => (
+      Boolean(ohlqDaysControl() && buttonWithExactLabel("Apply Filters"))
+    ));
+    if (state.status === "cancelled") return;
+    if (!filtersReady) {
+      await finish(state, "needs_review", "OHLQ's filters did not finish loading within 90 seconds. Nothing was added. Wait for the page to load, then retry from the dashboard.");
+      return;
+    }
     const daysControl = ohlqDaysControl();
     const applyFilters = buttonWithExactLabel("Apply Filters");
     if (!daysControl || !applyFilters) throw new Error("The OHLQ purchased-product filters were unavailable.");
@@ -490,8 +500,11 @@ async function runOhlqCatalog(state) {
     await delay(1500);
   }
 
-  if (!await waitForOhlqCatalog()) {
-    throw new Error("No orderable OHLQ product rows were detected. If the catalog is visible, reload the On Par Vendor Cart Builder extension and refresh this page before retrying.");
+  const catalogReady = await waitForOhlqCatalog(state);
+  if (state.status === "cancelled") return;
+  if (!catalogReady) {
+    await finish(state, "needs_review", "OHLQ's catalog did not finish loading within 90 seconds. Nothing was added. Wait for the products to appear, then retry from the dashboard. If they are already visible, reload the extension and refresh this page.");
+    return;
   }
 
   const staged = [];
