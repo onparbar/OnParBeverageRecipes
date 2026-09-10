@@ -148,7 +148,7 @@ test("vendor cart bridge surfaces helper rejection and timeout messages", async 
     now: () => 2,
   });
   timedOut.expire();
-  await assert.rejects(timeoutPromise, /Install or enable the On Par Vendor Cart Builder/);
+  await assert.rejects(timeoutPromise, /Automatic cart building requires Chrome with the On Par Vendor Cart Builder enabled/);
 });
 
 test("vendor cart bridge fails closed outside a browser window", async () => {

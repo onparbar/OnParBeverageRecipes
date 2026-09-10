@@ -48,7 +48,7 @@ export function sendVendorCartRequest(view, {
   return new Promise((resolve, reject) => {
     const timeout = windowRef.setTimeout(() => {
       windowRef.removeEventListener("message", receiveResponse);
-      reject(new Error("Install or enable the On Par Vendor Cart Builder in Chrome."));
+      reject(new Error("The cart helper did not respond. Automatic cart building requires Chrome with the On Par Vendor Cart Builder enabled. If this browser cannot run the helper, open the dashboard in that Chrome browser to build the cart. You can still review and edit the order here; no order was submitted."));
     }, timeoutMs);
 
     function receiveResponse(event) {

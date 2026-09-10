@@ -66,7 +66,7 @@ test("shows a calculation but requires review when price inputs are stale or und
   assert.equal(result.recommendedPricePerOz, 1);
   assert.equal(result.action, "increase");
   assert.equal(result.needsReview, true);
-  assert.deepEqual(result.issues.map((entry) => entry.code), ["undated-cost", "stale-live-price", "large-change"]);
+  assert.deepEqual(result.issues.map((entry) => entry.code), ["stale-live-price", "large-change"]);
   assert.equal(result.publishEligible, false);
 });
 

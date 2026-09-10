@@ -131,11 +131,12 @@ export default function DashboardPage() {
               <div>
                 <input
                   id="dashboard-data-search-input"
-                  placeholder="Search dashboard data or ask a question..."
+                  placeholder="Search products, recipes, tap numbers, or ask a question..."
                   aria-controls="header-search-results"
                   aria-expanded="false"
                   type="search"
                   autoComplete="off"
+                  enterKeyHint="search"
                 />
                 <button className="primary-button" type="submit">Search</button>
               </div>
@@ -293,7 +294,6 @@ export default function DashboardPage() {
               <span>Find recipe</span>
               <input id="pricing-search" type="search" placeholder="Search charge pricing..." />
             </label>
-            <button className="ghost-button" id="clear-charges" type="button">Clear charge overrides</button>
           </div>
 
           <section className="pricing-advisor" aria-labelledby="pricing-advisor-title">

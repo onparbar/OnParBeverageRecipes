@@ -189,17 +189,10 @@ export function evaluatePricingRecommendation(input = {}, options = {}) {
     issues.push(issue("missing-live-price", "blocker", "No current PMB selling price was loaded."));
   }
 
-  const costAgeMs = getAgeMs(input.costUpdatedAt, now);
-  if (costPerOz && !Number.isFinite(costAgeMs)) {
-    issues.push(issue("undated-cost", "warning", "The cost source has no verifiable update date."));
-  } else if (costPerOz && costAgeMs > positiveNumber(settings.maxCostAgeDays) * DAY_MS) {
-    issues.push(issue("stale-cost", "warning", `The cost is more than ${settings.maxCostAgeDays} days old.`));
-  }
-
   const livePriceAgeMs = getAgeMs(input.livePriceUpdatedAt, now);
   if (currentPricePerOz && !Number.isFinite(livePriceAgeMs)) {
     issues.push(issue("undated-live-price", "warning", "The PMB price has not been freshness-checked."));
-  } else if (currentPricePerOz && livePriceAgeMs > positiveNumber(settings.maxLivePriceAgeHours) * 60 * 60 * 1000) {
+  } else if (currentPricePerOz && livePriceAgeMs > positiveNumber(settings.maxLivePriceAgeHours) * DAY_MS / 24) {
     issues.push(issue("stale-live-price", "warning", `The PMB price check is more than ${settings.maxLivePriceAgeHours} hours old.`));
   }
 
@@ -267,9 +260,46 @@ function recommendationSortRank(item) {
   return 3;
 }
 
+function evaluateLiquorPricingRecommendation(input, options) {
+  const portions = (Array.isArray(input.portions) ? input.portions : []).map((portion, index) => {
+    const servingOz = positiveNumber(portion.servingOz);
+    const result = evaluatePricingRecommendation({
+      ...input,
+      costPerOz: positiveNumber(input.costPerOz) * servingOz,
+      currentPricePerOz: positiveNumber(portion.price),
+    }, options);
+    if (!servingOz) {
+      result.issues.push(issue("missing-portion-size", "blocker", "The serving size is missing."));
+      result.hasBlocker = true;
+      result.needsReview = true;
+    }
+    return { ...result, portionName: clean(portion.name) || `Portion ${index + 1}`, servingOz };
+  });
+  const base = evaluatePricingRecommendation({ ...input, currentPricePerOz: 0 }, options);
+  if (!portions.length) return { ...base, portions, portionPricing: true };
+  const issues = portions.flatMap((portion) => portion.issues.map((entry) => ({
+    ...entry,
+    message: `${portion.portionName}: ${entry.message}`,
+  })));
+  return {
+    ...base,
+    portions,
+    portionPricing: true,
+    issues,
+    hasBlocker: portions.some((portion) => portion.hasBlocker),
+    needsReview: portions.some((portion) => portion.needsReview),
+    action: portions.some((portion) => portion.action === "increase") ? "increase"
+      : portions.some((portion) => portion.action === "set") ? "set"
+        : portions.every((portion) => portion.action === "hold") ? "hold" : "review",
+    priceChangePercent: Math.max(...portions.map((portion) => Math.abs(portion.priceChangePercent))),
+  };
+}
+
 export function buildPricingAdvisor(inputs = [], options = {}) {
   const rows = inputs
-    .map((input) => evaluatePricingRecommendation(input, options))
+    .map((input) => clean(input.kind).toLowerCase() === "liquor"
+      ? evaluateLiquorPricingRecommendation(input, options)
+      : evaluatePricingRecommendation(input, options))
     .sort((left, right) => (
       recommendationSortRank(left) - recommendationSortRank(right)
       || Math.abs(right.priceChangePercent) - Math.abs(left.priceChangePercent)

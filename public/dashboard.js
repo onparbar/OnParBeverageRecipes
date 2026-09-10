@@ -982,7 +982,6 @@ const pullPmbWeeklyUsageButton = document.querySelector("#pull-pmb-weekly-usage"
 const weeklyUsageSummary = document.querySelector("#weekly-usage-summary");
 const weeklyUsageTable = document.querySelector("#weekly-usage-table");
 const clearKegPricesButton = document.querySelector("#clear-keg-prices");
-const clearChargesButton = document.querySelector("#clear-charges");
 const recipeForm = document.querySelector("#recipe-form");
 const recipeFormTitle = document.querySelector("#recipe-form-title");
 const recipeSubmitButton = document.querySelector("#recipe-submit-button");
@@ -1052,7 +1051,7 @@ let weeklyUsageSharedBaseline = null;
 let weeklyUsageSyncMessage = "Open Weekly Usage on the work network to check Pour My Beer. After the service-computer import, saved reports remain available anywhere.";
 let weeklyUsageLastSyncAt = loadWeeklyUsageLastSyncAt();
 let weeklyUsageSyncAttempted = false;
-let weeklyUsageHistoryLimit = window.matchMedia("(max-width: 720px)").matches ? 6 : 0;
+let weeklyUsageHistoryLimit = 6;
 let weeklyUsageSharedRevision = 0;
 let weeklyUsageSharedInitialized = false;
 let weeklyUsageSharedProvisioned = false;
@@ -1253,6 +1252,7 @@ let activePmbPriceUpdateKey = "";
 const pmbPriceUpdateMessages = new Map();
 let pricingAdvisorInputsByKey = new Map();
 let pricingAdvisorShowAll = false;
+let pricingAdvisorReviewOnly = false;
 let beverageNewsPayload = null;
 let beverageNewsLoading = false;
 let ohioComplianceAcknowledgement = {};
@@ -3305,17 +3305,6 @@ function bindEvents() {
     saveKegPriceOverrides();
     render();
   });
-  clearChargesButton.addEventListener("click", () => {
-    if (!confirmDashboardAction(
-      "Clear every tap-charge override?",
-      [`${Object.keys(chargeOverrides).length} saved charge entries will be reset.`],
-      "This cannot be undone from the dashboard.",
-    )) return;
-    chargeOverrides = {};
-    saveChargeOverrides();
-    render();
-  });
-
   document.addEventListener("keydown", handleEnterKeyNavigation);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") hideUntappdSearchResults();
@@ -3520,19 +3509,36 @@ function setHeaderSearchResultsVisible(visible) {
 }
 
 function bindDashboardDataSearchEvents() {
+  let searchDebounce;
   document.querySelector("#header-search-close")?.addEventListener("click", () => {
+    window.clearTimeout(searchDebounce);
     setHeaderSearchResultsVisible(false);
     dashboardDataSearchInput?.focus();
   });
   dashboardDataSearchInput?.addEventListener("input", () => {
+    window.clearTimeout(searchDebounce);
     if (!clean(dashboardDataSearchInput.value)) {
       setHeaderSearchResultsVisible(false);
       dashboardDataSearchFeedback.textContent = "";
       dashboardDataSearchResults.innerHTML = "";
+    } else {
+      searchDebounce = window.setTimeout(() => renderDashboardDataSearch({ submitted: true }), 220);
     }
   });
+  dashboardDataSearchInput?.addEventListener("focus", () => {
+    if (!clean(dashboardDataSearchInput.value)) renderDashboardDataSearch({ submitted: true });
+  });
   document.querySelector(".header-search")?.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      const buttons = [...(dashboardDataSearchResults?.querySelectorAll("button") || [])];
+      if (!buttons.length) return;
+      event.preventDefault();
+      const index = buttons.indexOf(document.activeElement);
+      buttons[(index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+      return;
+    }
     if (event.key !== "Escape") return;
+    window.clearTimeout(searchDebounce);
     event.preventDefault();
     setHeaderSearchResultsVisible(false);
     dashboardDataSearchInput?.focus();
@@ -3545,9 +3551,22 @@ function bindDashboardDataSearchEvents() {
   });
   dashboardDataSearchForm?.addEventListener("submit", (event) => {
     event.preventDefault();
+    window.clearTimeout(searchDebounce);
     renderDashboardDataSearch({ submitted: true });
   });
   dashboardDataSearchResults?.addEventListener("click", (event) => {
+    const example = event.target.closest("[data-search-example]");
+    if (example) {
+      dashboardDataSearchInput.value = example.dataset.searchExample;
+      renderDashboardDataSearch({ submitted: true });
+      return;
+    }
+    const quickLink = event.target.closest("[data-header-search-item]");
+    if (quickLink) {
+      setHeaderSearchResultsVisible(false);
+      activateGlobalSearchResult(globalSearchItems.find((item) => item.id === quickLink.dataset.headerSearchItem));
+      return;
+    }
     const link = event.target.closest("[data-dashboard-data-search-name]");
     if (!link || !weeklyUsageSearch) return;
     setHeaderSearchResultsVisible(false);
@@ -3615,7 +3634,7 @@ function buildDashboardDataSearchItems() {
       dollars: currentOunces === 0 ? 0 : sellingPricePerOz > 0 ? currentOunces * sellingPricePerOz : null,
     };
 
-    return {
+    const result = {
       id: item.archiveId || item.id || `usage-search-${index}`,
       name: clean(item.name) || "Unnamed product",
       tapNumber: toNumber(item.tapNumber) || null,
@@ -3641,6 +3660,14 @@ function buildDashboardDataSearchItems() {
         ),
       },
     };
+    const estimate = getPerformanceEstimatedProfitRate(item);
+    Object.values(result.periods).forEach((period) => {
+      if (!period) return;
+      period.profit = period.ounces === 0 ? 0 : estimate.grossProfitPerOz != null ? period.ounces * estimate.grossProfitPerOz : null;
+      period.margin = estimate.grossProfitPerOz != null && estimate.sellingPricePerOz > 0
+        ? estimate.grossProfitPerOz / estimate.sellingPricePerOz * 100 : null;
+    });
+    return result;
   });
 }
 
@@ -3648,31 +3675,36 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
   if (!dashboardDataSearchInput || !dashboardDataSearchResults || !dashboardDataSearchFeedback) return;
   if (submitted) setHeaderSearchResultsVisible(true);
   const query = clean(dashboardDataSearchInput.value);
+  refreshGlobalSearchIndex();
+  const quickMatches = searchDashboardItems(globalSearchItems, query, { limit: 12 });
+  const quickResults = quickMatches.length ? `<section class="header-search-matches"><h3>${query ? "Open an item" : "Go to a section"}</h3><div class="header-search-match-grid">${quickMatches.map((item) => `<button type="button" class="header-search-match" data-header-search-item="${escapeHtml(item.id)}"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.section)}</span><small>${escapeHtml(item.subtitle || "")}</small></button>`).join("")}</div></section>` : "";
   if (!query) {
-    dashboardDataSearchFeedback.textContent = submitted ? "Enter a question to search dashboard data." : "";
-    dashboardDataSearchResults.innerHTML = "";
+    dashboardDataSearchFeedback.textContent = "Find products, recipes, inventory, taps, or ask about performance.";
+    dashboardDataSearchResults.innerHTML = `${quickResults}<div class="header-search-examples">${["Tito's", "tap 31", "top 5 cocktails last 6 weeks", "lowest profit margin last week"].map((example) => `<button type="button" class="mini-button" data-search-example="${escapeHtml(example)}">${escapeHtml(example)}</button>`).join("")}</div>`;
     return;
   }
 
   const search = searchDashboardData(buildDashboardDataSearchItems(), query);
   if (search.status === "needs-clarification") {
-    dashboardDataSearchFeedback.textContent = "One quick question";
-    dashboardDataSearchResults.innerHTML = `<div class="dashboard-data-search-question">${escapeHtml(search.question)}</div>`;
+    dashboardDataSearchFeedback.textContent = quickMatches.length ? "Matching dashboard items" : "One quick question";
+    dashboardDataSearchResults.innerHTML = `${quickResults}<div class="dashboard-data-search-question">${escapeHtml(search.question)}</div>`;
     return;
   }
 
   dashboardDataSearchFeedback.textContent = search.groups
     ? `Top ${search.groups.top.length} and bottom ${search.groups.bottom.length}`
-    : `${search.results.length} matching item${search.results.length === 1 ? "" : "s"}`;
+    : `${quickMatches.length} quick link${quickMatches.length === 1 ? "" : "s"} · ${search.results.length}${search.total > search.results.length ? ` of ${search.total}` : ""} performance result${search.results.length === 1 ? "" : "s"}`;
   if (!search.results.length) {
-    dashboardDataSearchResults.innerHTML = '<div class="dashboard-data-search-empty">No dashboard items match that search. Try another wall, period, or threshold.</div>';
+    dashboardDataSearchResults.innerHTML = `${quickResults}<div class="dashboard-data-search-empty">${quickMatches.length ? "No recorded usage matches this question. The item links above are still available." : "No matches. Try a shorter product name, a tap number, or a dashboard section."}</div>`;
     return;
   }
 
   const renderSearchRows = (rows) => rows.map((item) => {
     const dollarsAvailable = Number.isFinite(Number(item.dollars)) && Number(item.dollars) > 0;
-    const primaryValue = search.intent.metric === "dollars"
-      ? dollarsAvailable ? money(item.value) : "Sales unavailable"
+    const primaryValue = search.intent.metric === "margin" ? `${formatNumber(item.value)}% estimated margin`
+      : search.intent.metric === "profit" ? `${money(item.value)} estimated profit`
+      : search.intent.metric === "dollars"
+      ? `${money(item.value)} estimated sales`
       : `${formatNumber(item.value)} oz`;
     const secondaryValue = search.intent.metric === "dollars"
       ? item.ounces === null ? "Sales estimate" : `${formatNumber(item.ounces)} oz poured`
@@ -3695,10 +3727,10 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
       </article>
     `;
   }).join("");
-  dashboardDataSearchResults.innerHTML = search.groups
+  dashboardDataSearchResults.innerHTML = quickResults + `<section class="header-search-performance"><h3>Usage &amp; performance</h3><p class="header-search-data-note">${search.intent.period === "recent" ? "Default: average of the last six saved weeks. " : ""}Sales and gross profit are estimates from recorded pours and available pricing, not POS totals. Multi-week results are weekly averages.</p>` + (search.groups
     ? `<section class="dashboard-data-search-group"><h3>Top ${formatNumber(search.groups.top.length)}</h3>${renderSearchRows(search.groups.top)}</section>
        <section class="dashboard-data-search-group"><h3>Bottom ${formatNumber(search.groups.bottom.length)}</h3>${renderSearchRows(search.groups.bottom)}</section>`
-    : renderSearchRows(search.results);
+    : renderSearchRows(search.results)) + "</section>";
 }
 
 function renderWhatIfPlan() {
@@ -4461,10 +4493,12 @@ function renderPricingAdvisor(visibleTapRows = []) {
 
   const advisorInputs = visibleTapRows
     .map(buildPricingAdvisorInput)
-    .filter((item) => isPricingAdvisorEligibleKind(item.kind));
+    .filter((item) => isPricingAdvisorEligibleKind(item.kind) || item.kind === "Liquor");
   const advisor = buildPricingAdvisor(advisorInputs);
   const suggestedRows = advisor.rows.filter((item) => item.action === "increase" || item.action === "set");
-  const displayedRows = pricingAdvisorShowAll ? advisor.rows : suggestedRows;
+  const displayedRows = pricingAdvisorReviewOnly
+    ? advisor.rows.filter((item) => item.needsReview)
+    : pricingAdvisorShowAll ? advisor.rows : suggestedRows;
   const advisorByKey = new Map(advisorInputs.map((input) => [input.updateKey, input]));
   pricingAdvisorInputsByKey = advisorByKey;
   if (pricingAdvisorToggle) {
@@ -4473,6 +4507,7 @@ function renderPricingAdvisor(visibleTapRows = []) {
       : `Show all ${formatNumber(advisor.rows.length)}`;
     pricingAdvisorToggle.setAttribute("aria-expanded", pricingAdvisorShowAll ? "true" : "false");
     pricingAdvisorToggle.onclick = () => {
+      pricingAdvisorReviewOnly = false;
       pricingAdvisorShowAll = !pricingAdvisorShowAll;
       renderPricingAdvisor(visibleTapRows);
     };
@@ -4480,9 +4515,16 @@ function renderPricingAdvisor(visibleTapRows = []) {
   pricingAdvisorSummary.innerHTML = `
     <div><strong>${formatNumber(advisor.summary.priceChangeCount)}</strong><span>Price suggestions</span></div>
     ${advisor.summary.onTargetCount ? `<div><strong>${formatNumber(advisor.summary.onTargetCount)}</strong><span>At or above 82%</span></div>` : ""}
-    ${advisor.summary.reviewCount ? `<div><strong>${formatNumber(advisor.summary.reviewCount)}</strong><span>Need review</span></div>` : ""}
+    ${advisor.summary.reviewCount || pricingAdvisorReviewOnly ? `<button type="button" class="pricing-advisor-review-filter" data-pricing-review-filter aria-pressed="${pricingAdvisorReviewOnly}" aria-controls="pricing-advisor-table"><strong>${formatNumber(advisor.summary.reviewCount)}</strong><span>Need review</span><small>${pricingAdvisorReviewOnly ? "Showing review items" : "View review items"}</small></button>` : ""}
     ${advisor.summary.blockedCount ? `<div><strong>${formatNumber(advisor.summary.blockedCount)}</strong><span>Missing data</span></div>` : ""}
   `;
+
+  pricingAdvisorSummary.querySelector("[data-pricing-review-filter]")?.addEventListener("click", () => {
+    pricingAdvisorReviewOnly = !pricingAdvisorReviewOnly;
+    pricingAdvisorShowAll = false;
+    renderPricingAdvisor(visibleTapRows);
+    pricingAdvisorTable.closest("table")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  });
 
   pricingAdvisorTable.innerHTML = displayedRows.map((item) => {
     const source = advisorByKey.get(item.updateKey || item.id) || {};
@@ -4502,7 +4544,15 @@ function renderPricingAdvisor(visibleTapRows = []) {
       item.costPerOz ? `${money(item.costPerOz)} cost / oz` : "Cost needed",
       item.costSource,
     ].filter(Boolean).join(" · ");
-    const updateControl = renderPmbPriceUpdateControl(item, source);
+    const portionValues = (field, suffix = "") => `<div class="portion-list">${item.portions.map((portion) => {
+      const value = field === "currentMarginPercent"
+        ? (portion.costPerOz && portion.currentPricePerOz ? `${formatNumber(portion[field])}%` : "Not available")
+        : (field === "priceChange" || portion[field] > 0 ? `${money(portion[field])}${suffix}` : "Not available");
+      return `<span><b>${escapeHtml(portion.portionName)}</b> ${escapeHtml(value)}</span>`;
+    }).join("") || "Portion prices needed"}</div>`;
+    const updateControl = item.portionPricing
+      ? `<button type="button" data-pricing-portion-tap="${escapeHtml(item.tapPosition)}">Edit single / double prices</button>`
+      : renderPmbPriceUpdateControl(item, source);
 
     return `
       <tr class="pricing-advisor-row pricing-advisor-row--${escapeHtml(status.tone)}" data-pricing-advisor-key="${escapeHtml(source.updateKey || item.id)}">
@@ -4511,10 +4561,10 @@ function renderPricingAdvisor(visibleTapRows = []) {
           <strong>${escapeHtml(item.name)}</strong>
           <span class="table-note">${escapeHtml(costNote)}</span>
         </td>
-        <td>${item.currentPricePerOz ? `${money(item.currentPricePerOz)} / oz` : "—"}</td>
-        <td>${escapeHtml(currentMargin)}</td>
-        <td><strong>${item.recommendedPricePerOz ? `${money(item.recommendedPricePerOz)} / oz` : "—"}</strong></td>
-        <td>${escapeHtml(delta)}</td>
+        <td>${item.portionPricing ? portionValues("currentPricePerOz") : item.currentPricePerOz ? `${money(item.currentPricePerOz)} / oz` : "—"}</td>
+        <td>${item.portionPricing ? portionValues("currentMarginPercent") : escapeHtml(currentMargin)}</td>
+        <td><strong>${item.portionPricing ? portionValues("recommendedPricePerOz") : item.recommendedPricePerOz ? `${money(item.recommendedPricePerOz)} / oz` : "—"}</strong></td>
+        <td>${item.portionPricing ? portionValues("priceChange") : escapeHtml(delta)}</td>
         <td>
           <span class="pricing-advisor-status pricing-advisor-status--${escapeHtml(status.tone)}">${escapeHtml(status.label)}</span>
           ${issueCopy ? `<span class="table-note">${escapeHtml(issueCopy)}</span>` : ""}
@@ -4522,9 +4572,19 @@ function renderPricingAdvisor(visibleTapRows = []) {
         <td>${updateControl}</td>
       </tr>
     `;
-  }).join("") || `<tr><td colspan="8" class="empty-state">${pricingAdvisorShowAll ? "No tap-pricing rows match this search." : "No price changes suggested."}</td></tr>`;
+  }).join("") || `<tr><td colspan="8" class="empty-state">${pricingAdvisorReviewOnly ? "No pricing items need review in this search." : pricingAdvisorShowAll ? "No tap-pricing rows match this search." : "No price changes suggested."}</td></tr>`;
 
   bindPmbPriceUpdateControls();
+  pricingAdvisorTable.querySelectorAll("[data-pricing-portion-tap]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const row = document.querySelector(`#pricing-table tr[data-portion-pricing-tap="${button.dataset.pricingPortionTap}"]`);
+      if (!row) return;
+      const section = row.closest("details");
+      if (section) section.open = true;
+      row.querySelectorAll("details").forEach((details) => { details.open = true; });
+      row.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  });
 }
 
 function buildPricingAdvisorInput({ livePrice, recipe, kegItem }) {
@@ -4547,6 +4607,11 @@ function buildPricingAdvisorInput({ livePrice, recipe, kegItem }) {
       : ingredient
         ? {
             kind: "Liquor",
+            portions: (Array.isArray(livePrice?.portions) ? livePrice.portions : []).map((portion) => ({
+              name: portion.name,
+              price: toNumber(portion.price),
+              servingOz: toNumber(portion.quantityOz) || getPortionServingOz(portion),
+            })),
             costPerOz: getCatalogUnitCost(ingredient),
             costSource: "Bottle cost",
             costUpdatedAt: priceOverrides[ingredient.id]?.updatedAt,
@@ -4914,6 +4979,7 @@ function renderIngredientTapPricingRow(livePrice, ingredient) {
   const profitPerOz = chargePerOz && costPerOz ? chargePerOz - costPerOz : 0;
   const margin = chargePerOz ? (profitPerOz / chargePerOz) * 100 : 0;
   const row = document.createElement("tr");
+  row.dataset.portionPricingTap = String(livePrice.tapPosition);
   row.innerHTML = `
     <td>${formatTapCell(livePrice)}</td>
     <td>
@@ -5572,9 +5638,10 @@ function getFinishWeekProgress() {
   return buildFinishWeekProgress({ weeklyOrderTracking, dashboardStaffPrepPlan });
 }
 
-function renderWeeklyPlanFinishWeek(planLocked) {
+function renderWeeklyPlanFinishWeek(planLocked, expandFirstIncomplete = true) {
   return renderFinishWeekPanel({
     planLocked,
+    expandFirstIncomplete,
     progress: getFinishWeekProgress(),
     weeklyOrderTracking,
     cocktails: Array.isArray(dashboardStaffPrepPlan.items) ? dashboardStaffPrepPlan.items : [],
@@ -7015,7 +7082,6 @@ function renderDashboardCategoryMix(mix) {
   return `
     <section>
       ${header}
-      ${isProfit ? `<p><strong>${money(mix.projectedProfit)}</strong> projected gross profit</p>` : ""}
       <div class="dashboard-pulse-mix-bar" aria-label="${title} for ${escapeHtml(mix.weekLabel || "selected period")}">
         ${mix.categories.filter((row) => row.sharePercent > 0).map((row) => `<i class="dashboard-pulse-mix-bar__${escapeHtml(row.category)}" style="--mix-share:${row.sharePercent}%"></i>`).join("")}
       </div>
@@ -7024,13 +7090,13 @@ function renderDashboardCategoryMix(mix) {
           <div class="dashboard-pulse-mix-legend__${escapeHtml(row.category)}">
             <span aria-hidden="true"></span>
             <strong>${formatNumber(row.sharePercent)}%</strong>
-            <small>${escapeHtml(row.label)}${isProfit ? ` · ${money(row.projectedSales)}` : ""}</small>
+            <small>${escapeHtml(row.label)}</small>
           </div>
         `).join("")}
       </div>
       ${isProfit ? `<p class="dashboard-pulse-empty">Estimated from recorded pours and available selling prices and costs, before labor and overhead. Uses same-category averages where product pricing is missing, and average liquor portion pricing where needed.
         ${mix.unpricedTapCount ? `${mix.unpricedTapCount} tap(s) excluded because neither product pricing nor a category estimate is available.` : ""}
-        ${mix.hasLosses ? "Losses are included in the dollar totals; percentages show positive category contributions only." : ""}
+        ${mix.hasLosses ? "Percentages show positive category contributions only; categories with a net loss have a 0% share." : ""}
       </p>` : ""}
     </section>
   `;
@@ -8048,8 +8114,8 @@ function renderWeeklyPlan() {
     ? `<button class="ghost-button" id="toggle-order-rehearsal" type="button">${orderRehearsalMode ? "Exit Rehearsal" : "Rehearsal"}</button>`
     : "";
   const liveHeaderActions = `
-    ${demoToggle}
-    ${planLocked ? `<button class="ghost-button" id="recall-weekly-plan" type="button"${weeklyPlanUpdating ? " disabled" : ""}>${weeklyPlanUpdating ? "Recalling..." : "Recall Plan"}</button>` : ""}
+    ${demoToggle || planLocked ? `<details class="weekly-plan-tools" id="weekly-plan-tools"><summary>Plan tools</summary><div>${demoToggle}
+    ${planLocked ? `<button class="ghost-button" id="recall-weekly-plan" type="button"${weeklyPlanUpdating ? " disabled" : ""}>${weeklyPlanUpdating ? "Recalling..." : "Recall Plan"}</button>` : ""}</div></details>` : ""}
     ${requiresLateSnapshotReason ? `
       <label class="weekly-plan-late-reason">
         <span>Reason required</span>
@@ -8062,27 +8128,27 @@ function renderWeeklyPlan() {
     <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(getWeeklyPlanManagerMessage(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : "")))}</p>
     ${renderMondayRun(mondayRun)}
     ${renderWeeklyPlanReadiness(freshness.readiness)}
-    <details class="weekly-plan-details">
-      <summary>Plan details</summary>
-      ${renderWeeklyPlanProvenance(freshness)}
-    </details>
     ${currentWeekPlanAvailable ? `<div class="weekly-plan-stats">
       <div><span>Items to order</span><strong>${formatNumber(summary.orderLineCount)}</strong></div>
       <div><span>Beer kegs</span><strong>${formatNumber(summary.beerKegTotal)}</strong></div>
-      <div><span>Bottles for liquor taps</span><strong>${formatNumber(summary.liquorTapBottleTotal)}</strong></div>
+      <div><span>Tap refill bottles</span><strong>${formatNumber(summary.liquorTapBottleTotal)}</strong></div>
       <div><span>Cocktails to make</span><strong>${formatNumber(summary.cocktailBatchTotal)}</strong></div>
-      <div class="${simpleSyrupNeed.complete ? "" : "weekly-plan-stat--warning"}"><span>Simple syrup</span><strong>${simpleSyrupNeed.complete ? `${formatNumber(simpleSyrupNeed.gallons)} gal` : "Check recipes"}</strong>${simpleSyrupNeed.complete ? `<small>${formatNumber(simpleSyrupNeed.totalOz)} oz</small>` : `<small>${formatNumber(simpleSyrupNeed.unmatched.length)} unmatched cocktail${simpleSyrupNeed.unmatched.length === 1 ? "" : "s"}</small>`}</div>
+      <div class="${simpleSyrupNeed.complete ? "" : "weekly-plan-stat--warning"}"><span>Simple syrup</span><strong>${simpleSyrupNeed.complete ? `${formatNumber(simpleSyrupNeed.gallons)} gal` : "Check recipes"}</strong>${simpleSyrupNeed.complete ? "" : `<small>${formatNumber(simpleSyrupNeed.unmatched.length)} unmatched cocktail${simpleSyrupNeed.unmatched.length === 1 ? "" : "s"}</small>`}</div>
       ${summary.heldLineCount + summary.excludedLineCount > 0 ? `<div><span>Held for review</span><strong>${formatNumber(summary.heldLineCount + summary.excludedLineCount)}</strong></div>` : ""}
       <div class="${summary.estimatedPurchaseCostComplete ? "" : "weekly-plan-stat--warning"}"><span>Estimated purchase</span><strong>${money(summary.estimatedKnownPurchaseCost)}</strong>${summary.missingPriceCount ? `<small>${formatNumber(summary.missingPriceCount)} missing price${summary.missingPriceCount === 1 ? "" : "s"}</small>` : ""}</div>
     </div>
     ${priceNote ? `<p class="weekly-plan-cost-note">${escapeHtml(priceNote)}</p>` : ""}
+    ${renderWeeklyPlanReview(plan)}
+    ${planLocked
+      ? `<details class="weekly-plan-phase weekly-plan-phase--orders" id="weekly-plan-orders"${orderStep?.complete ? "" : " open"}><summary><span>${orderStep?.complete ? "Placed orders" : "Place orders"}</span><strong>${escapeHtml(orderStep?.status || "Review")}</strong></summary>${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)}</details>`
+      : ""}
     <div class="weekly-plan-columns${planLocked ? " weekly-plan-columns--locked" : ""}">
       ${planLocked ? "" : `<section class="weekly-plan-column">
         <div class="weekly-plan-column__header"><h2>Order This Week</h2></div>
         ${renderWeeklyPlanByVendor(plan, vendorOrderModel.deferredOrders)}
       </section>`}
       <details class="weekly-plan-phase weekly-plan-phase--prep"${planLocked ? "" : " open"}>
-        <summary><span>Prep plan</span><strong>${formatNumber(summary.cocktailBatchTotal)} cocktail${toNumber(summary.cocktailBatchTotal) === 1 ? "" : "s"} · ${formatNumber(summary.liquorTapBottleTotal)} liquor</strong></summary>
+        <summary><span>Prep plan</span><strong>${formatNumber(summary.cocktailBatchTotal)} batch${toNumber(summary.cocktailBatchTotal) === 1 ? "" : "es"} · ${formatNumber(summary.liquorTapBottleTotal)} refill bottles</strong></summary>
         <section class="weekly-plan-column weekly-plan-column--prep">
           <div class="weekly-plan-column__header"><h2>Cocktails To Make</h2></div>
           ${renderWeeklyPlanCocktailRows(plan.prep.cocktails)}
@@ -8091,11 +8157,11 @@ function renderWeeklyPlan() {
         </section>
       </details>
     </div>
-    ${planLocked && !orderStep?.complete
-      ? `<details class="weekly-plan-phase weekly-plan-phase--orders" id="weekly-plan-orders" open><summary><span>Place orders</span><strong>${escapeHtml(orderStep?.status || "Review")}</strong></summary>${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)}</details>`
-      : ""}
-    ${renderWeeklyPlanFinishWeek(planLocked)}
-    ${renderWeeklyPlanReview(plan)}` : `<section class="weekly-plan-empty" role="status"><h2>This week's plan has not been generated</h2><p>The previous plan is saved in Weekly Snapshots. Use Save &amp; Lock Plan after the current PMB usage and counts are ready.</p></section>`}
+    ${renderWeeklyPlanFinishWeek(planLocked, Boolean(orderStep?.complete))}` : `<section class="weekly-plan-empty" role="status"><h2>This week's plan has not been generated</h2><p>The previous plan is saved in Weekly Snapshots. Use Save &amp; Lock Plan after the current PMB usage and counts are ready.</p></section>`}
+    <details class="weekly-plan-details" id="weekly-plan-source-details">
+      <summary>Plan details &amp; data sources</summary>
+      ${renderWeeklyPlanProvenance(freshness)}
+    </details>
   `;
   let weeklyPlanBody = liveWeeklyPlanBody;
   if (orderRehearsalMode) {
@@ -8119,7 +8185,8 @@ function renderWeeklyPlan() {
   weeklyPlan.innerHTML = `
     <header class="weekly-plan-header">
       <div>
-        <h2>${orderRehearsalMode ? "Rehearsal" : "Order &amp; Prep Plan"}</h2>
+        <p class="eyebrow">${orderRehearsalMode ? "Practice mode" : planLocked ? "Locked plan" : "Monday planning"}</p>
+        <h2>${orderRehearsalMode ? "Rehearsal" : "Weekly plan"}</h2>
         <p>${escapeHtml(orderRehearsalMode ? "Guided weekly workflow rehearsal" : updatedText)}</p>
       </div>
       <div class="weekly-plan-actions">
@@ -8135,10 +8202,6 @@ function renderWeeklyPlan() {
   if (inventoryEstimatedPurchase) {
     inventoryEstimatedPurchase.textContent = money(globalThis.onParWeeklyPlanEstimatedPurchaseCost);
   }
-  const planDetails = weeklyPlan.querySelector("details.weekly-plan-details");
-  const prepPhase = weeklyPlan.querySelector("details.weekly-plan-phase--prep");
-  if (planDetails && prepPhase) planDetails.append(prepPhase);
-
   weeklyPlan.querySelectorAll("details").forEach((details) => {
     const key = getWeeklyPlanDisclosureKey(details);
     if (weeklyPlanDisclosureState.has(key)) details.open = weeklyPlanDisclosureState.get(key);

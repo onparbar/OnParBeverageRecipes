@@ -85,6 +85,8 @@ test("dashboard data search parses natural-language filters and comparisons", ()
     comparison: { operator: "lt", threshold: 10 },
     period: "recent",
     sort: null,
+    tapNumber: null,
+    rankLimit: 1,
     nameTerms: [],
   });
 });

@@ -58,7 +58,7 @@ function getDashboardDataIdentity(item) {
 
 function getSearchScore(item, query, tokens) {
   const fields = getSearchFields(item);
-  if (!tokens.every((token) => fields.combined.includes(token))) return null;
+  if (!tokens.every((token) => searchTokenMatches(token, fields.combined))) return null;
 
   let score = 0;
   if (fields.title === query) score += 1_000;
@@ -73,7 +73,33 @@ function getSearchScore(item, query, tokens) {
   score += tokens.filter((token) => titleWords.some((word) => word.startsWith(token))).length * 30;
   score += tokens.filter((token) => fields.secondary.includes(token)).length * 12;
   if (item?.kind === "section") score += 5;
+  score -= tokens.filter((token) => !fields.combined.includes(token)).length * 160;
   return score;
+}
+
+function searchTokenMatches(token, text) {
+  const words = text.split(" ");
+  if (/^\d+$/.test(token)) return words.includes(token);
+  if (text.includes(token)) return true;
+  if (token.length < 4 || /\d/.test(token)) return false;
+  const distanceLimit = token.length >= 8 ? 2 : 1;
+  return words.some((word) => {
+    if (Math.abs(word.length - token.length) > distanceLimit || /\d/.test(word)) return false;
+    if (word.length === token.length) {
+      const mismatches = [...token].flatMap((letter, index) => letter === word[index] ? [] : [index]);
+      if (mismatches.length === 2 && mismatches[1] === mismatches[0] + 1
+        && token[mismatches[0]] === word[mismatches[1]] && token[mismatches[1]] === word[mismatches[0]]) return true;
+    }
+    let previous = Array.from({ length: word.length + 1 }, (_, index) => index);
+    for (let i = 1; i <= token.length; i += 1) {
+      const current = [i];
+      for (let j = 1; j <= word.length; j += 1) {
+        current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + Number(token[i - 1] !== word[j - 1]));
+      }
+      previous = current;
+    }
+    return previous[word.length] <= distanceLimit;
+  });
 }
 
 export function searchDashboardItems(items, rawQuery, { limit = 12 } = {}) {
@@ -113,6 +139,7 @@ const DASHBOARD_QUERY_STOP_WORDS = new Set([
   "latest", "me", "of", "on", "one", "or", "past", "please", "recent", "recently", "search", "show",
   "tap", "taps", "that", "the", "this", "to", "wall", "week", "weeks", "what",
   "which", "with", "four", "six", "eight", "twelve", "time", "history",
+  "how", "much", "many", "do", "does", "we", "our", "my", "tell", "about", "average", "avg",
 ]);
 
 const DASHBOARD_QUERY_RULE_WORDS = new Set([
@@ -121,6 +148,7 @@ const DASHBOARD_QUERY_RULE_WORDS = new Set([
   "less", "liquor", "liquors", "lowest", "main", "most", "no", "ounce", "ounces",
   "over", "patio", "pour", "poured", "pours", "recent", "revenue", "sale", "sales",
   "profit", "profits", "margin", "shot", "shots", "spirit", "spirits", "than", "top", "under", "usage", "volume", "worst",
+  "bottom", "largest", "smallest", "oz", "percent", "estimated", "projected", "gross", "sellers", "selling",
 ]);
 
 const DASHBOARD_PERIOD_WEEK_VALUES = new Map([
@@ -182,13 +210,13 @@ function getDashboardQueryNameTerms(query) {
   return query
     .split(" ")
     .filter(Boolean)
-    .filter((token) => !/^\d+(?:\.\d+)?$/.test(token))
     .filter((token) => !DASHBOARD_QUERY_STOP_WORDS.has(token))
     .filter((token) => !DASHBOARD_QUERY_RULE_WORDS.has(token));
 }
 
 export function parseDashboardDataQuery(rawQuery) {
-  const query = normalizeGlobalSearchText(rawQuery);
+  const query = normalizeGlobalSearchText(String(rawQuery ?? "").replace(/(\d)\.(?=\d)/g, "$1decimalpoint"))
+    .replace(/(\d)decimalpoint(?=\d)/g, "$1.");
   if (!query) {
     return {
       status: "needs-clarification",
@@ -235,7 +263,7 @@ export function parseDashboardDataQuery(rawQuery) {
   }
 
   let comparison = getDashboardQueryComparison(query);
-  let metric = hasProfitMetric ? "profit" : hasDollarMetric ? "dollars" : "ounces";
+  let metric = /\bmargin\b/.test(query) ? "margin" : hasProfitMetric ? "profit" : hasDollarMetric ? "dollars" : "ounces";
   if (/\bno\s+(?:sales?|revenue)\b/.test(query)) {
     comparison = { operator: "eq", threshold: 0 };
     metric = "dollars";
@@ -245,17 +273,8 @@ export function parseDashboardDataQuery(rawQuery) {
   }
 
   const periodSelection = getDashboardQueryPeriod(query);
-  const comparisonQuery = periodSelection.matchedText
-    ? query.replace(periodSelection.matchedText, " ")
-    : query;
-  const hasNumber = /\b\d+(?:\.\d+)?\b/.test(comparisonQuery);
-  if (hasNumber && !comparison) {
-    return {
-      status: "needs-clarification",
-      question: "Should that number be treated as above, below, or exactly the threshold?",
-      intent: null,
-    };
-  }
+  const tapMatch = query.match(/\btap\s+(\d+)\b/) || query.match(/^(\d{1,3})$/);
+  const rankMatch = query.match(/\b(?:top|bottom|best|worst|highest|lowest)\s+(\d+)\b/);
   if (comparison && !hasDollarMetric && !hasOunceMetric && !hasProfitMetric) {
     return {
       status: "needs-clarification",
@@ -267,16 +286,12 @@ export function parseDashboardDataQuery(rawQuery) {
   const wantsTop = /\b(?:best|highest|top|largest)\b|\bmost\s+(?:poured|sales|volume|ounces)/.test(query);
   const wantsBottom = /\b(?:worst|lowest|least|bottom|smallest)\b/.test(query);
   const sort = wantsTop && wantsBottom ? "both" : wantsTop ? "desc" : wantsBottom ? "asc" : null;
-  if (sort && !periodSelection.explicit) {
-    return {
-      status: "needs-clarification",
-      question: "Which period should I rank: last week, this week, or recent history?",
-      intent: null,
-    };
-  }
-
-  const nameTerms = getDashboardQueryNameTerms(query);
-  if (!categories.length && !walls.length && !comparison && !sort && !nameTerms.length) {
+  let nameQuery = query.replace(periodSelection.matchedText || /$^/, " ");
+  if (tapMatch) nameQuery = nameQuery.replace(tapMatch[0], " ");
+  if (rankMatch) nameQuery = nameQuery.replace(rankMatch[0], " ");
+  if (comparison) nameQuery = nameQuery.replace(/\b\d+(?:\.\d+)?\b/g, " ");
+  const nameTerms = getDashboardQueryNameTerms(nameQuery);
+  if (!categories.length && !walls.length && !comparison && !sort && !nameTerms.length && !tapMatch) {
     return {
       status: "needs-clarification",
       question: "What drink, wall, or comparison should I search for?",
@@ -295,6 +310,8 @@ export function parseDashboardDataQuery(rawQuery) {
       comparison,
       period: periodSelection.key,
       sort,
+      tapNumber: tapMatch ? Number(tapMatch[1]) : null,
+      rankLimit: rankMatch ? Math.max(1, Math.min(100, Number(rankMatch[1]))) : sort === "both" ? 5 : 1,
       nameTerms,
     },
   };
@@ -321,9 +338,10 @@ export function searchDashboardData(items, rawQuery, { limit = 50 } = {}) {
     .filter((item) => intent.visibility === "hidden" ? item.hidden === true : item.hidden !== true)
     .filter((item) => !intent.category || item.category === intent.category)
     .filter((item) => !intent.wall || getDashboardDataIdentity(item).wall === intent.wall)
+    .filter((item) => !intent.tapNumber || Number(item.tapNumber) === intent.tapNumber)
     .filter((item) => {
       const { haystack } = getDashboardDataIdentity(item);
-      return intent.nameTerms.every((term) => haystack.includes(term));
+      return intent.nameTerms.every((term) => searchTokenMatches(term, haystack));
     })
     .map((item) => {
       const savedPeriod = item.periods?.[intent.period] || null;
@@ -331,13 +349,14 @@ export function searchDashboardData(items, rawQuery, { limit = 50 } = {}) {
         ? { label: "No recorded activity", ounces: 0, dollars: 0 }
         : null);
       if (!period) return null;
+      if (period[intent.metric] == null || period[intent.metric] === "") return null;
       const value = Number(period[intent.metric]);
       if (!Number.isFinite(value) || !dashboardQueryValueMatches(value, intent.comparison)) return null;
       return {
         ...item,
         value,
-        ounces: Number.isFinite(Number(period.ounces)) ? Number(period.ounces) : null,
-        dollars: Number.isFinite(Number(period.dollars)) ? Number(period.dollars) : null,
+        ounces: period.ounces != null && Number.isFinite(Number(period.ounces)) ? Number(period.ounces) : null,
+        dollars: period.dollars != null && Number.isFinite(Number(period.dollars)) ? Number(period.dollars) : null,
         periodLabel: period.label || "Selected period",
       };
     })
@@ -347,7 +366,7 @@ export function searchDashboardData(items, rawQuery, { limit = 50 } = {}) {
   const compareValues = (direction) => (left, right) => direction * (left.value - right.value) || compareNames(left, right);
 
   if (intent.sort === "both") {
-    const groupLimit = Math.min(5, safeLimit);
+    const groupLimit = Math.min(intent.rankLimit, safeLimit);
     const top = [...matches]
       .sort(compareValues(-1))
       .slice(0, groupLimit)
@@ -371,6 +390,7 @@ export function searchDashboardData(items, rawQuery, { limit = 50 } = {}) {
 
   return {
     ...parsed,
-    results: matches.slice(0, intent.sort ? 1 : safeLimit),
+    total: matches.length,
+    results: matches.slice(0, intent.sort ? Math.min(intent.rankLimit, safeLimit) : safeLimit),
   };
 }

@@ -67,6 +67,7 @@ export function renderFinishWeekPanel({
   actor = "",
   saving = false,
   message = "",
+  expandFirstIncomplete = true,
 } = {}) {
   if (!planLocked) return "";
   const checklistSections = [
@@ -90,9 +91,9 @@ export function renderFinishWeekPanel({
     <section class="finish-week-panel" id="weekly-plan-finish-week" aria-labelledby="finish-week-title">
       <header class="finish-week-header">
         <div>
-          <p class="eyebrow">Shared with Staff View</p>
-          <h2 id="finish-week-title">Finish the Week</h2>
-          <p>Check off deliveries, prepared cocktails, and liquor added to taps. Both views update together.</p>
+          <p class="eyebrow">After ordering</p>
+          <h2 id="finish-week-title">Receive &amp; complete</h2>
+          <p>Record what arrived and what was prepared. Changes sync with Staff View.</p>
         </div>
         <strong class="finish-week-state${progress.complete ? " is-complete" : ""}">${progress.complete ? "Complete" : `${formatNumber(progress.remainingCount)} left`}</strong>
       </header>
@@ -108,7 +109,7 @@ export function renderFinishWeekPanel({
         ${checklistSections.map((item, index) => {
           const section = progress.sections[index] || { complete: false, completedCount: 0, totalCount: 0 };
           return `
-            <details class="finish-week-checklist${section.complete ? " is-complete" : ""}"${section.complete ? "" : " open"}>
+            <details id="finish-week-checklist-${index}" class="finish-week-checklist${section.complete ? " is-complete" : ""}"${expandFirstIncomplete && index === progress.sections.findIndex((entry) => !entry.complete) ? " open" : ""}>
               <summary><span>${escapeHtml(item.title)}</span><strong>${formatNumber(section.completedCount)} / ${formatNumber(section.totalCount)}</strong></summary>
               <div class="finish-week-checklist__body">
                 <p>${escapeHtml(item.description)}</p>

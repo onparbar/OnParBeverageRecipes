@@ -67,6 +67,8 @@
   }
 
   function getDashboardSearchField() {
+    const headerSearch = document.getElementById("dashboard-data-search-input");
+    if (headerSearch) return headerSearch;
     return [...document.querySelectorAll('input:not([type="hidden"]), textarea')].find((field) => {
       const identity = [
         field.getAttribute("aria-label"),
