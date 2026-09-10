@@ -6192,6 +6192,7 @@ function getMissingPriceAlerts() {
   });
   getWeeklyPlanInventoryItems().forEach((item) => {
     const name = clean(item?.name);
+    if (item?.id === "non-alcoholic-beer" || /^non[-\s]*alcoholic beer$/i.test(name)) return;
     const productKey = normalizeProductPriceKey(name);
     if (!name || isPricingPlaceholder(name) || !productKey || toNumber(item?.par) <= 0 || toNumber(item?.unitCost) > 0 || seenCosts.has(productKey)) return;
     seenCosts.add(productKey);
@@ -12552,7 +12553,7 @@ async function runKegConfigUpdate() {
   if (!confirmDashboardAction(
     "Update the Pour My Beer tap connections?",
     [
-      "This can stop pouring on every wall for several minutes.",
+      "This temporarily disables the tap walls for several minutes.",
       "Confirm that no guests are using the tap walls.",
     ],
     "Only continue after all guest taps are clear.",
@@ -12575,11 +12576,10 @@ async function runKegConfigUpdate() {
 
     kegSyncMessage = result.message || "Configuration update sent.";
     window.clearTimeout(tapRepairRefreshTimer);
-    kegSyncMessage += " Fresh PMB readings will be checked automatically in one minute; the tap repair will not be repeated.";
-    tapRepairRefreshTimer = window.setTimeout(() => {
-      tapRepairRefreshTimer = null;
-      void runUnifiedPmbRefresh();
-    }, 60_000);
+    tapRepairRefreshTimer = null;
+    kegSyncMessage += " Refreshing PMB readings now; the tap repair will not be repeated.";
+    renderKegLevels();
+    await runUnifiedPmbRefresh();
   } catch (error) {
     kegSyncMessage = getPmbConnectionErrorMessage(
       error,
