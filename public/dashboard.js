@@ -1178,6 +1178,7 @@ let kegSyncAttempted = false;
 let kegUpdatedAt = "";
 let kegLiveLevelsStale = false;
 let kegConfigUpdateRunning = false;
+let kegRepairStatus = null;
 let kegDeviceLevels = new Map();
 let kegTemplateAssignments = new Map();
 let parAgentState = null;
@@ -1434,19 +1435,20 @@ let unifiedPmbRefreshRunning = false;
 let tapRepairRefreshTimer = null;
 
 async function runUnifiedPmbRefresh() {
-  if (isEmployeeDashboard || unifiedPmbRefreshRunning) return;
+  if (isEmployeeDashboard || unifiedPmbRefreshRunning) return false;
   const button = document.querySelector("#refresh-all-pmb");
   const lockToken = acquireOwnerLoginSyncLock();
   if (!lockToken) {
     weeklyPlanRefreshMessage = "PMB is already refreshing in another dashboard tab. Your counts are unchanged; retry shortly.";
     renderWeeklyPlan();
-    return;
+    return false;
   }
   if (tapRepairRefreshTimer) {
     window.clearTimeout(tapRepairRefreshTimer);
     tapRepairRefreshTimer = null;
   }
   unifiedPmbRefreshRunning = true;
+  let pmbRefreshed = false;
   if (button) {
     button.disabled = true;
     button.textContent = "Refreshing...";
@@ -1467,8 +1469,9 @@ async function runUnifiedPmbRefresh() {
         flushPendingInventoryFieldSyncs(),
         flushPendingParAgentStateSync(),
       ]);
-      const inputsReady = refreshResults.slice(0, 3).every((result, index) => result.status === "fulfilled"
-        && (index === 2 ? result.value?.ok === true : result.value === true))
+      pmbRefreshed = refreshResults.slice(0, 3).every((result, index) => result.status === "fulfilled"
+        && (index === 2 ? result.value?.ok === true : result.value === true));
+      const inputsReady = pmbRefreshed
         && saveResults.every((result) => result.status === "fulfilled" && result.value !== false);
       if (inputsReady && !getCurrentMondayKegPlanSnapshot() && !hasPublishedWeeklyPlanRecommendations()) {
         await runKegParAgent();
@@ -1476,6 +1479,7 @@ async function runUnifiedPmbRefresh() {
       renderDashboardOverview();
     });
   } catch (error) {
+    pmbRefreshed = false;
     weeklyPlanRefreshMessage = `PMB refresh did not finish: ${error.message || "connection interrupted"}. Your saved counts remain unchanged.`;
   } finally {
     releaseOwnerLoginSyncLock(lockToken);
@@ -1487,6 +1491,7 @@ async function runUnifiedPmbRefresh() {
     renderWeeklyPlan();
     renderDashboardOverview();
   }
+  return pmbRefreshed;
 }
 
 document.querySelector("#refresh-all-pmb")?.addEventListener("click", () => {
@@ -8266,6 +8271,7 @@ function renderKegLevels() {
       <button class="ghost-button" id="send-keg-config-update" type="button"${kegSyncLoading || kegConfigUpdateRunning ? " disabled" : ""}>${kegConfigUpdateRunning ? "Updating..." : "Repair tap connection"}</button>
         <button class="ghost-button keg-clear-on-hand-button" id="clear-keg-on-hand" type="button">Clear all on hand</button>
       </div>
+      <div id="keg-repair-status" role="status" aria-live="polite" aria-atomic="true">${kegRepairStatus ? `<p class="sync-status${kegRepairStatus.warning ? " sync-status--warning" : ""}"><strong>${escapeHtml(kegRepairStatus.message)}</strong>${kegRepairStatus.completedAt ? `<br>Completed ${escapeHtml(formatUpdatedAt(kegRepairStatus.completedAt))}.` : ""}</p>` : ""}</div>
       <p class="sync-status">${escapeHtml(kegSyncMessage)}${kegUpdatedAt ? ` Last updated ${escapeHtml(formatUpdatedAt(kegUpdatedAt))}.` : ""}</p>
       ${liveCount < totalTaps ? `<p class="sync-status sync-status--warning">${formatNumber(totalTaps - liveCount)} tap${totalTaps - liveCount === 1 ? " needs" : "s need"} update. Refresh the connection only when guest taps are clear.</p>` : ""}
     </div>
@@ -12560,6 +12566,7 @@ async function runKegConfigUpdate() {
   )) return;
 
   kegConfigUpdateRunning = true;
+  kegRepairStatus = { message: "Configuring taps. PMB will refresh when the update finishes." };
   kegSyncMessage = "Sending config update to Pour My Beer...";
   renderKegLevels();
 
@@ -12578,9 +12585,14 @@ async function runKegConfigUpdate() {
     window.clearTimeout(tapRepairRefreshTimer);
     tapRepairRefreshTimer = null;
     kegSyncMessage += " Refreshing PMB readings now; the tap repair will not be repeated.";
+    kegRepairStatus = { message: "Tap configuration update sent. Refreshing PMB now..." };
     renderKegLevels();
-    await runUnifiedPmbRefresh();
+    const refreshed = await runUnifiedPmbRefresh();
+    kegRepairStatus = refreshed
+      ? { message: "Taps have been configured and PMB has been refreshed.", completedAt: new Date().toISOString() }
+      : { message: "Tap configuration update sent, but the PMB refresh could not be confirmed. Use Refresh PMB to retry; you do not need to repeat the tap repair.", warning: true };
   } catch (error) {
+    kegRepairStatus = { message: "Tap configuration could not be confirmed. Review the connection message below before retrying.", warning: true };
     kegSyncMessage = getPmbConnectionErrorMessage(
       error,
       "Could not send config update.",
