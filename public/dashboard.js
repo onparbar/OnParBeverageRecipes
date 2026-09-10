@@ -152,6 +152,7 @@ import {
 } from "./shot-pricing-view.mjs";
 import {
   getComingSoonKindLabel,
+  consolidateComingSoonItems,
   mergeRequiredComingSoonItems,
   getActiveComingSoonItems,
 } from "./coming-soon-items.mjs";
@@ -8412,12 +8413,10 @@ function renderComingSoonItem(item) {
 }
 
 function getComingSoonImageUrl(item) {
-  const savedImageUrl = clean(item?.imageUrl);
-  if (savedImageUrl) return savedImageUrl;
   const cloneSourceName = clean(item?.cloneSourceName);
   return cloneSourceName
     ? `/api/pmb-products?cloneImageFor=${encodeURIComponent(cloneSourceName)}`
-    : "";
+    : clean(item?.imageUrl);
 }
 
 function getComingSoonCardDescription(value) {
@@ -11452,7 +11451,9 @@ function openComingSoonLiquorSetup(item) {
 }
 
 function buildPmbPayloadFromComingSoonItem(item) {
-  const imageUrl = clean(item.imageUrl);
+  // Let PMB copy the original wall product's image for a duplicate product.
+  // A saved preview must not override that source image during publishing.
+  const imageUrl = clean(item.cloneSourceName) ? "" : clean(item.imageUrl);
   const liquorCatalogPricing = getComingSoonLiquorCatalogPricing(item);
   const liquorBottleOz = toNumber(item.bottleOz || item.kegOz || liquorCatalogPricing?.bottleOz);
   const liquorBottleCost = toNumber(item.bottleCost || item.kegCost || liquorCatalogPricing?.unitPrice);
@@ -16230,12 +16231,7 @@ function addComingSoonItemFromPmbProduct(payload, product = null) {
 
 function upsertComingSoonItem(item) {
   if (!item?.id || !item.name) return;
-  const existing = comingSoonItems.find((entry) => entry.id === item.id);
-  if (existing) {
-    comingSoonItems = comingSoonItems.map((entry) => (entry.id === item.id ? { ...entry, ...item, createdAt: entry.createdAt || item.createdAt } : entry));
-  } else {
-    comingSoonItems.push(item);
-  }
+  comingSoonItems = consolidateComingSoonItems([...comingSoonItems, item]);
   saveComingSoonItems();
 }
 
@@ -19267,6 +19263,7 @@ function loadComingSoonItems() {
 }
 
 function saveComingSoonItems() {
+  comingSoonItems = consolidateComingSoonItems(comingSoonItems);
   writeDashboardLocalStorageValue(COMING_SOON_STORAGE_KEY, comingSoonItems);
   scheduleSharedDashboardStateSync("products.comingSoonItems");
 }

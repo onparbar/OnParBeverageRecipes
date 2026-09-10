@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
 
 import {
   getActiveComingSoonItems,
+  consolidateComingSoonItems,
   getComingSoonKindLabel,
   mergeRequiredComingSoonItems,
   REQUIRED_COMING_SOON_ITEMS,
@@ -22,7 +25,6 @@ test("keeps the required products in Coming Soon", () => {
   assert.deepEqual(
     REQUIRED_COMING_SOON_ITEMS.map(({ name }) => name),
     [
-      "Bacardi Sunset",
       "On Par Tee (Crown Royal) 1",
       "Whiskey Smash (Jim Beam) 1",
       "Triple Jam Cider 2",
@@ -31,8 +33,8 @@ test("keeps the required products in Coming Soon", () => {
   );
 
   const merged = mergeRequiredComingSoonItems([]);
-  assert.equal(merged.length, 5);
-  assert.deepEqual(merged.map(({ kind }) => kind), ["recipe", "recipe", "recipe", "beer", "recipe"]);
+  assert.equal(merged.length, 4);
+  assert.deepEqual(merged.map(({ kind }) => kind), ["recipe", "recipe", "beer", "recipe"]);
   assert.deepEqual(
     merged.find(({ id }) => id === "recipe:vodka-cran-2"),
     {
@@ -113,6 +115,69 @@ test("labels beer, liquor, and cocktail Coming Soon items correctly", () => {
   assert.equal(getComingSoonKindLabel("liquor"), "Liquor tap");
   assert.equal(getComingSoonKindLabel("recipe"), "Cocktail recipe");
   assert.equal(getComingSoonKindLabel("liquor", { compact: true }), "liquor");
+});
+
+test("consolidates a beer's draft and published entries while preserving its original ID", () => {
+  const draft = { id: "beer:psychopathy", name: "Psychopathy", kind: "beer", plu: 0, createdAt: "2026-09-10T10:00:00Z", kegCost: 180 };
+  const published = { id: "beer:4321", name: "PSYCHOPATHY", kind: "beer", plu: 4321, createdAt: "2026-09-10T11:00:00Z", pricePerOz: 0.6 };
+  const merged = consolidateComingSoonItems([draft, published]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].id, draft.id);
+  assert.equal(merged[0].createdAt, draft.createdAt);
+  assert.equal(merged[0].plu, 4321);
+  assert.equal(merged[0].kegCost, 180);
+  assert.equal(merged[0].pricePerOz, 0.6);
+  const reloaded = mergeRequiredComingSoonItems(merged, [{ kind: "beer", name: "Psychopathy", status: "ready", payload: {} }]);
+  assert.equal(reloaded.filter((item) => /psychopathy/i.test(item.name)).length, 1);
+  assert.equal(draft.plu, 0);
+});
+
+test("keeps distinct PMB products and numbered wall counterparts separate", () => {
+  const items = [
+    { id: "beer:1", kind: "beer", name: "Triple Jam Cider 1", plu: 1 },
+    { id: "beer:2", kind: "beer", name: "Triple Jam Cider 2", plu: 2 },
+    { id: "beer:3", kind: "beer", name: "Triple Jam Cider 1", plu: 3 },
+  ];
+  assert.equal(consolidateComingSoonItems(items).length, 3);
+});
+
+test("a completed duplicate cannot reappear as a waiting product", () => {
+  const items = [
+    { id: "beer:psychopathy", kind: "beer", name: "Psychopathy", plu: 0 },
+    { id: "beer:4321", kind: "beer", name: "Psychopathy", plu: 4321, replacedAt: "2026-09-10T12:00:00Z", replaceTapKey: "main:21" },
+  ];
+  assert.equal(getActiveComingSoonItems(items).length, 0);
+  assert.equal(consolidateComingSoonItems(items)[0].replaceTapKey, "main:21");
+});
+
+test("Bacardi Sunset is removed from old saved Coming Soon data and never reseeded", () => {
+  const saved = [{ id: "recipe:bacardi-sunset", kind: "recipe", name: "Bacardi Sunset" }];
+  assert.equal(getActiveComingSoonItems(saved).length, 0);
+  assert.equal(mergeRequiredComingSoonItems(saved).some((item) => item.id === saved[0].id), false);
+  assert.equal(saved.length, 1);
+});
+
+test("clone previews and publishing use the main-wall image instead of the saved substitute", () => {
+  const source = readFileSync(new URL("../public/dashboard.js", import.meta.url), "utf8");
+  const context = vm.createContext({
+    clean: (value) => String(value ?? "").trim(),
+    toNumber: (value) => Number(value) || 0,
+    getComingSoonLiquorCatalogPricing: () => null,
+    STANDARD_BEER_KEG_OZ: 1984,
+    STANDARD_COCKTAIL_KEG_OZ: 1452,
+  });
+  for (const name of ["getComingSoonImageUrl", "buildPmbPayloadFromComingSoonItem"]) {
+    const match = source.match(new RegExp(`function ${name}\\(item\\) \\{[\\s\\S]*?\\n\\}`));
+    assert.ok(match, name);
+    vm.runInContext(match[0], context);
+  }
+  for (const item of REQUIRED_COMING_SOON_ITEMS.filter((entry) => entry.cloneSourceName)) {
+    assert.equal(context.getComingSoonImageUrl(item), `/api/pmb-products?cloneImageFor=${encodeURIComponent(item.cloneSourceName)}`);
+    const payload = context.buildPmbPayloadFromComingSoonItem(item);
+    assert.equal(payload.imageUrl, "");
+    assert.equal(payload.cloneSourceName, item.cloneSourceName);
+  }
+  assert.equal(context.getComingSoonImageUrl({ imageUrl: "/own-image.png" }), "/own-image.png");
 });
 
 test("includes an unpublished queued beer in Coming Soon immediately", () => {

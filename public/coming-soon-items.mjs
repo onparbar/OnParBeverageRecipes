@@ -1,11 +1,5 @@
 export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
   Object.freeze({
-    id: "recipe:bacardi-sunset",
-    kind: "recipe",
-    recipeId: "bacardi-sunset",
-    name: "Bacardi Sunset",
-  }),
-  Object.freeze({
     id: "recipe:on-par-tee",
     kind: "recipe",
     recipeId: "on-par-tee",
@@ -37,6 +31,7 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
 ]);
 
 const RETIRED_COMING_SOON_IDS = new Set([
+  "recipe:bacardi-sunset",
   "liquor:captain-morgan",
   "liquor:don-julio-blanco-2",
   "liquor:woodford-reserve",
@@ -52,6 +47,41 @@ function clean(value) {
 
 function slug(value) {
   return clean(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function isSameComingSoonProduct(left, right) {
+  if (clean(left.id) === clean(right.id)) return true;
+  if (clean(left.kind).toLowerCase() !== clean(right.kind).toLowerCase()) return false;
+  const leftPlu = Number(left.plu) || 0;
+  const rightPlu = Number(right.plu) || 0;
+  if (leftPlu > 0 && rightPlu > 0) return leftPlu === rightPlu;
+  return Boolean(slug(left.name)) && slug(left.name) === slug(right.name);
+}
+
+export function consolidateComingSoonItems(items = []) {
+  const result = [];
+  for (const item of Array.isArray(items) ? items : []) {
+    if (!item || typeof item !== "object" || !clean(item.id) || !clean(item.name)) continue;
+    if (RETIRED_COMING_SOON_IDS.has(clean(item.id))) continue;
+    const existing = result.find((entry) => isSameComingSoonProduct(entry, item));
+    if (!existing) {
+      result.push({ ...item });
+      continue;
+    }
+    const preserved = {
+      id: existing.id,
+      createdAt: existing.createdAt || item.createdAt,
+      replacedAt: existing.replacedAt || item.replacedAt,
+      replaceTapKey: existing.replaceTapKey || item.replaceTapKey,
+      pmbActiveAt: existing.pmbActiveAt || item.pmbActiveAt,
+      plu: Number(item.plu) > 0 ? item.plu : existing.plu,
+    };
+    for (const [key, value] of Object.entries(item)) {
+      if (value !== undefined && value !== null && value !== "") existing[key] = value;
+    }
+    Object.assign(existing, preserved);
+  }
+  return result;
 }
 
 function getQueuedComingSoonProduct(item) {
@@ -88,9 +118,7 @@ export function getComingSoonKindLabel(kind, { compact = false } = {}) {
 }
 
 export function getActiveComingSoonItems(items = []) {
-  return Array.isArray(items)
-    ? items.filter((item) => item && typeof item === "object" && !clean(item.replacedAt))
-    : [];
+  return consolidateComingSoonItems(items).filter((item) => !clean(item.replacedAt));
 }
 
 export function mergeRequiredComingSoonItems(items = [], pmbPublishQueue = []) {
@@ -103,12 +131,12 @@ export function mergeRequiredComingSoonItems(items = [], pmbPublishQueue = []) {
         && !RETIRED_COMING_SOON_IDS.has(clean(item.id))
       ))
     : [];
-  const byId = new Map(safeItems.map((item) => [clean(item.id), { ...item }]));
+  const byId = new Map(consolidateComingSoonItems(safeItems).map((item) => [clean(item.id), { ...item }]));
 
   (Array.isArray(pmbPublishQueue) ? pmbPublishQueue : []).forEach((queuedItem) => {
     const item = getQueuedComingSoonProduct(queuedItem);
     if (!item || RETIRED_COMING_SOON_IDS.has(item.id)) return;
-    const existing = [...byId.values()].find((entry) => clean(entry.name).toLowerCase() === item.name.toLowerCase());
+    const existing = [...byId.values()].find((entry) => isSameComingSoonProduct(entry, item));
     byId.set(existing?.id || item.id, existing ? { ...item, ...existing } : item);
   });
 
@@ -129,5 +157,5 @@ export function mergeRequiredComingSoonItems(items = [], pmbPublishQueue = []) {
       : { ...required });
   });
 
-  return [...byId.values()];
+  return consolidateComingSoonItems([...byId.values()]);
 }
