@@ -159,7 +159,7 @@ test("expanded prep recipes offer optional per-container progress checks", () =>
   assert.match(stylesheet, /\.staff-ingredient-progress__checks input:checked \+ span \{/);
 });
 
-test("employee prep and recipe cards have a phone-specific layout", () => {
+test("employee prep and recipe cards have a phone-specific layout", async () => {
   const mobileStart = stylesheet.indexOf("@media (max-width: 720px)");
   const mobileStyles = stylesheet.slice(mobileStart);
 
@@ -169,7 +169,11 @@ test("employee prep and recipe cards have a phone-specific layout", () => {
   assert.match(mobileStyles, /\.staff-order-full-receipt \{[^}]*min-height: 48px/s);
   assert.match(mobileStyles, /\.staff-order-quantity-field input \{[^}]*width: 92px/s);
   assert.match(mobileStyles, /\.staff-section-tabs \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/s);
-  assert.match(staffDashboardSource, /fullReceipt\.checked = item\.status === "received"/);
+  assert.match(staffDashboardSource, /renderStaffReceiving\(\{ root: orderList/);
+  const receivingStyles = await readFile(new URL("../public/staff-receiving.css", import.meta.url), "utf8");
+  assert.match(receivingStyles, /@media \(max-width: 650px\)[\s\S]*\.receiving-item \{ grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(receivingStyles, /min-height: 48px/);
+  assert.match(receivingStyles, /font-size: 16px/);
   assert.match(mobileStyles, /\.staff-recipe-card \.recipe-table-wrap \{[^}]*overflow-x: visible/s);
   assert.match(mobileStyles, /\.staff-recipe-table th:nth-child\(2\),\s*\.staff-recipe-table td:nth-child\(2\) \{\s*width: 56%/s);
   assert.match(stylesheet, /\.staff-recipe-add--bottle-size \{\s*white-space: nowrap/s);

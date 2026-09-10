@@ -9,6 +9,7 @@ export default function StaffRecipePage() {
   return (
     <div className="shell staff-recipe-shell" data-staff-dashboard="true">
       <link rel="stylesheet" href="/smart-receiving.css" />
+      <link rel="stylesheet" href="/staff-receiving.css" />
       <section className="staff-rehearsal-banner" id="staff-rehearsal-banner" hidden aria-live="polite">
         <div className="staff-rehearsal-banner__copy">
           <strong id="staff-rehearsal-title">Staff Rehearsal</strong>
@@ -113,11 +114,19 @@ export default function StaffRecipePage() {
               <p className="eyebrow">Delivery checklist</p>
               <h2 id="staff-order-title">Orders to receive</h2>
             </div>
-            <p id="staff-order-help">Check off a full delivery, or enter the quantity received when an order arrives short. Your signed-in name is saved automatically.</p>
+            <p id="staff-order-help">Choose a delivery, check what arrived, and see where it goes. Each receipt saves as you go using your signed-in name.</p>
           </div>
           <div id="staff-order-status" className="staff-recipe-status" role="status" aria-live="polite">
             Loading this week&apos;s order checklist...
           </div>
+          <label className="staff-receiving-name">
+            <span>Checked by</span>
+            <input id="smart-receiving-name" data-current-user-name-input type="text" maxLength="80" autoComplete="name" placeholder="Signed-in employee" />
+          </label>
+          <div id="staff-order-summary" className="staff-prep-summary" aria-live="polite"></div>
+          <div id="staff-order-list" className="staff-order-list" aria-busy="true"></div>
+          <details className="staff-receiving-voice">
+            <summary>Prefer to speak or type the delivery?</summary>
           <section className="smart-receiving" aria-labelledby="smart-receiving-title">
             <div className="smart-receiving__header">
               <h3 id="smart-receiving-title">Smart receiving</h3>
@@ -127,10 +136,6 @@ export default function StaffRecipePage() {
               <label>
                 <span>Delivery update</span>
                 <textarea id="smart-receiving-transcript" rows="3" autoComplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="Bonbright arrived; everything came except one Garage Lime"></textarea>
-              </label>
-              <label>
-                <span>Checked by</span>
-                <input id="smart-receiving-name" data-current-user-name-input type="text" maxLength="80" autoComplete="name" placeholder="Signed-in employee" />
               </label>
             </div>
             <label className="smart-receiving__note-field">
@@ -144,8 +149,7 @@ export default function StaffRecipePage() {
             <p className="smart-receiving__status" id="smart-receiving-status" role="status" aria-live="polite"></p>
             <div className="smart-receiving__review" id="smart-receiving-review-list"></div>
           </section>
-          <div id="staff-order-summary" className="staff-prep-summary" aria-live="polite"></div>
-          <div id="staff-order-list" className="staff-order-list" aria-busy="true"></div>
+          </details>
         </section>
 
         <section className="panel" id="staff-taps-panel" role="tabpanel" aria-labelledby="staff-taps-title" hidden>
@@ -245,7 +249,7 @@ export default function StaffRecipePage() {
             `,
           }}
         />
-        <Script type="module" src="/staff-dashboard.js?v=20260904-1" strategy="afterInteractive" />
+        <Script type="module" src="/staff-dashboard.js?v=20260910-receiving" strategy="afterInteractive" />
     </div>
   );
 }

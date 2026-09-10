@@ -1,5 +1,6 @@
 import { parseSmartReceivingTranscript } from "./smart-receiving.mjs";
 import { kegDestination } from "./keg-destination.mjs";
+import { renderStaffReceiving } from "./staff-receiving-view.mjs";
 import "./staff-resilience.mjs";
 
 import {
@@ -607,193 +608,33 @@ function renderWeeklyOrderTracking() {
     return;
   }
 
-  orderTracking.vendors.forEach((vendor) => {
-    const section = document.createElement("section");
-    section.className = "staff-order-vendor";
-    const header = document.createElement("header");
-    const heading = document.createElement("h3");
-    heading.textContent = `${clean(vendor.vendor)} order`;
-    const ordered = document.createElement("p");
-    ordered.textContent = vendor.ordered
-      ? `Ordered by ${clean(vendor.orderedBy)}${vendor.orderedAt ? ` · ${formatCompletionTime(vendor.orderedAt)}` : ""}`
-      : "The manager has not recorded who placed this order yet.";
-    header.append(heading, ordered);
-    section.append(header);
-    if (vendor.deliveryNote) {
-      const note = document.createElement("p");
-      note.className = "staff-order-delivery-note";
-      note.textContent = vendor.deliveryNote;
-      section.append(note);
-    }
-    (vendor.items || []).forEach((item) => section.append(createOrderReceiptItem(item)));
-    orderList.append(section);
-  });
+  renderStaffReceiving({ root: orderList, tracking: orderTracking, saveReceipts: saveStaffChecklistReceipts });
 }
 
-function createOrderReceiptItem(item) {
-  const form = document.createElement("form");
-  form.className = `staff-order-item staff-order-item--${clean(item.status) || "pending"}`;
-
-  const details = document.createElement("div");
-  details.className = "staff-order-item__details";
-  const heading = document.createElement("h4");
-  heading.textContent = clean(item.name);
-  const meta = document.createElement("p");
-  const taps = Array.isArray(item.tapNumbers) && item.tapNumbers.length
-    ? ` · Tap${item.tapNumbers.length === 1 ? "" : "s"} ${item.tapNumbers.join(", ")}`
-    : "";
-  meta.textContent = `${formatNumber(item.quantity)} ${clean(item.unit)}${taps}`;
-  details.append(heading, meta);
-  const destination = kegDestination(item);
-  if (destination) {
-    const cooler = document.createElement("p");
-    cooler.textContent = destination;
-    details.append(cooler);
+async function saveStaffChecklistReceipts(vendor, receipts) {
+  if (isStaffRehearsalMode()) {
+    orderTracking = applyRehearsalReceipts(orderTracking, {
+      vendorId: vendor.id, receipts, handledBy: clean(smartReceivingName?.value) || "Staff rehearsal",
+      note: vendor.deliveryNote || "",
+    });
+    renderStaffOverview();
+    return { tracking: orderTracking, warning: "Saved in rehearsal only. Live deliveries are unchanged." };
   }
-  if (item.status !== "pending" && item.updatedAt) {
-    const saved = document.createElement("small");
-    const receiptSummary = item.status === "received"
-      ? `All ${formatNumber(item.quantity)} received`
-      : `${formatNumber(item.receivedQuantity)} of ${formatNumber(item.quantity)} received`;
-    saved.textContent = `${receiptSummary} by ${clean(item.handledBy)} · ${formatCompletionTime(item.updatedAt)}`;
-    details.append(saved);
-  }
-
-  const choices = document.createElement("fieldset");
-  choices.className = "staff-order-receipt-choices";
-  const legend = document.createElement("legend");
-  legend.textContent = "Delivery received";
-  choices.append(legend);
-  const fullReceiptLabel = document.createElement("label");
-  fullReceiptLabel.className = "staff-order-full-receipt";
-  const fullReceipt = document.createElement("input");
-  fullReceipt.type = "checkbox";
-  fullReceipt.checked = item.status === "received";
-  const fullReceiptText = document.createElement("span");
-  fullReceiptText.textContent = "Received full order";
-  fullReceiptLabel.append(fullReceipt, fullReceiptText);
-  choices.append(fullReceiptLabel);
-
-  const quantityField = document.createElement("label");
-  quantityField.className = "staff-order-quantity-field";
-  const quantityLabel = document.createElement("span");
-  quantityLabel.textContent = "Quantity received";
-  const quantityControls = document.createElement("span");
-  const quantityInput = document.createElement("input");
-  quantityInput.type = "number";
-  quantityInput.min = "0";
-  quantityInput.step = "1";
-  quantityInput.inputMode = "numeric";
-  quantityInput.value = item.status === "pending"
-    ? ""
-    : String(item.status === "received" ? number(item.quantity) : number(item.receivedQuantity));
-  quantityInput.placeholder = "0";
-  quantityInput.disabled = fullReceipt.checked;
-  const quantityTotal = document.createElement("small");
-  quantityTotal.textContent = `of ${formatNumber(item.quantity)} ${clean(item.unit)}`;
-  quantityControls.append(quantityInput, quantityTotal);
-  quantityField.append(quantityLabel, quantityControls);
-  choices.append(quantityField);
-
-  fullReceipt.addEventListener("change", () => {
-    quantityInput.disabled = fullReceipt.checked;
-    if (fullReceipt.checked) {
-      quantityInput.value = String(number(item.quantity));
-    } else {
-      quantityInput.focus();
-      quantityInput.select();
-    }
+  const response = await fetch("/api/weekly-order-tracking", {
+    method: "POST", credentials: "same-origin",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "set-selected-receipts", generatedAt: orderTracking.generatedAt,
+      vendorId: vendor.id, receipts, confirmed: true,
+      handledBy: clean(smartReceivingName?.value), note: vendor.deliveryNote || "",
+    }),
   });
-
-  const nameField = document.createElement("label");
-  nameField.className = "staff-prep-name-field";
-  const nameLabel = document.createElement("span");
-  nameLabel.textContent = "Checked by";
-  const nameInput = document.createElement("input");
-  nameInput.type = "text";
-  nameInput.maxLength = 80;
-  nameInput.autoComplete = "name";
-  nameInput.placeholder = "Employee name";
-  nameInput.value = clean(item.handledBy);
-  nameField.append(nameLabel, nameInput);
-
-  const saveButton = document.createElement("button");
-  saveButton.className = "primary-button staff-prep-save";
-  saveButton.type = "submit";
-  saveButton.textContent = "Save";
-  const rowStatus = document.createElement("p");
-  rowStatus.className = "staff-prep-item__status";
-  rowStatus.setAttribute("role", "status");
-  rowStatus.setAttribute("aria-live", "polite");
-
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (!fullReceipt.checked && String(quantityInput.value).trim() === "") {
-      rowStatus.textContent = "Enter the quantity received or choose Received full order.";
-      rowStatus.dataset.state = "error";
-      quantityInput.focus();
-      return;
-    }
-    const receivedQuantity = fullReceipt.checked ? number(item.quantity) : Number(quantityInput.value);
-    const status = fullReceipt.checked
-      ? "received"
-      : receivedQuantity > 0 ? "partial" : "not-received";
-    const handledBy = clean(nameInput.value);
-    if (!Number.isInteger(receivedQuantity) || receivedQuantity < 0 || receivedQuantity > 9999) {
-      rowStatus.textContent = "Enter a whole quantity from 0 to 9,999.";
-      rowStatus.dataset.state = "error";
-      quantityInput.focus();
-      return;
-    }
-    if (!handledBy) {
-      rowStatus.textContent = "Enter your name before saving the delivery status.";
-      rowStatus.dataset.state = "error";
-      nameInput.focus();
-      return;
-    }
-    if (isStaffRehearsalMode()) {
-      orderTracking = applyRehearsalReceipts(orderTracking, {
-        receipts: [{ itemId: item.id, status, receivedQuantity }],
-        handledBy,
-      });
-      renderWeeklyOrderTracking();
-      renderStaffOverview();
-      return;
-    }
-    const inputs = [...form.querySelectorAll("input, button")];
-    inputs.forEach((input) => { input.disabled = true; });
-    saveButton.textContent = "Saving...";
-    rowStatus.textContent = "";
-    delete rowStatus.dataset.state;
-    try {
-      const response = await fetch("/api/weekly-order-tracking", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "set-receipt",
-          generatedAt: orderTracking.generatedAt,
-          itemId: item.id,
-          status,
-          receivedQuantity,
-          handledBy,
-        }),
-      });
-      const result = await parseJsonResponse(response);
-      if (!response.ok) throw new Error(result?.error || "The delivery update could not be saved.");
-      orderTracking = normalizeOrderTracking(result);
-      renderWeeklyOrderTracking();
-      renderStaffOverview();
-    } catch (error) {
-      inputs.forEach((input) => { input.disabled = false; });
-      saveButton.textContent = "Save";
-      rowStatus.textContent = error?.message || "The delivery update could not be saved.";
-      rowStatus.dataset.state = "error";
-    }
-  });
-
-  form.append(details, choices, nameField, saveButton, rowStatus);
-  return form;
+  const result = await parseJsonResponse(response);
+  if (!response.ok || result.available !== true) throw new Error(result?.error || "The delivery update could not be saved.");
+  orderTracking = normalizeOrderTracking(result);
+  orderSummary.textContent = `${formatNumber(orderTracking.receivedCount)} fully received / ${formatNumber(orderTracking.notReceivedCount)} short or missing / ${formatNumber(orderTracking.itemCount)} total items`;
+  renderStaffOverview();
+  return { tracking: orderTracking, warning: clean(result.inventoryUpdate?.warning) };
 }
 
 function setSmartReceivingStatus(message, state = "") {

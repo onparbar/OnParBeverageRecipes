@@ -201,8 +201,9 @@ test("activity retries detect an existing matching record", async () => {
 });
 
 test("pending receiving lines require an explicit user choice", async () => {
-  const source = await readFile(new URL("../public/staff-dashboard.js", import.meta.url), "utf8");
-  assert.match(source, /fullReceipt\.checked = item\.status === "received";/);
+  const source = await readFile(new URL("../public/staff-receiving-view.mjs", import.meta.url), "utf8");
+  assert.match(source, /Received as ordered/);
   assert.match(source, /item\.status === "pending"\s*\? ""/);
-  assert.match(source, /Enter the quantity received or choose Received full order\./);
+  assert.match(source, /window\.confirm\(`Confirm these/);
+  assert.match(source, /if \(!count\.value\.trim\(\)/);
 });

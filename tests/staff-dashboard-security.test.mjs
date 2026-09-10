@@ -85,7 +85,7 @@ test("staff page loads only its dedicated bundle", async () => {
   assert.match(page, /Cocktails to make/);
   assert.match(page, /Orders to receive/);
   assert.match(await readProjectFile("public/staff-dashboard.js"), /Completed by/);
-  assert.match(await readProjectFile("public/staff-dashboard.js"), /Quantity received/);
+  assert.match(await readProjectFile("public/staff-receiving-view.mjs"), /Total accepted so far/);
 });
 
 test("middleware redirects employee root access, allows owner staff previews, and blocks non-staff assets", async () => {
