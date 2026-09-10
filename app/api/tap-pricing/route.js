@@ -461,6 +461,12 @@ export async function GET() {
           degraded: true,
           backupCapturedAt: backup.capturedAt,
           liveError: message,
+          portionPricing: {
+            ...backup.data.portionPricing,
+            writeAvailable: false,
+            code: "PMB_PRICING_STALE",
+            message: "PMB live verification failed. Saved prices are read-only until a fresh PMB check succeeds.",
+          },
         });
       }
     }

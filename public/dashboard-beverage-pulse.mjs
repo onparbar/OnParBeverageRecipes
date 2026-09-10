@@ -272,6 +272,7 @@ export function buildLastWeekProjectedSalesMix(
   } = {},
 ) {
   const isProfit = metric === "profit";
+  const isVolume = metric === "volume";
   const sourceItems = Array.isArray(items) ? items.filter(Boolean) : [];
   const labelsByTime = new Map();
   sourceItems.forEach((item) => {
@@ -339,9 +340,12 @@ export function buildLastWeekProjectedSalesMix(
         entry: entries[0] || null,
       };
       let sellingPricePerOz = null;
-    if (isProfit) {
+    if (isVolume) {
+      sellingPricePerOz = 1;
+    } else if (isProfit) {
       try {
         const result = getGrossProfitPerOz(item, priceContext);
+        if (result?.estimated === true) priceContext.estimated = true;
         const value = result && typeof result === "object" ? result.grossProfitPerOz : result;
         if (value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value))) {
           sellingPricePerOz = Number(value);
@@ -385,7 +389,7 @@ export function buildLastWeekProjectedSalesMix(
 
   return {
     available: isProfit ? pricedTapCount > 0 : projectedSales > 0,
-    metric: isProfit ? "profit" : "sales",
+    metric: isProfit ? "profit" : isVolume ? "volume" : "sales",
     projectedProfit: isProfit ? projectedSales : null,
     hasLosses: isProfit && Object.values(categorySales).some((value) => value < 0),
     wall: clean(wall).toLowerCase(),

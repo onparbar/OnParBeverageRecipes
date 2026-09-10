@@ -34,7 +34,10 @@ test("the owner dashboard is the initial page and recipes appear later in naviga
   assert.match(pageSource, /id="performance-panel"/);
   assert.doesNotMatch(pageSource, /id="insights-panel"/);
   assert.match(pageSource, /id="onpar-insights"/);
-  assert.match(dashboardSource, /option value="sales"/);
+  assert.match(dashboardSource, /Sales mix by volume/);
+  assert.match(dashboardSource, /Sales mix by estimated profit/);
+  assert.match(dashboardSource, /Sales mix by wall/);
+  assert.doesNotMatch(dashboardSource, /data-dashboard-mix-metric/);
   assert.match(dashboardSource, /option value="profit"/);
   assert.match(dashboardSource, /option value="twelve-weeks"/);
   assert.doesNotMatch(dashboardSource, /data-order-draft-export/);
@@ -385,9 +388,9 @@ test("the initial Dashboard uses a light visual beverage pulse and change-only O
   assert.match(pulseSource, /buildLastWeekPourLeaders/);
   assert.match(pulseSource, /No liquor pours were saved for the Patio or Karaoke wall last week/);
   assert.match(pulseSource, /Sales mix/);
-  assert.match(pulseSource, /const venueSalesMix = buildLastWeekProjectedSalesMix\(/);
-  assert.match(pulseSource, /const selectedWallSalesMix = buildLastWeekProjectedSalesMix\(/);
-  assert.match(pulseSource, /const projectedSalesMix = \{ \.\.\.selectedWallSalesMix, walls: venueSalesMix\.walls, venueUnpricedTapCount: venueSalesMix\.unpricedTapCount \}/);
+  assert.match(pulseSource, /const volumeMix = buildLastWeekProjectedSalesMix\(/);
+  assert.match(pulseSource, /const profitMix = buildLastWeekProjectedSalesMix\(/);
+  assert.match(pulseSource, /renderDashboardProjectedWallMix\(volumeMix\.walls\)/);
   assert.doesNotMatch(pulseSource, /PMB ounces × saved\/current prices/);
   assert.match(pulseSource, /dashboard-pulse-bar/);
   assert.match(pulseSource, /data-seller-ranking-wall/);

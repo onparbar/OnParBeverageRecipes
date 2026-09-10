@@ -1264,7 +1264,6 @@ let sellerRankingWall = "main";
 // fallback; the owner Dashboard now intentionally exposes only the wall choice.
 let sellerRankingCategory = "all";
 let sellerRankingMetric = "volume";
-let dashboardMixMetric = "sales";
 let sellerRankingPeriod = "six-weeks";
 let sellerRankingListSize = 5;
 let activeOperationsTab = "keg-levels";
@@ -1351,7 +1350,7 @@ async function init() {
   syncRecipeBuilderSummary();
   clearBeerLookupResult();
   render();
-  void refreshPmbMorningRepairStatus();
+  if (typeof refreshPmbMorningRepairStatus === "function") void refreshPmbMorningRepairStatus();
   void hydrateComingSoonLiquorItemsFromUntappd();
   loadBeverageNews();
   void runOwnerLoginSync();
@@ -3170,12 +3169,6 @@ function bindEvents() {
     switchTab(target.dataset.dashboardTarget);
   });
   const handleDashboardPulseChange = (event) => {
-    const mixControl = event.target.closest("[data-dashboard-mix-metric]");
-    if (mixControl) {
-      dashboardMixMetric = mixControl.value === "profit" ? "profit" : "sales";
-      renderDashboardBeveragePulse();
-      return;
-    }
     const periodControl = event.target.closest("[data-dashboard-pulse-period]");
     if (periodControl) {
       const nextPeriod = clean(periodControl.value).toLowerCase();
@@ -3341,7 +3334,8 @@ function bindEvents() {
   });
   window.setInterval(() => {
     if (document.visibilityState === "visible") void refreshDashboardStaffPrepPlan();
-    if (document.visibilityState === "visible" && document.querySelector("#keg-levels-panel.is-active")) void refreshPmbMorningRepairStatus();
+    if (document.visibilityState === "visible" && document.querySelector("#keg-levels-panel.is-active")
+      && typeof refreshPmbMorningRepairStatus === "function") void refreshPmbMorningRepairStatus();
   }, 30_000);
 }
 
@@ -3449,7 +3443,7 @@ function switchTab(tabName) {
     runTapPricingSync();
   }
   if (requestedTab === "dashboard") renderDashboardOverview();
-  if (requestedTab === "keg-levels") void refreshPmbMorningRepairStatus();
+  if (requestedTab === "keg-levels" && typeof refreshPmbMorningRepairStatus === "function") void refreshPmbMorningRepairStatus();
   if (requestedTab === "insights") renderDashboardBeveragePulse();
   if (requestedTab === "print") renderTapPrintWorkspace();
 }
@@ -4337,13 +4331,17 @@ function renderShotPricing(visibleTapRows = []) {
     `).join("");
 
     const editor = document.createElement("details");
+    editor.className = "shot-pricing-editor";
     editor.dataset.shotPricingKey = row.key;
     editor.open = running || Boolean(message);
     editor.innerHTML = `
       <summary>Edit portion prices</summary>
       <div class="shot-pricing-fields">${editors}</div>
-      <p class="table-note">${escapeHtml(row.canEdit ? "Both portion prices are verified with PMB before and after saving." : row.blockers.join(" "))}</p>
+      <p class="shot-pricing-editor__status" role="status">${escapeHtml(row.canEdit ? "Both portion prices are verified with PMB before and after saving." : row.blockers.map((blocker) => /socket hang up|econnreset|econnrefused|fetch failed|failed to fetch|timed? ?out|etimedout/i.test(blocker)
+        ? "The PMB connection was interrupted. These are the last loaded prices; editing is paused until PMB can be checked again."
+        : blocker).join(" "))}</p>
       <div class="pricing-advisor-action">
+        ${!row.canEdit ? '<button class="mini-button" type="button" data-shot-pricing-recheck>Recheck PMB connection</button>' : ""}
         <button class="mini-button" type="button" data-shot-price-update="${escapeHtml(row.key)}"${!row.canEdit || activePmbPortionPriceUpdateKey ? " disabled" : ""}>${running ? "Updating both..." : "Update both in PMB"}</button>
         ${message ? `<span class="pricing-advisor-action__message pricing-advisor-action__message--${escapeHtml(message.tone)}" role="status">${escapeHtml(message.text)}</span>` : ""}
       </div>`;
@@ -4358,6 +4356,17 @@ function bindShotPricingControls() {
     const row = shotPricingRowsByKey.get(key);
     const inputs = [...tableRow.querySelectorAll("[data-shot-price-input]")];
     const button = tableRow.querySelector("[data-shot-price-update]");
+    tableRow.querySelector("[data-shot-pricing-recheck]")?.addEventListener("click", async (event) => {
+      const retryButton = event.currentTarget;
+      retryButton.disabled = true;
+      retryButton.textContent = "Checking PMB...";
+      try {
+        await runTapPricingSync();
+      } finally {
+        retryButton.disabled = false;
+        retryButton.textContent = "Recheck PMB connection";
+      }
+    });
     if (!row || !button) return;
     const updateButtonState = () => {
       if (activePmbPortionPriceUpdateKey || !row.canEdit) return;
@@ -6962,7 +6971,7 @@ function renderDashboardPulseCategoryLeaders({
   `;
 }
 
-function renderDashboardProjectedWallMix(rows = [], isProfit = false) {
+function renderDashboardProjectedWallMix(rows = []) {
   const wallColors = {
     main: "#bf604c",
     karaoke: "#2f7ca3",
@@ -6972,8 +6981,8 @@ function renderDashboardProjectedWallMix(rows = [], isProfit = false) {
   if (!visibleRows.length) return "";
   return `
     <div style="margin-top:18px;padding-top:16px;border-top:1px solid rgba(34, 68, 60, 0.16);">
-      <div class="dashboard-pulse-sales-mix__header"><h3>By wall</h3></div>
-      <div class="dashboard-pulse-mix-bar" aria-label="${isProfit ? "Projected profit" : "Sales"} mix by wall">
+      <div class="dashboard-pulse-sales-mix__header"><h3>Sales mix by wall</h3><small>All walls · poured volume</small></div>
+      <div class="dashboard-pulse-mix-bar" aria-label="Poured volume mix across all walls">
         ${visibleRows.filter((row) => row.sharePercent > 0).map((row) => `<i style="--mix-share:${row.sharePercent}%;background:${wallColors[row.wall] || "#718078"}"></i>`).join("")}
       </div>
       <div class="dashboard-pulse-mix-legend">
@@ -6981,35 +6990,30 @@ function renderDashboardProjectedWallMix(rows = [], isProfit = false) {
           <div>
             <span aria-hidden="true" style="background:${wallColors[row.wall] || "#718078"}"></span>
             <strong>${formatNumber(row.sharePercent)}%</strong>
-            <small>${escapeHtml(row.label)}${isProfit ? ` · ${money(row.projectedSales)}` : ""}</small>
+            <small>${escapeHtml(row.label)}</small>
           </div>
         `).join("")}
       </div>
-      ${isProfit ? `<small>All walls. Percentages show positive wall contributions; dollar totals include losses.</small>` : ""}
+      <small>Always includes all walls for the selected period, regardless of the wall filter.</small>
     </div>
   `;
 }
 
-function renderDashboardProjectedSalesMix(mix) {
+function renderDashboardCategoryMix(mix) {
   const isProfit = mix.metric === "profit";
-  const title = isProfit ? "Projected profit mix" : "Sales mix";
-  const controls = `<label class="dashboard-pulse-wall"><span>Mix by</span>
-    <select data-dashboard-mix-metric aria-label="Sales mix measure">
-      <option value="sales"${!isProfit ? " selected" : ""}>Sales</option>
-      <option value="profit"${isProfit ? " selected" : ""}>Projected profit</option>
-    </select></label>`;
+  const title = isProfit ? "Sales mix by estimated profit" : "Sales mix by volume";
   const header = `<div class="dashboard-pulse-sales-mix__header">
     <h3>${title}</h3><small>${escapeHtml(mix.weekLabel || "Selected period")}</small>
-  </div>${controls}`;
+  </div>`;
   if (!mix.available) {
-    return `<aside class="dashboard-pulse-sales-mix">${header}
+    return `<section>${header}
       <p class="dashboard-pulse-empty">${isProfit
-        ? "Not enough verified usage, PMB prices and product costs to calculate this wall's profit mix."
-        : "Recorded usage and current PMB prices are needed to project this period's category mix."}</p>
-    </aside>`;
+        ? "No usable pour history or product/category pricing estimate is available for this selection."
+        : "No recorded pours are available for this selection."}</p>
+    </section>`;
   }
   return `
-    <aside class="dashboard-pulse-sales-mix">
+    <section>
       ${header}
       ${isProfit ? `<p><strong>${money(mix.projectedProfit)}</strong> projected gross profit</p>` : ""}
       <div class="dashboard-pulse-mix-bar" aria-label="${title} for ${escapeHtml(mix.weekLabel || "selected period")}">
@@ -7024,14 +7028,22 @@ function renderDashboardProjectedSalesMix(mix) {
           </div>
         `).join("")}
       </div>
-      ${isProfit ? `<p class="dashboard-pulse-empty">Recorded pours × (current selling price minus product cost), before labor and overhead.
-        ${mix.unpricedTapCount ? `${mix.unpricedTapCount} tap(s) excluded: verified pricing or cost data is unavailable.` : ""}
+      ${isProfit ? `<p class="dashboard-pulse-empty">Estimated from recorded pours and available selling prices and costs, before labor and overhead. Uses same-category averages where product pricing is missing, and average liquor portion pricing where needed.
+        ${mix.unpricedTapCount ? `${mix.unpricedTapCount} tap(s) excluded because neither product pricing nor a category estimate is available.` : ""}
         ${mix.hasLosses ? "Losses are included in the dollar totals; percentages show positive category contributions only." : ""}
       </p>` : ""}
-      ${renderDashboardProjectedWallMix(mix.walls, isProfit)}
-      ${isProfit && mix.venueUnpricedTapCount ? `<p class="dashboard-pulse-empty">Venue-wide wall mix excludes ${mix.venueUnpricedTapCount} tap(s) with unavailable pricing or costs.</p>` : ""}
-    </aside>
+    </section>
   `;
+}
+
+function renderDashboardProjectedSalesMix(volumeMix, profitMix) {
+  return `<aside class="dashboard-pulse-sales-mix">
+    ${renderDashboardCategoryMix(volumeMix)}
+    <div style="margin-top:18px;padding-top:16px;border-top:1px solid rgba(34, 68, 60, 0.16);">
+      ${renderDashboardCategoryMix(profitMix)}
+    </div>
+    ${renderDashboardProjectedWallMix(volumeMix.walls)}
+  </aside>`;
 }
 
 function renderDashboardBeveragePulse() {
@@ -7074,29 +7086,27 @@ function renderDashboardBeveragePulse() {
       limit: 3,
     },
   );
-  const venueSalesMix = buildLastWeekProjectedSalesMix(
-    [...weeklyUsageItems, ...weeklyUsageArchivedItems],
-    {
-      wall: "all",
-      period: recentWeekLimit,
-      getFullOunces: getWeeklyUsageFullOunces,
-      getSellingPricePerOz: getWeeklyUsageItemSellingRate,
-      metric: dashboardMixMetric,
-      getGrossProfitPerOz: getWeeklyUsageItemProfitRate,
-    },
-  );
-  const selectedWallSalesMix = buildLastWeekProjectedSalesMix(
+  const volumeMix = buildLastWeekProjectedSalesMix(
     [...weeklyUsageItems, ...weeklyUsageArchivedItems],
     {
       wall: sellerRankingWall,
       period: recentWeekLimit,
       getFullOunces: getWeeklyUsageFullOunces,
       getSellingPricePerOz: getWeeklyUsageItemSellingRate,
-      metric: dashboardMixMetric,
-      getGrossProfitPerOz: getWeeklyUsageItemProfitRate,
+      metric: "volume",
     },
   );
-  const projectedSalesMix = { ...selectedWallSalesMix, walls: venueSalesMix.walls, venueUnpricedTapCount: venueSalesMix.unpricedTapCount };
+  const profitMix = buildLastWeekProjectedSalesMix(
+    [...weeklyUsageItems, ...weeklyUsageArchivedItems],
+    {
+      wall: sellerRankingWall,
+      period: recentWeekLimit,
+      getFullOunces: getWeeklyUsageFullOunces,
+      getSellingPricePerOz: getWeeklyUsageItemSellingRate,
+      metric: "profit",
+      getGrossProfitPerOz: getPerformanceEstimatedProfitRate,
+    },
+  );
   const favorite = leaders[0] || null;
   const favoriteName = clean(favorite?.name).toLowerCase();
   const rising = [
@@ -7146,7 +7156,7 @@ function renderDashboardBeveragePulse() {
               ? ["beer", "cocktail"]
               : ["beer", "cocktail", "liquor"],
         })}
-        ${renderDashboardProjectedSalesMix(projectedSalesMix)}
+        ${renderDashboardProjectedSalesMix(volumeMix, profitMix)}
     </div>
     <div class="dashboard-pulse-stories">
       ${renderDashboardPulseStory({
@@ -12429,7 +12439,14 @@ async function runTapPricingSync() {
     }
 
     liveTapPriceItems = filterCurrentTapPricingItems(result.items);
-    shotPricingCapability = result.portionPricing && typeof result.portionPricing === "object"
+    const stalePricing = result.stale === true || result.degraded === true;
+    shotPricingCapability = stalePricing
+      ? {
+          writeAvailable: false,
+          code: "PMB_PRICING_STALE",
+          message: "Showing saved prices. A fresh PMB connection check is required before editing.",
+        }
+      : result.portionPricing && typeof result.portionPricing === "object"
       ? result.portionPricing
       : {
           writeAvailable: false,
@@ -12438,18 +12455,25 @@ async function runTapPricingSync() {
         };
     kegPricingItems = buildKegPricingCatalog(kegWallItems, getCurrentKegPricingTapItems());
     liveTapPrices = buildLiveTapPriceMap(liveTapPriceItems);
-    liveTapPricingUpdatedAt = clean(result.updatedAt);
+    liveTapPricingUpdatedAt = stalePricing ? "" : clean(result.updatedAt);
     const matchedCount = getActiveRecipes().filter((recipe) => getLiveTapPrice(recipe)).length;
-    liveTapPricingMessage = `Matched ${matchedCount} recipes from Pour My Beer.`;
+    liveTapPricingMessage = stalePricing
+      ? "PMB live verification failed. Showing saved prices; editing is paused."
+      : `Matched ${matchedCount} recipes from Pour My Beer.`;
     renderPricing();
     renderKegLevels();
     renderWeeklyUsage();
     renderRecipes();
     renderOldRecipes();
     renderStats();
-    succeeded = true;
+    succeeded = !stalePricing;
   } catch (error) {
     liveTapPricingUpdatedAt = "";
+    shotPricingCapability = {
+      writeAvailable: false,
+      code: "PMB_PRICING_REFRESH_FAILED",
+      message: "PMB could not be verified. Displayed prices are read-only until the connection is restored.",
+    };
     liveTapPricingMessage = getPmbConnectionErrorMessage(error, "Could not load current tap pricing.");
     renderPricing();
     renderKegLevels();
@@ -14782,6 +14806,7 @@ function syncInventoryItemCatalogLinks() {
     const ingredient = ingredientById.get(item.id) || null;
     item.linkedIngredientName = ingredient?.name || item.name;
     item.vendorProduct = ingredient?.vendorProduct || getVendorMapping(item.id) || null;
+    if (item.id === "non-alcoholic-beer") item.excludeFromInventoryValue = false;
     Object.assign(item, applyMappedInventoryPackageRule(item, item.vendorProduct));
     item.unitCost = getInventoryBottleCost(item, ingredient);
     item.note = getInventoryPriceSourceNote(item);
@@ -18095,7 +18120,7 @@ function parseInventory(rows) {
       parDisplay,
       note,
       orderHoldReason: getInventoryOrderHoldReason(normalizedName, group, note),
-      excludeFromInventoryValue: ["Non Alcoholic Beer", "Blue Rasp Powder"].includes(normalizedName),
+      excludeFromInventoryValue: normalizedName === "Blue Rasp Powder",
     };
 
     item.excludeFromOrderList = Boolean(
@@ -18110,9 +18135,9 @@ function parseInventory(rows) {
   ensureInventoryPlaceholder(items, {
     name: "Non Alcoholic Beer",
     group: "Other",
-    unitCost: 0,
-    note: "Tracked separately",
-    excludeFromInventoryValue: true,
+    unitCost: INVENTORY_PROVI_MAPPINGS["non-alcoholic-beer"].unitPrice,
+    note: "Upside Dawn - counted in cans; ordered in 24-can cases",
+    excludeFromInventoryValue: false,
   });
 
   ensureInventoryPlaceholder(items, {

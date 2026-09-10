@@ -8015,6 +8015,62 @@ td {
   padding: 0 9px;
 }
 
+.pricing-table .shot-pricing-editor {
+  min-width: 10rem;
+  margin-top: 10px;
+  white-space: normal;
+  text-align: left;
+}
+
+.pricing-table .shot-pricing-editor > summary {
+  cursor: pointer;
+  padding: 8px 0;
+  font-weight: 700;
+}
+
+.pricing-table .shot-pricing-editor .shot-pricing-field {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  font-size: 0.875rem;
+}
+
+.pricing-table .shot-pricing-editor .shot-pricing-field > span {
+  display: block;
+  white-space: normal;
+}
+
+.pricing-table .shot-pricing-editor input {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px 8px 26px;
+  font-size: 1rem;
+}
+
+.pricing-table .shot-pricing-editor input:disabled {
+  opacity: 1;
+  color: var(--ink);
+}
+
+.pricing-table .shot-pricing-editor__status {
+  margin: 12px 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  text-transform: none;
+  overflow-wrap: anywhere;
+}
+
+.pricing-table .shot-pricing-editor .pricing-advisor-action {
+  display: grid;
+  gap: 10px;
+  white-space: normal;
+}
+
+.pricing-table .shot-pricing-editor button {
+  width: 100%;
+  min-height: 44px;
+  white-space: normal;
+}
+
 .table-note {
   display: block;
   margin-top: 3px;
