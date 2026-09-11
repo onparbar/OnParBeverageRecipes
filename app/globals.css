@@ -5355,10 +5355,14 @@ td {
 }
 
 .coming-soon-item__image {
+  display: block;
   width: 100%;
-  aspect-ratio: 3 / 2;
+  max-width: 100%;
+  min-width: 0;
+  aspect-ratio: 676 / 540;
   border-radius: 8px;
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center;
   background: rgba(24, 33, 31, 0.06);
 }
 

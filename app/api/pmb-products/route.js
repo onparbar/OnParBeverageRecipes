@@ -404,7 +404,11 @@ async function buildPmbImageFile(imageUrl, productName, options = {}) {
   for (const quality of [88, 82, 76, 70, 64, 58, 52]) {
     const output = await sharp(sourceBuffer, { animated: false, limitInputPixels: 40_000_000 })
       .rotate()
-      .resize(PRODUCT_IMAGE_WIDTH, PRODUCT_IMAGE_HEIGHT, { fit: "cover", position: "center" })
+      .resize(PRODUCT_IMAGE_WIDTH, PRODUCT_IMAGE_HEIGHT, {
+        fit: "contain",
+        position: "center",
+        background: { r: 255, g: 255, b: 255, alpha: 1 },
+      })
       .withMetadata({ density: 72 })
       .jpeg({ quality, progressive: true })
       .toBuffer();
@@ -526,6 +530,12 @@ function getCloneImageUrl(product, baseUrl) {
     } catch {
       // Try the next known PMB image field.
     }
+  }
+  // TTG productlist omits image fields. Its Product Database serves each
+  // image through this PLU-based endpoint, independently of the JSON API.
+  const plu = Number(product?.plu);
+  if (Number.isSafeInteger(plu) && plu > 0) {
+    return new URL(`/components/prod_img/${plu}`, baseUrl).toString();
   }
   return "";
 }
@@ -776,19 +786,28 @@ export async function GET(request) {
     if (cloneImageFor) {
       const sourceProduct = getCloneSourceProduct(products.productlist, cloneImageFor);
       const imageUrl = getCloneImageUrl(sourceProduct, config.baseUrl);
-      const imageFile = await buildPmbImageFile(imageUrl, sourceProduct.name || cloneImageFor, {
+      const imageBuffer = await readImageSourceBuffer(imageUrl, {
         trustedBaseUrl: config.baseUrl,
       });
-      if (!imageFile) {
+      if (!imageBuffer) {
         return NextResponse.json(
           { ok: false, error: `${cloneImageFor} does not have a PMB image.` },
           { status: 404, headers: { "Cache-Control": "no-store" } },
         );
       }
-      return new NextResponse(imageFile.buffer, {
+      // A preview must show the counterpart's actual artwork, not another
+      // cropped/re-encoded version of it. Upload sizing is handled separately.
+      const metadata = await sharp(imageBuffer, { limitInputPixels: 40_000_000 }).metadata();
+      const contentType = {
+        jpeg: "image/jpeg", png: "image/png", webp: "image/webp",
+        avif: "image/avif", heif: "image/avif", gif: "image/gif",
+      }[metadata.format];
+      if (!contentType) throw new Error("PMB returned an unsupported product image format.");
+      return new NextResponse(imageBuffer, {
         headers: {
-          "Cache-Control": "private, max-age=300",
-          "Content-Type": imageFile.contentType,
+          "Cache-Control": "private, no-store",
+          "Content-Type": contentType,
+          "X-Content-Type-Options": "nosniff",
         },
       });
     }
@@ -837,8 +856,8 @@ export async function POST(request) {
       ? buildClonedProduct(input, plu, sourceProduct)
       : buildProduct(input, plu);
     const cloneImageUrl = sourceProduct ? getCloneImageUrl(sourceProduct, config.baseUrl) : "";
-    const imageFile = await buildPmbImageFile(input.imageUrl || cloneImageUrl, product.name, {
-      trustedBaseUrl: input.imageUrl ? "" : sourceProduct ? config.baseUrl : "",
+    const imageFile = await buildPmbImageFile(sourceProduct ? cloneImageUrl : input.imageUrl, product.name, {
+      trustedBaseUrl: sourceProduct ? config.baseUrl : "",
     });
     if (sourceProduct && !imageFile) {
       throw new Error(`PMB did not provide the ${cloneSourceName} image, so the duplicate was not created.`);

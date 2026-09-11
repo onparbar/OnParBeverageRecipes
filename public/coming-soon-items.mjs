@@ -151,6 +151,7 @@ export function mergeRequiredComingSoonItems(items = [], pmbPublishQueue = []) {
           ...existing,
           id: required.id,
           name: required.name,
+          cloneSourceName: required.cloneSourceName || existing.cloneSourceName,
           imageUrl: required.imageUrl || existing.imageUrl,
           untappdQuery: required.untappdQuery || existing.untappdQuery,
         }
