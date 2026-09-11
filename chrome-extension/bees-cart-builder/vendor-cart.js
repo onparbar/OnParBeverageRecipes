@@ -685,6 +685,7 @@ async function submitSearch(state, lineIndex) {
   await saveState(state);
   const destination = vendorSearchUrl(state.vendor, term);
   if (destination) {
+    navigationPending = true;
     location.assign(destination);
     return "navigating";
   }
@@ -937,6 +938,7 @@ async function checkProofCart(state) {
 }
 
 let running = false;
+let navigationPending = false;
 function startSafely() {
   void start().catch((error) => {
     const vendor = currentVendor();
@@ -963,22 +965,24 @@ async function start() {
       );
     }
   }
-  if (running) return;
+  if (running || navigationPending) return;
+  // Claim this document before the first asynchronous state read.
+  running = true;
+  let state;
+  const vendor = currentVendor();
+  try {
   const response = await chrome.runtime.sendMessage({ type: "GET_VENDOR_CART_STATE" });
   if (!response?.ok) throw new Error(response?.message || "Could not load the temporary vendor cart state.");
-  const state = response.state;
-  const vendor = currentVendor();
+  state = response.state;
   if (!state || state.vendor !== vendor || !["pending", "working"].includes(state.status)) return;
   if (isLoginPage()) {
     renderOverlay(state, `Sign in to ${VENDOR_CONFIG[vendor].label}. The cart builder will continue after sign-in.`);
     return;
   }
-  running = true;
   state.status = "working";
   state.results = Array.isArray(state.results) ? state.results : [];
   state.searchCursor = Number.isInteger(state.searchCursor) ? state.searchCursor : 0;
   await saveState(state);
-  try {
     if (vendor === "proof" && await checkProofCart(state)) return;
     if (vendor === "ohlq") {
       await runOhlqCatalog(state);
@@ -1037,6 +1041,7 @@ async function start() {
     }
     await finishFromResults(state);
   } catch (error) {
+    if (!state) throw error;
     state.results.push({ name: VENDOR_CONFIG[vendor].label, status: "unmatched", message: error.message });
     await finish(state, "needs_review", `${VENDOR_CONFIG[vendor].label} changed before the cart could be completed. Review the listed items manually.`);
   } finally {

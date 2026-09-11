@@ -6,13 +6,12 @@ const operationSections = [
   ["keg-levels", "Keg Levels"],
   ["inventory", "Inventory"],
   ["weekly-plan", "Weekly Plan"],
-  ["weekly-snapshots", "Weekly Snapshots"],
 ];
 
 function OperationsBar({ context }) {
   return (
     <div className="operations-bar">
-      <div className="operation-tabs operation-tabs--four" role="tablist" aria-label="Beverage operations sections">
+      <div className="operation-tabs operation-tabs--three" role="tablist" aria-label="Beverage operations sections">
         {operationSections.map(([id, label]) => (
           <button
             className={`operation-tab${id === "keg-levels" ? " is-active" : ""}`}
@@ -118,12 +117,12 @@ export default function DashboardPage() {
       <header className="topbar">
         <div className="topbar-title-row">
           <h1>OPE Beverage</h1>
+          <div className="topbar-account-tools">
           <div className="topbar-account-actions">
             <a className="logout-link dashboard-owner-only" href="/staff">Staff View</a>
             <button className="logout-link pmb-refresh-button dashboard-owner-only" id="refresh-all-pmb" type="button">Refresh PMB</button>
             <a className="logout-link" href="/api/logout" aria-label={`Log out of the ${sessionRole} dashboard`}>Log out</a>
           </div>
-        </div>
         <section className="header-search dashboard-owner-only" aria-label="Dashboard search">
           <div className="dashboard-data-search">
             <form className="dashboard-data-search__form" id="dashboard-data-search-form" role="search">
@@ -131,14 +130,13 @@ export default function DashboardPage() {
               <div>
                 <input
                   id="dashboard-data-search-input"
-                  placeholder="Search products, recipes, tap numbers, or ask a question..."
+                  placeholder="Search"
                   aria-controls="header-search-results"
                   aria-expanded="false"
                   type="search"
                   autoComplete="off"
                   enterKeyHint="search"
                 />
-                <button className="primary-button" type="submit">Search</button>
               </div>
             </form>
             <div id="header-search-results" className="header-search-results" hidden>
@@ -165,6 +163,8 @@ export default function DashboardPage() {
             </div>
           </div>
         </section>
+          </div>
+        </div>
 
         <div className="topbar-actions">
           <div className="top-actions dashboard-owner-only" aria-label="Dashboard sections">
@@ -177,6 +177,7 @@ export default function DashboardPage() {
               <span className="dashboard-menu-icon" aria-hidden="true"><i></i><i></i><i></i></span>
             </summary>
             <div className="dashboard-menu-popover">
+              <button className="dashboard-menu-item" data-menu-tab="weekly-snapshots" type="button">Weekly Snapshots</button>
                       <button className="dashboard-menu-item" id="weekly-usage-tab" data-menu-tab="weekly-usage" type="button">Weekly Usage</button>
               <button className="dashboard-menu-item" data-menu-tab="pricing" type="button">Tap Pricing</button>
               <button className="dashboard-menu-item" data-menu-tab="ingredients" type="button">Ingredient &amp; Keg Costs</button>
@@ -325,8 +326,8 @@ export default function DashboardPage() {
 
           <details className="pricing-directory">
             <summary>All current tap prices</summary>
-            <div className="pricing-layout">
-              <aside className="pricing-summary" id="pricing-summary"></aside>
+            <div className="pricing-layout dashboard-layout--full-width">
+              <div className="dashboard-inline-status" id="pricing-summary"></div>
               <div className="pricing-table-wrap">
                 <table className="pricing-table">
                   <thead>
@@ -360,11 +361,9 @@ export default function DashboardPage() {
         </section>
 
         <section className="panel" id="weekly-snapshots-panel" role="tabpanel" aria-label="Weekly Snapshots">
-          <OperationsBar context="weekly-snapshots" />
           <section className="inventory-block inventory-snapshots-block">
             <div className="inventory-block__header inventory-snapshots-block__header">
               <div>
-                <span className="inventory-snapshots-block__eyebrow">Weekly record</span>
                 <h2>Weekly Snapshots</h2>
               </div>
               <span className="inventory-snapshots-block__hint">Latest week first</span>
@@ -655,8 +654,8 @@ export default function DashboardPage() {
             </label>
           </div>
 
-          <div className="ingredient-layout">
-            <aside className="ingredient-summary" id="ingredient-summary"></aside>
+          <div className="ingredient-layout dashboard-layout--full-width">
+            <div className="dashboard-inline-filters" id="ingredient-summary"></div>
             <div className="pricing-sections">
               <section className="inventory-block">
                 <div className="inventory-block__header">
@@ -711,21 +710,15 @@ export default function DashboardPage() {
 
         <section className="panel" id="inventory-panel" role="tabpanel" aria-label="Inventory">
           <OperationsBar context="inventory" />
-          <div className="toolbar">
-            <label className="search-field">
-              <span>Find inventory item</span>
-              <input id="inventory-search" type="search" placeholder="Search liquor, mixers, reorder items..." />
-            </label>
-          </div>
 
-          <div className="inventory-layout">
-            <aside className="inventory-summary" id="inventory-summary"></aside>
+          <div className="inventory-layout dashboard-layout--full-width">
             <div className="inventory-sections">
               <section className="inventory-block">
                 <div className="inventory-block__header">
                   <div>
                     <h2>Current Inventory</h2>
                   </div>
+                  <div className="inventory-toolbar">
                   <details className="custom-inventory-editor" id="custom-inventory-editor">
                     <summary>Add item</summary>
                     <form className="custom-inventory-form" id="custom-inventory-form" autoComplete="off" data-form-type="other">
@@ -763,26 +756,17 @@ export default function DashboardPage() {
                     </div>
                     </form>
                   </details>
-                </div>
                 <details className="inventory-speech" id="inventory-speech-assistant"></details>
                 <button className="ghost-button inventory-clear-on-hand-button" id="clear-inventory-on-hand" type="button">Clear on hand</button>
-                <details className="cabinet-reserve-settings">
-                  <summary>Cabinet reserve settings</summary>
-                  <p>These fixed reserves are included after the next two Thursday prep sessions. They are not extra quantities to add to the order yourself.</p>
-                  <div id="cabinet-reserve-settings"></div>
-                </details>
-                <p className="formula-note inventory-note">Two-week need is the ingredient quantity for two prep sessions, before reserve and inventory deductions. Orders use the weekly plan counts; see Why this quantity for details.</p>
+                  </div>
+                </div>
+                <div className="dashboard-inline-status" id="inventory-summary" hidden></div>
                 <div className="inventory-table-wrap">
                   <table className="inventory-table inventory-table--stock">
                     <thead>
                       <tr>
                         <th>Item</th>
                         <th>On hand (units)</th>
-                        <th>Two-week need (units)</th>
-                        <th>Order (units)</th>
-                        <th>Pack</th>
-                        <th>Unit cost</th>
-                        <th>Total value</th>
                       </tr>
                     </thead>
                     <tbody id="inventory-table"></tbody>
@@ -790,30 +774,6 @@ export default function DashboardPage() {
                 </div>
               </section>
 
-              <section className="inventory-block">
-                <div className="inventory-block__header">
-                  <div>
-              <h2>Ingredient order reference</h2>
-                    <p className="formula-note inventory-note">Ingredient quantities use the weekly plan and the product pack size. Review the full Weekly Plan for liquor-tap refills, vendor minimum additions and approved changes.</p>
-                  </div>
-                </div>
-                <div className="inventory-table-wrap">
-                  <table className="inventory-table inventory-table--orders">
-                    <thead>
-                      <tr>
-                        <th>Item</th>
-                        <th>On hand (units)</th>
-                        <th>Two-week need (units)</th>
-                        <th>Order</th>
-                        <th>Pack</th>
-                        <th>Unit cost</th>
-                        <th>Est. reorder cost</th>
-                      </tr>
-                    </thead>
-                    <tbody id="inventory-order-table"></tbody>
-                  </table>
-                </div>
-              </section>
 
             </div>
           </div>

@@ -5,10 +5,11 @@ import { runInNewContext } from "node:vm";
 
 const background = readFileSync(new URL("../chrome-extension/bees-cart-builder/background.js", import.meta.url), "utf8");
 const branch = background.slice(background.indexOf('  if (message?.type === "CHECK_PROOF_CART")'), background.indexOf('  if (message?.type === "START_VENDOR_CART")'));
+const ownershipSource = background.slice(background.indexOf("function ownsProofWorker("), background.indexOf("chrome.runtime.onMessage.addListener"));
 
 function harness(fail = false) {
   const calls = [];
-  const state = { vendor: "proof", requestId: "request-1", status: "working" };
+  const state = { vendor: "proof", requestId: "request-1", status: "working", workerTabId: 10 };
   const context = {
     ORDER_KEY: "order", temporaryStorage: { get: async () => ({ order: state }) },
     waitForTabComplete: async (id) => calls.push(["loaded", id]),
@@ -19,7 +20,7 @@ function harness(fail = false) {
       remove: async (id) => calls.push(["remove", id]),
     } },
   };
-  runInNewContext(`function handle(message, sender) { ${branch} }`, context);
+  runInNewContext(`${ownershipSource}\nfunction handle(message, sender) { ${branch} }`, context);
   return { context, calls };
 }
 
@@ -46,4 +47,11 @@ test("a failed background read cleans up its reader tab without touching the pro
   const result = await h.context.handle({ type: "CHECK_PROOF_CART", requestId: "request-1" }, { tab: { id: 10 }, url: "https://shop.sgproof.com/" });
   assert.equal(result.ok, false);
   assert.deepEqual(h.calls.at(-1), ["remove", 99]);
+});
+
+test("another Proof tab cannot read the active worker's cart", async () => {
+  const h = harness();
+  const result = await h.context.handle({ type: "CHECK_PROOF_CART", requestId: "request-1" }, { tab: { id: 11 }, url: "https://shop.sgproof.com/" });
+  assert.equal(result.ok, false);
+  assert.deepEqual(h.calls, []);
 });

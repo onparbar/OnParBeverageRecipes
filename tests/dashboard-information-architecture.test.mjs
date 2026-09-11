@@ -34,7 +34,10 @@ test("the owner dashboard is the initial page and recipes appear later in naviga
   assert.match(pageSource, /id="performance-panel"/);
   assert.doesNotMatch(pageSource, /id="insights-panel"/);
   assert.match(pageSource, /id="onpar-insights"/);
-  assert.match(dashboardSource, /Sales mix by volume/);
+  const mixStart = dashboardSource.indexOf("function renderDashboardProjectedSalesMix(");
+  const mixSource = dashboardSource.slice(mixStart, dashboardSource.indexOf("\n}", mixStart));
+  assert.match(mixSource, /renderDashboardCategoryMix\(profitMix\)/);
+  assert.doesNotMatch(mixSource, /renderDashboardCategoryMix\(volumeMix\)/);
   assert.match(dashboardSource, /Sales mix by estimated profit/);
   assert.match(dashboardSource, /Sales mix by wall/);
   assert.doesNotMatch(dashboardSource, /data-dashboard-mix-metric/);
@@ -107,8 +110,8 @@ test("Keg Levels keeps customer tap pricing in the dedicated pricing workspace",
   assert.doesNotMatch(wallSource, /<th>Tap price<\/th>/);
   assert.doesNotMatch(dashboardSource, /function renderKegEditFinancialPanel/);
   assert.match(wallSource, /<th>Order \/ make<\/th>/);
-  assert.match(pageSource, /Two-week need \(units\)/);
-  assert.match(pageSource, /Cabinet reserve settings/);
+  assert.doesNotMatch(pageSource, /Two-week need \(units\)/);
+  assert.doesNotMatch(pageSource, /Cabinet reserve settings/);
 });
 
 test("late Monday snapshots use an inline reason instead of an unsupported prompt", () => {
@@ -117,8 +120,8 @@ test("late Monday snapshots use an inline reason instead of an unsupported promp
   assert.doesNotMatch(dashboardSource, /window\.prompt\("Why are you saving this Monday snapshot late\?"\)/);
 });
 
-test("Weekly Plan source freshness uses compact provenance items", () => {
-  assert.equal((dashboardSource.match(/weekly-plan-provenance__item/g) || []).length, 4);
+test("Weekly Plan omits redundant source descriptions", () => {
+  assert.doesNotMatch(dashboardSource, /weekly-plan-provenance__item|id="weekly-plan-source-details"/);
   assert.match(pageSource, /id="weekly-plan"/);
 });
 
@@ -133,7 +136,7 @@ test("new recipe cards use spirit labels without physical-wall suffixes", () => 
   assert.match(dashboardSource, /function getCanonicalProductDisplayName\(/);
   assert.match(dashboardSource, /getCanonicalProductDisplayName\(item\.name\)/);
   assert.match(dashboardSource, /getCanonicalProductDisplayName\(item\.name\)/);
-  assert.match(dashboardSource, /getCanonicalProductDisplayName\(recommendation\.orderProductName\)/);
+  assert.match(dashboardSource, /getCanonicalProductDisplayName\(\s*recommendation\?\.orderProductName/);
 });
 
 test("Home owns compact Guest Favorites while deeper analysis stays in Performance", () => {
@@ -329,11 +332,12 @@ test("voice inventory starts directly and offers phone keyboard dictation", () =
 test("Weekly Plan hides recommendations from a previous operating week", () => {
   assert.match(dashboardSource, /const currentWeekPlanAvailable = planLocked/);
   assert.match(dashboardSource, /This week's plan has not been generated/);
-  assert.match(dashboardSource, /Previous plan from/);
+  assert.match(dashboardSource, /The previous plan is saved in Weekly Snapshots/);
 });
 
-test("inventory keeps advanced controls behind one row Edit action and retires Bubbly", () => {
-  assert.match(dashboardSource, /inventory-row-edit-toggle/);
+test("inventory uses drag handles instead of row Edit buttons and retires Bubbly", () => {
+  assert.match(dashboardSource, /class="inventory-drag-handle"/);
+  assert.doesNotMatch(dashboardSource, /class="mini-button inventory-row-edit-toggle"/);
   assert.doesNotMatch(dashboardSource, /inventory-par-toggle/);
   assert.doesNotMatch(dashboardSource, /custom-inventory-price/);
   assert.doesNotMatch(dashboardSource, />Find price</);

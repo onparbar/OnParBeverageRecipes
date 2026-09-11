@@ -12,6 +12,7 @@ function harness(state) {
   const saved = [], destinations = [], added = [], waits = [];
   const context = {
     running: false,
+    navigationPending: false,
     isOhlqCheckoutPage: () => false,
     currentVendor: () => "proof",
     isLoginPage: () => false,
@@ -44,6 +45,20 @@ test("Proof saves the cursor and stops immediately when search navigation starts
   assert.deepEqual(h.waits, []);
   assert.equal(h.saved.at(-1).searchCursor, 0);
   assert.equal(h.saved.at(-1).phase, "search-results");
+});
+
+test("Proof ignores duplicate starts while navigation is pending", async () => {
+  const h = harness(order());
+  await h.context.start();
+  await h.context.start();
+  assert.deepEqual(h.destinations, ["https://shop.sgproof.com/search?text=38000"]);
+  assert.deepEqual(h.added, []);
+});
+
+test("Proof claims the worker before its asynchronous state read", async () => {
+  const h = harness(order());
+  await Promise.all([h.context.start(), h.context.start()]);
+  assert.deepEqual(h.destinations, ["https://shop.sgproof.com/search?text=38000"]);
 });
 
 test("Proof resumes the saved item and navigates away before checking the next", async () => {

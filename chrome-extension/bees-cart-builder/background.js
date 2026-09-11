@@ -38,11 +38,22 @@ const VENDORS = Object.freeze({
   },
 });
 
-async function focusVendor(vendor) {
+async function focusVendor(vendor, state) {
   const config = VENDORS[vendor];
   if (!config) throw new Error("That vendor cart is not supported.");
   const tabs = await chrome.tabs.query({ url: config.urls });
-  const tab = tabs.find((item) => item.id);
+  const tab = tabs.find((item) => item.id && !String(item.url || "").includes("#onpar-cart-check"));
+  if (vendor === "proof") {
+    // Bind the worker before loading Proof so no other open Proof tab can
+    // consume the handoff or race the selected tab's navigation.
+    const worker = tab || await chrome.tabs.create({ url: "about:blank", active: true });
+    await temporaryStorage.set({ [ORDER_KEY]: { ...state, workerTabId: worker.id } });
+    if (worker.windowId) await chrome.windows.update(worker.windowId, { focused: true });
+    return {
+      tab: await chrome.tabs.update(worker.id, { url: config.home, active: true }),
+      notifyExistingPage: false,
+    };
+  }
   if (!tab) {
     return {
       tab: await chrome.tabs.create({ url: config.home, active: true }),
@@ -95,6 +106,13 @@ async function broadcastResult(result) {
   )));
 }
 
+let startingVendorCart = false;
+
+function ownsProofWorker(state, sender) {
+  return Boolean(state?.workerTabId && state.workerTabId === sender?.tab?.id
+    && /^https:\/\/shop\.sgproof\.com\//i.test(sender.url || ""));
+}
+
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "CHECK_PROOF_CART") {
     return (async () => {
@@ -103,7 +121,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
       }
       const stored = await temporaryStorage.get(ORDER_KEY);
       const state = stored[ORDER_KEY];
-      if (!state || state.vendor !== "proof" || state.requestId !== message.requestId || !["pending", "working"].includes(state.status)) {
+      if (!state || state.vendor !== "proof" || !ownsProofWorker(state, sender) || state.requestId !== message.requestId || !["pending", "working"].includes(state.status)) {
         throw new Error("This Proof cart request is no longer active.");
       }
       // This tab only reads quantities. It never runs the cart-building worker.
@@ -124,9 +142,18 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     })().catch((error) => ({ ok: false, message: error.message }));
   }
   if (message?.type === "START_VENDOR_CART") {
+    if (startingVendorCart) return Promise.resolve({ ok: false, message: "A cart is already starting. Please wait." });
+    startingVendorCart = true;
     return (async () => {
       const config = VENDORS[message.payload?.vendor];
       if (!config) throw new Error("That vendor cart is not supported.");
+      const existing = (await temporaryStorage.get(ORDER_KEY))[ORDER_KEY];
+      if (existing?.vendor === "proof" && existing.workerTabId && ["pending", "working"].includes(existing.status)) {
+        const worker = await chrome.tabs.get(existing.workerTabId).catch(() => null);
+        if (worker && /^https:\/\/shop\.sgproof\.com\//i.test(worker.url || "")) {
+          throw new Error("A Proof cart is already running. Use Stop in its helper before starting another build.");
+        }
+      }
       const state = {
         ...message.payload,
         status: "pending",
@@ -136,25 +163,43 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         searchCursor: 0,
         startedAt: new Date().toISOString(),
       };
-      await temporaryStorage.set({ [ORDER_KEY]: state });
+      if (state.vendor !== "proof") await temporaryStorage.set({ [ORDER_KEY]: state });
       await temporaryStorage.remove(RESULT_KEY);
-      const focused = await focusVendor(state.vendor);
+      const focused = await focusVendor(state.vendor, state);
       if (focused.tab?.id) {
         await waitForTabComplete(focused.tab.id);
-        await chrome.tabs.sendMessage(focused.tab.id, { type: "VENDOR_CART_START" }).catch(() => {});
+        // Proof starts itself on page load. Sending another start after its
+        // first navigation can restart the worker on the departing page.
+        if (state.vendor !== "proof") {
+          await chrome.tabs.sendMessage(focused.tab.id, { type: "VENDOR_CART_START" }).catch(() => {});
+        }
       }
       return { ok: true, message: `${config.label} opened. The cart builder is working.` };
-    })().catch((error) => ({ ok: false, message: error.message }));
+    })().catch((error) => ({ ok: false, message: error.message }))
+      .finally(() => { startingVendorCart = false; });
   }
 
   if (message?.type === "GET_VENDOR_CART_STATE") {
     return temporaryStorage.get(ORDER_KEY)
-      .then((stored) => ({ ok: true, state: stored[ORDER_KEY] || null }))
+      .then((stored) => {
+        const state = stored[ORDER_KEY];
+        return { ok: true, state: state?.vendor === "proof" && !ownsProofWorker(state, sender) ? null : state || null };
+      })
       .catch((error) => ({ ok: false, message: error.message }));
   }
 
   if (message?.type === "SAVE_VENDOR_CART_STATE") {
-    return temporaryStorage.set({ [ORDER_KEY]: message.state })
+    return temporaryStorage.get(ORDER_KEY)
+      .then((stored) => {
+        const current = stored[ORDER_KEY];
+        if (current?.vendor === "proof" || message.state?.vendor === "proof") {
+          if (!ownsProofWorker(current, sender) || current.requestId !== message.state?.requestId) {
+            throw new Error("This Proof cart worker is no longer active.");
+          }
+          return temporaryStorage.set({ [ORDER_KEY]: { ...message.state, workerTabId: current.workerTabId } });
+        }
+        return temporaryStorage.set({ [ORDER_KEY]: message.state });
+      })
       .then(() => ({ ok: true }))
       .catch((error) => ({ ok: false, message: error.message }));
   }
@@ -184,6 +229,12 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 
   if (message?.type === "VENDOR_CART_FINISHED") {
     return (async () => {
+      const current = (await temporaryStorage.get(ORDER_KEY))[ORDER_KEY];
+      if (current?.vendor === "proof" || message.result?.vendor === "proof") {
+        if (!ownsProofWorker(current, sender) || current.requestId !== message.result?.requestId) {
+          throw new Error("This Proof cart worker is no longer active.");
+        }
+      }
       await temporaryStorage.set({ [RESULT_KEY]: message.result });
       await temporaryStorage.remove(ORDER_KEY);
       await broadcastResult(message.result);

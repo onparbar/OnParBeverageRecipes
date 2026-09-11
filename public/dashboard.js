@@ -5,7 +5,6 @@ import {
   buildInventoryPosition,
   buildStockGapRecommendation,
   classifyPmbLevelState,
-  deriveWeeklyWorkflowState,
   isOperationalProduct,
 } from "./operations-truth-model.mjs";
 
@@ -870,8 +869,8 @@ const MENU_ORDER = [
   ["WASHINGTON APPLE (CROWN ROYAL APPLE)", "Washington Apple (Whiskey)"],
   ["WHISKEY SOUR (JACK DANIELS)", "Whiskey Sour (Whiskey)"],
 ];
-const OPERATION_TAB_NAMES = ["keg-levels", "inventory", "weekly-plan", "weekly-snapshots"];
-const MENU_TAB_NAMES = ["performance", "weekly-usage", "recipes", "add", "pricing", "ingredients", "print"];
+const OPERATION_TAB_NAMES = ["keg-levels", "inventory", "weekly-plan"];
+const MENU_TAB_NAMES = ["weekly-snapshots", "performance", "weekly-usage", "recipes", "add", "pricing", "ingredients", "print"];
 const NEW_RECIPE_ORDER = [
   ["Bacardi Sunset", "Bacardi Sunset"],
   ["Whiskey Smash", "Whiskey Smash"],
@@ -960,7 +959,6 @@ const ingredientSearch = document.querySelector("#ingredient-search");
 const ingredientTable = document.querySelector("#ingredient-table");
 const kegPricingTable = document.querySelector("#keg-pricing-table");
 const ingredientSummary = document.querySelector("#ingredient-summary");
-const inventorySearch = document.querySelector("#inventory-search");
 const customInventoryForm = document.querySelector("#custom-inventory-form");
 const customInventoryNameInput = document.querySelector("#custom-inventory-name");
 const customInventoryGroupInput = document.querySelector("#custom-inventory-group");
@@ -1080,6 +1078,7 @@ let inactiveRecipeIds = loadInactiveRecipeIds();
 let editedRecipes = loadEditedRecipes();
 let customInventoryItems = loadCustomInventoryItems();
 let inventoryItemOrder = loadInventoryItemOrder();
+let inventoryGroupOverrides = readDashboardLocalStorageValue("onpar-inventory-group-overrides", {});
 let inventoryOnHandOverrides = loadInventoryOnHandOverrides();
 let inventoryParOverrides = loadInventoryParOverrides();
 let inventoryHistory = loadInventoryHistory();
@@ -3244,7 +3243,6 @@ function bindEvents() {
   oldSearch.addEventListener("input", renderOldRecipes);
   pricingSearch.addEventListener("input", renderPricing);
   ingredientSearch.addEventListener("input", renderIngredients);
-  inventorySearch.addEventListener("input", renderInventory);
   customInventoryForm?.addEventListener("submit", addCustomInventoryItem);
   customInventoryCancelButton?.addEventListener("click", resetCustomInventoryForm);
   weeklyUsageSearch?.addEventListener("input", renderWeeklyUsage);
@@ -4395,7 +4393,7 @@ function renderShotPricing(visibleTapRows = []) {
     editor.innerHTML = `
       <summary>Edit portion prices</summary>
       <div class="shot-pricing-fields">${editors}</div>
-      <p class="shot-pricing-editor__status" role="status">${escapeHtml(row.canEdit ? "Both portion prices are verified with PMB before and after saving." : row.blockers.map((blocker) => /socket hang up|econnreset|econnrefused|fetch failed|failed to fetch|timed? ?out|etimedout/i.test(blocker)
+      <p class="shot-pricing-editor__status" role="status">${escapeHtml(row.canEdit ? "" : row.blockers.map((blocker) => /socket hang up|econnreset|econnrefused|fetch failed|failed to fetch|timed? ?out|etimedout/i.test(blocker)
         ? "The PMB connection was interrupted. You can enter both prices now; your entries stay here during a recheck. Saving is paused until PMB verification succeeds."
         : blocker).join(" "))}</p>
       <div class="pricing-advisor-action">
@@ -4606,11 +4604,7 @@ function renderPricingAdvisor(visibleTapRows = []) {
     const delta = item.currentPricePerOz && item.recommendedPricePerOz
       ? `${item.priceChange > 0 ? "+" : ""}${money(item.priceChange)} / oz`
       : "—";
-    const costNote = [
-      item.kind,
-      item.costPerOz ? `${money(item.costPerOz)} cost / oz` : "Cost needed",
-      item.costSource,
-    ].filter(Boolean).join(" · ");
+    const costNote = item.costPerOz ? `${money(item.costPerOz)} / oz cost` : "Cost needed";
     const portionValues = (field, suffix = "") => `<div class="portion-list">${item.portions.map((portion) => {
       const value = field === "currentMarginPercent"
         ? (portion.costPerOz && portion.currentPricePerOz ? `${formatNumber(portion[field])}%` : "Not available")
@@ -4990,13 +4984,13 @@ function renderRecipeTapPricingRow(livePrice, recipe) {
   const override = chargeOverrides[recipe.id];
   const chargePerOz = toNumber(override) || livePrice?.chargePerOz || recipe.defaultChargePerOz || 0;
   const pricing = calculateRecipePricing(recipe, chargePerOz);
-  const sourceLabel = override ? "Dashboard calculation override (not PMB)" : livePrice ? `PMB live: ${livePrice.name}` : "CSV fallback";
+  const sourceLabel = override ? "Dashboard-only price (not saved to PMB)" : livePrice ? "" : "Saved price; refresh PMB to verify";
   const row = document.createElement("tr");
   row.innerHTML = `
     <td>${formatTapCell(livePrice)}</td>
     <td>
       <strong>${escapeHtml(livePrice?.name || recipe.title)}</strong>
-      <span class="table-note">${escapeHtml(sourceLabel)}</span>
+      ${sourceLabel ? `<span class="table-note">${escapeHtml(sourceLabel)}</span>` : ""}
     </td>
     <td data-pricing-cell="cost">${money(pricing.costPerOz)}</td>
     <td><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(override ?? "")}" placeholder="${formatNumber(livePrice?.chargePerOz || recipe.defaultChargePerOz)}" aria-label="Charge per ounce for ${escapeHtml(recipe.title)}"></td>
@@ -5051,7 +5045,6 @@ function renderIngredientTapPricingRow(livePrice, ingredient) {
     <td>${formatTapCell(livePrice)}</td>
     <td>
       <strong>${escapeHtml(livePrice.name)}</strong>
-      <span class="table-note">PMB live: ${escapeHtml(ingredient.name)} cost</span>
     </td>
     <td>${costPerOz ? money(costPerOz) : "-"}</td>
     <td>${portions.length ? renderPortionList(portions) : chargePerOz ? money(chargePerOz) : "-"}</td>
@@ -5067,7 +5060,6 @@ function renderUnmappedTapPricingRow(livePrice) {
     <td>${formatTapCell(livePrice)}</td>
     <td>
       <strong>${escapeHtml(livePrice.name)}</strong>
-      <span class="table-note">PMB live</span>
     </td>
     <td>-</td>
     <td>${portions.length ? renderPortionList(portions) : livePrice.chargePerOz ? money(livePrice.chargePerOz) : "-"}</td>
@@ -5125,23 +5117,9 @@ function updateRecipeTapPricingRow(row, recipe, livePrice) {
   row.querySelector('[data-pricing-cell="margin"]').textContent = `${formatNumber(pricing.margin)}%`;
 }
 
-function renderPricingSummary(visibleTapRows = getLiveTapPricingRows(pricingSearch.value.trim().toLowerCase())) {
-  const activeRecipes = getActiveRecipes();
-  const pricing = activeRecipes.map(getRecipePricing);
-  const revenue = sum(pricing.map((item) => item.revenue));
-  const cost = sum(pricing.map((item) => item.cost));
-  const profit = revenue - cost;
-  const margin = revenue ? (profit / revenue) * 100 : 0;
+function renderPricingSummary() {
   pricingSummary.innerHTML = `
-    <h2>Charge pricing</h2>
-    <div class="sync-panel">
-      <p class="sync-status">${escapeHtml(liveTapPricingMessage)}${liveTapPricingUpdatedAt ? ` Last updated ${escapeHtml(formatUpdatedAt(liveTapPricingUpdatedAt))}.` : ""}</p>
-    </div>
-    <div class="summary-line"><span>Cocktail recipes</span><strong>${activeRecipes.length}</strong></div>
-    <div class="summary-line"><span>Current PMB taps</span><strong>${liveTapPriceItems.length || visibleTapRows.length}</strong></div>
-    <div class="summary-line"><span>Projected batch revenue</span><strong>${money(revenue)}</strong></div>
-    <div class="summary-line"><span>Projected batch profit</span><strong>${money(profit)}</strong></div>
-    <div class="summary-line"><span>Projected margin</span><strong>${formatNumber(margin)}%</strong></div>
+    <p class="sync-status" role="status">${escapeHtml(liveTapPricingMessage)}${liveTapPricingUpdatedAt ? ` Last updated ${escapeHtml(formatUpdatedAt(liveTapPricingUpdatedAt))}.` : ""}</p>
   `;
   document.querySelector("#refresh-tap-pricing")?.addEventListener("click", runTapPricingSync);
 }
@@ -5235,11 +5213,7 @@ function renderIngredients() {
   });
 }
 
-function renderIngredientSummary(visibleIngredientsInput = ingredients.filter((ingredient) => ingredient.id !== "water"), visibleKegsInput = kegPricingItems) {
-  const visibleIngredients = visibleIngredientsInput.filter((ingredient) => ingredient.id !== "water");
-  const visibleKegs = visibleKegsInput;
-  const kegTrackedValue = sum(visibleKegs.map((item) => getKegPrice(item)));
-
+function renderIngredientSummary() {
   ingredientSummary.innerHTML = `
     <label class="sync-field">
       <span>Vendor</span>
@@ -7131,7 +7105,6 @@ function renderDashboardProjectedWallMix(rows = []) {
           </div>
         `).join("")}
       </div>
-      <small>Always includes all walls for the selected period, regardless of the wall filter.</small>
     </div>
   `;
 }
@@ -7164,7 +7137,8 @@ function renderDashboardCategoryMix(mix) {
           </div>
         `).join("")}
       </div>
-      ${isProfit ? `<p class="dashboard-pulse-empty">Estimated from recorded pours and available selling prices and costs, before labor and overhead. Uses same-category averages where product pricing is missing, and average liquor portion pricing where needed.
+      ${isProfit ? `
+      <p class="dashboard-pulse-empty">
         ${mix.unpricedTapCount ? `${mix.unpricedTapCount} tap(s) excluded because neither product pricing nor a category estimate is available.` : ""}
         ${mix.hasLosses ? "Percentages show positive category contributions only; categories with a net loss have a 0% share." : ""}
       </p>` : ""}
@@ -7174,10 +7148,7 @@ function renderDashboardCategoryMix(mix) {
 
 function renderDashboardProjectedSalesMix(volumeMix, profitMix) {
   return `<aside class="dashboard-pulse-sales-mix">
-    ${renderDashboardCategoryMix(volumeMix)}
-    <div style="margin-top:18px;padding-top:16px;border-top:1px solid rgba(34, 68, 60, 0.16);">
-      ${renderDashboardCategoryMix(profitMix)}
-    </div>
+    ${renderDashboardCategoryMix(profitMix)}
     ${renderDashboardProjectedWallMix(volumeMix.walls)}
   </aside>`;
 }
@@ -7571,41 +7542,6 @@ function renderWeeklyPlanReadiness(readiness) {
       <h3 id="weekly-plan-readiness-title">${escapeHtml(readiness.label)}</h3>
       ${friendlyReasons.length ? `<ul>${friendlyReasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>` : ""}
       ${needsReload ? '<button class="mini-button" type="button" data-weekly-plan-reload>Reload current data</button>' : ""}
-    </section>
-  `;
-}
-
-function renderWeeklyPlanProvenance({ latestCompletedWeek, latestCompletedUsageSaved, latestCompletedUsageRowCount, requiredUsageRows, usageCoverageMessage }) {
-  const recommendations = parAgentState?.recommendations;
-  const planLocked = hasPublishedWeeklyPlanRecommendations();
-  const currentPlanAvailable = planLocked
-    || Boolean(getCurrentMondayKegPlanSnapshot())
-    || isRecommendationForOperatingWeek(recommendations?.generatedAt, new Date());
-  const priceTime = getLatestPriceTimestamp();
-  const missingCounts = getWeeklyPlanMissingInventoryCount();
-  return `
-    <section class="weekly-plan-provenance" aria-label="Weekly plan source freshness">
-      <div class="weekly-plan-provenance__item">
-        <span>Plan</span>
-        <strong>${currentPlanAvailable ? `${planLocked ? "Locked · " : ""}${recommendations?.generatedAt ? escapeHtml(formatUpdatedAt(recommendations.generatedAt)) : "Current inputs saved"}` : "Not generated for this week"}</strong>
-        ${!currentPlanAvailable && recommendations?.generatedAt ? `<small>Previous plan from ${escapeHtml(formatUpdatedAt(recommendations.generatedAt))} is available in Weekly Snapshots.</small>` : ""}
-      </div>
-      <div class="weekly-plan-provenance__item">
-        <span>Weekly Usage</span>
-        <strong>${weeklyUsageSharedSaveError ? "Needs refresh" : weeklyUsageSharedSaving || weeklyUsageSharedPendingWrites || weeklyUsageSharedSaveTimer || weeklyUsageSharedOutbox ? "Saving changes" : latestCompletedWeek ? `Week of ${escapeHtml(formatIsoDate(latestCompletedWeek))}` : "No completed week"}</strong>
-        ${weeklyUsageSharedSaveError ? `<small>${escapeHtml(getWeeklyPlanManagerMessage(weeklyUsageSharedSaveError))}</small>` : `<small>${latestCompletedUsageSaved ? `${formatNumber(latestCompletedUsageRowCount)}/${formatNumber(requiredUsageRows)} active taps saved` : escapeHtml(usageCoverageMessage)}</small>`}
-        ${weeklyUsageItems.some((item) => !isWeeklyUsageRequiredItem(item)) ? "<small>Coming Soon placeholders do not require sales history.</small>" : ""}
-      </div>
-      <div class="weekly-plan-provenance__item">
-        <span>Inventory</span>
-        <strong>${inventorySharedSaveError ? "Needs refresh" : inventorySharedSaving || inventoryFieldSyncPendingCount || inventoryFieldSyncTimers.size || Object.keys(inventoryFieldOutbox).length || inventoryActionOutbox.length ? "Saving changes" : inventorySharedInitialized ? (inventorySharedUpdatedAt ? escapeHtml(formatUpdatedAt(inventorySharedUpdatedAt)) : "Shared inventory") : "Local / baseline only"}</strong>
-        ${inventorySharedSaveError ? `<small>${escapeHtml(getWeeklyPlanManagerMessage(inventorySharedSaveError))}</small>` : missingCounts ? `<small>${formatNumber(missingCounts)} missing count${missingCounts === 1 ? "" : "s"}</small>` : ""}
-      </div>
-      <div class="weekly-plan-provenance__item">
-        <span>Prices</span>
-        <strong>${priceTime ? escapeHtml(formatUpdatedAt(priceTime)) : "Bundled defaults"}</strong>
-        ${vendorSyncRunning ? "<small>Syncing…</small>" : ""}
-      </div>
     </section>
   `;
 }
@@ -8177,9 +8113,6 @@ function renderWeeklyPlan() {
   });
   const mondayRun = getMondayRunModel(plan, freshness);
   const orderStep = mondayRun.steps.find((step) => step.id === "orders");
-  const simpleSyrupNeed = getWeeklySimpleSyrupNeed(plan.prep.cocktails);
-  const workflowState = deriveWeeklyWorkflowState({ planLocked, mondayRun });
-  const updatedText = workflowState.complete ? "Week complete" : workflowState.label;
   const demoToggle = ORDER_REHEARSAL_AVAILABLE && (planLocked || orderRehearsalMode)
     ? `<button class="ghost-button" id="toggle-order-rehearsal" type="button">${orderRehearsalMode ? "Exit Rehearsal" : "Rehearsal"}</button>`
     : "";
@@ -8198,15 +8131,7 @@ function renderWeeklyPlan() {
     <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(getWeeklyPlanManagerMessage(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : "")))}</p>
     ${renderMondayRun(mondayRun)}
     ${renderWeeklyPlanReadiness(freshness.readiness)}
-    ${currentWeekPlanAvailable ? `<div class="weekly-plan-stats">
-      <div><span>Items to order</span><strong>${formatNumber(summary.orderLineCount)}</strong></div>
-      <div><span>Beer kegs</span><strong>${formatNumber(summary.beerKegTotal)}</strong></div>
-      <div><span>Tap refill bottles</span><strong>${formatNumber(summary.liquorTapBottleTotal)}</strong></div>
-      <div><span>Cocktails to make</span><strong>${formatNumber(summary.cocktailBatchTotal)}</strong></div>
-      <div class="${simpleSyrupNeed.complete ? "" : "weekly-plan-stat--warning"}"><span>Simple syrup</span><strong>${simpleSyrupNeed.complete ? `${formatNumber(simpleSyrupNeed.gallons)} gal` : "Check recipes"}</strong>${simpleSyrupNeed.complete ? "" : `<small>${formatNumber(simpleSyrupNeed.unmatched.length)} unmatched cocktail${simpleSyrupNeed.unmatched.length === 1 ? "" : "s"}</small>`}</div>
-      ${summary.heldLineCount + summary.excludedLineCount > 0 ? `<div><span>Held for review</span><strong>${formatNumber(summary.heldLineCount + summary.excludedLineCount)}</strong></div>` : ""}
-      <div class="${summary.estimatedPurchaseCostComplete ? "" : "weekly-plan-stat--warning"}"><span>Estimated purchase</span><strong>${money(summary.estimatedKnownPurchaseCost)}</strong>${summary.missingPriceCount ? `<small>${formatNumber(summary.missingPriceCount)} missing price${summary.missingPriceCount === 1 ? "" : "s"}</small>` : ""}</div>
-    </div>
+    ${currentWeekPlanAvailable ? `
     ${priceNote ? `<p class="weekly-plan-cost-note">${escapeHtml(priceNote)}</p>` : ""}
     ${renderWeeklyPlanReview(plan)}
     ${planLocked
@@ -8218,7 +8143,7 @@ function renderWeeklyPlan() {
         ${renderWeeklyPlanByVendor(plan, vendorOrderModel.deferredOrders)}
       </section>`}
       <details class="weekly-plan-phase weekly-plan-phase--prep"${planLocked ? "" : " open"}>
-        <summary><span>Prep plan</span><strong>${formatNumber(summary.cocktailBatchTotal)} batch${toNumber(summary.cocktailBatchTotal) === 1 ? "" : "es"} · ${formatNumber(summary.liquorTapBottleTotal)} refill bottles</strong></summary>
+        <summary><span>Prep plan</span><strong>${formatNumber(summary.cocktailBatchTotal)} cocktail${toNumber(summary.cocktailBatchTotal) === 1 ? "" : "s"} to make, ${formatNumber(summary.liquorTapBottleTotal)} liquor tap refill${toNumber(summary.liquorTapBottleTotal) === 1 ? "" : "s"}</strong></summary>
         <section class="weekly-plan-column weekly-plan-column--prep">
           <div class="weekly-plan-column__header"><h2>Cocktails To Make</h2></div>
           ${renderWeeklyPlanCocktailRows(plan.prep.cocktails)}
@@ -8228,10 +8153,6 @@ function renderWeeklyPlan() {
       </details>
     </div>
     ${renderWeeklyPlanFinishWeek(planLocked, Boolean(orderStep?.complete))}` : `<section class="weekly-plan-empty" role="status"><h2>This week's plan has not been generated</h2><p>The previous plan is saved in Weekly Snapshots. Use Save &amp; Lock Plan after the current PMB usage and counts are ready.</p></section>`}
-    <details class="weekly-plan-details" id="weekly-plan-source-details">
-      <summary>Plan details &amp; data sources</summary>
-      ${renderWeeklyPlanProvenance(freshness)}
-    </details>
   `;
   let weeklyPlanBody = liveWeeklyPlanBody;
   if (orderRehearsalMode) {
@@ -8254,10 +8175,9 @@ function renderWeeklyPlan() {
   });
   weeklyPlan.innerHTML = `
     <header class="weekly-plan-header">
-      <div>
-        <p class="eyebrow">${orderRehearsalMode ? "Practice mode" : planLocked ? "Locked plan" : "Monday planning"}</p>
+      <div class="weekly-plan-header__heading">
+        ${orderRehearsalMode ? '<p class="eyebrow">Practice mode</p>' : ""}
         <h2>${orderRehearsalMode ? "Rehearsal" : "Weekly plan"}</h2>
-        <p>${escapeHtml(orderRehearsalMode ? "Guided weekly workflow rehearsal" : updatedText)}</p>
       </div>
       <div class="weekly-plan-actions">
         ${orderRehearsalMode ? demoToggle : liveHeaderActions}
@@ -8322,10 +8242,6 @@ function renderKegLevels() {
     const level = row?.fillLevelPercent;
     return row?.levelAvailable !== false && level != null && String(level).trim() !== "" && Number.isFinite(Number(level));
   }).length;
-  const reorderCount = kegWallItems.filter((item) => getKegNeed(item) > 0).length;
-  const currentInventoryValue = sum(kegWallItems.map((item) => (
-    getKegCurrentValue(item, getKegLiveRow(item)) + getKegOnDeckInventoryValue(item)
-  )));
   const recipeCoverage = getWallCocktailRecipeCoverage();
 
   kegSummary.innerHTML = `
@@ -8342,9 +8258,7 @@ function renderKegLevels() {
     <div class="keg-summary-stats">
       <div class="summary-line"><span>Total taps</span><strong>${totalTaps}</strong></div>
       <div class="summary-line"><span>Live levels found</span><strong>${liveCount}</strong></div>
-    <div class="summary-line"><span>Taps needing stock</span><strong>${reorderCount}</strong></div>
       ${recipeCoverage.missing.length ? `<div class="summary-line"><span>Missing recipes</span><strong>${recipeCoverage.missing.length}</strong></div>` : ""}
-      <div class="summary-line"><span>Keg inventory value</span><strong>${money(currentInventoryValue)}</strong></div>
     </div>
     ${recipeCoverage.missing.length ? `
       <div class="recipe-coverage-summary">
@@ -10161,7 +10075,6 @@ function renderKegWallBlock(wallName, items, { attentionOnly = false } = {}) {
               <th>Tap #</th>
               <th>Product</th>
               <th>Current level</th>
-              <th>Avg weekly</th>
               <th>On hand</th>
               <th>Order / make</th>
             </tr>
@@ -10189,7 +10102,6 @@ function renderKegWallBlock(wallName, items, { attentionOnly = false } = {}) {
                     <td class="keg-level-cell ${getKegLevelClass(liveRow?.fillLevelPercent)}">
                       <span class="keg-level-display">${formatKegCurrentLevel(item, liveRow)}</span>
                     </td>
-                    <td class="keg-usage-cell">${formatKegWeeklyUsageAverage(item, displayBrand)}</td>
                     <td>
                       <div class="keg-on-hand-stack">
                         ${isLiquorTap
@@ -10391,14 +10303,6 @@ function getUnmappedKegWallPricing(livePrice) {
     chargeHtml: portions.length ? renderPortionList(portions) : livePrice?.chargePerOz ? money(livePrice.chargePerOz) : '<span class="inventory-order-zero">-</span>',
     marginHtml: '<span class="inventory-order-zero">-</span>',
   };
-}
-
-function formatKegWeeklyUsageAverage(item, displayBrand = item?.brand) {
-  const usage = getWeeklyUsageForKegItem(item, displayBrand);
-  if (!usage || !Number.isFinite(usage.average) || usage.average <= 0) {
-    return '<span class="inventory-order-zero">-</span>';
-  }
-  return `${formatNumber(usage.average)} ${escapeHtml(usage.displayUnit || "")}`;
 }
 
 function getWeeklyUsageForKegItem(item, displayBrand = item?.brand) {
@@ -10900,7 +10804,7 @@ function renderKegLevelAdjustRow(item, liveRow, displayBrand = item.brand) {
     : "Refresh keg levels before adjusting this tap.";
   return `
     <tr class="keg-adjust-row">
-      <td colspan="6">
+      <td colspan="5">
         <div class="keg-adjust-panel keg-edit-panel">
           <section class="keg-edit-section keg-edit-section--on-deck">
             ${renderKegOnDeckControl(item)}
@@ -12811,42 +12715,19 @@ function getKegNeed(item) {
 
 function renderKegNeedCell(item, need) {
   const recommendation = getParAgentRecommendation(item);
-  const explanation = recommendation?.reason
-    ? `<details class="ordering-quantity-details"><summary>Why this quantity?</summary><p>${escapeHtml(recommendation.reason)}</p></details>`
-    : "";
   if (need === null) {
     return '<span class="inventory-order-zero">PMB sync issue</span>';
   }
-  const valueHtml = need > 0
-      ? `<span class="inventory-order-value">${formatNumber(need)}${recommendation?.isLiquorTap ? ` bottle${need === 1 ? "" : "s"}` : ""}</span>`
-      : `<span class="inventory-order-zero">0</span>`;
-  if (!recommendation) {
-    const onDeck = getKegOnDeckItem(item);
-    if (!onDeck || need <= 0) return valueHtml;
-    return `
-      <div class="keg-need-agent">
-        ${valueHtml}
-        <span class="table-note table-note--accent">Order ${escapeHtml(onDeck.name)}</span>
-      </div>
-    `;
+  if (!(need > 0)) return '<span class="inventory-order-zero">0</span>';
+  const orderProductName = getCanonicalProductDisplayName(
+    recommendation?.orderProductName || getKegOnDeckItem(item)?.name || getKegDisplayBrand(item, getKegLiveRow(item)),
+  );
+  if (recommendation?.isLiquorTap) {
+    return `<span class="inventory-order-value">Order ${formatNumber(need)} bottle${need === 1 ? "" : "s"}${orderProductName ? ` of ${escapeHtml(orderProductName)}` : ""}</span>`;
   }
-
-  const orderProductName = getCanonicalProductDisplayName(recommendation.orderProductName);
-  if (recommendation.isLiquorTap && orderProductName && need > 0) {
-    return `<span class="inventory-order-value">Order ${formatNumber(need)} bottle${need === 1 ? "" : "s"} of ${escapeHtml(orderProductName)}</span>${explanation}`;
-  }
-  const actionLabel = recommendation.isLiquorTap
-    ? "Order"
-    : recommendation.actionType === "make"
-      ? "Make"
-      : "Order";
-  return `
-    <div class="keg-need-agent">
-      ${valueHtml}
-      ${orderProductName && need > 0 ? `<span class="table-note table-note--accent">${escapeHtml(actionLabel)} ${escapeHtml(orderProductName)}</span>` : ""}
-      ${explanation}
-    </div>
-  `;
+  const actionLabel = recommendation?.actionType === "make"
+    || (!recommendation && normalizeTitle(item.type) === "cocktail") ? "Make" : "Order";
+  return `<span class="inventory-order-value" title="${escapeHtml(orderProductName)}">${actionLabel} ${formatNumber(need)}</span>`;
 }
 
 function getKegLiveRow(item) {
@@ -13292,6 +13173,7 @@ function applyPendingInventoryActionLocally(payload) {
       break;
     case "reorder-items":
       inventoryItemOrder = Array.isArray(payload.itemOrder) ? [...new Set(payload.itemOrder)] : inventoryItemOrder;
+      if (payload.movedItem) applyInventoryCabinetMove(payload.movedItem);
       break;
     case "batch-update-fields": {
       (Array.isArray(payload.changes) ? payload.changes : []).forEach((change) => {
@@ -13473,6 +13355,8 @@ function applySharedInventoryState(state, { rebuild = false } = {}) {
   inventoryParOverrides = { ...(state.current?.parOverrides || {}) };
   customInventoryItems = Array.isArray(state.current?.customItems) ? state.current.customItems : [];
   inventoryItemOrder = Array.isArray(state.current?.itemOrder) ? state.current.itemOrder : [];
+  inventoryGroupOverrides = { ...(state.current?.groupOverrides || {}) };
+  writeDashboardLocalStorageValue("onpar-inventory-group-overrides", inventoryGroupOverrides);
   inventoryHistory = Array.isArray(state.snapshots) ? state.snapshots : [];
   inventorySharedUpdatedAt = state.current?.updatedAt || "";
   inventorySharedCountedAt = state.current?.countedAt || "";
@@ -13494,6 +13378,7 @@ function getInventorySharedImportSnapshot() {
     parOverrides: { ...inventoryParOverrides },
     customItems: [...customInventoryItems],
     itemOrder: [...inventoryItemOrder],
+    groupOverrides: { ...inventoryGroupOverrides },
     snapshots: getMigratedInventoryHistory(),
   };
 }
@@ -13881,22 +13766,24 @@ async function reconcileInventorySnapshotConflict() {
   }
 }
 
-function renderInventorySummary(visibleItems, reorderItems) {
-  const totalValue = sum(visibleItems.filter((item) => !item.excludeFromInventoryValue).map((item) => item.totalValue));
-  const reorderCost = sum(reorderItems.filter((item) => !item.excludeFromInventoryValue).map((item) => getInventoryRoundedOrderQuantity(item) * item.unitCost));
-  const latestSnapshot = inventoryHistory[0];
+function isIncludedInInventoryValue(item) {
+  // These ingredients remain tracked and priced, but do not contribute to stock valuation.
+  const excludedIds = ["cold-brew", "sweet-and-sour", "sour-mix"];
+  return !item.excludeFromInventoryValue
+    && !excludedIds.includes(item.id)
+    && !excludedIds.includes(slugify(item.name));
+}
 
+function renderInventorySummary() {
+  const needsSetup = inventorySharedProvisioned && !inventorySharedInitialized;
+  const needsRecovery = inventoryActionOutbox.some((entry) => entry.conflict && entry.payload.action === "save-snapshot");
+  const message = inventorySharedSaveError || inventorySharedMessage;
+  inventorySummary.hidden = !needsSetup && !needsRecovery && !message;
   inventorySummary.innerHTML = `
-    <h2>Inventory</h2>
-    <div class="summary-line"><span>Tracked items</span><strong>${visibleItems.length}</strong></div>
-    <div class="summary-line"><span>Current value</span><strong>${money(totalValue)}</strong></div>
-    <div class="summary-line"><span>Items to reorder</span><strong>${reorderItems.length}</strong></div>
-    <div class="summary-line"><span>Estimated purchase</span><strong data-inventory-estimated-purchase>${Number.isFinite(Number(globalThis.onParWeeklyPlanEstimatedPurchaseCost)) ? money(Number(globalThis.onParWeeklyPlanEstimatedPurchaseCost)) : "—"}</strong></div>
     <div class="sync-panel inventory-actions-panel">
-      ${inventorySharedProvisioned && !inventorySharedInitialized ? '<button class="ghost-button" id="initialize-shared-inventory" type="button">Import from service computer</button>' : ""}
-      ${inventorySharedMessage ? `<p class="sync-status">${escapeHtml(inventorySharedMessage)}</p>` : ""}
-      ${inventoryActionOutbox.some((entry) => entry.conflict && entry.payload.action === "save-snapshot") ? `<button class="ghost-button" id="reconcile-inventory-snapshot" type="button" ${inventorySharedSaving ? "disabled" : ""}>Recover snapshot save (keep counts)</button>` : ""}
-      <p class="sync-status">${latestSnapshot ? `Last snapshot: ${escapeHtml(formatInventorySnapshotLabel(getInventorySnapshotDate(latestSnapshot)))}` : "No snapshots yet"}</p>
+      ${needsSetup ? '<button class="ghost-button" id="initialize-shared-inventory" type="button">Import from service computer</button>' : ""}
+      ${message ? `<p class="sync-status" role="status">${escapeHtml(message)}</p>` : ""}
+      ${needsRecovery ? `<button class="ghost-button" id="reconcile-inventory-snapshot" type="button" ${inventorySharedSaving ? "disabled" : ""}>Recover snapshot save (keep counts)</button>` : ""}
     </div>
   `;
 
@@ -13966,6 +13853,7 @@ function getInventorySpeechSourceItems() {
     name: item.name,
     target: "inventory",
     group: item.group,
+    cabinetAssigned: Object.prototype.hasOwnProperty.call(inventoryGroupOverrides, item.id),
     unit: "units",
     packSize: item.packSize,
     currentValue: item.onHandDisplay,
@@ -14063,6 +13951,10 @@ function renderInventorySpeechAssistant() {
           "vanilla syrup",
         ].includes(inventoryName);
         if (item.target !== "inventory") return false;
+        if (inventorySpeechInventoryScope === "other") return inventoryGroup === "other";
+        if (item.cabinetAssigned) {
+          return inventoryGroup === (inventorySpeechInventoryScope === "mixer" ? "mixer cabinet" : "liquor cabinet");
+        }
         if (inventorySpeechInventoryScope === "mixer") {
           return inventoryGroup === "mixer cabinet" || isSharedCabinetItem;
         }
@@ -14129,6 +14021,7 @@ function renderInventorySpeechAssistant() {
           <div class="inventory-speech__scope" role="group" aria-label="Inventory area">
             <button class="ghost-button${inventorySpeechInventoryScope === "liquor" ? " is-active" : ""}" data-speech-inventory-scope="liquor" type="button" aria-pressed="${inventorySpeechInventoryScope === "liquor"}">Liquor cabinet</button>
             <button class="ghost-button${inventorySpeechInventoryScope === "mixer" ? " is-active" : ""}" data-speech-inventory-scope="mixer" type="button" aria-pressed="${inventorySpeechInventoryScope === "mixer"}">Mixer cabinet</button>
+            <button class="ghost-button${inventorySpeechInventoryScope === "other" ? " is-active" : ""}" data-speech-inventory-scope="other" type="button" aria-pressed="${inventorySpeechInventoryScope === "other"}">Other</button>
           </div>`}
         <label>
           <span class="sr-only">Spoken inventory transcript</span>
@@ -14167,13 +14060,13 @@ function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
   });
   assistant.querySelectorAll("[data-speech-inventory-scope]").forEach((button) => {
     button.addEventListener("click", () => {
-      const nextScope = button.dataset.speechInventoryScope === "mixer" ? "mixer" : "liquor";
+      const nextScope = ["mixer", "other"].includes(button.dataset.speechInventoryScope) ? button.dataset.speechInventoryScope : "liquor";
       if (nextScope === inventorySpeechInventoryScope) return;
       stopInventorySpeechRecognition();
       inventorySpeechInventoryScope = nextScope;
       inventorySpeechTranscript = "";
       inventorySpeechProposals = [];
-      inventorySpeechMessage = nextScope === "mixer" ? "Mixer cabinet selected." : "Liquor cabinet selected.";
+      inventorySpeechMessage = nextScope === "other" ? "Other inventory selected." : nextScope === "mixer" ? "Mixer cabinet selected." : "Liquor cabinet selected.";
       renderInventorySpeechAssistant();
     });
   });
@@ -14401,15 +14294,13 @@ async function applyReviewedInventorySpeechChanges() {
 
 function renderInventoryStockTable(groupedItems) {
   inventoryTable.innerHTML = "";
-  const allVisibleItems = groupedItems.flatMap(([, items]) => items);
-  const totalValue = sum(allVisibleItems.filter((item) => !item.excludeFromInventoryValue).map((item) => item.totalValue));
 
-  groupedItems.forEach(([groupName, items]) => {
-    inventoryTable.append(createInventoryGroupRow(groupName));
+  const groups = new Map(groupedItems);
+  ["Liquor Cabinet", "Mixer Cabinet", "Other"].forEach((groupName) => {
+    const items = groups.get(groupName) || [];
+    inventoryTable.append(createInventoryGroupRow(groupName, 2));
     items.forEach((item) => inventoryTable.append(createInventoryRow(item, "stock")));
   });
-
-  inventoryTable.append(createInventoryTotalRow("Current bottle inventory total", money(totalValue)));
 }
 
 async function addCustomInventoryItem(event) {
@@ -14491,7 +14382,10 @@ function mergeCustomInventoryItems(baseItems) {
     byId.set(normalized.id, normalized);
   });
 
-  return [...byId.values()];
+  return [...byId.values()].map((item) => ({
+    ...item,
+    group: inventoryGroupOverrides[item.id] || item.group,
+  }));
 }
 
 function normalizeCustomInventoryItem(item) {
@@ -14686,6 +14580,7 @@ async function deleteCustomInventoryItem(id) {
 }
 
 function renderInventoryOrderTable(reorderItems) {
+  if (!inventoryOrderTable) return;
   inventoryOrderTable.innerHTML = "";
 
   if (!reorderItems.length) {
@@ -14708,10 +14603,24 @@ function renderInventoryOrderTable(reorderItems) {
   inventoryOrderTable.append(createInventoryTotalRow("Estimated reorder total", money(reorderCost)));
 }
 
-function createInventoryGroupRow(groupName) {
+function createInventoryGroupRow(groupName, columnCount = 7) {
   const row = document.createElement("tr");
   row.className = "inventory-group-row";
-  row.innerHTML = `<td colspan="7">${escapeHtml(groupName)}</td>`;
+  row.dataset.inventoryGroup = groupName;
+  if (columnCount === 2) {
+    row.addEventListener("dragover", (event) => {
+      if (!draggedInventoryItemId) return;
+      event.preventDefault();
+      row.classList.add("inventory-row--drag-target");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("inventory-row--drag-target"));
+    row.addEventListener("drop", (event) => {
+      event.preventDefault();
+      row.classList.remove("inventory-row--drag-target");
+      moveInventoryItemToCabinet(draggedInventoryItemId, groupName);
+    });
+  }
+  row.innerHTML = `<td colspan="${columnCount}">${escapeHtml(groupName)}</td>`;
   return row;
 }
 
@@ -14765,9 +14674,8 @@ function createInventoryRow(item, mode) {
   if (mode === "stock") {
     linkedNotes.push(`
       <div class="inventory-row-controls">
-        <button class="mini-button inventory-row-edit-toggle" type="button">${isRowEditing ? "Done" : "Edit"}</button>
+        <button class="inventory-drag-handle" type="button" draggable="true" title="Drag to reorder; use arrow keys when focused" aria-label="Reorder ${escapeHtml(item.name)}">&#8942;&#8942;</button>
         ${isRowEditing ? `
-          <span class="inventory-drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag ${escapeHtml(item.name)} to reorder">::</span>
           <button class="icon-button inventory-move-up" type="button" title="Move up" aria-label="Move ${escapeHtml(item.name)} up">&uarr;</button>
           <button class="icon-button inventory-move-down" type="button" title="Move down" aria-label="Move ${escapeHtml(item.name)} down">&darr;</button>
           ${item.isCustomInventory ? `
@@ -14783,15 +14691,15 @@ function createInventoryRow(item, mode) {
     ? money(item.unitCost)
     : '<span class="inventory-order-zero">Price needed</span>';
   row.innerHTML = `
-    <td><strong>${escapeHtml(item.name)}</strong>${item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${item.orderHoldReason ? `<span class="table-note table-note--warning">Ordering hold: ${escapeHtml(item.orderHoldReason)}</span>` : ""}${linkedNotes.join("")}
-      <details class="ordering-quantity-details"><summary>Why this quantity?</summary><p data-cell="ordering-reason">${escapeHtml(getInventoryOrderingReason(item))}</p>${fallbackSetting}</details>
+    <td><strong>${escapeHtml(item.name)}</strong>${isRowEditing && item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${item.orderHoldReason ? `<span class="table-note table-note--warning">Ordering hold: ${escapeHtml(item.orderHoldReason)}</span>` : ""}${linkedNotes.join("")}
+      ${isRowEditing ? fallbackSetting : ""}
     </td>
     <td>${mode === "stock" ? `<input class="inventory-input" data-field="onHand" name="inventory-on-hand-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" pattern="${item.allowsDecimal ? "[0-9]*[.]?[0-9]*" : "[0-9]*"}" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getInventoryDisplayValue(item, "onHand"))}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>
-    <td data-cell="two-week-need">${twoWeekNeed}</td>
+    ${mode === "order" ? `<td data-cell="two-week-need">${twoWeekNeed}</td>
     <td data-cell="order" class="${item.orderQuantity > 0 ? "inventory-order-flag" : "muted"}">${orderCell}</td>
     <td>${escapeHtml(packLabel)}</td>
     <td>${unitCostCell}</td>
-    <td data-cell="cost">${costCell}</td>
+    <td data-cell="cost">${costCell}</td>` : ""}
   `;
   if (mode === "stock") {
     row.querySelectorAll("input").forEach((input) => {
@@ -14811,6 +14719,52 @@ function createInventoryRow(item, mode) {
     row.querySelector(".custom-inventory-delete")?.addEventListener("click", () => deleteCustomInventoryItem(item.id));
     row.querySelector(".inventory-move-up")?.addEventListener("click", () => moveInventoryItem(item.id, -1));
     row.querySelector(".inventory-move-down")?.addEventListener("click", () => moveInventoryItem(item.id, 1));
+    const dragHandle = row.querySelector(".inventory-drag-handle");
+    dragHandle?.addEventListener("keydown", (event) => {
+      if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
+      event.preventDefault();
+      moveInventoryItem(item.id, event.key === "ArrowUp" ? -1 : 1);
+      inventoryTable.querySelector(`[data-inventory-id="${CSS.escape(item.id)}"] .inventory-drag-handle`)?.focus();
+    });
+    let touchDrag = null;
+    const finishTouchDrag = (event, canceled = false) => {
+      if (!touchDrag || touchDrag.pointerId !== event.pointerId) return;
+      const { targetId, targetGroup, after } = touchDrag;
+      touchDrag = null;
+      draggedInventoryItemId = "";
+      row.classList.remove("is-dragging");
+      inventoryTable.querySelectorAll(".inventory-row--drag-target").forEach((target) => target.classList.remove("inventory-row--drag-target"));
+      if (!canceled && targetId) reorderInventoryItemBefore(item.id, targetId, after);
+      else if (!canceled && targetGroup) moveInventoryItemToCabinet(item.id, targetGroup);
+    };
+    dragHandle?.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "mouse") return;
+      event.preventDefault();
+      touchDrag = { pointerId: event.pointerId, targetId: null, after: false };
+      draggedInventoryItemId = item.id;
+      dragHandle.setPointerCapture(event.pointerId);
+      row.classList.add("is-dragging");
+    });
+    dragHandle?.addEventListener("pointermove", (event) => {
+      if (!touchDrag || touchDrag.pointerId !== event.pointerId) return;
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("tr[data-inventory-id], tr[data-inventory-group]");
+      inventoryTable.querySelectorAll(".inventory-row--drag-target").forEach((entry) => entry.classList.remove("inventory-row--drag-target"));
+      touchDrag.targetId = null;
+      touchDrag.targetGroup = null;
+      if (target && inventoryTable.contains(target) && target.dataset.inventoryGroup) {
+        touchDrag.targetGroup = target.dataset.inventoryGroup;
+        target.classList.add("inventory-row--drag-target");
+      }
+      if (target && inventoryTable.contains(target) && canReorderInventoryItems(item.id, target.dataset.inventoryId)) {
+        touchDrag.targetId = target.dataset.inventoryId;
+        const bounds = target.getBoundingClientRect();
+        touchDrag.after = event.clientY > bounds.top + bounds.height / 2;
+        target.classList.add("inventory-row--drag-target");
+      }
+    });
+    dragHandle?.addEventListener("pointerup", (event) => finishTouchDrag(event));
+    dragHandle?.addEventListener("pointercancel", (event) => finishTouchDrag(event, true));
+    dragHandle?.addEventListener("lostpointercapture", (event) => finishTouchDrag(event, true));
     row.querySelector(".inventory-drag-handle")?.addEventListener("dragstart", (event) => {
       draggedInventoryItemId = item.id;
       row.classList.add("is-dragging");
@@ -14831,7 +14785,8 @@ function createInventoryRow(item, mode) {
     row.addEventListener("drop", (event) => {
       event.preventDefault();
       row.classList.remove("inventory-row--drag-target");
-      reorderInventoryItemBefore(draggedInventoryItemId, item.id);
+      const bounds = row.getBoundingClientRect();
+      reorderInventoryItemBefore(draggedInventoryItemId, item.id, event.clientY > bounds.top + bounds.height / 2);
     });
   }
   return row;
@@ -14847,7 +14802,7 @@ function canReorderInventoryItems(sourceId, targetId) {
   if (!sourceId || !targetId || sourceId === targetId) return false;
   const source = findInventoryItem(sourceId);
   const target = findInventoryItem(targetId);
-  return Boolean(source && target && source.group === target.group);
+  return Boolean(source && target);
 }
 
 function moveInventoryItem(id, direction) {
@@ -14864,13 +14819,31 @@ function moveInventoryItem(id, direction) {
   persistInventoryItemOrder(fullOrder);
 }
 
-function reorderInventoryItemBefore(sourceId, targetId) {
+function reorderInventoryItemBefore(sourceId, targetId, after = false) {
   if (!canReorderInventoryItems(sourceId, targetId)) return;
   const fullOrder = getCompleteInventoryItemOrder().filter((id) => id !== sourceId);
   const targetIndex = fullOrder.indexOf(targetId);
-  fullOrder.splice(targetIndex, 0, sourceId);
+  fullOrder.splice(targetIndex + (after ? 1 : 0), 0, sourceId);
   draggedInventoryItemId = "";
-  persistInventoryItemOrder(fullOrder);
+  const source = findInventoryItem(sourceId);
+  const target = findInventoryItem(targetId);
+  persistInventoryItemOrder(fullOrder, source.group !== target.group ? { id: sourceId, group: target.group } : null);
+}
+
+function applyInventoryCabinetMove({ id, group }) {
+  if (!id || !["Liquor Cabinet", "Mixer Cabinet", "Other"].includes(group)) return;
+  inventoryGroupOverrides[id] = group;
+  inventoryItems = inventoryItems.map((item) => item.id === id ? { ...item, group } : item);
+  writeDashboardLocalStorageValue("onpar-inventory-group-overrides", inventoryGroupOverrides);
+}
+
+function moveInventoryItemToCabinet(id, group) {
+  if (!findInventoryItem(id) || !["Liquor Cabinet", "Mixer Cabinet", "Other"].includes(group)) return;
+  const fullOrder = getCompleteInventoryItemOrder().filter((itemId) => itemId !== id);
+  const firstInGroup = fullOrder.findIndex((itemId) => findInventoryItem(itemId)?.group === group);
+  fullOrder.splice(firstInGroup < 0 ? fullOrder.length : firstInGroup, 0, id);
+  draggedInventoryItemId = "";
+  persistInventoryItemOrder(fullOrder, { id, group });
 }
 
 function getCompleteInventoryItemOrder() {
@@ -14878,12 +14851,13 @@ function getCompleteInventoryItemOrder() {
     .flatMap((group) => getSortedInventoryGroupItems(group).map((item) => item.id));
 }
 
-function persistInventoryItemOrder(itemOrder) {
+function persistInventoryItemOrder(itemOrder, movedItem = null) {
+  if (movedItem) applyInventoryCabinetMove(movedItem);
   inventoryItemOrder = [...new Set(itemOrder)];
   saveInventoryItemOrder();
   renderInventory();
   runSharedInventoryAction(
-    { action: "reorder-items", itemOrder: inventoryItemOrder },
+    { action: "reorder-items", itemOrder: inventoryItemOrder, ...(movedItem ? { movedItem } : {}) },
     { successMessage: "Cabinet order saved for all managers.", applyState: false },
   );
 }
@@ -15009,12 +14983,8 @@ function getInventoryBottleCost(item, ingredient) {
 }
 
 function getVisibleInventoryItems() {
-  const searchTerm = inventorySearch.value.trim().toLowerCase();
   const planById = new Map(getWeeklyPlanInventoryItems({ live: true }).map((item) => [item.id, item]));
-  return inventoryItems.filter((item) => {
-    const haystack = `${item.name} ${item.group} ${item.sourceSection}`.toLowerCase();
-    return haystack.includes(searchTerm);
-  }).map((item) => buildInventoryOrderingDisplay(item, planById.get(item.id)));
+  return inventoryItems.map((item) => buildInventoryOrderingDisplay(item, planById.get(item.id)));
 }
 
 function buildInventoryOrderingDisplay(item, plan) {
@@ -15043,7 +15013,7 @@ function renderCabinetReserveSettings() {
   container.innerHTML = `<dl class="cabinet-reserve-list">${Object.entries(getRollingCocktailReserves()).map(([id, units]) => {
     const item = inventoryItems.find((entry) => entry.id === id);
     return `<div><dt>${escapeHtml(item?.name || id.replace(/-/g, " "))}</dt><dd>${formatNumber(units)} units</dd></div>`;
-  }).join("")}</dl><p class="formula-note">Reserve quantities are shown in each product's inventory units. No additional reserve is applied to other ingredients by the two-week rule.</p>`;
+  }).join("")}</dl>`;
 }
 
 function findInventoryItem(id) {
@@ -15378,7 +15348,7 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
 function getInventorySnapshotSummary() {
   const bottleInventoryValue = sum(
     inventoryItems
-      .filter((item) => !item.excludeFromInventoryValue)
+      .filter(isIncludedInInventoryValue)
       .map((item) => item.totalValue),
   );
   const lineValues = kegWallItems.reduce((totals, item) => {
@@ -17952,6 +17922,34 @@ function getCurrentKegPricingTapItems() {
 }
 
 function buildKegPricingCatalog(sourceKegWallItems, currentTapItems = []) {
+  // A published product retains its entered cost even if its separate pricing
+  // override is missing. Recover only exact, unambiguous product matches.
+  const savedBeerCosts = [
+    ...customBeerKegs,
+    ...comingSoonItems.filter((item) => item.kind === "beer"),
+    ...pmbPublishQueue
+      .filter((item) => item.kind === "beer" && item.status === "published")
+      .map((item) => ({ ...item.payload, updatedAt: item.publishedAt })),
+  ];
+  const costsByProduct = new Map();
+  savedBeerCosts.forEach((item) => {
+    if (!clean(item.name) || !(toNumber(item.kegCost) > 0) || !(toNumber(item.kegOz) > 0)) return;
+    const id = getKegPricingKey(item.name);
+    if (Object.prototype.hasOwnProperty.call(kegPriceOverrides[id] || {}, "kegPrice")) return;
+    const candidates = costsByProduct.get(id) || [];
+    candidates.push({
+      kegPrice: String(toNumber(item.kegCost)),
+      kegOz: String(toNumber(item.kegOz)),
+      updatedAt: item.updatedAt || item.createdAt || "",
+    });
+    costsByProduct.set(id, candidates);
+  });
+  costsByProduct.forEach((candidates, id) => {
+    const first = candidates[0];
+    if (candidates.every((item) => item.kegPrice === first.kegPrice && item.kegOz === first.kegOz)) {
+      kegPriceOverrides[id] = { ...kegPriceOverrides[id], ...first };
+    }
+  });
   const byId = new Map();
   const currentBeerByTap = new Map(
     currentTapItems
@@ -18823,7 +18821,7 @@ function normalizeIngredientAlias(name) {
 
   if (/^tito'?s(\s+vodka)?$/.test(normalized)) return "Tito's";
   if (/^hennessy(\s+cognac)?$/.test(normalized)) return "Hennessy";
-  if (/^bacardi superior( traveler)?(\s+rum)?$/.test(normalized)) return "Bacardi Superior";
+  if (normalized === "bacardi" || /^bacardi superior( traveler)?(\s+rum)?$/.test(normalized)) return "Bacardi Superior";
   if (/^1800 reposado(\s+tequila)?$/.test(normalized)) return "1800 Reposado";
   if (/^don julio blanco(\s+tequila)?$/.test(normalized)) return "Don Julio Blanco";
   if (/^pink whitney(\s+vodka)?$/.test(normalized)) return "Pink Whitney";
