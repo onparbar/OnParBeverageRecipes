@@ -25,7 +25,7 @@ test("formats full and compact tap context without changing inventory units", ()
   assert.equal(getWeeklyPlanTapContext(item, "kegs", { compact: true }), "Taps 21, 75 · Main, Karaoke");
 });
 
-test("renders inventory rows with case math, vendor, par, cost, and safe product text", () => {
+test("renders inventory rows with case math, vendor, stock, cost, and safe product text", () => {
   const html = renderWeeklyPlanInventoryRows([{
     name: "Lime <Juice>",
     vendor: "Proof",
@@ -37,7 +37,8 @@ test("renders inventory rows with case math, vendor, par, cost, and safe product
     quantity: 12,
   }]);
   assert.match(html, /Lime &lt;Juice&gt;/);
-  assert.match(html, /Proof · 4 on hand \/ 12 par · \$35\.50 estimated/);
+  assert.match(html, /Proof · 4 on hand · \$35\.50 estimated/);
+  assert.doesNotMatch(html, /12 par/);
   assert.match(html, /2 cases · 12 units/);
 });
 

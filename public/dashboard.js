@@ -162,7 +162,7 @@ import {
   normalizeVendorOrderPolicy,
 } from "./vendor-order-drafts.mjs";
 import { buildProofPrepOrderContext } from "./proof-prep-replacements.mjs";
-import { buildRollingCocktailIngredientOrders, netRollingLiquorTapRecommendations } from "./rolling-cocktail-ingredients.mjs";
+import { buildRollingCocktailIngredientOrders, netRollingLiquorTapRecommendations, getRollingCocktailReserves } from "./rolling-cocktail-ingredients.mjs";
 import {
   getLiquorCabinetOrderQuantity,
   getLiquorCabinetWeeklyBottleNeeds,
@@ -5263,6 +5263,7 @@ function renderInventory() {
   renderWeeklyPlan();
   renderInventorySummary(visibleItems, reorderItems);
   renderInventoryStockTable(groupedItems);
+  renderCabinetReserveSettings();
   renderInventoryOrderTable(reorderItems);
   renderInventoryHistory();
   renderInventorySpeechAssistant();
@@ -8341,7 +8342,7 @@ function renderKegLevels() {
     <div class="keg-summary-stats">
       <div class="summary-line"><span>Total taps</span><strong>${totalTaps}</strong></div>
       <div class="summary-line"><span>Live levels found</span><strong>${liveCount}</strong></div>
-      <div class="summary-line"><span>Kegs below par</span><strong>${reorderCount}</strong></div>
+    <div class="summary-line"><span>Taps needing stock</span><strong>${reorderCount}</strong></div>
       ${recipeCoverage.missing.length ? `<div class="summary-line"><span>Missing recipes</span><strong>${recipeCoverage.missing.length}</strong></div>` : ""}
       <div class="summary-line"><span>Keg inventory value</span><strong>${money(currentInventoryValue)}</strong></div>
     </div>
@@ -10150,7 +10151,7 @@ function renderKegWallBlock(wallName, items, { attentionOnly = false } = {}) {
         </div>
         <div class="keg-wall-card__meta">
           <strong>${items.length} ${attentionOnly ? "flagged" : "taps"}</strong>
-          <span class="keg-wall-card__badge">${attentionOnly ? "Needs attention" : `${belowParCount} below par`}</span>
+          <span class="keg-wall-card__badge">${attentionOnly ? "Needs attention" : `${belowParCount} need stock`}</span>
         </div>
       </div>
       <div class="inventory-table-wrap">
@@ -10162,7 +10163,7 @@ function renderKegWallBlock(wallName, items, { attentionOnly = false } = {}) {
               <th>Current level</th>
               <th>Avg weekly</th>
               <th>On hand</th>
-              <th>Need</th>
+              <th>Order / make</th>
             </tr>
           </thead>
           <tbody>
@@ -10865,21 +10866,6 @@ function renderKegCostEmptyState(message) {
   return `<div class="empty-state keg-cost-empty">${escapeHtml(message)}</div>`;
 }
 
-function renderKegEditFinancialPanel(item) {
-  const itemKey = getKegItemKey(item);
-  const par = getKegParDisplay(item);
-  return `
-    <section class="keg-edit-section keg-edit-section--finance">
-      <div class="keg-edit-metrics">
-        <label class="keg-adjust-field keg-adjust-field--par">
-          <span>Par</span>
-          <input class="inventory-input keg-input keg-input--par" data-keg-field="par" data-keg-key="${escapeHtml(itemKey)}" type="number" min="0" step="0.01" inputmode="decimal" value="${escapeHtml(par)}" placeholder="0">
-        </label>
-      </div>
-    </section>
-  `;
-}
-
 function renderKegOnDeckControl(item) {
   const itemKey = getKegItemKey(item);
   const onDeck = getKegOnDeckItem(item);
@@ -10937,7 +10923,6 @@ function renderKegLevelAdjustRow(item, liveRow, displayBrand = item.brand) {
               <button class="primary-button push-keg-level-adjust" data-keg-key="${escapeHtml(itemKey)}" type="button"${disabled || kegConfigUpdateRunning ? " disabled" : ""}>Push to tap</button>
             </div>
           </section>
-          ${renderKegEditFinancialPanel(item)}
           <section class="keg-edit-section keg-edit-section--costs">
             ${renderKegProductCostEditor(item, displayBrand)}
           </section>
@@ -12826,6 +12811,9 @@ function getKegNeed(item) {
 
 function renderKegNeedCell(item, need) {
   const recommendation = getParAgentRecommendation(item);
+  const explanation = recommendation?.reason
+    ? `<details class="ordering-quantity-details"><summary>Why this quantity?</summary><p>${escapeHtml(recommendation.reason)}</p></details>`
+    : "";
   if (need === null) {
     return '<span class="inventory-order-zero">PMB sync issue</span>';
   }
@@ -12845,7 +12833,7 @@ function renderKegNeedCell(item, need) {
 
   const orderProductName = getCanonicalProductDisplayName(recommendation.orderProductName);
   if (recommendation.isLiquorTap && orderProductName && need > 0) {
-    return `<span class="inventory-order-value">Order ${formatNumber(need)} bottle${need === 1 ? "" : "s"} of ${escapeHtml(orderProductName)}</span>`;
+    return `<span class="inventory-order-value">Order ${formatNumber(need)} bottle${need === 1 ? "" : "s"} of ${escapeHtml(orderProductName)}</span>${explanation}`;
   }
   const actionLabel = recommendation.isLiquorTap
     ? "Order"
@@ -12856,6 +12844,7 @@ function renderKegNeedCell(item, need) {
     <div class="keg-need-agent">
       ${valueHtml}
       ${orderProductName && need > 0 ? `<span class="table-note table-note--accent">${escapeHtml(actionLabel)} ${escapeHtml(orderProductName)}</span>` : ""}
+      ${explanation}
     </div>
   `;
 }
@@ -14751,18 +14740,27 @@ function getInventoryVendorTotals(items) {
 
 function createInventoryRow(item, mode) {
   const row = document.createElement("tr");
+  row.dataset.inventoryId = item.id;
   if (mode === "stock") row.dataset.globalSearchKey = `inventory:${item.id}`;
   const orderQuantityForMode = mode === "order" ? getInventoryRoundedOrderQuantity(item) : item.orderQuantity;
   const costCell = item.unitCost > 0
     ? (mode === "order" ? money(orderQuantityForMode * item.unitCost) : money(item.totalValue))
     : '<span class="inventory-order-zero">Price needed</span>';
-  const orderCell = mode === "order"
-    ? getInventoryOrderCell(item, orderQuantityForMode)
-    : formatInventoryQuantity(item.orderDisplay);
+  const orderCell = item.orderHoldReason
+    ? '<span class="table-note table-note--warning">Review needed</span>'
+    : mode === "order" ? getInventoryOrderCell(item, orderQuantityForMode) : formatInventoryQuantity(item.orderDisplay);
   const packLabel = item.casePackaged ? `${formatNumber(item.packSize)} / case` : "Each";
   row.className = mode === "order" && item.orderQuantity > 0 ? "inventory-row--order" : "";
   const inputMode = item.allowsDecimal ? "decimal" : "numeric";
   const isRowEditing = Boolean(inventoryRowEditState[item.id]);
+  const rollingPlan = item.orderingPlan?.rollingIngredientVersion === 1;
+  const twoWeekNeed = rollingPlan && !item.orderHoldReason
+    ? formatInventoryQuantity(item.orderingPlan.cocktailPrepRequiredBottles)
+    : '<span class="inventory-order-zero">-</span>';
+  const fallbackSetting = mode === "stock" && !rollingPlan ? `
+    <label class="ordering-fallback-setting"><span>Fallback stock target (units)</span>
+      <input class="inventory-input inventory-input--par" data-field="par" name="inventory-par-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" value="${escapeHtml(item.parDisplay)}" aria-label="Fallback stock target for ${escapeHtml(item.name)}" ${isRowEditing ? "" : "readonly"}>
+    </label>` : "";
   const linkedNotes = [];
   if (mode === "stock") {
     linkedNotes.push(`
@@ -14785,9 +14783,11 @@ function createInventoryRow(item, mode) {
     ? money(item.unitCost)
     : '<span class="inventory-order-zero">Price needed</span>';
   row.innerHTML = `
-    <td><strong>${escapeHtml(item.name)}</strong>${item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${item.orderHoldReason ? `<span class="table-note table-note--warning">Ordering hold: ${escapeHtml(item.orderHoldReason)}</span>` : ""}${linkedNotes.join("")}</td>
+    <td><strong>${escapeHtml(item.name)}</strong>${item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${item.orderHoldReason ? `<span class="table-note table-note--warning">Ordering hold: ${escapeHtml(item.orderHoldReason)}</span>` : ""}${linkedNotes.join("")}
+      <details class="ordering-quantity-details"><summary>Why this quantity?</summary><p data-cell="ordering-reason">${escapeHtml(getInventoryOrderingReason(item))}</p>${fallbackSetting}</details>
+    </td>
     <td>${mode === "stock" ? `<input class="inventory-input" data-field="onHand" name="inventory-on-hand-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" pattern="${item.allowsDecimal ? "[0-9]*[.]?[0-9]*" : "[0-9]*"}" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getInventoryDisplayValue(item, "onHand"))}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>
-    <td>${mode === "stock" ? `<div class="inventory-par-cell"><input class="inventory-input inventory-input--par ${isRowEditing ? "is-editing" : "is-locked"}" data-field="par" name="inventory-par-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" pattern="${item.allowsDecimal ? "[0-9]*[.]?[0-9]*" : "[0-9]*"}" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(item.parDisplay)}" aria-label="Par for ${escapeHtml(item.name)}" ${isRowEditing ? "" : "readonly"}></div>` : formatInventoryQuantity(item.parDisplay)}</td>
+    <td data-cell="two-week-need">${twoWeekNeed}</td>
     <td data-cell="order" class="${item.orderQuantity > 0 ? "inventory-order-flag" : "muted"}">${orderCell}</td>
     <td>${escapeHtml(packLabel)}</td>
     <td>${unitCostCell}</td>
@@ -14924,12 +14924,20 @@ function commitInventoryValue(id, field, value) {
 }
 
 function syncInventoryRowCells(row, item) {
+  if (!item) return;
+  const displayItem = item.orderingPlan ? item : buildInventoryOrderingDisplay(item,
+    getWeeklyPlanInventoryItems({ live: true }).find((entry) => entry.id === item.id));
   const orderCell = row.querySelector('[data-cell="order"]');
   const costCell = row.querySelector('[data-cell="cost"]');
   if (orderCell) {
-    orderCell.textContent = formatInventoryQuantity(item.orderDisplay);
-    orderCell.className = item.orderQuantity > 0 ? "inventory-order-flag" : "muted";
+    orderCell.textContent = displayItem.orderHoldReason ? "Review needed" : formatInventoryQuantity(displayItem.orderDisplay);
+    orderCell.className = displayItem.orderQuantity > 0 ? "inventory-order-flag" : "muted";
   }
+  const needCell = row.querySelector('[data-cell="two-week-need"]');
+  if (needCell) needCell.textContent = displayItem.orderingPlan?.rollingIngredientVersion === 1 && !displayItem.orderHoldReason
+    ? formatInventoryQuantity(displayItem.orderingPlan.cocktailPrepRequiredBottles) : "-";
+  const reason = row.querySelector('[data-cell="ordering-reason"]');
+  if (reason) reason.textContent = getInventoryOrderingReason(displayItem);
   if (costCell) {
     costCell.textContent = money(item.totalValue);
   }
@@ -14941,6 +14949,11 @@ function renderInventoryPanels() {
   renderWeeklyPlan();
   renderInventorySummary(visibleItems, reorderItems);
   renderInventoryOrderTable(reorderItems);
+  const byId = new Map(visibleItems.map((item) => [item.id, item]));
+  inventoryTable?.querySelectorAll("tr[data-inventory-id]").forEach((row) => {
+    const item = byId.get(row.dataset.inventoryId);
+    if (item) syncInventoryRowCells(row, item);
+  });
 }
 
 function getInventoryReorderItems(sourceItems) {
@@ -14997,10 +15010,40 @@ function getInventoryBottleCost(item, ingredient) {
 
 function getVisibleInventoryItems() {
   const searchTerm = inventorySearch.value.trim().toLowerCase();
+  const planById = new Map(getWeeklyPlanInventoryItems({ live: true }).map((item) => [item.id, item]));
   return inventoryItems.filter((item) => {
     const haystack = `${item.name} ${item.group} ${item.sourceSection}`.toLowerCase();
     return haystack.includes(searchTerm);
-  });
+  }).map((item) => buildInventoryOrderingDisplay(item, planById.get(item.id)));
+}
+
+function buildInventoryOrderingDisplay(item, plan) {
+  if (plan?.rollingIngredientVersion !== 1) return { ...item, orderingPlan: plan || null };
+  return {
+    ...item,
+    orderingPlan: plan,
+    orderQuantity: plan.orderUnits,
+    orderDisplay: String(plan.orderUnits),
+    orderHoldReason: plan.orderHoldReason,
+  };
+}
+
+function getInventoryOrderingReason(item) {
+  const plan = item.orderingPlan;
+  if (plan?.rollingIngredientVersion === 1) {
+    if (plan.orderHoldReason) return `Cannot calculate the two-week order yet: ${plan.orderHoldReason}`;
+    return `${plan.rollingPlanReason} These are the weekly plan ingredient quantities and use its saved counts when available. The full Weekly Plan also includes liquor-tap refill orders and vendor minimum adjustments.`;
+  }
+  return item.orderHoldReason || `This item is outside the two-week cocktail ingredient calculation. Its saved stock target and counted inventory determine the shortage, rounded to its order pack. Review the Weekly Plan before ordering.`;
+}
+
+function renderCabinetReserveSettings() {
+  const container = document.querySelector("#cabinet-reserve-settings");
+  if (!container) return;
+  container.innerHTML = `<dl class="cabinet-reserve-list">${Object.entries(getRollingCocktailReserves()).map(([id, units]) => {
+    const item = inventoryItems.find((entry) => entry.id === id);
+    return `<div><dt>${escapeHtml(item?.name || id.replace(/-/g, " "))}</dt><dd>${formatNumber(units)} units</dd></div>`;
+  }).join("")}</dl><p class="formula-note">Reserve quantities are shown in each product's inventory units. No additional reserve is applied to other ingredients by the two-week rule.</p>`;
 }
 
 function findInventoryItem(id) {
@@ -15422,7 +15465,6 @@ function renderInventoryHistory() {
                   <tr>
                     <th>Item</th>
                     <th>On hand</th>
-                    <th>Par</th>
                     <th>Order</th>
                     <th>Unit cost</th>
                     <th>Total value</th>
@@ -15496,12 +15538,11 @@ function renderInventorySnapshotValueSummary(summary) {
 function renderInventoryHistoryRows(items) {
   const grouped = groupInventorySnapshotItems(items);
   return grouped.map(([groupName, groupItems]) => `
-    <tr class="inventory-group-row"><td colspan="6">${escapeHtml(groupName)}</td></tr>
+    <tr class="inventory-group-row"><td colspan="5">${escapeHtml(groupName)}</td></tr>
     ${groupItems.map((item) => `
       <tr>
         <td><strong>${escapeHtml(item.name)}</strong>${item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}</td>
         <td>${formatInventoryQuantity(item.onHandDisplay)}</td>
-        <td>${formatInventoryQuantity(item.parDisplay)}</td>
         <td class="${toNumber(item.orderDisplay) > 0 ? "inventory-order-flag" : "muted"}">${formatInventoryQuantity(item.orderDisplay)}</td>
         <td>${money(item.unitCost)}</td>
         <td>${money(item.totalValue)}</td>

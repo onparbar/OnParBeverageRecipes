@@ -4,6 +4,10 @@ const RESERVES = Object.freeze({
   "tito-s": 12, "jose-cuervo-silver": 16, "crown-apple": 6,
   "svedka-blue-raspberry-vodka": 9, "lime-juice": 8, "triple-sec": 8,
 });
+
+export function getRollingCocktailReserves() {
+  return { ...RESERVES };
+}
 function key(value) {
   return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase().replace(/['\u2019]/g, "").replace(/\s+[123]$/, "")

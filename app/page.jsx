@@ -746,7 +746,7 @@ export default function DashboardPage() {
                       <input id="custom-inventory-on-hand" name="inventory-item-on-hand" type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="1" />
                     </label>
                     <label>
-                      <span>Par (units)</span>
+                      <span>Fallback stock target (units)</span>
                       <input id="custom-inventory-par" name="inventory-item-par" type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="0" />
                     </label>
                     <label>
@@ -766,14 +766,20 @@ export default function DashboardPage() {
                 </div>
                 <details className="inventory-speech" id="inventory-speech-assistant"></details>
                 <button className="ghost-button inventory-clear-on-hand-button" id="clear-inventory-on-hand" type="button">Clear on hand</button>
+                <details className="cabinet-reserve-settings">
+                  <summary>Cabinet reserve settings</summary>
+                  <p>These fixed reserves are included after the next two Thursday prep sessions. They are not extra quantities to add to the order yourself.</p>
+                  <div id="cabinet-reserve-settings"></div>
+                </details>
+                <p className="formula-note inventory-note">Two-week need is the ingredient quantity for two prep sessions, before reserve and inventory deductions. Orders use the weekly plan counts; see Why this quantity for details.</p>
                 <div className="inventory-table-wrap">
                   <table className="inventory-table inventory-table--stock">
                     <thead>
                       <tr>
                         <th>Item</th>
                         <th>On hand (units)</th>
-                        <th>Par (units)</th>
-                        <th>Need (units)</th>
+                        <th>Two-week need (units)</th>
+                        <th>Order (units)</th>
                         <th>Pack</th>
                         <th>Unit cost</th>
                         <th>Total value</th>
@@ -787,8 +793,8 @@ export default function DashboardPage() {
               <section className="inventory-block">
                 <div className="inventory-block__header">
                   <div>
-              <h2>Par Gap Reference</h2>
-                    <p className="formula-note inventory-note">Orders round to full cases.</p>
+              <h2>Ingredient order reference</h2>
+                    <p className="formula-note inventory-note">Ingredient quantities use the weekly plan and the product pack size. Review the full Weekly Plan for liquor-tap refills, vendor minimum additions and approved changes.</p>
                   </div>
                 </div>
                 <div className="inventory-table-wrap">
@@ -797,7 +803,7 @@ export default function DashboardPage() {
                       <tr>
                         <th>Item</th>
                         <th>On hand (units)</th>
-                        <th>Par (units)</th>
+                        <th>Two-week need (units)</th>
                         <th>Order</th>
                         <th>Pack</th>
                         <th>Unit cost</th>

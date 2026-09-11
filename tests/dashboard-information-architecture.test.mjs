@@ -104,12 +104,11 @@ test("Keg Levels keeps customer tap pricing in the dedicated pricing workspace",
   const wallStart = dashboardSource.indexOf("function renderKegWallBlock");
   const wallEnd = dashboardSource.indexOf("function getKegCanonicalResolution", wallStart);
   const wallSource = dashboardSource.slice(wallStart, wallEnd);
-  const financeStart = dashboardSource.indexOf("function renderKegEditFinancialPanel");
-  const financeEnd = dashboardSource.indexOf("function renderKegOnDeckControl", financeStart);
-  const financeSource = dashboardSource.slice(financeStart, financeEnd);
   assert.doesNotMatch(wallSource, /<th>Tap price<\/th>/);
-  assert.doesNotMatch(financeSource, /Tap price|Cost \/ oz|Margin/);
-  assert.match(financeSource, /<span>Par<\/span>/);
+  assert.doesNotMatch(dashboardSource, /function renderKegEditFinancialPanel/);
+  assert.match(wallSource, /<th>Order \/ make<\/th>/);
+  assert.match(pageSource, /Two-week need \(units\)/);
+  assert.match(pageSource, /Cabinet reserve settings/);
 });
 
 test("late Monday snapshots use an inline reason instead of an unsupported prompt", () => {

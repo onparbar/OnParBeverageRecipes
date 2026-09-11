@@ -71,7 +71,6 @@ export function buildStockGapRecommendation({
 
 export function buildOperationalRecommendation({
   kind = "beer",
-  wall = "",
   averageUsage = 0,
   position = {},
   reserve,
@@ -79,20 +78,21 @@ export function buildOperationalRecommendation({
   maxOrder = Number.POSITIVE_INFINITY,
 } = {}) {
   const normalizedKind = clean(kind).toLowerCase();
-  const normalizedWall = clean(wall).toLowerCase();
   const usage = nonNegative(averageUsage);
   const reserveAmount = reserve == null
     ? normalizedKind === "liquor"
       ? 100
       : normalizedKind === "cocktail"
         ? 0.25
-        : normalizedWall === "main" ? 1 : 0.5
+        : usage * 0.1
     : nonNegative(reserve);
   const stockGap = buildStockGapRecommendation({
     targetStock: usage + reserveAmount,
     position,
-    orderMode: normalizedKind === "beer" && normalizedWall === "main" ? "single" : "ceil",
-    maxOrder,
+    orderMode: "ceil",
+    // Beer orders cover the entire forecast shortage on every wall. A
+    // configured threshold can flag review, but must not reduce coverage.
+    maxOrder: normalizedKind === "beer" ? Number.POSITIVE_INFINITY : maxOrder,
   });
   if (normalizedKind !== "liquor" || stockGap.gap <= 0) {
     return { ...stockGap, kind: normalizedKind, averageUsage: usage, reserve: reserveAmount };

@@ -716,7 +716,7 @@ test("makes enough cocktail kegs to cover the complete calculated gap", () => {
   assert.equal(result.orderQty, 3);
 });
 
-test("surfaces the configured beer order cap whenever it reduces calculated need", () => {
+test("flags large beer orders without reducing the full shortage coverage", () => {
   const tap = beerTap("Test Lager 1", 21);
   const result = buildRawRecommendation(
     tap,
@@ -733,8 +733,9 @@ test("surfaces the configured beer order cap whenever it reduces calculated need
   );
 
   assert.equal(result.calculatedOrderQty, 5);
-  assert.equal(result.orderQty, 2);
+  assert.equal(result.orderQty, 5);
   assert.equal(result.orderCap, 2);
-  assert.equal(result.orderCapApplied, true);
-  assert.match(result.reason, /configured per-tap order cap reduced this to 2/);
+  assert.equal(result.orderCapApplied, false);
+  assert.match(result.reason, /exceeds the 2-keg review threshold/);
+  assert.match(result.reason, /full rounded quantity is retained/);
 });

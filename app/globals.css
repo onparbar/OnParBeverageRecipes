@@ -5809,6 +5809,60 @@ td {
   display: block;
 }
 
+.ordering-quantity-details {
+  margin-top: 6px;
+  font-size: 0.82rem;
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ordering-quantity-details summary,
+.cabinet-reserve-settings summary {
+  cursor: pointer;
+  padding: 10px 0;
+  min-height: 44px;
+  color: var(--juniper-dark);
+  font-weight: 700;
+}
+
+.ordering-quantity-details p {
+  margin: 4px 0 10px;
+  line-height: 1.5;
+}
+
+.ordering-fallback-setting {
+  display: grid;
+  gap: 6px;
+  max-width: 220px;
+}
+
+.cabinet-reserve-settings {
+  padding: 0 16px 10px;
+  margin: 12px 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.cabinet-reserve-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 8px 24px;
+}
+
+.cabinet-reserve-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cabinet-reserve-list dd {
+  margin: 0;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
 .inventory-input--par {
   color: var(--juniper-dark);
   font-weight: 800;

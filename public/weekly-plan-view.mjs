@@ -28,12 +28,17 @@ export function renderWeeklyPlanInventoryRows(items) {
       : `${formatNumber(item.quantity)} unit${item.quantity === 1 ? "" : "s"}`;
     const details = [
       item.vendor,
-      `${formatNumber(item.onHand)} on hand / ${formatNumber(item.par)} par`,
+      `${formatNumber(item.onHand)} on hand`,
+      item.rollingIngredientVersion === 1
+        ? `${formatNumber(item.cocktailPrepRequiredBottles)} units for two weeks of prep`
+        : "",
       item.estimatedCost > 0 ? `${money(item.estimatedCost)} estimated` : "Price needed",
     ].filter(Boolean).join(" · ");
     return `
       <div class="weekly-plan-item">
-        <div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(details)}</span></div>
+        <div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(details)}</span>
+          ${item.reasons?.length ? `<details class="ordering-quantity-details"><summary>Why this quantity?</summary><p>${escapeHtml(item.reasons.join(" "))}</p></details>` : ""}
+        </div>
         <b>${escapeHtml(quantity)}</b>
       </div>
     `;
@@ -49,7 +54,8 @@ export function renderWeeklyPlanTapRows(items, {
     <div class="weekly-plan-item">
       <div>
         <strong>${escapeHtml(item.displayName || item.name)}</strong>
-        <span>${escapeHtml(getWeeklyPlanTapContext(item, unit === "refills" ? "oz" : "kegs", { compact: true }))}</span>
+        <span>${escapeHtml(getWeeklyPlanTapContext(item, unit === "refills" ? "oz" : "kegs"))}</span>
+        ${item.reasons?.length ? `<details class="ordering-quantity-details"><summary>Why this quantity?</summary><p>${escapeHtml(item.reasons.join(" "))}</p></details>` : ""}
         ${unit !== "refills" ? `<span>${escapeHtml(kegDestination({ ...item, unit: "kegs", wall: item.walls?.[0] }))}</span>` : ""}
       </div>
       <b>${escapeHtml(action)} ${formatNumber(item.quantity)} ${escapeHtml(unit === "refills" ? `refill${item.quantity === 1 ? "" : "s"}` : `keg${item.quantity === 1 ? "" : "s"}`)}</b>

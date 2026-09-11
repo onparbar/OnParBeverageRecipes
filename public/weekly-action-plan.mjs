@@ -173,6 +173,8 @@ function normalizeInventoryOrders(items) {
         hasCurrentCount: item.hasCurrentCount !== false,
         cocktailPrepRequiredBottles,
         cocktailPrepShortageUnits,
+        rollingIngredientVersion: item.rollingIngredientVersion,
+        rollingReserveUnits: item.rollingReserveUnits,
         neededBeforeThursday: Boolean(
           item.neededBeforeThursday
           || item.requiredBeforeThursday
