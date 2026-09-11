@@ -1,4 +1,5 @@
 import "./operations-learning-ui.mjs";
+import { classifyShotPriceReadback } from "./shot-price-readback.mjs";
 import { inventorySnapshotInputsMatch } from "./inventory-snapshot-recovery.mjs";
 import {
   buildInventoryPosition,
@@ -4347,6 +4348,9 @@ const shotPricingDrafts = new Map();
 function renderShotPricing(visibleTapRows = []) {
   if (!shotPricingTable) return;
   const rows = buildShotPricingRows(visibleTapRows, shotPricingCapability);
+  const recommendations = new Map(buildPricingAdvisor(
+    visibleTapRows.map(buildPricingAdvisorInput),
+  ).rows.map((item) => [item.updateKey || item.id, item]));
   shotPricingRowsByKey = new Map(rows.map((row) => [row.key, row]));
   rows.forEach((row) => {
     const index = visibleTapRows.findIndex((tap) => (tap.livePrice || tap) === row.livePrice);
@@ -4354,6 +4358,12 @@ function renderShotPricing(visibleTapRows = []) {
     if (!chargeCell) return;
     const running = activePmbPortionPriceUpdateKey === row.key;
     const message = pmbPortionPriceUpdateMessages.get(row.key);
+    const suggestedPrices = new Map((recommendations.get(row.key)?.portions || []).map((portion) => [
+      clean(portion.portionName).toLowerCase(),
+      portion.costPerOz > 0 && portion.servingOz > 0 && portion.recommendedPricePerOz > 0
+        ? `Suggested (82% margin target): ${money(portion.recommendedPricePerOz)}`
+        : "Suggestion needs a mapped cost and serving size.",
+    ]));
     const draftIdentity = JSON.stringify(row.portions.map(({ itemId, name }) => [itemId, name]));
     let draft = shotPricingDrafts.get(row.key);
     if (draft && draft.identity !== draftIdentity) {
@@ -4374,6 +4384,7 @@ function renderShotPricing(visibleTapRows = []) {
           aria-label="New ${escapeHtml(portion.name)} price for ${escapeHtml(row.name)}"
           ${activePmbPortionPriceUpdateKey ? "disabled" : ""}
         ></span>
+        <small class="shot-pricing-suggestion">${escapeHtml(suggestedPrices.get(clean(portion.name).toLowerCase()) || "Suggestion needs a mapped cost and serving size.")}</small>
       </label>
     `).join("");
 
@@ -4465,6 +4476,7 @@ async function submitPmbPortionPriceUpdate(updateKey) {
   activePmbPortionPriceUpdateKey = key;
   pmbPortionPriceUpdateMessages.set(key, { tone: "pending", text: "Re-verifying both PMB portions..." });
   renderPricing();
+  const saveStartedAt = Date.now();
 
   try {
     const representative = row.assignments[0] || {};
@@ -4498,14 +4510,44 @@ async function submitPmbPortionPriceUpdate(updateKey) {
     });
     const result = await parseJsonResponse(response);
     if (!response.ok || result?.ok !== true) {
-      throw new Error(result?.error || "PMB did not confirm both shot prices.");
+      throw new Error(result?.error || (
+        response.type === "opaqueredirect" || response.status === 0
+          ? "The dashboard save request was redirected without a readable confirmation."
+          : `The dashboard returned no price-save confirmation (HTTP ${response.status}).`
+      ));
     }
+    shotPricingDrafts.delete(key);
     pmbPortionPriceUpdateMessages.set(key, { tone: "success", text: "PMB accepted both prices. Refreshing the exact portions..." });
     await runTapPricingSync();
   } catch (error) {
+    pmbPortionPriceUpdateMessages.set(key, { tone: "pending", text: "Checking the actual PMB prices before reporting the save result. No save will be repeated." });
+    renderPricing();
+    let readback = { state: "unknown" };
+    try {
+      const response = await fetch("/api/tap-pricing", {
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (response.ok) {
+        readback = classifyShotPriceReadback(await parseJsonResponse(response), row, validation.cents, saveStartedAt);
+      }
+    } catch {
+      // An uncertain save is never replayed, even when read-back also fails.
+    }
+    const detail = clean(error?.message) || "The save response was interrupted.";
+    const actual = readback.amounts?.map((amount, index) => `${row.portions[index].name} ${money(amount / 100)}`).join("; ");
+    if (readback.state === "saved") shotPricingDrafts.delete(key);
     pmbPortionPriceUpdateMessages.set(key, {
-      tone: "error",
-      text: getPmbConnectionErrorMessage(error, "Could not update both PMB shot prices.", { writeAttempted: true }),
+      tone: readback.state === "saved" ? "success" : "error",
+      text: readback.state === "saved"
+        ? `PMB now shows both requested prices: ${actual}. The original save response was interrupted; configuration delivery was not confirmed.`
+        : readback.state === "unchanged"
+          ? `PMB still shows ${actual}; the requested prices are not saved. Your entries have been kept. ${detail}`
+          : readback.state === "partial"
+            ? `PMB shows different or partially changed prices: ${actual}. Do not repeat the save until these are reviewed. ${detail}`
+            : `The save could not be confirmed, and fresh PMB prices could not be read. Your entries have been kept; check PMB before retrying. ${detail}`,
     });
   } finally {
     activePmbPortionPriceUpdateKey = "";
