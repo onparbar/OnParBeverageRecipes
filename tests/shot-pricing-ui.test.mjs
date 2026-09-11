@@ -24,6 +24,18 @@ test("shot pricing edits both portions inside the unified tap pricing table", ()
   assert.match(dashboard, /newPrice: \(validation\.cents\[index\]/);
 });
 
+test("shot price drafts remain editable during verification but saving stays gated", () => {
+  const editor = dashboard.slice(dashboard.indexOf("function renderShotPricing("), dashboard.indexOf("function bindShotPricingControls("));
+  const inputs = editor.slice(editor.indexOf("const editors ="), editor.indexOf("const editor = document.createElement"));
+  assert.doesNotMatch(inputs, /!row\.canEdit/);
+  assert.match(inputs, /activePmbPortionPriceUpdateKey \? "disabled"/);
+  assert.match(editor, /data-shot-price-update[^\n]+!row\.canEdit/);
+  assert.match(editor, /draft\?\.values\[index\]/);
+  assert.match(editor, /draft\.identity !== draftIdentity/);
+  assert.match(editor, /editor\.addEventListener\("input", rememberDraft\)/);
+  assert.match(editor, /editor\.addEventListener\("toggle", rememberDraft\)/);
+});
+
 test("the portion endpoint authenticates first and remains fail-closed until the PMB form is verified", () => {
   const authIndex = updateRoute.indexOf("requireDashboardRequestRole");
   const jsonIndex = updateRoute.indexOf("request.json()");

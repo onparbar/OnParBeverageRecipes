@@ -28,7 +28,7 @@ export async function fetchPmbJsonWithRetry({
   parseResponse,
   maxAttempts = 2,
   retryDelayMs = 400,
-  timeoutMs = 12_000,
+  timeoutMs = 60_000,
   shouldRetryResult = () => false,
   sleep = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
 } = {}) {

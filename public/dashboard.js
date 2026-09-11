@@ -4342,6 +4342,8 @@ function renderPricing() {
   renderShotPricing(visibleTapRows);
 }
 
+const shotPricingDrafts = new Map();
+
 function renderShotPricing(visibleTapRows = []) {
   if (!shotPricingTable) return;
   const rows = buildShotPricingRows(visibleTapRows, shotPricingCapability);
@@ -4352,6 +4354,12 @@ function renderShotPricing(visibleTapRows = []) {
     if (!chargeCell) return;
     const running = activePmbPortionPriceUpdateKey === row.key;
     const message = pmbPortionPriceUpdateMessages.get(row.key);
+    const draftIdentity = JSON.stringify(row.portions.map(({ itemId, name }) => [itemId, name]));
+    let draft = shotPricingDrafts.get(row.key);
+    if (draft && draft.identity !== draftIdentity) {
+      shotPricingDrafts.delete(row.key);
+      draft = null;
+    }
     const editors = row.portions.slice(0, 2).map((portion, index) => `
       <label class="shot-pricing-field">
         <span>${escapeHtml(portion.name)}</span>
@@ -4361,10 +4369,10 @@ function renderShotPricing(visibleTapRows = []) {
           min="0.01"
           max="1000"
           step="0.01"
-          value="${escapeHtml(formatPriceInput(portion.price))}"
+          value="${escapeHtml(draft?.values[index] ?? formatPriceInput(portion.price))}"
           data-shot-price-input="${index}"
           aria-label="New ${escapeHtml(portion.name)} price for ${escapeHtml(row.name)}"
-          ${!row.canEdit || activePmbPortionPriceUpdateKey ? "disabled" : ""}
+          ${activePmbPortionPriceUpdateKey ? "disabled" : ""}
         ></span>
       </label>
     `).join("");
@@ -4372,18 +4380,28 @@ function renderShotPricing(visibleTapRows = []) {
     const editor = document.createElement("details");
     editor.className = "shot-pricing-editor";
     editor.dataset.shotPricingKey = row.key;
-    editor.open = running || Boolean(message);
+    editor.open = running || (draft?.open ?? Boolean(message));
     editor.innerHTML = `
       <summary>Edit portion prices</summary>
       <div class="shot-pricing-fields">${editors}</div>
       <p class="shot-pricing-editor__status" role="status">${escapeHtml(row.canEdit ? "Both portion prices are verified with PMB before and after saving." : row.blockers.map((blocker) => /socket hang up|econnreset|econnrefused|fetch failed|failed to fetch|timed? ?out|etimedout/i.test(blocker)
-        ? "The PMB connection was interrupted. These are the last loaded prices; editing is paused until PMB can be checked again."
+        ? "The PMB connection was interrupted. You can enter both prices now; your entries stay here during a recheck. Saving is paused until PMB verification succeeds."
         : blocker).join(" "))}</p>
       <div class="pricing-advisor-action">
         ${!row.canEdit ? '<button class="mini-button" type="button" data-shot-pricing-recheck>Recheck PMB connection</button>' : ""}
         <button class="mini-button" type="button" data-shot-price-update="${escapeHtml(row.key)}"${!row.canEdit || activePmbPortionPriceUpdateKey ? " disabled" : ""}>${running ? "Updating both..." : "Update both in PMB"}</button>
         ${message ? `<span class="pricing-advisor-action__message pricing-advisor-action__message--${escapeHtml(message.tone)}" role="status">${escapeHtml(message.text)}</span>` : ""}
       </div>`;
+    const rememberDraft = () => {
+      if (!editor.isConnected) return;
+      shotPricingDrafts.set(row.key, {
+        identity: draftIdentity,
+        values: Array.from(editor.querySelectorAll("[data-shot-price-input]"), (input) => input.value),
+        open: editor.open,
+      });
+    };
+    editor.addEventListener("input", rememberDraft);
+    editor.addEventListener("toggle", rememberDraft);
     chargeCell.append(editor);
   });
   bindShotPricingControls();
