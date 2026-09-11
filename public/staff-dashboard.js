@@ -144,7 +144,6 @@ async function initStaffRecipes() {
       window.location.replace("/login?next=/staff");
       return;
     }
-    const isOwnerPreview = session.role === "owner";
     if (!["employee", "owner"].includes(session.role)) {
       window.location.replace("/");
       return;
@@ -153,11 +152,8 @@ async function initStaffRecipes() {
     bindStaffSectionEvents();
     applyStaffDemoContext();
 
-    const profileCheck = inspectStaffBrowserProfile();
-    if (!isOwnerPreview && !profileCheck.safe && !isLocalStaffPreview()) {
-      lockStaffRecipesForBrowserProfile(profileCheck.storageUnavailable);
-      return;
-    }
+    // Access comes from the authenticated session and staff-only API permissions,
+    // not browser history. Never inspect or clear saved owner edits on this page.
     bindStaffRecipeEvents();
     overviewRetryButton?.addEventListener("click", refreshStaffSections);
     await refreshStaffSections();
@@ -291,60 +287,6 @@ function updateStaffRetryState() {
   overviewRetryButton.hidden = !hasRetryableFailure && !staffSectionRefreshRunning;
   overviewRetryButton.disabled = staffSectionRefreshRunning;
   overviewRetryButton.textContent = staffSectionRefreshRunning ? "Refreshing..." : "Retry";
-}
-
-function isLocalStaffPreview() {
-  const hostname = clean(window.location.hostname).toLowerCase();
-  const isLoopback = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-  return isLoopback && new URLSearchParams(window.location.search).get("preview") === "1";
-}
-
-function inspectStaffBrowserProfile() {
-  try {
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index) || "";
-      if (key.startsWith("cocktail-dashboard-")) {
-        return { safe: false, storageUnavailable: false };
-      }
-    }
-    return { safe: true, storageUnavailable: false };
-  } catch {
-    // Private browsing can deny localStorage even though authenticated staff APIs
-    // remain available. Absence of readable owner data is not evidence of a conflict.
-    return { safe: true, storageUnavailable: true };
-  }
-}
-
-function lockStaffRecipesForBrowserProfile(storageUnavailable) {
-  if (overviewWeek) {
-    overviewWeek.textContent = storageUnavailable
-      ? "This browser profile cannot safely open Staff View."
-      : "Open Staff View from the owner dashboard or use a separate staff browser profile.";
-  }
-  [overviewPrepValue, overviewLiquorValue, overviewOrderValue, overviewRecipeValue]
-    .filter(Boolean)
-    .forEach((element) => {
-      element.textContent = "—";
-    });
-  [overviewPrepDetail, overviewLiquorDetail, overviewOrderDetail, overviewRecipeDetail]
-    .filter(Boolean)
-    .forEach((element) => {
-      element.textContent = "";
-    });
-  statusPanel.dataset.state = "error";
-  prepStatusPanel.dataset.state = "error";
-  prepStatusPanel.textContent = "The staff prep checklist is locked in this browser profile.";
-  orderStatusPanel.dataset.state = "error";
-  orderStatusPanel.textContent = "The delivery checklist is locked in this browser profile.";
-  statusPanel.textContent = "Staff View is locked because this browser profile contains owner dashboard data. Use a separate browser profile reserved for staff.";
-  recipeGrid.setAttribute("aria-busy", "false");
-  prepList.setAttribute("aria-busy", "false");
-  orderList.setAttribute("aria-busy", "false");
-  prepList.replaceChildren(createEmptyState("Open the staff page in a new, dedicated staff browser profile."));
-  orderList.replaceChildren(createEmptyState("Open the staff page in a new, dedicated staff browser profile."));
-  recipeGrid.replaceChildren(createEmptyState(
-    "Do not clear this profile's site data; it may contain unsynced owner edits. Open the staff page in a new, dedicated staff browser profile instead.",
-  ));
 }
 
 async function fetchStaffRecipeCsv(set) {

@@ -249,7 +249,7 @@ export default function StaffRecipePage() {
             `,
           }}
         />
-        <Script type="module" src="/staff-dashboard.js?v=20260910-receiving" strategy="afterInteractive" />
+        <Script type="module" src="/staff-dashboard.js?v=20260911-staff-access" strategy="afterInteractive" />
     </div>
   );
 }

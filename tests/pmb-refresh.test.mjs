@@ -9,6 +9,47 @@ function response(status) {
   return { ok: status >= 200 && status < 300, status };
 }
 
+test("retries saved keg readings even when the server returns HTTP 200", async () => {
+  const readings = [
+    { stale: true, updatedAt: "2026-09-10T12:00:00Z", liveError: "Connection interrupted" },
+    { stale: false, updatedAt: "2026-09-11T12:00:00Z", capturedCount: 102 },
+  ];
+  const result = await fetchPmbJsonWithRetry({
+    fetcher: async () => response(200),
+    parseResponse: async () => readings.shift(),
+    shouldRetryResult: (value) => value?.stale === true,
+    sleep: async () => {},
+  });
+  assert.equal(result.attempts, 2);
+  assert.equal(result.result.stale, false);
+  assert.equal(result.result.capturedCount, 102);
+  assert.equal(result.result.updatedAt, "2026-09-11T12:00:00Z");
+});
+
+test("exhausted keg retries preserve the stale flag, old timestamp, and error", async () => {
+  const saved = { stale: true, updatedAt: "2026-09-10T12:00:00Z", liveError: "PMB unavailable" };
+  const result = await fetchPmbJsonWithRetry({
+    fetcher: async () => response(200),
+    parseResponse: async () => saved,
+    shouldRetryResult: (value) => value?.stale === true,
+    sleep: async () => {},
+  });
+  assert.equal(result.attempts, 2);
+  assert.deepEqual(result.result, saved);
+});
+
+test("fresh keg readings return immediately without a duplicate refresh", async () => {
+  let calls = 0;
+  const result = await fetchPmbJsonWithRetry({
+    fetcher: async () => { calls += 1; return response(200); },
+    parseResponse: async () => ({ stale: false, capturedCount: 102 }),
+    shouldRetryResult: (value) => value?.stale === true,
+    sleep: async () => {},
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.attempts, 1);
+});
+
 test("recognizes transient PMB gateway failures, including Cloudflare 520", () => {
   [502, 503, 504, 520, 521, 522, 523, 524].forEach((status) => {
     assert.equal(isRetryablePmbStatus(status), true, String(status));

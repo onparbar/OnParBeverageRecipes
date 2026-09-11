@@ -219,6 +219,7 @@ function normalizeFeed(rawFeed = {}) {
     expectedCount,
     updatedAt: clean(feed.updatedAt),
     error: clean(feed.error),
+    reason: clean(feed.reason),
   };
 }
 
@@ -496,8 +497,10 @@ function buildKegLevelAlerts(feed, ageState) {
       severity: "critical",
       priority: 60,
       title: "Live keg levels are stale",
-      message: "Refresh PMB before using the displayed keg quantities for this week's plan.",
-      action: makeAction("Refresh Keg Levels", DASHBOARD_OVERVIEW_TARGETS.kegLevels),
+      message: feed.reason
+        ? `Keg levels did not refresh: ${feed.reason} Previously saved quantities are still displayed; they are not confirmed current.`
+        : "The last successful keg-level reading is too old. Refresh PMB before relying on the displayed quantities.",
+      action: makeAction("Refresh PMB", DASHBOARD_OVERVIEW_TARGETS.refreshPmb),
     })];
   }
   return [];

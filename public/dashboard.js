@@ -1178,6 +1178,7 @@ let kegSyncLoading = false;
 let kegSyncAttempted = false;
 let kegUpdatedAt = "";
 let kegLiveLevelsStale = false;
+let kegLiveLevelsError = "";
 let kegConfigUpdateRunning = false;
 let kegRepairStatus = null;
 let kegDeviceLevels = new Map();
@@ -6098,6 +6099,7 @@ function getPmbKegLevelOverviewFeed() {
     capturedCount,
     expectedCount: status === "not-checked" ? 0 : expectedCount,
     updatedAt: kegUpdatedAt,
+    reason: kegLiveLevelsError,
     error: !kegUpdatedAt && kegSyncAttempted ? kegSyncMessage : "",
   };
 }
@@ -12438,8 +12440,15 @@ async function runKegLevelSync() {
 
   try {
     const { response, result } = await fetchPmbJsonWithRetry({
-      fetcher: () => fetch("/api/keg-levels", { cache: "no-store" }),
+      // Reading all taps can outlast the short timeout used for pricing calls.
+      // Abort each timed-out browser request before starting another attempt.
+      fetcher: () => fetch("/api/keg-levels", {
+        cache: "no-store",
+        signal: AbortSignal.timeout(60_000),
+      }),
       parseResponse: parseJsonResponse,
+      timeoutMs: 61_000,
+      shouldRetryResult: (result) => result?.stale === true,
     });
     if (!response.ok) {
       throw new Error(result?.error || "Could not load keg levels.");
@@ -12458,11 +12467,14 @@ async function runKegLevelSync() {
     pmbCurrentTapSnapshot = selection.snapshot;
     applyPmbCurrentTapSnapshot(pmbCurrentTapSnapshot);
     kegLiveLevelsStale = Boolean(result.stale);
+    kegLiveLevelsError = kegLiveLevelsStale
+      ? getPmbConnectionErrorMessage(new Error(result.liveError || "PMB returned saved readings instead of live levels."), "Live keg levels could not be refreshed.")
+      : "";
     const partial = Boolean(result.partial);
     const installedOnDeckItems = kegLiveLevelsStale || partial ? [] : reconcileInstalledKegOnDeckProducts();
     if (!kegLiveLevelsStale && !partial) savePmbCurrentTapSnapshot();
     kegSyncMessage = kegLiveLevelsStale
-      ? `Last known taps and levels from ${formatUpdatedAt(kegUpdatedAt)}.`
+      ? `Last known taps and levels from ${formatUpdatedAt(kegUpdatedAt)}. ${kegLiveLevelsError}`
       : partial
         ? `${formatNumber(result.capturedCount || 0)} live · ${formatNumber(result.unreachableTaps?.length || 0)} need update.`
       : installedOnDeckItems.length
@@ -12480,6 +12492,7 @@ async function runKegLevelSync() {
       applyPmbCurrentTapSnapshot(fallback.snapshot);
       kegLiveLevelsStale = true;
     }
+    kegLiveLevelsError = getPmbConnectionErrorMessage(error, "Live keg levels could not be refreshed.");
     kegSyncMessage = fallback.snapshot
       ? "PMB unavailable. Showing last complete sync."
       : getPmbConnectionErrorMessage(error, "Could not load live keg levels.");

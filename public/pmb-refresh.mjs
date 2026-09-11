@@ -29,6 +29,7 @@ export async function fetchPmbJsonWithRetry({
   maxAttempts = 2,
   retryDelayMs = 400,
   timeoutMs = 12_000,
+  shouldRetryResult = () => false,
   sleep = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
 } = {}) {
   if (typeof fetcher !== "function" || typeof parseResponse !== "function") {
@@ -48,7 +49,10 @@ export async function fetchPmbJsonWithRetry({
         "PMB did not respond in time.",
       );
       result = await parseResponse(response);
-      if (response.ok || !isRetryablePmbStatus(response.status) || attempt === attemptLimit) {
+      const retryable = response.ok
+        ? shouldRetryResult(result) === true
+        : isRetryablePmbStatus(response.status);
+      if (!retryable || attempt === attemptLimit) {
         return { response, result, attempts: attempt };
       }
     } catch (error) {

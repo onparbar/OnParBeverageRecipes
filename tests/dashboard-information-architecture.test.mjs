@@ -265,13 +265,15 @@ test("vendor price sync remains automatic at login but stays outside the unified
 });
 
 test("PMB refresh alerts distinguish attempted failures from unchecked feeds", () => {
-  assert.match(dashboardSource, /fetchPmbJsonWithRetry\(\{\s*fetcher: \(\) => fetch\("\/api\/keg-levels"/s);
+  assert.match(dashboardSource, /fetchPmbJsonWithRetry\(\{(?:\s|\/\/[^\n]*\n)*fetcher: \(\) => fetch\("\/api\/keg-levels"/s);
   assert.match(dashboardSource, /kegSyncAttempted\s*\?\s*"offline"\s*:\s*"not-checked"/s);
   assert.match(dashboardSource, /tapPricingSyncAttempted\s*\?\s*"offline"\s*:\s*"not-checked"/s);
 
   const kegSyncStart = dashboardSource.indexOf("async function runKegLevelSync()");
   const kegSyncEnd = dashboardSource.indexOf("async function runTapPricingSync()", kegSyncStart);
   assert.doesNotMatch(dashboardSource.slice(kegSyncStart, kegSyncEnd), /kegSyncAttempted = false/);
+  assert.match(dashboardSource.slice(kegSyncStart, kegSyncEnd), /signal: AbortSignal\.timeout\(60_000\)/);
+  assert.match(dashboardSource.slice(kegSyncStart, kegSyncEnd), /shouldRetryResult: \(result\) => result\?\.stale === true/);
 });
 
 test("Tap Pricing gives slow PMB configuration reads time to finish and marks them retryable", async () => {

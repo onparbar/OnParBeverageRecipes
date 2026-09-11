@@ -35,29 +35,19 @@ test("staff bundle does not contain owner pricing, ordering, or browser-storage 
   });
 });
 
-test("staff profile guard protects employee sessions while allowing an intentional owner preview", async () => {
+test("authenticated staff and owners can load staff checklists regardless of browser history", async () => {
   const staffBundle = await readProjectFile("public/staff-dashboard.js");
-  assert.match(staffBundle, /const isOwnerPreview = session\.role === "owner"/);
   assert.match(staffBundle, /!\["employee", "owner"\]\.includes\(session\.role\)/);
-  assert.match(staffBundle, /!isOwnerPreview && !profileCheck\.safe && !isLocalStaffPreview\(\)/);
-  assert.match(staffBundle, /window\.localStorage\.length/);
-  assert.match(staffBundle, /window\.localStorage\.key\(index\)/);
-  assert.match(staffBundle, /key\.startsWith\("cocktail-dashboard-"\)/);
-  assert.equal(/localStorage\.(?:getItem|setItem|removeItem|clear)\s*\(/.test(staffBundle), false);
-  assert.match(staffBundle, /Do not clear this profile's site data/);
+  assert.match(staffBundle, /if \(!sessionResponse\.ok\)\s*\{\s*window\.location\.replace\("\/login\?next=\/staff"\);\s*return;/);
+  assert.doesNotMatch(staffBundle, /inspectStaffBrowserProfile|lockStaffRecipesForBrowserProfile|locked in this browser profile/);
+  const roleGate = staffBundle.indexOf('if (!["employee", "owner"].includes(session.role))');
+  const loadChecklists = staffBundle.indexOf("await refreshStaffSections()", roleGate);
+  assert.ok(roleGate >= 0 && loadChecklists > roleGate);
 });
 
-test("an explicit loopback-only preview can show the sanitized employee view", async () => {
+test("staff access neither reads nor clears owner browser data and has no preview bypass", async () => {
   const staffBundle = await readProjectFile("public/staff-dashboard.js");
-  const previewStart = staffBundle.indexOf("function isLocalStaffPreview()");
-  const previewEnd = staffBundle.indexOf("function inspectStaffBrowserProfile()", previewStart);
-  const previewSource = staffBundle.slice(previewStart, previewEnd);
-
-  assert.match(staffBundle, /!profileCheck\.safe && !isLocalStaffPreview\(\)/);
-  assert.match(previewSource, /hostname === "localhost"/);
-  assert.match(previewSource, /hostname === "127\.0\.0\.1"/);
-  assert.match(previewSource, /hostname === "::1"/);
-  assert.match(previewSource, /new URLSearchParams\(window\.location\.search\)\.get\("preview"\) === "1"/);
+  assert.doesNotMatch(staffBundle, /localStorage|cocktail-dashboard-|isLocalStaffPreview/);
 });
 
 test("staff bundle communicates only with session, sanitized recipes, prep, and receipt endpoints", async () => {
