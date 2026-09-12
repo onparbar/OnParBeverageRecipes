@@ -1,43 +1,38 @@
 name: Run par agent check
-
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
   group: onpar-production-deploy
   cancel-in-progress: false
-
 jobs:
-  check:
-    runs-on:
-      - self-hosted
-      - onpar-production
-    timeout-minutes: 15
+  diagnostic:
+    runs-on: [self-hosted, onpar-production]
+    timeout-minutes: 3
     environment: production
     steps:
-      - name: Run the deployed par agent without publishing
+      - name: Read original planning error and schedule without running planner
         shell: bash
         run: |
           set -Eeuo pipefail
-
-          service_dir="/Users/onpar/OnParBeverageRecipes-service"
-          current_release="${service_dir}/current"
-          helper="${service_dir}/.deploy/run-par-agent.sh"
-
-          if [ "$(id -un)" != "onpar" ]; then
-            echo "The production runner must run as onpar." >&2
-            exit 1
-          fi
-          if [ ! -L "${current_release}" ] || [ ! -d "${current_release}" ]; then
-            echo "The active production release is unavailable." >&2
-            exit 1
-          fi
-          if [ ! -x "${helper}" ]; then
-            echo "The installed par-agent helper is unavailable." >&2
-            exit 1
-          fi
-
-          ONPAR_SERVICE_DIR="${current_release}" "${helper}" --dry-run
+          export PATH="/opt/homebrew/opt/node@22/bin:/usr/local/opt/node@22/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+          node <<'NODE'
+          
+          const fs=require('node:fs');
+          const cp=require('node:child_process');
+          const root='/Users/onpar/OnParBeverageRecipes-service';
+          const secrets=[];
+          try { for(const line of fs.readFileSync(root+'/.env.local','utf8').split('\n')) {const match=line.match(/^\s*[A-Z_][A-Z0-9_]*\s*=\s*(.*?)\s*$/); if(match){const value=match[1].replace(/^['"]|['"]$/g,'');if(value.length>5) secrets.push(value);}} } catch {}
+          function clean(value){let s=String(value);for(const secret of secrets)s=s.split(secret).join('[REDACTED]');return s.replace(/https?:\/\/[^\s"']+/g,'[URL]').replace(/(?:Bearer\s+|eyJ)[A-Za-z0-9_.\/-]+/g,'[TOKEN]');}
+          function read(file){try{return fs.readFileSync(file,'utf8');}catch(e){return '[unavailable: '+e.code+']';}}
+          console.log('CURRENT_RELEASE',fs.realpathSync(root+'/current'));
+          console.log('HEARTBEAT',clean(read(root+'/logs/par-agent-status.json')));
+          for(const file of ['par-agent.err.log','par-agent.log']) console.log(file,clean(read(root+'/logs/'+file).slice(-14000)));
+          for(const file of ['/Library/LaunchDaemons/com.onpar.par-agent.plist','/Users/onpar/Library/LaunchAgents/com.onpar.par-agent.plist']){
+           try {const p=JSON.parse(cp.execFileSync('/usr/bin/plutil',['-convert','json','-o','-',file],{encoding:'utf8',stdio:['ignore','pipe','pipe']}));console.log('SERVICE_DEFINITION',JSON.stringify({file,ProgramArguments:p.ProgramArguments,WorkingDirectory:p.WorkingDirectory,UserName:p.UserName,StartCalendarInterval:p.StartCalendarInterval,serviceDir:p.EnvironmentVariables?.ONPAR_SERVICE_DIR,StandardErrorPath:p.StandardErrorPath}));} catch(e){console.log('SERVICE_DEFINITION_UNAVAILABLE',file);}
+          }
+          for(const domain of ['system','gui/'+process.getuid()]) {try {const s=cp.execFileSync('/bin/launchctl',['print',domain+'/com.onpar.par-agent'],{encoding:'utf8',stdio:['ignore','pipe','pipe']});console.log('LAUNCH_STATUS',domain,clean(s.split('\n').filter(l=>/state =|path =|program =|runs =|last exit|pid =/.test(l)).join('\n')));}catch(e){console.log('LAUNCH_STATUS_UNAVAILABLE',domain);}}
+          console.log('INSTALLED_HELPER',clean(read(root+'/.deploy/run-par-agent.sh')));
+          
+          NODE
