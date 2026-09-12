@@ -158,23 +158,6 @@ export default function DashboardPage() {
               <button id="header-search-close" className="mini-button header-search-close" type="button">Close results</button>
             <p className="dashboard-data-search__feedback" id="dashboard-data-search-feedback" aria-live="polite"></p>
             <div className="dashboard-data-search__results" id="dashboard-data-search-results"></div>
-            <details className="what-if-planner">
-              <summary>What-if planning</summary>
-              <form className="what-if-planner__form" id="what-if-planner-form">
-                <label htmlFor="what-if-planner-input">What should we preview?</label>
-                <div>
-                  <input
-                    id="what-if-planner-input"
-                    type="search"
-                    autoComplete="off"
-                    placeholder="What if pours are 20% higher next week?"
-                  />
-                  <button className="primary-button" type="submit">Preview</button>
-                </div>
-              </form>
-              <p className="what-if-planner__feedback" id="what-if-planner-feedback" aria-live="polite"></p>
-              <div className="what-if-planner__results" id="what-if-planner-results"></div>
-            </details>
             </div>
           </div>
         </section>
@@ -741,9 +724,18 @@ export default function DashboardPage() {
               <section className="inventory-block">
                 <div className="inventory-block__header">
                   <div>
-                    <h2>Current Inventory</h2>
+                    <details className="inventory-speech" id="inventory-speech-assistant"></details>
                   </div>
-                  <div className="inventory-toolbar">
+                </div>
+                <details className="keg-wall-filter inventory-group-filter" id="inventory-group-filter" data-group="all">
+                  <summary aria-label="Filter inventory"><span className="keg-wall-filter__title">Current Inventory</span></summary>
+                  <div className="keg-wall-filter__options">
+                    {[["all", "Current Inventory"], ["Liquor Cabinet", "Liquor Cabinet"], ["Mixer Cabinet", "Mixer Cabinet"], ["Other", "Other"]].map(([value, label]) => (
+                      <button key={value} type="button" data-inventory-group-filter={value} aria-pressed={value === "all"} className={value === "all" ? "is-active" : ""}>{label}</button>
+                    ))}
+                  </div>
+                </details>
+                  <div className="inventory-toolbar inventory-toolbar--under-header">
                   <details className="custom-inventory-editor" id="custom-inventory-editor">
                     <summary>Add item</summary>
                     <form className="custom-inventory-form" id="custom-inventory-form" autoComplete="off" data-form-type="other">
@@ -781,10 +773,8 @@ export default function DashboardPage() {
                     </div>
                     </form>
                   </details>
-                <details className="inventory-speech" id="inventory-speech-assistant"></details>
                 <button className="ghost-button inventory-clear-on-hand-button" id="clear-inventory-on-hand" type="button">Clear on hand</button>
                   </div>
-                </div>
                 <div className="dashboard-inline-status" id="inventory-summary" hidden></div>
                 <div className="inventory-table-wrap">
                   <table className="inventory-table inventory-table--stock">
@@ -797,6 +787,7 @@ export default function DashboardPage() {
                     <tbody id="inventory-table"></tbody>
                   </table>
                 </div>
+
               </section>
 
 

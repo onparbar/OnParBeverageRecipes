@@ -380,11 +380,15 @@ export function buildLastWeekProjectedSalesMix(
     && (selectedWall !== "patio" || category === "liquor")
   ));
   const wallPercentages = allocateWholePercentages(wallOrder.map((wallKey) => Math.max(0, wallSales[wallKey])));
+  const positiveWallProfit = wallOrder.reduce((total, wallKey) => total + Math.max(0, wallSales[wallKey]), 0);
   const walls = wallOrder.map((wallKey, index) => ({
     wall: wallKey,
     label: wallLabels[wallKey],
     projectedSales: round(wallSales[wallKey]),
     sharePercent: wallPercentages[index],
+    preciseSharePercent: positiveWallProfit > 0
+      ? Math.max(0, wallSales[wallKey]) / positiveWallProfit * 100
+      : 0,
   }));
 
   return {

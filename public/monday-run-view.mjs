@@ -5,6 +5,7 @@ export function buildMondayRunModel({
   pricingFeed = {},
   inventoryMissingCount = 0,
   inventoryCountedThisWeek = false,
+  inventoryMissingSections = [],
   inventorySaving = false,
   inventorySharedInitialized = false,
   inventorySharedSaveError = "",
@@ -60,17 +61,19 @@ export function buildMondayRunModel({
       id: "inventory",
       label: "Count inventory",
       target: "inventory",
-      complete: lockedPlanCapturedSetup || (
+      complete: (
         inventorySharedInitialized
         && inventoryCountedThisWeek
         && inventoryMissingCount === 0
         && !inventorySaving
         && !inventorySharedSaveError
       ),
-      status: lockedPlanCapturedSetup ? "Done" : inventorySharedSaveError
+      status: inventorySharedSaveError
         ? "Save recovery needed"
         : inventorySaving
           ? "Saving"
+        : inventoryMissingSections.length
+          ? `Count needed: ${inventoryMissingSections.join(", ")}`
         : inventoryMissingCount > 0
           ? `${formatNumber(inventoryMissingCount)} left`
           : inventorySharedInitialized
@@ -116,7 +119,26 @@ export function buildMondayRunModel({
   };
 }
 
+function getVisibleMondayRun(run) {
+  const backgroundRefresh = run.steps.find((step) => step.id === "pmb");
+  const steps = run.steps.filter((step) => step.id !== "pmb").map((step) => (
+    step.id === "plan" && !step.complete && backgroundRefresh && !backgroundRefresh.complete
+      ? { ...step, status: backgroundRefresh.status }
+      : step
+  ));
+  const nextIndex = steps.findIndex((step) => !step.complete);
+  return {
+    ...run,
+    steps,
+    completedCount: steps.filter((step) => step.complete).length,
+    nextIndex,
+    nextStep: steps[nextIndex < 0 ? 0 : nextIndex],
+    complete: nextIndex < 0,
+  };
+}
+
 export function renderMondayRun(run, { unlocking = false } = {}) {
+  run = getVisibleMondayRun(run);
   const progress = run.steps.length ? Math.round((run.completedCount / run.steps.length) * 100) : 0;
   const currentStepNumber = run.complete ? run.steps.length : run.nextIndex + 1;
   const focusStep = run.nextStep;
@@ -151,6 +173,7 @@ export function renderMondayRun(run, { unlocking = false } = {}) {
 }
 
 export function renderMondayRunCompact(run) {
+  run = getVisibleMondayRun(run);
   const progress = run.steps.length ? Math.round((run.completedCount / run.steps.length) * 100) : 0;
   const currentStepNumber = run.complete ? run.steps.length : run.nextIndex + 1;
   return `

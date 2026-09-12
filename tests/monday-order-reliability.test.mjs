@@ -24,7 +24,8 @@ const captureMetadata = {
 
 function initializedState() {
   const base = createEmptyInventoryState();
-  return applyInventoryStateAction(base, "initialize", { onHandOverrides: { vodka: "2" } }, "owner", monday);
+  const initialized = applyInventoryStateAction(base, "initialize", { onHandOverrides: { vodka: "2" } }, "owner", monday);
+  return applyInventoryStateAction(initialized, "update-field", { id: "vodka", field: "onHand", value: "2" }, "owner", monday);
 }
 
 test("captures one immutable Monday snapshot with actor and source provenance", () => {

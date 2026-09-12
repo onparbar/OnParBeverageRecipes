@@ -462,10 +462,9 @@ export function evaluateWeeklyPlanReadiness({
   if (!publishedPlanLocked && inventorySavePending) blockers.push("Inventory changes are still saving.");
   if (!publishedPlanLocked && inventorySaveError) blockers.push(`The latest inventory save failed: ${clean(inventorySaveError)}`);
   if (!publishedPlanLocked && !weeklyUsageInitialized) blockers.push("Shared Weekly Usage setup is incomplete.");
-  if (!publishedPlanLocked && !newOperatingWeekStarted && weeklyUsageSavePending) blockers.push("Weekly Usage changes are still saving.");
-  if (!publishedPlanLocked && !newOperatingWeekStarted && weeklyUsageSaveError) blockers.push(`The latest Weekly Usage save failed: ${clean(weeklyUsageSaveError)}`);
-  if (!generatedTime) blockers.push("Keg and prep recommendations have not been generated.");
-  if (!publishedPlanLocked && recommendationInventoryMissing) blockers.push("Keg backup/on-hand counts are incomplete, so ordering is held.");
+  if (!publishedPlanLocked && weeklyUsageSavePending) blockers.push("Weekly Usage changes are still saving.");
+  if (!publishedPlanLocked && weeklyUsageSaveError) blockers.push(`The latest Weekly Usage save failed: ${clean(weeklyUsageSaveError)}`);
+  if (!publishedPlanLocked && operatingWeekCurrent && recommendationInventoryMissing) blockers.push("Keg backup/on-hand counts are incomplete, so ordering is held.");
   if (!publishedPlanLocked && missingInventoryCount > 0) {
     blockers.push(`${missingInventoryCount} inventory item${missingInventoryCount === 1 ? " is" : "s are"} using an old baseline instead of a current saved count.`);
   }
@@ -481,34 +480,30 @@ export function evaluateWeeklyPlanReadiness({
   if (!publishedPlanLocked && weeklyUsageInitialized && !latestCompletedUsageSaved) {
     staleReasons.push(clean(usageCoverageMessage) || "The latest completed Monday-Sunday usage report is not saved.");
   }
-  if (generatedTime && !operatingWeekCurrent && !recommendationSourceCurrent) {
-    staleReasons.push("Keg Levels inputs changed after these recommendations; the old order and prep quantities are hidden until refreshed.");
-  }
-  if (generatedTime && !operatingWeekCurrent) {
-    staleReasons.push("A new Monday operating week has started. Calculate this week's plan from the new Monday inputs.");
-  } else if (!publishedPlanLocked && generatedTime && shouldRefreshMondayPlanForUsage(generatedTime, weeklyUsageLastSyncAt, currentTime)) {
-    staleReasons.push("Monday Weekly Usage changed after this week's plan was calculated.");
-  }
-  if (generatedTime && !operatingWeekCurrent && parseTime(parInputsChangedAt) > generatedTime) {
-    staleReasons.push("Keg counts, pars, or On Deck choices changed after this run.");
-  }
-  if (generatedTime && !operatingWeekCurrent && currentTime - generatedTime > staleAfterDays * 24 * 60 * 60 * 1000) {
-    staleReasons.push(`Recommendations are more than ${staleAfterDays} days old.`);
-  }
+  // Save & Lock refreshes these inputs and calculates before it publishes.
+  // Needing that calculation is normal workflow, not a readiness failure.
+  const needsRecalculation = !publishedPlanLocked && (
+    !generatedTime || !operatingWeekCurrent || !recommendationSourceCurrent
+    || parseTime(parInputsChangedAt) > generatedTime
+    || shouldRefreshMondayPlanForUsage(generatedTime, weeklyUsageLastSyncAt, currentTime)
+    || currentTime - generatedTime > staleAfterDays * 24 * 60 * 60 * 1000
+    || !inventorySnapshotCurrent
+  );
+  const refreshState = { autoRefreshPlan: true, needsRecalculation, actionable: !needsRecalculation };
 
   if (heldLineCount > 0) reviewReasons.push(`${heldLineCount} recommendation line${heldLineCount === 1 ? " is" : "s are"} held for review.`);
   if (excludedLineCount > 0) reviewReasons.push(`${excludedLineCount} inventory ordering rule${excludedLineCount === 1 ? " is" : "s are"} shown for review.`);
   if (missingPriceCount > 0) reviewReasons.push(`${missingPriceCount} active purchase line${missingPriceCount === 1 ? " is" : "s are"} missing a price.`);
   if (blockers.length) {
-    return { status: "blocked", label: "Not ready to order", blockers, staleReasons, reviewReasons };
+    return { ...refreshState, actionable: false, status: "blocked", label: "Not ready to order", blockers, staleReasons, reviewReasons };
   }
   if (staleReasons.length) {
-    return { status: "stale", label: "Refresh required", blockers, staleReasons, reviewReasons };
+    return { ...refreshState, actionable: false, status: "stale", label: "Refresh required", blockers, staleReasons, reviewReasons };
   }
   if (reviewReasons.length) {
-    return { status: "review", label: "Ready with review", blockers, staleReasons, reviewReasons };
+    return { ...refreshState, status: "review", label: "Ready with review", blockers, staleReasons, reviewReasons };
   }
-  return { status: "ready", label: "Ready to order", blockers, staleReasons, reviewReasons };
+  return { ...refreshState, status: "ready", label: needsRecalculation ? "Ready to save & lock" : "Ready to order", blockers, staleReasons, reviewReasons };
 }
 
 export function buildWeeklyActionPlan({ inventoryItems = [], recommendations = [] } = {}) {

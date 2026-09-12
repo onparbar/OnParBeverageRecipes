@@ -4,8 +4,8 @@ import test from "node:test";
 import vm from "node:vm";
 
 const source = readFileSync(new URL("../public/dashboard.js", import.meta.url), "utf8");
-const functions = ["runUnifiedPmbRefresh", "runKegConfigUpdate"].map((name) => {
-  const match = source.match(new RegExp(`async function ${name}\\([^\\n]*\\n[\\s\\S]*?\\n\\}`));
+const functions = ["runUnifiedPmbRefresh", "runUnifiedPmbRefreshAttempt", "runKegConfigUpdate"].map((name) => {
+  const match = source.match(new RegExp(`(?:async )?function ${name}\\([^\\n]*\\n[\\s\\S]*?\\n\\}`));
   assert.ok(match, name);
   return match[0];
 }).join("\n");
@@ -14,7 +14,7 @@ function harness({ refresh = true, repair = true, lock = true, confirm = true } 
   let writes = 0;
   let retries = 0;
   const context = vm.createContext({
-    isEmployeeDashboard: false, unifiedPmbRefreshRunning: false,
+    isEmployeeDashboard: false, unifiedPmbRefreshRunning: false, mondayPmbRefreshPromise: null,
     kegConfigUpdateRunning: false, kegRepairStatus: null,
     kegSyncMessage: "", weeklyPlanRefreshMessage: "", tapRepairRefreshTimer: null,
     weeklyUsageSharedOutbox: null,

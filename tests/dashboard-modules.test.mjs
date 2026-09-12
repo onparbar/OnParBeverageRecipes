@@ -130,6 +130,8 @@ test("Monday Run model preserves the five Monday operational steps and next-acti
 
   const locked = buildMondayRunModel({
     planLocked: true,
+    inventorySharedInitialized: true,
+    inventoryCountedThisWeek: true,
     weeklyOrderTrackingAvailable: true,
     vendorOrders: [{ ordered: true }],
     orderLineCount: 3,
@@ -140,6 +142,8 @@ test("Monday Run model preserves the five Monday operational steps and next-acti
 
   const lockedInProgress = buildMondayRunModel({
     planLocked: true,
+    inventorySharedInitialized: true,
+    inventoryCountedThisWeek: true,
     weeklyOrderTrackingAvailable: true,
     vendorOrders: [{ ordered: false }],
     orderLineCount: 1,
@@ -147,8 +151,8 @@ test("Monday Run model preserves the five Monday operational steps and next-acti
   });
   const lockedHtml = renderMondayRun(lockedInProgress);
   assert.match(lockedHtml, /<button type="button" disabled aria-disabled="true">\s*<span>1<\/span>/);
-  assert.match(lockedHtml, /<button type="button" disabled aria-disabled="true">\s*<span>2<\/span>/);
-  assert.match(lockedHtml, /<button type="button" id="recall-weekly-plan">\s*<span>3<\/span>\s*<strong>Unlock plan<\/strong>/);
+  assert.doesNotMatch(lockedHtml, /Refresh PMB &amp; capture usage/);
+  assert.match(lockedHtml, /<button type="button" id="recall-weekly-plan">\s*<span>2<\/span>\s*<strong>Unlock plan<\/strong>/);
   assert.match(renderMondayRun(lockedInProgress, { unlocking: true }), /id="recall-weekly-plan" disabled aria-disabled="true"/);
   assert.doesNotMatch(renderMondayRun(locked), /Review this week|View all 5 steps|>Review<\/button>/);
   assert.match(lockedHtml, /data-monday-run-step="orders" data-dashboard-target="weekly-plan"/);
@@ -175,7 +179,7 @@ test("Monday Run renderers keep actionable data attributes and compact next-step
   const compact = renderMondayRunCompact(run);
   assert.match(full, /data-monday-run-step="plan"/);
   assert.match(full, /aria-current="step"/);
-  assert.match(full, /Step 3 of 5/);
-  assert.match(compact, /Step 3 of 5/);
+  assert.match(full, /Step 2 of 4/);
+  assert.match(compact, /Step 2 of 4/);
   assert.match(compact, /Next:<\/span> <strong>Save &amp; lock plan/);
 });

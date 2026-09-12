@@ -57,7 +57,7 @@ test("order hover uses the same stock target as the recommendation", () => {
     MINIMUM_KEG_CUSHION: 0.25,
     getKegDisplayBrand: () => "Test beer",
     getKegFullOunces: () => 1984,
-    getEightWeekPeakUsage: () => ({ sampleWeeks: 8, peak: 1.8, targetStock: 2.25 }),
+    getEightWeekPeakUsage: () => ({ sampleWeeks: 8, average: 1.2, peak: 1.8, targetStock: 2.25 }),
     parAgentState: { recommendations: { items: [{ key: "21", preThursdayForecastKegs: 0.25 }] } },
     buildInventoryPosition, buildOperationalRecommendation, buildStockGapRecommendation,
   };
@@ -72,7 +72,8 @@ test("order hover uses the same stock target as the recommendation", () => {
   });
   const html = render(item, 1);
   assert.match(html, /Order 1/);
-  assert.match(html, /1.8 kegs \/ week/);
+  assert.match(html, /Avg<\/span>\s*<strong>1.2 kegs/);
+  assert.match(html, /8-week high<\/span>\s*<strong>1.8 kegs/);
   assert.match(html, /Need at least/);
   assert.match(html, /2.25 kegs/);
   assert.doesNotMatch(html, /Last tapped|Replaced/);

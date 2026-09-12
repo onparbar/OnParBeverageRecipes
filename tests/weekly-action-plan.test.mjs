@@ -541,16 +541,16 @@ test("new Monday inputs start a new Weekly Plan cycle", () => {
     inventoryInitialized: true,
   };
 
-  assert.equal(evaluateWeeklyPlanReadiness({
-    ...base,
-    weeklyUsageLastSyncAt: "2026-08-10T16:00:00.000Z",
-    now: "2026-08-10T17:00:00.000Z",
-  }).status, "stale");
-  assert.equal(evaluateWeeklyPlanReadiness({
-    ...base,
-    weeklyUsageLastSyncAt: "2026-08-17T13:00:00.000Z",
-    now: "2026-08-17T14:00:00.000Z",
-  }).status, "stale");
+  for (const [weeklyUsageLastSyncAt, now] of [
+    ["2026-08-10T16:00:00.000Z", "2026-08-10T17:00:00.000Z"],
+    ["2026-08-17T13:00:00.000Z", "2026-08-17T14:00:00.000Z"],
+  ]) {
+    const readiness = evaluateWeeklyPlanReadiness({ ...base, weeklyUsageLastSyncAt, now });
+    assert.equal(readiness.status, "ready");
+    assert.equal(readiness.needsRecalculation, true);
+    assert.equal(readiness.actionable, false);
+    assert.deepEqual(readiness.blockers, []);
+  }
 });
 
 test("weekly usage identity prefers a physical tap and uses PLU only when unique", () => {

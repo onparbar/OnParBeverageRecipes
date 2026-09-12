@@ -5373,7 +5373,7 @@ td {
 
 .tap-change-controls {
   display: grid;
-  grid-template-columns: 56px minmax(160px, 1fr) 64px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 5px;
   align-items: center;
   margin-top: 8px;
@@ -5727,6 +5727,20 @@ td {
   gap: 10px;
   align-items: start;
 }
+
+#inventory-panel .inventory-toolbar--under-header {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 20px;
+}
+
+#inventory-panel #inventory-speech-assistant {
+  width: 100%;
+}
+
+#inventory-panel .inventory-group-filter {
+  margin: 0 0 20px;
+}
+
 
 #inventory-panel table.inventory-table--stock {
   width: 100%;

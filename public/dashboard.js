@@ -2,6 +2,8 @@ import { observePackagePrice, createSupplierMapping } from "./vendor-pricing-sta
 import { isUsableWeeklyUsageEntry } from "./weekly-usage-evidence.mjs";
 import { MINIMUM_KEG_CUSHION, getEightWeekPeakUsage } from "./keg-demand-policy.mjs";
 import { applyInventoryCountPolicy, getUncountedInventoryAmount } from "./inventory-count-policy.mjs";
+import { getInventoryCountSections } from "./inventory-weekly-counts.mjs";
+import { answerLocalInventoryQuestion } from "./local-inventory-questions.mjs";
 import { renderSavedWeeklySnapshot } from "./weekly-snapshot-view.mjs";
 import { getSixWeekUsage } from "./six-week-usage.mjs";
 import "./operations-learning-ui.mjs";
@@ -130,6 +132,8 @@ import { fetchPmbJsonWithRetry } from "./pmb-refresh.mjs";
 import {
   searchDashboardData,
   searchDashboardItems,
+  getConversationalItemQuery,
+  describeDashboardDataSearch,
 } from "./global-dashboard-search.mjs";
 import {
   buildPricingAdvisor,
@@ -950,10 +954,6 @@ const dashboardDataSearchForm = document.querySelector("#dashboard-data-search-f
 const dashboardDataSearchInput = document.querySelector("#dashboard-data-search-input");
 const dashboardDataSearchFeedback = document.querySelector("#dashboard-data-search-feedback");
 const dashboardDataSearchResults = document.querySelector("#dashboard-data-search-results");
-const whatIfPlannerForm = document.querySelector("#what-if-planner-form");
-const whatIfPlannerInput = document.querySelector("#what-if-planner-input");
-const whatIfPlannerFeedback = document.querySelector("#what-if-planner-feedback");
-const whatIfPlannerResults = document.querySelector("#what-if-planner-results");
 const categoryFilter = document.querySelector("#category-filter");
 const recipeSearch = document.querySelector("#recipe-search");
 const oldSearch = document.querySelector("#old-search");
@@ -1101,7 +1101,7 @@ let inventorySpeechKegScope = "main";
 let inventorySpeechInventoryScope = "liquor";
 let inventorySourceRows = [];
 let inventorySharedUpdatedAt = "";
-let inventorySharedCountedAt = "";
+let inventoryCountedItemsAt = {};
 let inventorySharedMessage = "Loading shared inventory...";
 let inventorySharedSaving = false;
 let inventorySharedSaveError = "";
@@ -1444,7 +1444,17 @@ function releaseOwnerLoginSyncLock(token) {
 let unifiedPmbRefreshRunning = false;
 let tapRepairRefreshTimer = null;
 
-async function runUnifiedPmbRefresh({ afterRepair = false } = {}) {
+let mondayPmbRefreshPromise = null;
+
+function runUnifiedPmbRefresh(options = {}) {
+  if (mondayPmbRefreshPromise) return mondayPmbRefreshPromise;
+  mondayPmbRefreshPromise = runUnifiedPmbRefreshAttempt(options).finally(() => {
+    mondayPmbRefreshPromise = null;
+  });
+  return mondayPmbRefreshPromise;
+}
+
+async function runUnifiedPmbRefreshAttempt({ afterRepair = false } = {}) {
   if (isEmployeeDashboard || unifiedPmbRefreshRunning) return false;
   if (kegConfigUpdateRunning && !afterRepair) {
     kegSyncMessage = "Tap repair is still being checked. PMB will refresh automatically once all 102 taps are responding.";
@@ -3541,9 +3551,6 @@ function bindDashboardDataSearchEvents() {
       searchDebounce = window.setTimeout(() => renderDashboardDataSearch({ submitted: true }), 220);
     }
   });
-  dashboardDataSearchInput?.addEventListener("focus", () => {
-    if (!clean(dashboardDataSearchInput.value)) renderDashboardDataSearch({ submitted: true });
-  });
   document.querySelector(".header-search")?.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       const buttons = [...(dashboardDataSearchResults?.querySelectorAll("button") || [])];
@@ -3589,10 +3596,6 @@ function bindDashboardDataSearchEvents() {
     weeklyUsageSearch.value = link.dataset.dashboardDataSearchName || "";
     renderWeeklyUsage();
     switchTab("weekly-usage");
-  });
-  whatIfPlannerForm?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    renderWhatIfPlan();
   });
 }
 
@@ -3677,6 +3680,8 @@ function buildDashboardDataSearchItems() {
       },
     };
     const estimate = getPerformanceEstimatedProfitRate(item);
+    result.profitPerOz = estimate.grossProfitPerOz;
+    result.sellingPricePerOz = estimate.sellingPricePerOz;
     Object.values(result.periods).forEach((period) => {
       if (!period) return;
       period.profit = period.ounces === 0 ? 0 : estimate.grossProfitPerOz != null ? period.ounces * estimate.grossProfitPerOz : null;
@@ -3691,9 +3696,19 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
   if (!dashboardDataSearchInput || !dashboardDataSearchResults || !dashboardDataSearchFeedback) return;
   if (submitted) setHeaderSearchResultsVisible(true);
   const query = clean(dashboardDataSearchInput.value);
+  const inventoryAnswer = answerLocalInventoryQuestion(query, inventoryItems, inventoryCountedItemsAt);
+  if (inventoryAnswer) {
+    dashboardDataSearchFeedback.textContent = "Answer from saved inventory";
+    dashboardDataSearchResults.innerHTML = `<p>${escapeHtml(inventoryAnswer.text)}</p>${inventoryAnswer.rows.map((row) => `<article class="dashboard-data-search-result"><div><strong>${escapeHtml(row.name)}</strong><p>${escapeHtml(row.text)}</p></div></article>`).join("")}`;
+    return;
+  }
+  if (/\bwhat\s+if\b/i.test(query)) {
+    renderWhatIfPlan(query);
+    return;
+  }
   refreshGlobalSearchIndex();
-  const quickMatches = searchDashboardItems(globalSearchItems, query, { limit: 12 });
-  const quickResults = quickMatches.length ? `<section class="header-search-matches"><h3>${query ? "Open an item" : "Go to a section"}</h3><div class="header-search-match-grid">${quickMatches.map((item) => `<button type="button" class="header-search-match" data-header-search-item="${escapeHtml(item.id)}"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.section)}</span><small>${escapeHtml(item.subtitle || "")}</small></button>`).join("")}</div></section>` : "";
+  const quickMatches = query ? searchDashboardItems(globalSearchItems, getConversationalItemQuery(query), { limit: 12 }) : [];
+  const quickResults = quickMatches.length ? `<section class="header-search-matches"><h3>Open an item</h3><div class="header-search-match-grid">${quickMatches.map((item) => `<button type="button" class="header-search-match" data-header-search-item="${escapeHtml(item.id)}"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.section)}</span><small>${escapeHtml(item.subtitle || "")}</small></button>`).join("")}</div></section>` : "";
   if (!query) {
     dashboardDataSearchFeedback.textContent = "Find products, recipes, inventory, taps, or ask about performance.";
     dashboardDataSearchResults.innerHTML = `${quickResults}<div class="header-search-examples">${["Tito's", "tap 31", "top 5 cocktails last 6 weeks", "lowest profit margin last week"].map((example) => `<button type="button" class="mini-button" data-search-example="${escapeHtml(example)}">${escapeHtml(example)}</button>`).join("")}</div>`;
@@ -3701,6 +3716,17 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
   }
 
   const search = searchDashboardData(buildDashboardDataSearchItems(), query);
+  const localExplanation = describeDashboardDataSearch(search);
+  if (localExplanation) {
+    // Queue after the synchronous result markup below, without reopening a closed panel.
+    queueMicrotask(() => {
+      if (clean(dashboardDataSearchInput.value) !== query) return;
+      const explanation = document.createElement("p");
+      explanation.className = "dashboard-data-search-explanation";
+      explanation.textContent = localExplanation;
+      dashboardDataSearchResults.prepend(explanation);
+    });
+  }
   if (search.status === "needs-clarification") {
     dashboardDataSearchFeedback.textContent = quickMatches.length ? "Matching dashboard items" : "One quick question";
     dashboardDataSearchResults.innerHTML = `${quickResults}<div class="dashboard-data-search-question">${escapeHtml(search.question)}</div>`;
@@ -3711,7 +3737,7 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
     ? `Top ${search.groups.top.length} and bottom ${search.groups.bottom.length}`
     : `${quickMatches.length} quick link${quickMatches.length === 1 ? "" : "s"} · ${search.results.length}${search.total > search.results.length ? ` of ${search.total}` : ""} performance result${search.results.length === 1 ? "" : "s"}`;
   if (!search.results.length) {
-    dashboardDataSearchResults.innerHTML = `${quickResults}<div class="dashboard-data-search-empty">${quickMatches.length ? "No recorded usage matches this question. The item links above are still available." : "No matches. Try a shorter product name, a tap number, or a dashboard section."}</div>`;
+    dashboardDataSearchResults.innerHTML = `${quickResults}<div class="dashboard-data-search-empty">${quickMatches.length ? "No recorded usage matches this question. The item links above are still available." : "No matches. Try a shorter product name or a tap number."}</div>`;
     return;
   }
 
@@ -3749,18 +3775,17 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
     : renderSearchRows(search.results)) + "</section>";
 }
 
-function renderWhatIfPlan() {
-  if (!whatIfPlannerInput || !whatIfPlannerFeedback || !whatIfPlannerResults) return;
-  const query = clean(whatIfPlannerInput.value);
+function renderWhatIfPlan(query) {
+  if (!dashboardDataSearchFeedback || !dashboardDataSearchResults) return;
   const scenario = buildWhatIfPlan(buildDashboardDataSearchItems(), query);
   if (scenario.status === "needs-clarification") {
-    whatIfPlannerFeedback.textContent = "One quick question";
-    whatIfPlannerResults.innerHTML = `<div class="dashboard-data-search-question">${escapeHtml(scenario.question)}</div>`;
+    dashboardDataSearchFeedback.textContent = "One quick question";
+    dashboardDataSearchResults.innerHTML = `<div class="dashboard-data-search-question">${escapeHtml(scenario.question)}</div>`;
     return;
   }
   if (scenario.status === "no-data") {
-    whatIfPlannerFeedback.textContent = "Preview unavailable";
-    whatIfPlannerResults.innerHTML = `<div class="dashboard-data-search-empty">${escapeHtml(scenario.message)}</div>`;
+    dashboardDataSearchFeedback.textContent = "Preview unavailable";
+    dashboardDataSearchResults.innerHTML = `<div class="dashboard-data-search-empty">${escapeHtml(scenario.message)}</div>`;
     return;
   }
 
@@ -3769,8 +3794,8 @@ function renderWhatIfPlan() {
     scenario.intent.wall === "all" ? "All walls" : `${normalizeTitle(scenario.intent.wall)} wall`,
     scenario.intent.category === "all" ? "All drinks" : getWeeklyUsagePerformanceCategoryLabel(scenario.intent.category),
   ].join(" · ");
-  whatIfPlannerFeedback.textContent = "Preview only · no dashboard data changed";
-  whatIfPlannerResults.innerHTML = `
+  dashboardDataSearchFeedback.textContent = "Preview only · no dashboard data changed";
+  dashboardDataSearchResults.innerHTML = `
     <section class="what-if-planner__summary">
       <span>${escapeHtml(scope)}</span>
       <strong>${formatNumber(scenario.projectedOz)} oz</strong>
@@ -3798,31 +3823,6 @@ function openGlobalSearch() {
 
 function closeGlobalSearch() {
   if (globalSearchDialog?.open) globalSearchDialog.close();
-}
-
-function getGlobalSearchSectionItems() {
-  return [
-    ["dashboard", "Dashboard", "Alerts, readiness, weekly priorities, and quick actions"],
-    ["recipes", "Recipes", "Cocktails, batches, spirits, and ingredients", "current"],
-    ["weekly-plan", "Weekly Plan", "Orders, beer kegs, and cocktails to make"],
-    ["weekly-snapshots", "Weekly Snapshots", "Saved inventory counts by week"],
-    ["keg-levels", "Keg Levels", "Tap walls, current levels, pars, and on-deck products"],
-    ["pricing", "Tap Pricing", "Pour prices, costs, and gross margins"],
-    ["ingredients", "Ingredient & Keg Costs", "Bottle prices, keg prices, and vendor mappings"],
-    ["inventory", "Inventory", "Liquor, mixers, counts, pars, and reorder items"],
-    ["weekly-usage", "Weekly Usage", "PMB history, average ounces, and tap performance"],
-    ["add", "Add Product", "Create a cocktail, beer keg, or liquor tap"],
-    ["recipes", "Old Recipes", "Deactivated cocktail recipes", "old"],
-  ].map(([tab, title, subtitle, recipeView]) => ({
-    id: `section:${tab}:${recipeView || "default"}`,
-    kind: "section",
-    title,
-    subtitle,
-    section: "Dashboard section",
-    searchText: [title, subtitle],
-    tab,
-    recipeView,
-  }));
 }
 
 function getRecipeGlobalSearchItems(sourceRecipes, { inactive = false } = {}) {
@@ -3924,7 +3924,6 @@ function refreshGlobalSearchIndex() {
     }));
 
   globalSearchItems = [
-    ...getGlobalSearchSectionItems(),
     ...getRecipeGlobalSearchItems(getActiveRecipes()),
     ...getRecipeGlobalSearchItems(getInactiveRecipes(), { inactive: true }),
     ...ingredientItems,
@@ -6016,8 +6015,8 @@ function getLatestPriceTimestamp() {
 }
 
 function getWeeklyPlanMissingInventoryCount() {
-  // A blank Inventory count intentionally means zero on hand.
-  return 0;
+  return getInventoryCountSections(inventoryItems, inventoryCountedItemsAt)
+    .reduce((total, section) => total + section.missing.length, 0);
 }
 
 function getWeeklyPlanFreshness(plan) {
@@ -6328,8 +6327,9 @@ function getMondayRunModel(plan, freshness) {
     || Object.keys(inventoryFieldOutbox).length > 0
     || inventoryActionOutbox.length > 0;
   const mondaySnapshotSaved = Boolean(getCurrentMondayInventorySnapshot(inventoryHistory, new Date()));
-  const inventoryCountedThisWeek = mondaySnapshotSaved
-    || isRecommendationForOperatingWeek(inventorySharedCountedAt, new Date());
+  const countSections = getInventoryCountSections(inventoryItems, inventoryCountedItemsAt);
+  const inventoryMissingSections = countSections.filter((section) => !section.complete).map((section) => section.name);
+  const inventoryCountedThisWeek = countSections.length > 0 && inventoryMissingSections.length === 0;
   const planLocked = hasPublishedWeeklyPlanRecommendations();
   const weeklyUsageCaptured = freshness.latestCompletedUsageSaved === true && !weeklyUsageSharedSaveError;
   const pmbRefreshPending = unifiedPmbRefreshRunning
@@ -6347,6 +6347,7 @@ function getMondayRunModel(plan, freshness) {
     pricingFeed,
     inventoryMissingCount,
     inventoryCountedThisWeek,
+    inventoryMissingSections,
     inventorySaving,
     inventorySharedInitialized,
     inventorySharedSaveError,
@@ -6364,7 +6365,7 @@ function getMondayRunModel(plan, freshness) {
     weeklyOrderTrackingAvailable: weeklyOrderTracking.available,
     orderLineCount,
     tapSheets,
-    planActionable: freshness.readiness?.actionable,
+    planActionable: ["ready", "review"].includes(freshness.readiness?.status),
   });
 }
 
@@ -6546,6 +6547,7 @@ function renderDashboardOverview() {
     const briefing = buildThirtySecondBriefing({
       overview,
       mondayRun,
+      readiness: freshness.readiness,
       staffPrepPlan: dashboardStaffPrepPlan,
       orders: weeklyOrderTracking,
       tapReplacementOverrides,
@@ -7248,7 +7250,7 @@ function renderDashboardPulseCategoryLeaders({
   `;
 }
 
-function renderDashboardProjectedWallMix(rows = []) {
+function renderDashboardProjectedWallMix(rows = [], weekLabel = "") {
   const wallColors = {
     main: "#bf604c",
     karaoke: "#2f7ca3",
@@ -7256,18 +7258,21 @@ function renderDashboardProjectedWallMix(rows = []) {
   };
   const visibleRows = rows.filter((row) => row && row.label);
   if (!visibleRows.length) return "";
+  const share = (row) => row.preciseSharePercent ?? row.sharePercent;
+  const percentFormatter = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+  const currencyFormatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
   return `
     <div style="margin-top:18px;padding-top:16px;border-top:1px solid rgba(34, 68, 60, 0.16);">
-      <div class="dashboard-pulse-sales-mix__header"><h3>Estimated profit by wall</h3><small>All walls · estimated profit</small></div>
-      <div class="dashboard-pulse-mix-bar" aria-label="Estimated profit share across all walls">
-        ${visibleRows.filter((row) => row.sharePercent > 0).map((row) => `<i style="--mix-share:${row.sharePercent}%;background:${wallColors[row.wall] || "#718078"}"></i>`).join("")}
+      <div class="dashboard-pulse-sales-mix__header"><h3>Estimated profit by wall</h3><small>All walls · ${escapeHtml(weekLabel || "Selected period")}</small></div>
+      <div class="dashboard-pulse-mix-bar" aria-label="Estimated profit share across all walls for ${escapeHtml(weekLabel || "selected period")}">
+        ${visibleRows.filter((row) => share(row) > 0).map((row) => `<i style="--mix-share:${share(row)}%;background:${wallColors[row.wall] || "#718078"}"></i>`).join("")}
       </div>
       <div class="dashboard-pulse-mix-legend">
         ${visibleRows.map((row) => `
           <div>
             <span aria-hidden="true" style="background:${wallColors[row.wall] || "#718078"}"></span>
-            <strong>${formatNumber(row.sharePercent)}%</strong>
-            <small>${escapeHtml(row.label)}</small>
+            <strong>${percentFormatter.format(share(row))}%</strong>
+            <small>${escapeHtml(row.label)} · ${currencyFormatter.format(row.projectedSales)}</small>
           </div>
         `).join("")}
       </div>
@@ -7315,7 +7320,7 @@ function renderDashboardCategoryMix(mix) {
 function renderDashboardProjectedSalesMix(profitMix) {
   return `<aside class="dashboard-pulse-sales-mix">
     ${renderDashboardCategoryMix(profitMix)}
-    ${renderDashboardProjectedWallMix(profitMix.walls)}
+    ${renderDashboardProjectedWallMix(profitMix.walls, profitMix.weekLabel)}
   </aside>`;
 }
 
@@ -8301,9 +8306,9 @@ function renderWeeklyPlan() {
       <details class="weekly-plan-phase weekly-plan-phase--prep"${planLocked ? "" : " open"}>
         <summary><span>Prep plan</span><strong>${escapeHtml(prepStatus)}</strong></summary>
         <section class="weekly-plan-column weekly-plan-column--prep">
-          <div class="weekly-plan-column__header"><h2>Cocktails To Make</h2></div>
+          <div class="weekly-plan-column__header"><h2>Cocktails</h2></div>
           ${renderWeeklyPlanCocktailRows(plan.prep.cocktails)}
-          <div class="weekly-plan-column__header"><h2>Add Liquor To Kegs</h2></div>
+          <div class="weekly-plan-column__header"><h2>Liquor Tap Refills</h2></div>
           ${renderWeeklyPlanLiquorRefillRows(plan.orders.liquorTapBottles)}
         </section>
         ${renderWeeklyPlanFinishWeek(planLocked, Boolean(orderStep?.complete), "prep")}
@@ -9590,7 +9595,24 @@ function queueSharedWeeklyUsageSave() {
   return weeklyUsageSharedWriteQueue;
 }
 
-async function flushPendingSharedWeeklyUsageSave() {
+let mondayWeeklyUsageSavePromise = null;
+
+function flushPendingSharedWeeklyUsageSave() {
+  if (mondayWeeklyUsageSavePromise) return mondayWeeklyUsageSavePromise;
+  mondayWeeklyUsageSavePromise = drainPendingSharedWeeklyUsageSave().finally(() => {
+    mondayWeeklyUsageSavePromise = null;
+  });
+  return mondayWeeklyUsageSavePromise;
+}
+
+async function drainPendingSharedWeeklyUsageSave() {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (await flushPendingSharedWeeklyUsageSaveAttempt()) return true;
+  }
+  return false;
+}
+
+async function flushPendingSharedWeeklyUsageSaveAttempt() {
   if (weeklyUsageSharedSaveTimer) {
     clearTimeout(weeklyUsageSharedSaveTimer);
     weeklyUsageSharedSaveTimer = null;
@@ -9660,6 +9682,8 @@ async function initializeSharedWeeklyUsageFromServiceComputer() {
 }
 
 async function refreshSharedWeeklyUsageBeforeMondaySnapshot() {
+  // Do not discard a pending report just because another dashboard saved first.
+  if (!(await flushPendingSharedWeeklyUsageSave())) return false;
   try {
     const state = await requestSharedWeeklyUsage();
     if (!state.initialized) {
@@ -9670,12 +9694,8 @@ async function refreshSharedWeeklyUsageBeforeMondaySnapshot() {
 
     const sharedRevision = Number(state.revision) || 0;
     const outboxBaseRevision = Number(weeklyUsageSharedOutbox?.baseRevision) || 0;
-    const supersededRecovery = Boolean(
-      weeklyUsageSharedOutbox
-      && (weeklyUsageSharedOutbox.conflict || sharedRevision > outboxBaseRevision),
-    );
 
-    if (!weeklyUsageSharedOutbox || supersededRecovery) {
+    if (!weeklyUsageSharedOutbox) {
       clearTimeout(weeklyUsageSharedSaveTimer);
       weeklyUsageSharedSaveTimer = null;
       weeklyUsageSharedOutbox = null;
@@ -9698,7 +9718,17 @@ async function refreshSharedWeeklyUsageBeforeMondaySnapshot() {
   }
 }
 
-async function runPmbWeeklyUsageSync({ automatic = false } = {}) {
+let mondayWeeklyUsageSyncPromise = null;
+
+function runPmbWeeklyUsageSync(options = {}) {
+  if (mondayWeeklyUsageSyncPromise) return mondayWeeklyUsageSyncPromise;
+  mondayWeeklyUsageSyncPromise = runPmbWeeklyUsageSyncAttempt(options).finally(() => {
+    mondayWeeklyUsageSyncPromise = null;
+  });
+  return mondayWeeklyUsageSyncPromise;
+}
+
+async function runPmbWeeklyUsageSyncAttempt({ automatic = false } = {}) {
   if (weeklyUsageSyncLoading) return { ok: false, error: "Weekly Usage is already refreshing." };
   weeklyUsageSyncError = "";
   weeklyUsageSyncAttempted = true;
@@ -10370,7 +10400,7 @@ function renderTapChangeControls(item, liveRow, displayBrand = item.brand) {
       </span>
     ` : ""}
     <div class="tap-change-controls">
-      <button class="mini-button toggle-keg-adjust" data-keg-key="${escapeHtml(itemKey)}" type="button"${adjustDisabled ? " disabled" : ""}>${activeKegAdjustKey === itemKey ? "Hide" : "Edit"}</button>
+      <button class="mini-button toggle-keg-adjust" data-keg-key="${escapeHtml(itemKey)}" type="button" aria-expanded="${isEditing}"${adjustDisabled ? " disabled" : ""}>Change product</button>
       ${isEditing ? `
         <select class="tap-change-select" data-keg-key="${escapeHtml(itemKey)}" aria-label="Replacement product for ${escapeHtml(item.brand)}"${selectDisabled ? " disabled" : ""}>
           <option value="">${hasOptions ? `Current: ${escapeHtml(currentLabel)}` : "No beverages loaded"}</option>
@@ -12325,7 +12355,26 @@ async function syncParAgentState({ silent = false, mutationVersion = parAgentSta
   }
 }
 
-async function flushPendingParAgentStateSync() {
+let mondayKegCountsFlushPromise = null;
+
+function flushPendingParAgentStateSync() {
+  if (mondayKegCountsFlushPromise) return mondayKegCountsFlushPromise;
+  mondayKegCountsFlushPromise = drainPendingParAgentStateSync().finally(() => {
+    mondayKegCountsFlushPromise = null;
+  });
+  return mondayKegCountsFlushPromise;
+}
+
+async function drainPendingParAgentStateSync() {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    // Finish the existing write before rebasing or sending another batch.
+    await parAgentStateSyncQueue;
+    if (await flushPendingParAgentStateSyncAttempt()) return true;
+  }
+  return false;
+}
+
+async function flushPendingParAgentStateSyncAttempt() {
   let enqueued = false;
   if (parAgentStateSyncTimer) {
     clearTimeout(parAgentStateSyncTimer);
@@ -12356,7 +12405,28 @@ async function flushPendingParAgentStateSync() {
   return !parAgentStateOutbox && parAgentStateOutboxDurable;
 }
 
-async function runKegParAgent() {
+let mondayCalculationPromise = null;
+
+function runKegParAgent() {
+  if (mondayCalculationPromise) return mondayCalculationPromise;
+  mondayCalculationPromise = calculateWithLatestKegCounts().finally(() => {
+    mondayCalculationPromise = null;
+  });
+  return mondayCalculationPromise;
+}
+
+async function calculateWithLatestKegCounts() {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!(await flushPendingParAgentStateSync())) return false;
+    const calculationVersion = parAgentStateMutationVersion;
+    const result = await runKegParAgentAttempt();
+    if (calculationVersion === parAgentStateMutationVersion) return result;
+    // Counts entered during the calculation stay queued and feed the next run.
+  }
+  return false;
+}
+
+async function runKegParAgentAttempt() {
   if (!parAgentState?.initialized) {
     parAgentMessage = getParAgentStatusMessage();
     renderKegLevels();
@@ -12527,7 +12597,17 @@ function scheduleKegReadRetry() {
   }, 30_000);
 }
 
-async function runKegLevelSync() {
+let mondayKegLevelSyncPromise = null;
+
+function runKegLevelSync() {
+  if (mondayKegLevelSyncPromise) return mondayKegLevelSyncPromise;
+  mondayKegLevelSyncPromise = runKegLevelSyncAttempt().finally(() => {
+    mondayKegLevelSyncPromise = null;
+  });
+  return mondayKegLevelSyncPromise;
+}
+
+async function runKegLevelSyncAttempt() {
   if (kegSyncLoading) return false;
   window.clearTimeout(kegReadRetryTimer);
   kegReadRetryTimer = null;
@@ -12931,18 +13011,21 @@ function renderKegNeedCell(item, need) {
   const usageItem = getWeeklyUsageForKegItem(item, displayBrand);
   const calculation = getKegNeedCalculation(item);
   const unit = isLiquorOunceTap(toNumber(item.tapNumber)) ? "oz" : "kegs";
+  const fullOunces = getKegFullOunces(liveRow, item);
+  const peakUsage = getEightWeekPeakUsage(usageItem || {}, new Date(), fullOunces);
   const usage = unit === "kegs"
-    ? getEightWeekPeakUsage(usageItem || {}, new Date(), getKegFullOunces(liveRow, item))
+    ? peakUsage
     : getSixWeekUsage(usageItem || {});
   const usageUnit = unit === "kegs" ? "kegs" : usageItem?.displayUnit === "oz" ? "oz" : "kegs";
   return `<details class="tap-product-detail tap-order-detail">
     <summary aria-label="Order calculation for ${escapeHtml(displayBrand)}">${renderKegNeedValue(item, need)}</summary>
     <div class="tap-product-detail__body">
-      <span class="tap-product-detail__label">${unit === "kegs" ? "Highest week in the last 8 weeks" : "Rolling 6-week weekly average"}</span>
-      <strong>${usage.sampleWeeks ? `${formatNumber(unit === "kegs" ? usage.peak : usage.average)} ${usageUnit} / week` : "Not available"}</strong>
+      <span class="tap-product-detail__label">Avg</span>
+      <strong>${usage.sampleWeeks ? `${formatNumber(usage.average)} ${usageUnit}` : "Not available"}</strong>
+      <span class="tap-product-detail__label">8-week high</span>
+      <strong>${peakUsage.sampleWeeks && (unit === "kegs" || fullOunces > 0) ? `${formatNumber(unit === "oz" ? peakUsage.peak * fullOunces : peakUsage.peak)} ${unit}` : "Not available"}</strong>
       <span class="tap-product-detail__label">Need at least</span>
       <strong>${calculation ? `${formatNumber(calculation.targetStock)} ${unit}` : "Not available"}</strong>
-      ${unit === "kegs" ? `<small>${usage.sampleWeeks} of 8 weeks recorded. Target includes ${formatNumber(MINIMUM_KEG_CUSHION * 100)}% above the highest week; missing weeks are not zero.</small>` : ""}
     </div>
   </details>`;
 }
@@ -12957,7 +13040,7 @@ function renderKegNeedValue(item, need) {
     recommendation?.orderProductName || getKegOnDeckItem(item)?.name || getKegDisplayBrand(item, getKegLiveRow(item)),
   );
   if (isLiquorOunceTap(toNumber(item.tapNumber))) {
-    return `<span class="inventory-order-value">Order ${formatNumber(need)} bottle${need === 1 ? "" : "s"}${orderProductName ? ` of ${escapeHtml(orderProductName)}` : ""}</span>`;
+    return `<span class="inventory-order-value">Order ${formatNumber(need)} bottle${need === 1 ? "" : "s"}</span>`;
   }
   const actionLabel = recommendation?.actionType === "make"
     || (!recommendation && normalizeTitle(item.type) === "cocktail") ? "Make" : "Order";
@@ -12967,13 +13050,18 @@ function renderKegNeedValue(item, need) {
 function getKegLiveRow(item) {
   const row = kegTemplateAssignments.get(getKegItemKey(item)) || null;
   if (!row) return row;
-  // The keg-level endpoint validates the controller response before setting
-  // levelAvailable. An explicit raw zero from that live physical tap is a
-  // valid empty reading, not an absent value or a fallback converted to zero.
+  // Older responses accepted an all-zero, unconfigured controller payload.
+  // Do not promote those cached readings to confirmed empty kegs.
   const livePmbZero = !kegLiveLevelsStale
     && row.levelAvailable === true
     && row.rawPercent === 0
     && row.fillLevelPercent === 0
+    && Number(row.rawKegSize) > 0
+    && row.rawKegSizeDp != null
+    && row.rawKegSizeDp !== ""
+    && Number.isInteger(Number(row.rawKegSizeDp))
+    && Number(row.rawKegSizeDp) >= 0
+    && Number(row.rawKegSizeDp) <= 6
     && !row.lastKnownAt
     && !row.levelError
     && toNumber(row.deviceId) > 0
@@ -13605,7 +13693,7 @@ function applySharedInventoryState(state, { rebuild = false } = {}) {
   writeDashboardLocalStorageValue("onpar-inventory-group-overrides", inventoryGroupOverrides);
   inventoryHistory = Array.isArray(state.snapshots) ? state.snapshots : [];
   inventorySharedUpdatedAt = state.current?.updatedAt || "";
-  inventorySharedCountedAt = state.current?.countedAt || "";
+  inventoryCountedItemsAt = { ...(state.current?.countedItemsAt || {}) };
   saveInventoryOnHandOverrides();
   saveInventoryParOverrides();
   saveCustomInventoryItems();
@@ -13738,7 +13826,7 @@ function queueInventoryActionSync(operationId) {
       });
       inventorySharedRevision = Number(state.revision) || inventorySharedRevision;
       inventorySharedUpdatedAt = state.current?.updatedAt || inventorySharedUpdatedAt;
-      inventorySharedCountedAt = state.current?.countedAt || "";
+      inventoryCountedItemsAt = { ...(state.current?.countedItemsAt || {}) };
       inventoryActionOutbox = inventoryActionOutbox.filter((entry) => entry.id !== activeEntry.id);
       inventoryActionOutbox = inventoryActionOutbox.map((entry) => rebaseOperationalOutboxAfterOwnCommit(entry, {
         committedBaseRevision: activeEntry.baseRevision,
@@ -13850,7 +13938,7 @@ function queueInventoryFieldSync(key, payload) {
       });
       inventorySharedRevision = Number(state.revision) || inventorySharedRevision;
       inventorySharedUpdatedAt = state.current?.updatedAt || inventorySharedUpdatedAt;
-      inventorySharedCountedAt = state.current?.countedAt || "";
+      inventoryCountedItemsAt = { ...(state.current?.countedItemsAt || {}) };
       if (inventoryFieldOutbox[key]?.id === activeEntry.id) delete inventoryFieldOutbox[key];
       else {
         inventoryFieldOutbox[key] = rebaseOperationalOutboxAfterOwnCommit(inventoryFieldOutbox[key], {
@@ -13965,11 +14053,13 @@ function getLocalInventorySnapshotInputs() {
 async function refreshInventoryRevisionForSnapshot() {
   const state = await requestSharedInventory();
   if (!state.initialized || !inventorySnapshotInputsMatch(getLocalInventorySnapshotInputs(), state.current)) {
-    throw new Error("Shared inventory counts or settings differ from this browser. Your local values are preserved; compare the changes before saving a snapshot.");
+    const error = new Error("Newer saved inventory is available. The plan needs recalculating with those counts.");
+    error.code = state.initialized ? "INVENTORY_SNAPSHOT_INPUTS_CHANGED" : "INVENTORY_STATE_NOT_INITIALIZED";
+    throw error;
   }
   inventorySharedRevision = Number(state.revision);
   inventorySharedUpdatedAt = state.current.updatedAt || "";
-  inventorySharedCountedAt = state.current.countedAt || "";
+  inventoryCountedItemsAt = { ...(state.current?.countedItemsAt || {}) };
   return state;
 }
 
@@ -14198,7 +14288,7 @@ function renderInventorySpeechAssistant() {
           "vanilla syrup",
         ].includes(inventoryName);
         if (item.target !== "inventory") return false;
-        if (inventorySpeechInventoryScope === "other") return inventoryGroup === "other";
+        if (inventoryGroup === "other") return true;
         if (item.cabinetAssigned) {
           return inventoryGroup === (inventorySpeechInventoryScope === "mixer" ? "mixer cabinet" : "liquor cabinet");
         }
@@ -14268,7 +14358,6 @@ function renderInventorySpeechAssistant() {
           <div class="inventory-speech__scope" role="group" aria-label="Inventory area">
             <button class="ghost-button${inventorySpeechInventoryScope === "liquor" ? " is-active" : ""}" data-speech-inventory-scope="liquor" type="button" aria-pressed="${inventorySpeechInventoryScope === "liquor"}">Liquor cabinet</button>
             <button class="ghost-button${inventorySpeechInventoryScope === "mixer" ? " is-active" : ""}" data-speech-inventory-scope="mixer" type="button" aria-pressed="${inventorySpeechInventoryScope === "mixer"}">Mixer cabinet</button>
-            <button class="ghost-button${inventorySpeechInventoryScope === "other" ? " is-active" : ""}" data-speech-inventory-scope="other" type="button" aria-pressed="${inventorySpeechInventoryScope === "other"}">Other</button>
           </div>`}
         <label>
           <span class="sr-only">Spoken inventory transcript</span>
@@ -14279,7 +14368,7 @@ function renderInventorySpeechAssistant() {
           <button class="primary-button inventory-speech-review" type="button">Review</button>
           <button class="ghost-button inventory-speech-clear" type="button">Clear</button>
         </div>
-        <p class="sync-status" role="status">${escapeHtml(inventorySpeechMessage || "Nothing changes until you review and apply. On a phone, you can also tap the text box and use your keyboard's microphone, if available. Tap Review when finished.")}</p>
+        <p class="sync-status" role="status">${escapeHtml(inventorySpeechMessage || "")}</p>
         ${inventorySpeechProposals.length ? `
           ${kegOnly ? `<p class="sync-status" data-keg-speech-totals role="status">${escapeHtml(getKegSpeechCountSummary(sourceItems))}</p>` : ""}
           <div class="inventory-speech__review">${reviewCards}</div>
@@ -14469,11 +14558,64 @@ function stopInventorySpeechRecognition() {
   renderInventorySpeechAssistant();
 }
 
+function buildCompletedInventorySectionChanges(group, submittedChanges) {
+  const changes = new Map(submittedChanges.map((change) => [change.id, change]));
+  inventoryItems.forEach((item) => {
+    if (item.group !== group || getUncountedInventoryAmount(item) !== null || changes.has(item.id)) return;
+    changes.set(item.id, { id: item.id, target: "inventory", value: "0" });
+  });
+  const submittedAt = new Date().toISOString();
+  const receivedCounts = { ...inventoryCountedItemsAt };
+  changes.forEach((change) => { receivedCounts[change.id] = submittedAt; });
+  const sections = getInventoryCountSections(inventoryItems, receivedCounts);
+  const cabinets = sections.filter((section) => section.name !== "Other");
+  if (cabinets.length && cabinets.every((section) => section.complete)) {
+    const other = sections.find((section) => section.name === "Other");
+    other?.missing.forEach((item) => {
+      changes.set(item.id, { id: item.id, target: "inventory", value: "0" });
+    });
+  }
+  return [...changes.values()];
+}
+
+async function submitInventorySectionCount(group, button) {
+  if (!["Liquor Cabinet", "Mixer Cabinet"].includes(group) || !inventorySharedInitialized) return;
+  button.disabled = true;
+  try {
+    if (!(await flushPendingInventorySyncs())) {
+      throw new Error("The entered counts have not finished saving. They are preserved for retry.");
+    }
+    const entered = inventoryItems.filter((item) => item.group === group
+      && getUncountedInventoryAmount(item) === null
+      && isRecommendationForOperatingWeek(inventoryCountedItemsAt[item.id], new Date()))
+      .map((item) => ({ id: item.id, target: "inventory", value: clean(item.onHandDisplay) || "0" }));
+    const changes = buildCompletedInventorySectionChanges(group, entered);
+    if (!changes.length) return;
+    const saved = await runSharedInventoryAction({
+      action: "batch-update-fields",
+      source: "section-count",
+      changes: changes.map((change) => ({ id: change.id, field: "onHand", value: change.value })),
+    }, { successMessage: `${group} count received. Unmentioned items are zero.`, rebuild: true });
+    if (!saved) throw new Error("The section count could not be saved. It is preserved for retry.");
+  } catch (error) {
+    inventorySharedMessage = error.message;
+  } finally {
+    button.disabled = false;
+    renderInventory();
+    renderWeeklyPlan();
+  }
+}
+
 async function applyReviewedInventorySpeechChanges() {
   const changes = buildSpeechInventoryChanges(inventorySpeechProposals);
-  const inventoryChanges = changes.filter((change) => change.target === "inventory");
+  let inventoryChanges = changes.filter((change) => change.target === "inventory");
   const kegChanges = changes.filter((change) => change.target === "keg");
   if (!changes.length || inventorySpeechApplying) return;
+  if (inventoryChanges.length && inventorySpeechProposals.some(speechProposalNeedsReview)) {
+    inventorySpeechMessage = "Match or skip the remaining entries before submitting this section's count.";
+    renderInventorySpeechAssistant();
+    return;
+  }
   if (inventoryChanges.length && !inventorySharedInitialized) {
     inventorySpeechMessage = "Shared Inventory must be available before applying these counts.";
     renderInventorySpeechAssistant();
@@ -14484,13 +14626,19 @@ async function applyReviewedInventorySpeechChanges() {
     renderInventorySpeechAssistant();
     return;
   }
+  const submittedCabinet = inventorySpeechInventoryScope === "mixer" ? "Mixer Cabinet" : "Liquor Cabinet";
+  if (inventoryChanges.length) {
+    inventoryChanges = buildCompletedInventorySectionChanges(submittedCabinet, inventoryChanges);
+  }
   if (!confirmDashboardAction(
     `Apply ${changes.length} reviewed count${changes.length === 1 ? "" : "s"}?`,
     [
       `${inventoryChanges.length} Inventory field${inventoryChanges.length === 1 ? "" : "s"}.`,
       `${kegChanges.length} Keg Levels field${kegChanges.length === 1 ? "" : "s"}.`,
     ],
-    "Only the reviewed on-hand values will change.",
+    inventoryChanges.length
+      ? `${submittedCabinet} will be submitted. Unmentioned items in that section count as zero. Other items not counted this week become zero once both cabinets are submitted.`
+      : "Only the reviewed on-hand values will change.",
   )) return;
   inventorySpeechApplying = true;
   inventorySpeechMessage = "Applying reviewed counts...";
@@ -14529,7 +14677,9 @@ async function applyReviewedInventorySpeechChanges() {
     }
     inventorySpeechTranscript = "";
     inventorySpeechProposals = [];
-    inventorySpeechMessage = `${changes.length} reviewed count${changes.length === 1 ? "" : "s"} applied.`;
+    inventorySpeechMessage = inventoryChanges.length
+      ? `${submittedCabinet} count received. Unmentioned items are zero.`
+      : `${changes.length} reviewed count${changes.length === 1 ? "" : "s"} applied.`;
   } catch (error) {
     inventorySpeechMessage = `${error.message} The reviewed list is still here for retry.`;
   } finally {
@@ -14541,11 +14691,54 @@ async function applyReviewedInventorySpeechChanges() {
 
 function renderInventoryStockTable(groupedItems) {
   inventoryTable.innerHTML = "";
-
+  const filter = document.querySelector("#inventory-group-filter");
+  const selectedGroup = filter?.dataset.group || "all";
+  if (filter) {
+    filter.onclick = (event) => {
+      const button = event.target.closest("[data-inventory-group-filter]");
+      if (!button || !filter.contains(button)) return;
+      const group = button.dataset.inventoryGroupFilter;
+      if (!["all", "Liquor Cabinet", "Mixer Cabinet", "Other"].includes(group)) return;
+      filter.dataset.group = group;
+      filter.querySelector(".keg-wall-filter__title").textContent = group === "all" ? "Current Inventory" : group;
+      filter.querySelectorAll("[data-inventory-group-filter]").forEach((option) => {
+        const active = option.dataset.inventoryGroupFilter === group;
+        option.classList.toggle("is-active", active);
+        option.setAttribute("aria-pressed", String(active));
+      });
+      filter.open = false;
+      filter.querySelector("summary").focus();
+      renderInventoryStockTable(groupInventoryForDisplay(getVisibleInventoryItems()));
+    };
+  }
   const groups = new Map(groupedItems);
+  const countProgress = new Map(getInventoryCountSections(inventoryItems, inventoryCountedItemsAt)
+    .map((section) => [section.name, section]));
   ["Liquor Cabinet", "Mixer Cabinet", "Other"].forEach((groupName) => {
+    if (selectedGroup !== "all" && selectedGroup !== groupName) return;
     const items = groups.get(groupName) || [];
-    inventoryTable.append(createInventoryGroupRow(groupName, 2));
+    const progress = countProgress.get(groupName);
+    if (selectedGroup === "all" || progress) {
+      const heading = createInventoryGroupRow(selectedGroup === "all" ? groupName : "", 2);
+      if (progress) {
+        const status = document.createElement("span");
+        status.className = "table-note";
+        status.textContent = progress.complete ? "Count received this week"
+          : `${progress.total - progress.missing.length} of ${progress.total} counted this week`;
+        heading.firstElementChild.append(status);
+        if ((!progress.complete || countProgress.get("Other")?.missing.length)
+          && ["Liquor Cabinet", "Mixer Cabinet"].includes(groupName)) {
+          const finish = document.createElement("button");
+          finish.type = "button";
+          finish.className = "mini-button";
+          finish.textContent = "Submit section count";
+          finish.setAttribute("aria-label", `Submit ${groupName} count; unmentioned items are zero`);
+          finish.addEventListener("click", () => void submitInventorySectionCount(groupName, finish));
+          heading.firstElementChild.append(finish);
+        }
+      }
+      inventoryTable.append(heading);
+    }
     items.forEach((item) => inventoryTable.append(createInventoryRow(item, "stock")));
   });
 }
@@ -14602,7 +14795,7 @@ async function addCustomInventoryItem(event) {
     saveInventoryParOverrides();
     inventoryItems = mergeCustomInventoryItems(inventoryItems.filter((item) => !item.isCustomInventory));
     await runSharedInventoryAction(
-      { action: "upsert-custom", item: nextItem },
+      { action: "upsert-custom", item: nextItem, countInput: onHandDisplay !== "" },
       {
         successMessage: editingCustomInventoryId
           ? `${name} was updated in shared inventory.`
@@ -15409,7 +15602,57 @@ function toggleInventoryRowEdit(id) {
   renderInventory();
 }
 
-async function saveInventorySnapshot({ replaceExisting = false } = {}) {
+async function saveInventorySnapshot(options = {}) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    // Only discard attempts the server explicitly rejected, never a save with
+    // an uncertain network outcome. Keep a durable copy for recovery.
+    const rejected = inventoryActionOutbox.filter((entry) => entry.conflict && entry.payload?.action === "save-snapshot");
+    if (rejected.length) {
+      localStorage.setItem(`onpar-inventory-snapshot-recovery-${Date.now()}`, JSON.stringify({
+        recoveredAt: new Date().toISOString(),
+        operations: rejected,
+      }));
+      const previous = inventoryActionOutbox;
+      const rejectedIds = new Set(rejected.map((entry) => entry.id));
+      inventoryActionOutbox = inventoryActionOutbox.filter((entry) => !rejectedIds.has(entry.id));
+      if (!saveInventoryActionOutbox()) {
+        inventoryActionOutbox = previous;
+        return false;
+      }
+      if (!getPendingInventoryOperations().length) inventorySharedSaveError = "";
+    }
+    if ((getPendingInventoryOperations().length || inventoryFieldSyncPendingCount || inventoryFieldSyncTimers.size)
+      && !await flushPendingInventorySyncs()) return false;
+    const latest = await requestSharedInventory();
+    if (!latest.initialized) throw new Error("Shared inventory setup is incomplete.");
+    // An edit made while the read was in flight must be saved, not replaced.
+    if (getPendingInventoryOperations().length || inventoryFieldSyncPendingCount || inventoryFieldSyncTimers.size) continue;
+    if (!inventoryFieldOutboxDurable || !inventoryActionOutboxDurable) return false;
+    applySharedInventoryState(latest, { rebuild: true });
+    inventorySharedSaveError = "";
+    try {
+      return await saveInventorySnapshotAttempt(options);
+    } catch (error) {
+      if (error.code !== "INVENTORY_SNAPSHOT_INPUTS_CHANGED") throw error;
+      inventorySharedMessage = "Inventory changed while saving. Using the latest saved counts and recalculating...";
+      weeklyPlanRefreshMessage = inventorySharedMessage;
+      renderWeeklyPlan();
+    }
+  }
+  inventorySharedSaving = false;
+  inventorySharedMessage = "Inventory kept changing during Save & Lock. Your counts are preserved. Finish counting, then try Save & Lock again.";
+  weeklyPlanRefreshMessage = inventorySharedMessage;
+  renderInventoryPanels();
+  renderWeeklyPlan();
+  return false;
+}
+
+async function saveInventorySnapshotAttempt({ replaceExisting = false } = {}) {
+  // Login refresh and Save & Lock share the same work instead of racing it.
+  if (mondayPmbRefreshPromise) await mondayPmbRefreshPromise;
+  if (mondayKegLevelSyncPromise) await mondayKegLevelSyncPromise;
+  if (mondayWeeklyUsageSyncPromise) await mondayWeeklyUsageSyncPromise;
+  if (mondayCalculationPromise) await mondayCalculationPromise;
   const now = new Date();
   const easternWeekday = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
@@ -15463,9 +15706,17 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
     await failCapture(inventorySharedSaveError || "Your counts are preserved, but could not be saved. Retry Save & Lock Plan.", "INVENTORY_NOT_READY");
     return false;
   }
+  let calculationBaseState;
   try {
-    await refreshInventoryRevisionForSnapshot();
+    calculationBaseState = await refreshInventoryRevisionForSnapshot();
+    const missingSections = getInventoryCountSections(inventoryItems, inventoryCountedItemsAt)
+      .filter((section) => !section.complete);
+    if (missingSections.length) {
+      await failCapture(`This week's counts are still needed for: ${missingSections.map((section) => section.name).join(", ")}.`, "INVENTORY_COUNTS_NOT_CURRENT");
+      return false;
+    }
   } catch (error) {
+    if (error.code === "INVENTORY_SNAPSHOT_INPUTS_CHANGED") throw error;
     await failCapture(error.message, "INVENTORY_REVISION_REVIEW_REQUIRED");
     return false;
   }
@@ -15538,11 +15789,21 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
     await failCapture("Inventory changes are pending. Recover any blocked snapshot attempt from Inventory before saving again.", "INVENTORY_NOT_READY");
     return false;
   }
+  let snapshotBaseState;
   try {
-    await refreshInventoryRevisionForSnapshot();
+    snapshotBaseState = await refreshInventoryRevisionForSnapshot();
   } catch (error) {
+    if (error.code === "INVENTORY_SNAPSHOT_INPUTS_CHANGED") throw error;
     await failCapture(error.message, "INVENTORY_REVISION_REVIEW_REQUIRED");
     return false;
+  }
+  if (!inventorySnapshotInputsMatch(calculationBaseState.current, snapshotBaseState.current)
+    || JSON.stringify(calculationBaseState.current.groupOverrides) !== JSON.stringify(snapshotBaseState.current.groupOverrides)
+    || JSON.stringify(calculationBaseState.current.inventoryContributions) !== JSON.stringify(snapshotBaseState.current.inventoryContributions)
+    || JSON.stringify(calculationBaseState.snapshots) !== JSON.stringify(snapshotBaseState.snapshots)) {
+    const error = new Error("Inventory changed during calculation.");
+    error.code = "INVENTORY_SNAPSHOT_INPUTS_CHANGED";
+    throw error;
   }
 
   weeklyPlanRefreshMessage = "Saving this week's snapshot and locking the plan...";
@@ -15550,6 +15811,7 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
   const state = await runSharedInventoryAction(
     {
       action: "save-snapshot",
+      snapshotBaseState,
       items: getInventorySnapshotItems(),
       summary,
       kegPlanSnapshot,
@@ -15591,6 +15853,11 @@ async function saveInventorySnapshot({ replaceExisting = false } = {}) {
     renderInventoryHistory();
     renderInventoryPanels();
     return true;
+  }
+  if (inventoryActionOutbox.some((entry) => entry.conflict && entry.payload?.action === "save-snapshot")) {
+    const error = new Error("Inventory changed before the snapshot could be saved.");
+    error.code = "INVENTORY_SNAPSHOT_INPUTS_CHANGED";
+    throw error;
   }
   return false;
 }

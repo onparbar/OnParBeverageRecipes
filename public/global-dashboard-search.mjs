@@ -13,6 +13,51 @@ export function normalizeGlobalSearchText(value) {
 const DASHBOARD_SEARCH_FIELD_CACHE = new WeakMap();
 const DASHBOARD_DATA_IDENTITY_CACHE = new WeakMap();
 
+export function normalizeDashboardQuestion(value) {
+  return normalizeGlobalSearchText(value)
+    .replace(/\bpbrs?\b/g, "pabst blue ribbon")
+    .replace(/\b(?:customers? favorites?|guest favorites?|most popular|best sellers?|bestselling)\b/g, "highest poured volume")
+    .replace(/\b(?:slowest selling|least popular)\b/g, "lowest poured volume")
+    .replace(/\b(?:makes?|making|earns?|earning|generates?|generating) (?:us )?(?:the )?most profit\b/g, "highest profit")
+    .replace(/\b(?:over|during|across) (?:the )?(?:(?:last|past) )?(one|1|four|4|six|6|eight|8|twelve|12) weeks?\b/g, "last $1 weeks")
+    .replace(/\b(?:pabst blue ribbon|titos) s\b/g, (match) => match.slice(0, -2));
+}
+
+export function getConversationalItemQuery(value) {
+  return normalizeDashboardQuestion(value)
+    .replace(/^(?:(?:can|could|would) you )?(?:please )?(?:find|show|open|look up|tell me about)(?: me)?\s+/, "")
+    .replace(/^(?:the|a|an)\s+/, "")
+    .replace(/\s+(?:recipe|please)$/, "");
+}
+
+export function describeDashboardDataSearch(search) {
+  const results = search?.results || [];
+  if (!results.length || !search.intent) return "";
+  const first = results[0];
+  const format = (value) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
+  const currency = (value) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
+  const metric = search.intent.metric;
+  const measure = metric === "margin" ? `${format(first.value)}% estimated gross margin`
+    : metric === "profit" ? `${currency(first.value)} estimated gross profit`
+      : metric === "dollars" ? `${currency(first.value)} estimated sales` : `${format(first.value)} oz poured`;
+  const leader = search.intent.sort === "desc" ? " has the highest matching value"
+    : search.intent.sort === "asc" ? " has the lowest matching value" : "";
+  const scope = [first.name, first.wall, first.tapNumber ? `Tap ${first.tapNumber}` : ""].filter(Boolean).join(" / ");
+  let text = `${scope}${leader}: ${measure}. Period: ${first.periodLabel}.`;
+  if (metric === "profit" && Number.isFinite(first.ounces) && Number.isFinite(first.profitPerOz)) {
+    text += ` Calculation: ${format(first.ounces)} oz x ${currency(first.profitPerOz)} estimated profit per oz (using unrounded values).`;
+  }
+  if (metric === "margin" && first.sellingPricePerOz > 0 && Number.isFinite(first.profitPerOz)) {
+    text += ` Calculation: estimated profit per oz divided by selling price per oz x 100.`;
+  }
+  if (["profit", "margin", "dollars"].includes(metric)) {
+    text += " These are estimates using the dashboard's current pricing assumptions, not recorded sales or net profit.";
+  }
+  if (search.intent.period === "recent") text += " No period was specified, so I used the recent saved-week average.";
+  if (results.length > 1) text += ` ${results.length} matching results are shown below.`;
+  return text;
+}
+
 function getSearchFields(item) {
   const extraValues = Array.isArray(item?.searchText) ? item.searchText : [item?.searchText];
   const signature = [item?.title, item?.section, item?.subtitle, ...extraValues]
@@ -140,6 +185,9 @@ const DASHBOARD_QUERY_STOP_WORDS = new Set([
   "tap", "taps", "that", "the", "this", "to", "wall", "week", "weeks", "what",
   "which", "with", "four", "six", "eight", "twelve", "time", "history",
   "how", "much", "many", "do", "does", "we", "our", "my", "tell", "about", "average", "avg",
+  "why", "explain", "could", "would", "you", "us", "getting", "get", "so", "such", "been", "being",
+  "was", "were", "during", "across", "previous", "looking", "look", "at", "doing", "performing",
+  "compared", "compare", "versus", "vs", "between",
 ]);
 
 const DASHBOARD_QUERY_RULE_WORDS = new Set([
@@ -149,6 +197,7 @@ const DASHBOARD_QUERY_RULE_WORDS = new Set([
   "over", "patio", "pour", "poured", "pours", "recent", "revenue", "sale", "sales",
   "profit", "profits", "margin", "shot", "shots", "spirit", "spirits", "than", "top", "under", "usage", "volume", "worst",
   "bottom", "largest", "smallest", "oz", "percent", "estimated", "projected", "gross", "sellers", "selling",
+  "high", "low", "profitable", "profitability",
 ]);
 
 const DASHBOARD_PERIOD_WEEK_VALUES = new Map([
@@ -215,7 +264,7 @@ function getDashboardQueryNameTerms(query) {
 }
 
 export function parseDashboardDataQuery(rawQuery) {
-  const query = normalizeGlobalSearchText(String(rawQuery ?? "").replace(/(\d)\.(?=\d)/g, "$1decimalpoint"))
+  const query = normalizeDashboardQuestion(String(rawQuery ?? "").replace(/(\d)\.(?=\d)/g, "$1decimalpoint"))
     .replace(/(\d)decimalpoint(?=\d)/g, "$1.");
   if (!query) {
     return {
@@ -253,7 +302,7 @@ export function parseDashboardDataQuery(rawQuery) {
 
   const hasDollarMetric = /\b(?:sales?|revenue|dollars?)\b/.test(query) || String(rawQuery ?? "").includes("$");
   const hasOunceMetric = /\b(?:ounces?|oz|pours?|poured|volume|usage)\b/.test(query);
-  const hasProfitMetric = /\b(?:profits?|margin)\b/.test(query);
+  const hasProfitMetric = /\b(?:profits?|margin|profitable|profitability)\b/.test(query);
   if ([hasDollarMetric, hasOunceMetric, hasProfitMetric].filter(Boolean).length > 1) {
     return {
       status: "needs-clarification",
@@ -283,7 +332,7 @@ export function parseDashboardDataQuery(rawQuery) {
     };
   }
 
-  const wantsTop = /\b(?:best|highest|top|largest)\b|\bmost\s+(?:poured|sales|volume|ounces)/.test(query);
+  const wantsTop = /\b(?:best|highest|top|largest)\b|\bmost\s+(?:poured|sales|volume|ounces|profit|profitable)/.test(query);
   const wantsBottom = /\b(?:worst|lowest|least|bottom|smallest)\b/.test(query);
   const sort = wantsTop && wantsBottom ? "both" : wantsTop ? "desc" : wantsBottom ? "asc" : null;
   let nameQuery = query.replace(periodSelection.matchedText || /$^/, " ");

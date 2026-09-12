@@ -71,19 +71,87 @@ function buildOutstandingWorkBullets(staffPrepPlan = {}, orders = {}, now = new 
   return cleanList(bullets);
 }
 
+function consolidateReadinessAlerts(alerts, readiness = {}, mondayRun = {}) {
+  const groups = new Map();
+  const other = [];
+  const definitions = {
+    pmb: ["PMB connection needs attention", "refresh-pmb"],
+    shared: ["Shared data needs attention", "weekly-plan"],
+    usage: ["Weekly usage needs attention", "weekly-usage"],
+    plan: ["Weekly plan needs attention", "weekly-plan"],
+  };
+  const reasonGroup = (message) => {
+    if (/save|saving|setup|unsynced|recovery|durabl/i.test(message)) return "shared";
+    if (/weekly usage|usage report|saved usage|active taps.*usage/i.test(message)) return "usage";
+    if (/PMB|tap repair|tap prices|keg levels.*(?:refresh|unavailable|reading)/i.test(message)) return "pmb";
+    return "plan";
+  };
+  const add = (key, alert, messages) => {
+    const group = groups.get(key) || {
+      id: `briefing-${key}`,
+      title: definitions[key][0],
+      severity: "info",
+      action: { target: definitions[key][1] },
+      details: [],
+    };
+    const rank = { info: 0, warning: 1, critical: 2 };
+    if ((rank[alert.severity] || 0) > (rank[group.severity] || 0)) group.severity = alert.severity;
+    for (const message of cleanList(messages)) {
+      const normalized = message.toLowerCase().replace(/[.!]+$/, "");
+      if (!group.details.some((value) => value.toLowerCase().replace(/[.!]+$/, "") === normalized)) group.details.push(message);
+    }
+    groups.set(key, group);
+  };
+  for (const alert of alerts) {
+    const id = clean(alert?.id);
+    const messages = cleanList([alert?.message, ...cleanList(alert?.details)]);
+    if (/^pmb-(?:keg-levels|pricing|connection)-/.test(id)
+      || /^(?:Live PMB keg levels are unavailable|Tap pricing is offline|PMB data unavailable|PMB connection|PMB refresh)/i.test(clean(alert?.title))) {
+      add("pmb", alert, [alert.title, ...messages]);
+    } else if (/^shared-/.test(id)) {
+      add("shared", alert, messages.length ? messages : [alert.title]);
+    } else if (/^weekly-usage-/.test(id)) {
+      add("usage", alert, [alert.title, ...messages]);
+    } else if (/^weekly-plan-/.test(id)) {
+      (messages.length ? messages : [alert.title]).forEach((message) => add(reasonGroup(message), alert, [message]));
+    } else {
+      other.push(alert);
+    }
+  }
+  for (const [field, severity] of [["blockers", "critical"], ["staleReasons", "critical"], ["reviewReasons", "warning"]]) {
+    cleanList(readiness[field]).forEach((message) => add(reasonGroup(message), { severity }, [message]));
+  }
+  if (["blocked", "stale", "unknown"].includes(readiness.status)
+    && !groups.size) {
+    add("plan", { severity: "critical" }, [clean(readiness.label) || "Weekly plan readiness could not be confirmed."]);
+  }
+  const refresh = (mondayRun.steps || []).find((step) => step.id === "pmb");
+  if (refresh && !refresh.complete && !groups.has("pmb")) {
+    const status = clean(refresh.status);
+    if (status && status !== "Ready") {
+      const key = reasonGroup(status);
+      // A more detailed alert for this input already carries the same issue.
+      if (!groups.has(key)) add(key, { severity: /refreshing|saving|waiting/i.test(status) ? "info" : "critical" }, [status]);
+    }
+  }
+  return [...groups.values(), ...other];
+}
+
 function buildThirtySecondBriefingRaw({
   overview = {},
   mondayRun = {},
+  readiness = {},
   staffPrepPlan = {},
   orders = {},
   now = new Date(),
 } = {}) {
   const lines = [];
-  const alerts = Array.isArray(overview.alerts) ? overview.alerts : [];
+  const alerts = consolidateReadinessAlerts(Array.isArray(overview.alerts) ? overview.alerts : [], readiness, mondayRun);
   const criticalAlerts = alerts.filter((item) => item?.severity === "critical");
   const warningAlerts = alerts.filter((item) => item?.severity === "warning");
   const informationalAlerts = alerts.filter((item) => !["critical", "warning"].includes(item?.severity));
-  const nextStep = mondayRun.complete ? null : mondayRun.nextStep;
+  const nextStep = (mondayRun.steps || []).find((step) => step.id !== "pmb" && !step.complete)
+    || (mondayRun.complete || mondayRun.nextStep?.id === "pmb" ? null : mondayRun.nextStep);
 
   if (criticalAlerts.length) {
     const alert = criticalAlerts[0];
@@ -137,7 +205,7 @@ function buildThirtySecondBriefingRaw({
     });
   }
 
-  const visibleLines = lines.slice(0, 6);
+  const visibleLines = lines;
   return {
     lines: visibleLines,
     voiceText: visibleLines
@@ -251,6 +319,7 @@ function homePolishBriefingItems(items, sourceArgs) {
     if (/Weekly Usage coverage is partial/i.test(title)) {
       coverageTemplate ||= item;
       homeBriefingStrings(item).forEach((entry) => homeCollectComingSoonTaps(entry, comingSoonTaps));
+      polished.push(item);
       continue;
     }
     if (/Live PMB keg levels are unavailable|Tap pricing is offline|PMB data unavailable/i.test(title)) {
@@ -322,7 +391,12 @@ export function buildThirtySecondBriefing(...args) {
   if (!result || typeof result !== "object") return result;
   for (const key of ["items", "lines", "alerts"]) {
     if (Array.isArray(result[key])) {
-      return { ...result, [key]: homePolishBriefingItems(result[key], args) };
+      const polished = homePolishBriefingItems(result[key], args);
+      return {
+        ...result,
+        [key]: polished,
+        voiceText: polished.map((item) => [item.text, item.detail, ...cleanList(item.bullets)].filter(Boolean).join(". ")).join(". "),
+      };
     }
   }
   return result;

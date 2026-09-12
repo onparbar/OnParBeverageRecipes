@@ -158,7 +158,7 @@ test("wall comparison uses estimated profit rather than volume and includes all 
   const result = buildLastWeekProjectedSalesMix(items, { wall: "karaoke", metric: "profit",
     getGrossProfitPerOz: (item) => item.tapNumber === 21 ? 1 : 4 });
   assert.deepEqual(result.walls.map((row) => row.sharePercent), [33, 67, 0]);
-  assert.match(source, /renderDashboardProjectedWallMix\(profitMix\.walls\)/);
+  assert.match(source, /renderDashboardProjectedWallMix\(profitMix\.walls, profitMix\.weekLabel\)/);
 });
 
 test("the 26-drink option reaches the ranking engine and destinations respect keg quantity", () => {

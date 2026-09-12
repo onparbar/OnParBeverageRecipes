@@ -20,9 +20,15 @@ export function findExactLastKnownKegLevel(snapshot, slot) {
     && positiveInteger(item?.plu) === identity.plu
   ));
   if (matches.length !== 1) return null;
+  if (matches[0].levelAvailable === false
+    || matches[0].fillLevelPercent == null || matches[0].fillLevelPercent === "") return null;
 
   const fillLevelPercent = Number(matches[0].fillLevelPercent);
   if (!Number.isFinite(fillLevelPercent) || fillLevelPercent < 0 || fillLevelPercent > 100) return null;
+  if (fillLevelPercent === 0 && (!(Number(matches[0].rawKegSize) > 0)
+    || matches[0].rawKegSizeDp == null || matches[0].rawKegSizeDp === ""
+    || !Number.isFinite(Number(matches[0].rawKegSizeDp))
+    || Number(matches[0].rawKegSizeDp) < 0 || Number(matches[0].rawKegSizeDp) > 6)) return null;
   return {
     ...matches[0],
     fillLevelPercent,

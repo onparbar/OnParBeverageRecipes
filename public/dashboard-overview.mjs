@@ -247,7 +247,7 @@ function getPlanState(weeklyPlan, nowTime, staleAfterDays) {
     ? getAgeState(generatedAt, nowTime, nonNegativeNumber(staleAfterDays) * DAY_MS)
     : "unknown";
   const lockedForWeek = weeklyPlan?.lockedForWeek === true;
-  const ageStale = !lockedForWeek && ageState === "stale";
+  const ageStale = !lockedForWeek && readiness.autoRefreshPlan !== true && ageState === "stale";
   const details = [
     ...cleanList(readiness.blockers),
     ...cleanList(readiness.staleReasons),
@@ -268,7 +268,7 @@ function getPlanState(weeklyPlan, nowTime, staleAfterDays) {
     generatedAt,
     ageStale,
     lockedForWeek,
-    actionable: ["ready", "review"].includes(status) && !ageStale,
+    actionable: ["ready", "review"].includes(status) && !ageStale && !readiness.needsRecalculation,
   };
 }
 

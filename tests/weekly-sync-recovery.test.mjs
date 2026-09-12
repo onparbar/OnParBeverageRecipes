@@ -59,7 +59,7 @@ test("inventory must have a count from this operating week, without making blank
   assert.equal(normalizeInventoryState(state).current.countedAt, monday.toISOString());
   state = applyInventoryStateAction(state, "batch-update-fields", { source: "clear-on-hand", changes: [{ id: "lime", field: "onHand", value: "" }] }, "owner", monday);
   assert.equal(model().steps[1].complete, false);
-  assert.equal(buildMondayRunModel({ planLocked: true }).steps[1].complete, true);
+  assert.equal(buildMondayRunModel({ planLocked: true }).steps[1].complete, false);
 });
 
 test("a count queued last week does not become this week's count merely because its retry succeeds today", () => {
@@ -72,7 +72,7 @@ test("a count queued last week does not become this week's count merely because 
 });
 
 const dashboardSource = await readFile(new URL("../public/dashboard.js", import.meta.url), "utf8");
-const queueSource = dashboardSource.slice(dashboardSource.indexOf("function queueSharedWeeklyUsageSave()"), dashboardSource.indexOf("async function flushPendingSharedWeeklyUsageSave()"));
+const queueSource = dashboardSource.slice(dashboardSource.indexOf("function queueSharedWeeklyUsageSave()"), dashboardSource.indexOf("function flushPendingSharedWeeklyUsageSave()"));
 
 function usageQueueContext(conflict = false) {
   let writes = 0;

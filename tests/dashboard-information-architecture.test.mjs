@@ -260,8 +260,8 @@ test("vendor price sync remains automatic at login but stays outside the unified
   assert.match(dashboardSource, /const syncScope = automatic \? "all" : vendorSyncScope/);
   assert.match(dashboardSource, /Prices sync automatically/);
   assert.match(pageSource, /id="refresh-all-pmb"/);
-  assert.match(dashboardSource, /async function runUnifiedPmbRefresh\(\{ afterRepair = false \} = \{\}\)/);
-  const unifiedStart = dashboardSource.indexOf("async function runUnifiedPmbRefresh(");
+  assert.match(dashboardSource, /async function runUnifiedPmbRefreshAttempt\(\{ afterRepair = false \} = \{\}\)/);
+  const unifiedStart = dashboardSource.indexOf("function runUnifiedPmbRefresh(");
   const unifiedEnd = dashboardSource.indexOf("document.querySelector(\"#refresh-all-pmb\")", unifiedStart);
   assert.doesNotMatch(dashboardSource.slice(unifiedStart, unifiedEnd), /runVendorSync/);
   assert.doesNotMatch(dashboardSource, /id="run-vendor-sync"/);
@@ -272,7 +272,7 @@ test("PMB refresh alerts distinguish attempted failures from unchecked feeds", (
   assert.match(dashboardSource, /kegSyncAttempted\s*\?\s*"offline"\s*:\s*"not-checked"/s);
   assert.match(dashboardSource, /tapPricingSyncAttempted\s*\?\s*"offline"\s*:\s*"not-checked"/s);
 
-  const kegSyncStart = dashboardSource.indexOf("async function runKegLevelSync()");
+  const kegSyncStart = dashboardSource.indexOf("function runKegLevelSync()");
   const kegSyncEnd = dashboardSource.indexOf("async function runTapPricingSync()", kegSyncStart);
   assert.doesNotMatch(dashboardSource.slice(kegSyncStart, kegSyncEnd), /kegSyncAttempted = false/);
   assert.match(dashboardSource.slice(kegSyncStart, kegSyncEnd), /signal: AbortSignal\.timeout\(60_000\)/);
@@ -397,7 +397,7 @@ test("the initial Dashboard uses a light visual beverage pulse and change-only O
   assert.match(pulseSource, /Sales mix/);
   assert.doesNotMatch(pulseSource, /const volumeMix = buildLastWeekProjectedSalesMix\(/);
   assert.match(pulseSource, /const profitMix = buildLastWeekProjectedSalesMix\(/);
-  assert.match(pulseSource, /renderDashboardProjectedWallMix\(profitMix\.walls\)/);
+  assert.match(pulseSource, /renderDashboardProjectedWallMix\(profitMix\.walls, profitMix\.weekLabel\)/);
   assert.doesNotMatch(pulseSource, /PMB ounces × saved\/current prices/);
   assert.match(pulseSource, /dashboard-pulse-bar/);
   assert.match(pulseSource, /data-seller-ranking-wall/);
