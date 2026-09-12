@@ -10286,8 +10286,16 @@ function renderTapChangeControls(item, liveRow, displayBrand = item.brand) {
           <span class="tap-product-detail__label">Rolling 6-week weekly usage</span>
           <strong>${escapeHtml(usageText)}</strong>
           ${usage.sampleWeeks && usage.sampleWeeks < 6 ? `<small>Based on ${usage.sampleWeeks} of the last 6 completed weeks.</small>` : ""}
-          <span class="tap-product-detail__label">Last tapped (PMB)</span>
-          <span>${escapeHtml(liveRow?.tappedOn || "Not reported by PMB")}</span>
+          ${liveRow?.productHistory ? `
+            <span class="tap-product-detail__label">${liveRow.productHistory.changedAt
+              ? liveRow.productHistory.source === "confirmed" ? "PMB product change confirmed" : "Current product first detected"
+              : "Tracking this product since"}</span>
+            <span>${escapeHtml(formatUpdatedAt(liveRow.productHistory.changedAt || liveRow.productHistory.firstSeenAt))}</span>
+            ${liveRow.productHistory.previousName ? `<small>Previously: ${escapeHtml(liveRow.productHistory.previousName)}</small>` : '<small>Earlier product-change date not recorded.</small>'}
+          ` : '<span class="tap-product-detail__label">Product history</span><span>Not recorded yet</span>'}
+          ${liveRow?.productHistoryUnavailable ? '<small>Saved product history is temporarily unavailable.</small>' : ""}
+          <span class="tap-product-detail__label">${liveRow?.tappedOnCached || kegLiveLevelsStale ? "Last tapped (saved PMB reading)" : "Last tapped (PMB)"}</span>
+          <span>${escapeHtml(liveRow?.tappedOn || liveRow?.tappedOnError || "Not reported by PMB")}</span>
           ${liveRow?.tappedOn ? '<small>PMB server time</small>' : ""}
         </div>
       </details>

@@ -10,6 +10,7 @@ import {
   requireSuccessfulKegLevelResponse,
 } from "../../../lib/pmb-keg-safety.mjs";
 import { findExactLastKnownKegLevel } from "../../../public/keg-level-fallback.mjs";
+import { attachTapProductHistory, recordTapProductObservations, sameTapProduct } from "../../../lib/pmb-tap-product-history.mjs";
 
 function parseJsonLoose(text) {
   try {
@@ -128,10 +129,12 @@ export async function GET() {
   try {
     const config = getConfig();
     const token = await getAuthtoken(config);
+    const observedAt = new Date().toISOString();
+    const cookieJar = new Map();
 
-    const [products, tapConfigRows, tappedOnRows] = await Promise.all([
+    const [products, tapConfigRows] = await Promise.all([
       postJson(config.baseUrl, "/api/productlist", { id: String(config.clientId) }, token),
-      getTapConfigRows(config).catch((error) => {
+      getTapConfigRows(config, { cookieJar }).catch((error) => {
         throw new PmbKegSafetyError(
           `Live PMB tap configuration could not be verified: ${error.message || "tap configuration unavailable"}`,
           {
@@ -140,9 +143,14 @@ export async function GET() {
           },
         );
       }),
-      // History is optional: its availability must never interrupt live levels.
-      getKegTappedOnRows(config).catch(() => []),
     ]);
+    // PMB management reads share a session and run sequentially. A failed
+    // optional report must not discard verified levels or masquerade as no history.
+    let tappedOnError = "";
+    const tappedOnRows = await getKegTappedOnRows(config, { cookieJar }).catch(() => {
+      tappedOnError = "PMB history is temporarily unavailable.";
+      return [];
+    });
 
     if (products.status !== 200 || !Array.isArray(products.json?.productlist)) {
       throw new PmbKegSafetyError(`PMB productlist failed (${products.status})`, {
@@ -239,7 +247,7 @@ export async function GET() {
         .map((product) => [Number(product.plu || 0), product])
         .filter(([plu]) => plu),
     );
-    const items = verifiedSlots.map((slot) => {
+    let items = verifiedSlots.map((slot) => {
       const product = productByPlu.get(slot.plu) || {};
       const level = levelBySlot.get(`${slot.deviceId}:${slot.lineNum}`) || {};
       const history = tappedOnRows.find((entry) => (
@@ -248,9 +256,13 @@ export async function GET() {
         && entry.tapNumber === Number(slot.tapNumber)
         && normalizeProductName(entry.name).toLowerCase() === normalizeProductName(slot.product).toLowerCase()
       ));
+      const saved = lastCompleteSnapshot?.items?.find((entry) => sameTapProduct(entry, slot));
       return {
         slotKey: slot.slotKey,
-        tappedOn: history?.tappedOn || "",
+        tappedOn: history?.tappedOn || saved?.tappedOn || "",
+        tappedOnCached: !history && Boolean(saved?.tappedOn),
+        tappedOnError: history ? "" : tappedOnError || "No matching PMB history record was returned.",
+        productHistory: saved?.productHistory || null,
         plu: slot.plu,
         name: normalizeProductName(product.name || slot.product || `PLU ${slot.plu}`),
         fillLevelPercent: level.fillLevelPercent ?? null,
@@ -268,6 +280,17 @@ export async function GET() {
         rawKegSizeDp: level.rawKegSizeDp ?? null,
       };
     });
+
+    try {
+      const history = await recordTapProductObservations(items.map((item) => ({
+        ...item, tappedOn: item.tappedOnCached ? "" : item.tappedOn,
+      })), { observedAt });
+      items = attachTapProductHistory(items, history);
+    } catch {
+      // Storage is additive: an unavailable/unprovisioned history table must
+      // never interrupt counting, levels, or existing ordering behavior.
+      items = attachTapProductHistory(items, [], { unavailable: true });
+    }
 
     const snapshot = {
       updatedAt: new Date().toISOString(),

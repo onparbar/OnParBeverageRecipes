@@ -4,6 +4,7 @@ import http from "node:http";
 import { POST as savePmbProduct } from "../pmb-products/route.js";
 import { requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
 import { getTapConfigRows as getVerifiedTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
+import { recordTapProductObservations } from "../../../lib/pmb-tap-product-history.mjs";
 import {
   requireKegTargetIdentity,
   verifyUniqueKegProductAssignment,
@@ -523,7 +524,26 @@ export async function POST(request) {
       });
     }
 
+    // Capture the previous assignment before the existing, user-confirmed write.
+    // Failure to save optional history must not cause a product write to repeat.
+    let productHistoryWarning = "";
+    try {
+      await recordTapProductObservations([slot]);
+    } catch {
+      productHistoryWarning = "Product history could not be saved.";
+    }
     const productResult = await saveProductOnTapPlu(productPayload, request);
+    const savedProduct = productResult.product;
+    if (Number(savedProduct?.plu) === Number(slot.plu)
+      && clean(savedProduct?.name).toLowerCase() === clean(productPayload.name).toLowerCase()) {
+      try {
+        await recordTapProductObservations([{ ...slot, product: savedProduct.name }], { source: "confirmed" });
+      } catch {
+        productHistoryWarning = "Product changed, but its history could not be saved. Do not repeat the product change.";
+      }
+    } else {
+      productHistoryWarning = "The new product name was not confirmed; no confirmed history event was recorded.";
+    }
     const configUpdate = input.sendConfigUpdate === false
       ? null
       : await sendTargetedConfigUpdate(config, slot.deviceId);
@@ -538,6 +558,7 @@ export async function POST(request) {
       },
       imageUploaded: Boolean(productResult.imageUploaded),
       configUpdateSent: Boolean(configUpdate),
+      productHistoryWarning,
       configUpdatePath: configUpdate?.path || "",
     });
   } catch (error) {
