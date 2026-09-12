@@ -5558,7 +5558,7 @@ td {
   font-size: 0.78rem;
 }
 
-.sync-actions--keg-primary .keg-clear-on-hand-button {
+.keg-clear-on-hand-button {
   border-color: rgba(198, 74, 50, 0.35);
   color: var(--tomato);
 }
@@ -10762,6 +10762,10 @@ tbody tr:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 0.55rem;
+}
+
+.inventory-speech__actions .keg-clear-on-hand-button {
+  margin-left: auto;
 }
 
 .inventory-speech__scope {

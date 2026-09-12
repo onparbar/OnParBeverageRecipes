@@ -36,6 +36,9 @@ export function describeDashboardDataSearch(search) {
   const first = results[0];
   const format = (value) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
   const currency = (value) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
+  if (search.intent.aggregation === "total" && metricIsVolume(search.intent.metric) && Number.isFinite(search.aggregateValue)) {
+    return `${format(search.aggregateValue)} oz poured across ${search.total} matching tap/product records. ${first.periodLabel}.${search.partialCoverage ? " This is a recorded subtotal: some requested weeks have missing or unverified usage, which was not counted as zero." : ""}`;
+  }
   const metric = search.intent.metric;
   const measure = metric === "margin" ? `${format(first.value)}% estimated gross margin`
     : metric === "profit" ? `${currency(first.value)} estimated gross profit`
@@ -179,6 +182,7 @@ export function searchDashboardItems(items, rawQuery, { limit = 12 } = {}) {
 }
 
 const DASHBOARD_QUERY_STOP_WORDS = new Set([
+  "total", "altogether", "overall", "combined",
   "a", "all", "an", "and", "are", "at", "bar", "by", "can", "dashboard", "did", "drink",
   "drinks", "find", "for", "from", "had", "has", "have", "in", "is", "it", "last",
   "latest", "me", "of", "on", "one", "or", "past", "please", "recent", "recently", "search", "show",
@@ -202,6 +206,8 @@ const DASHBOARD_QUERY_RULE_WORDS = new Set([
 
 const DASHBOARD_PERIOD_WEEK_VALUES = new Map([
   ["one", 1], ["1", 1],
+  ["two", 2], ["three", 3], ["five", 5], ["seven", 7],
+  ["nine", 9], ["ten", 10], ["eleven", 11],
   ["four", 4], ["4", 4],
   ["six", 6], ["6", 6],
   ["eight", 8], ["8", 8],
@@ -219,11 +225,12 @@ function getDashboardQueryPeriod(query) {
     return { key: "all-time", explicit: true, matchedText: "" };
   }
 
-  const windowMatch = query.match(/\b(?:last|past|recent)\s+(one|1|four|4|six|6|eight|8|twelve|12)\s+weeks?\b/);
+  const windowMatch = query.match(/\b(?:last|past|recent)\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d+)\s+weeks?\b/);
   if (windowMatch) {
-    const weeks = DASHBOARD_PERIOD_WEEK_VALUES.get(windowMatch[1]) || 6;
+    const weeks = DASHBOARD_PERIOD_WEEK_VALUES.get(windowMatch[1]) || Number(windowMatch[1]);
     return {
-      key: weeks === 1 ? "one-week" : `${weeks === 4 ? "four" : weeks === 6 ? "six" : weeks === 8 ? "eight" : "twelve"}-weeks`,
+      key: ({ 1: "one-week", 4: "four-weeks", 6: "six-weeks", 8: "eight-weeks", 12: "twelve-weeks" })[weeks] || `${weeks}-weeks`,
+      weeks,
       explicit: true,
       matchedText: windowMatch[0],
     };
@@ -322,6 +329,9 @@ export function parseDashboardDataQuery(rawQuery) {
   }
 
   const periodSelection = getDashboardQueryPeriod(query);
+  if (periodSelection.weeks != null && (periodSelection.weeks < 1 || periodSelection.weeks > 104)) {
+    return { status: "needs-clarification", question: "Please choose between 1 and 104 saved weeks.", intent: null };
+  }
   const tapMatch = query.match(/\btap\s+(\d+)\b/) || query.match(/^(\d{1,3})$/);
   const rankMatch = query.match(/\b(?:top|bottom|best|worst|highest|lowest)\s+(\d+)\b/);
   if (comparison && !hasDollarMetric && !hasOunceMetric && !hasProfitMetric) {
@@ -358,6 +368,9 @@ export function parseDashboardDataQuery(rawQuery) {
       metric,
       comparison,
       period: periodSelection.key,
+      weekCount: periodSelection.weeks || null,
+      aggregation: !/\b(?:average|avg|per week|weekly)\b/.test(query)
+        && /\b(?:how much|how many|total|altogether|overall|combined)\b/.test(query) ? "total" : "average",
       sort,
       tapNumber: tapMatch ? Number(tapMatch[1]) : null,
       rankLimit: rankMatch ? Math.max(1, Math.min(100, Number(rankMatch[1]))) : sort === "both" ? 5 : 1,
@@ -374,6 +387,10 @@ function dashboardQueryValueMatches(value, comparison) {
   if (comparison.operator === "gt") return difference > 0;
   if (comparison.operator === "gte") return difference >= 0;
   return Math.abs(difference) < 0.01;
+}
+
+function metricIsVolume(metric) {
+  return metric === "ounces";
 }
 
 export function searchDashboardData(items, rawQuery, { limit = 50 } = {}) {
@@ -393,7 +410,10 @@ export function searchDashboardData(items, rawQuery, { limit = 50 } = {}) {
       return intent.nameTerms.every((term) => searchTokenMatches(term, haystack));
     })
     .map((item) => {
-      const savedPeriod = item.periods?.[intent.period] || null;
+      const originalPeriod = item.periods?.[intent.period] || null;
+      const savedPeriod = intent.aggregation === "total" && originalPeriod?.totals
+        ? { ...originalPeriod, ...originalPeriod.totals, label: originalPeriod.totalLabel }
+        : originalPeriod;
       const period = savedPeriod || (item.hidden && intent.comparison?.operator === "eq" && intent.comparison.threshold === 0
         ? { label: "No recorded activity", ounces: 0, dollars: 0 }
         : null);
@@ -407,6 +427,7 @@ export function searchDashboardData(items, rawQuery, { limit = 50 } = {}) {
         ounces: period.ounces != null && Number.isFinite(Number(period.ounces)) ? Number(period.ounces) : null,
         dollars: period.dollars != null && Number.isFinite(Number(period.dollars)) ? Number(period.dollars) : null,
         periodLabel: period.label || "Selected period",
+        partialCoverage: period.partialCoverage === true,
       };
     })
     .filter(Boolean);
@@ -440,6 +461,8 @@ export function searchDashboardData(items, rawQuery, { limit = 50 } = {}) {
   return {
     ...parsed,
     total: matches.length,
+    aggregateValue: matches.reduce((total, item) => total + item.value, 0),
+    partialCoverage: matches.some((item) => item.partialCoverage),
     results: matches.slice(0, intent.sort ? Math.min(intent.rankLimit, safeLimit) : safeLimit),
   };
 }

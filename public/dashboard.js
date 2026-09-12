@@ -4,6 +4,8 @@ import { MINIMUM_KEG_CUSHION, getEightWeekPeakUsage } from "./keg-demand-policy.
 import { applyInventoryCountPolicy, getUncountedInventoryAmount } from "./inventory-count-policy.mjs";
 import { getInventoryCountSections } from "./inventory-weekly-counts.mjs";
 import { answerLocalInventoryQuestion } from "./local-inventory-questions.mjs";
+import { answerLocalBeverageQuestion, BEVERAGE_QUESTION_EXAMPLES } from "./local-beverage-answers.mjs";
+import { requestLocalAiAnswer } from "./local-ai-client.mjs";
 import { renderSavedWeeklySnapshot } from "./weekly-snapshot-view.mjs";
 import { getSixWeekUsage } from "./six-week-usage.mjs";
 import "./operations-learning-ui.mjs";
@@ -131,6 +133,7 @@ import {
 import { fetchPmbJsonWithRetry } from "./pmb-refresh.mjs";
 import {
   searchDashboardData,
+  parseDashboardDataQuery,
   searchDashboardItems,
   getConversationalItemQuery,
   describeDashboardDataSearch,
@@ -954,6 +957,8 @@ const dashboardDataSearchForm = document.querySelector("#dashboard-data-search-f
 const dashboardDataSearchInput = document.querySelector("#dashboard-data-search-input");
 const dashboardDataSearchFeedback = document.querySelector("#dashboard-data-search-feedback");
 const dashboardDataSearchResults = document.querySelector("#dashboard-data-search-results");
+let dashboardAiController = null;
+let dashboardAiHistory = [];
 const categoryFilter = document.querySelector("#category-filter");
 const recipeSearch = document.querySelector("#recipe-search");
 const oldSearch = document.querySelector("#old-search");
@@ -983,7 +988,6 @@ const inventoryHistoryList = document.querySelector("#inventory-history-list");
 const weeklyPlan = document.querySelector("#weekly-plan");
 const kegSummary = document.querySelector("#keg-summary");
 const kegWalls = document.querySelector("#keg-walls");
-const weeklyUsageSearch = document.querySelector("#weekly-usage-search");
 const weeklyUsageRangeInput = document.querySelector("#weekly-usage-range");
 const weeklyUsageHead = document.querySelector("#weekly-usage-head");
 const pullPmbWeeklyUsageButton = document.querySelector("#pull-pmb-weekly-usage");
@@ -3268,7 +3272,6 @@ function bindEvents() {
   pricingSearch.addEventListener("input", renderPricing);
   customInventoryForm?.addEventListener("submit", addCustomInventoryItem);
   customInventoryCancelButton?.addEventListener("click", resetCustomInventoryForm);
-  weeklyUsageSearch?.addEventListener("input", renderWeeklyUsage);
   weeklyUsageRangeInput?.addEventListener("change", () => {
     weeklyUsageHistoryLimit = Math.max(0, toNumber(weeklyUsageRangeInput.value));
     renderWeeklyUsage();
@@ -3529,6 +3532,7 @@ function bindGlobalSearchEvents() {
 }
 
 function setHeaderSearchResultsVisible(visible) {
+  if (!visible) dashboardAiController?.abort();
   const results = document.querySelector("#header-search-results");
   if (results) results.hidden = !visible;
   dashboardDataSearchInput?.setAttribute("aria-expanded", String(visible));
@@ -3542,6 +3546,7 @@ function bindDashboardDataSearchEvents() {
     dashboardDataSearchInput?.focus();
   });
   dashboardDataSearchInput?.addEventListener("input", () => {
+    dashboardAiController?.abort();
     window.clearTimeout(searchDebounce);
     if (!clean(dashboardDataSearchInput.value)) {
       setHeaderSearchResultsVisible(false);
@@ -3575,13 +3580,14 @@ function bindDashboardDataSearchEvents() {
   dashboardDataSearchForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     window.clearTimeout(searchDebounce);
-    renderDashboardDataSearch({ submitted: true });
+    void runLocalAiDashboardSearch();
   });
   dashboardDataSearchResults?.addEventListener("click", (event) => {
     const example = event.target.closest("[data-search-example]");
     if (example) {
       dashboardDataSearchInput.value = example.dataset.searchExample;
-      renderDashboardDataSearch({ submitted: true });
+      window.clearTimeout(searchDebounce);
+      void runLocalAiDashboardSearch();
       return;
     }
     const quickLink = event.target.closest("[data-header-search-item]");
@@ -3591,9 +3597,8 @@ function bindDashboardDataSearchEvents() {
       return;
     }
     const link = event.target.closest("[data-dashboard-data-search-name]");
-    if (!link || !weeklyUsageSearch) return;
+    if (!link) return;
     setHeaderSearchResultsVisible(false);
-    weeklyUsageSearch.value = link.dataset.dashboardDataSearchName || "";
     renderWeeklyUsage();
     switchTab("weekly-usage");
   });
@@ -3609,20 +3614,27 @@ function getDashboardDataSearchEntryOunces(item, entry) {
   return fullOunces > 0 ? value * fullOunces : null;
 }
 
-function getDashboardDataSearchPeriod(item, label, entries, sellingPricePerOz) {
+function getDashboardDataSearchPeriod(item, label, entries, sellingPricePerOz, expectedWeeks = entries.length, totalLabel = "Total for selected period") {
   const ounceValues = entries
     .map((entry) => getDashboardDataSearchEntryOunces(item, entry))
     .filter((value) => value !== null);
   if (!ounceValues.length) return null;
   const ounces = ounceValues.reduce((total, value) => total + value, 0) / ounceValues.length;
+  const totalOunces = ounceValues.reduce((total, value) => total + value, 0);
   return {
     label,
+    totalLabel,
+    partialCoverage: ounceValues.length < expectedWeeks,
+    totals: {
+      ounces: totalOunces,
+      dollars: totalOunces === 0 ? 0 : sellingPricePerOz > 0 ? totalOunces * sellingPricePerOz : null,
+    },
     ounces,
     dollars: ounces === 0 ? 0 : sellingPricePerOz > 0 ? ounces * sellingPricePerOz : null,
   };
 }
 
-function buildDashboardDataSearchItems() {
+function buildDashboardDataSearchItems(requestedIntent = null) {
   const sourceItems = [...weeklyUsageItems, ...weeklyUsageArchivedItems]
     .filter((item) => !isRetiredProduct(item));
   const historyLabels = getWeeklyUsageHistoryHeaders(sourceItems);
@@ -3641,7 +3653,8 @@ function buildDashboardDataSearchItems() {
       const label = entries.length
         ? `${entries.length}-week average`
         : fallbackLabel;
-      return getDashboardDataSearchPeriod(item, label, entries, sellingPricePerOz);
+      return getDashboardDataSearchPeriod(item, label, entries, sellingPricePerOz, weekLimit,
+        `Total for the last ${weekLimit} saved week${weekLimit === 1 ? "" : "s"}${labels.length ? ` (${labels[labels.length - 1]} through ${labels[0]})` : ""}`);
     };
     const currentOunces = Object.prototype.hasOwnProperty.call(item, "rawOz")
       && Number.isFinite(Number(item.rawOz))
@@ -3679,6 +3692,9 @@ function buildDashboardDataSearchItems() {
         ),
       },
     };
+    if (requestedIntent?.weekCount) {
+      result.periods[requestedIntent.period] = getSavedWindow(requestedIntent.weekCount, "Requested saved weeks");
+    }
     const estimate = getPerformanceEstimatedProfitRate(item);
     result.profitPerOz = estimate.grossProfitPerOz;
     result.sellingPricePerOz = estimate.sellingPricePerOz;
@@ -3687,15 +3703,182 @@ function buildDashboardDataSearchItems() {
       period.profit = period.ounces === 0 ? 0 : estimate.grossProfitPerOz != null ? period.ounces * estimate.grossProfitPerOz : null;
       period.margin = estimate.grossProfitPerOz != null && estimate.sellingPricePerOz > 0
         ? estimate.grossProfitPerOz / estimate.sellingPricePerOz * 100 : null;
+      if (period.totals) {
+        period.totals.profit = period.totals.ounces === 0 ? 0 : estimate.grossProfitPerOz != null ? period.totals.ounces * estimate.grossProfitPerOz : null;
+        period.totals.margin = period.margin;
+      }
     });
     return result;
   });
+}
+
+async function runLocalAiDashboardSearch() {
+  const query = clean(dashboardDataSearchInput?.value);
+  if (!query) return renderDashboardDataSearch({ submitted: true });
+  dashboardAiController?.abort();
+  const controller = new AbortController();
+  dashboardAiController = controller;
+  let timedOut = false;
+  const timeout = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 100000);
+  setHeaderSearchResultsVisible(true);
+  dashboardDataSearchFeedback.textContent = "Asking the local AI...";
+  dashboardDataSearchResults.textContent = "Reading relevant dashboard records. Nothing will be changed.";
+  const isCurrent = () => dashboardAiController === controller && clean(dashboardDataSearchInput.value) === query && !controller.signal.aborted;
+  try {
+    const result = await requestLocalAiAnswer({ question: query, history: dashboardAiHistory,
+      getContext: getLocalBeverageQuestionContext, signal: controller.signal });
+    if (!isCurrent()) return;
+    if (!result) {
+      renderDashboardDataSearch({ submitted: true });
+      const notice = document.createElement("p");
+      notice.className = "header-search-data-note";
+      notice.textContent = "Local AI is not enabled yet. This answer uses the regular dashboard search.";
+      dashboardDataSearchResults.prepend(notice);
+      return;
+    }
+    dashboardDataSearchFeedback.textContent = "Local AI answer";
+    dashboardDataSearchResults.replaceChildren();
+    const answer = document.createElement("p");
+    answer.style.whiteSpace = "pre-wrap";
+    answer.textContent = result.answer;
+    const note = document.createElement("p");
+    note.className = "header-search-data-note";
+    note.textContent = `Computed on the service computer from the dashboard snapshot captured ${formatUpdatedAt(result.capturedAt)}. AI can make mistakes; check the source readings for important decisions.`;
+    const sources = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "Data used";
+    sources.append(summary);
+    for (const source of result.sources || []) {
+      const row = document.createElement("p");
+      row.textContent = `${source.dataset}: ${source.matchedReadings} matching readings${source.truncated ? "; displayed query results were limited" : ""}. Filters: ${JSON.stringify(source.filters || [])}`;
+      sources.append(row);
+    }
+    dashboardDataSearchResults.append(answer, note, sources);
+    dashboardAiHistory = [...dashboardAiHistory, { question: query, answer: result.answer }].slice(-4);
+  } catch (failure) {
+    if (!isCurrent() && !(timedOut && dashboardAiController === controller && clean(dashboardDataSearchInput.value) === query)) return;
+    renderDashboardDataSearch({ submitted: true });
+    const notice = document.createElement("p");
+    notice.className = "header-search-data-note";
+    notice.textContent = `${timedOut ? "The local AI took too long to respond." : failure.message} Showing regular dashboard search instead.`;
+    dashboardDataSearchResults.prepend(notice);
+  } finally {
+    window.clearTimeout(timeout);
+    if (dashboardAiController === controller) dashboardAiController = null;
+  }
+}
+
+function getLocalBeverageQuestionContext() {
+  return {
+    usage: () => {
+      const source = [...weeklyUsageItems, ...weeklyUsageArchivedItems]
+        .filter((item) => !isRetiredProduct(item) && !isPricingPlaceholder(item.name));
+      return {
+        labels: getWeeklyUsageHistoryHeaders(source),
+        items: source.map((item) => {
+          const estimate = getPerformanceEstimatedProfitRate(item);
+          return {
+            id: item.archiveId || item.id,
+            name: clean(item.name),
+            tapNumber: item.tapNumber,
+            wall: getDashboardPulseWall(item) || clean(item.wall).toLowerCase(),
+            category: getWeeklyUsagePerformanceCategory(item),
+            kegOz: getWeeklyUsageFullOunces(item),
+            profitPerOz: estimate.grossProfitPerOz,
+            sellingPricePerOz: estimate.sellingPricePerOz,
+            history: (item.history || []).map((entry) => ({
+              label: entry.label,
+              ounces: isUsableWeeklyUsageEntry(entry) ? getDashboardDataSearchEntryOunces(item, entry) : null,
+            })),
+          };
+        }),
+      };
+    },
+    inventory: () => ({
+      countedAt: inventoryCountedItemsAt,
+      state: getInventorySharedOverviewSource(),
+      items: getVisibleInventoryItems().map((item) => ({
+        ...item,
+        physicalCountRequired: getUncountedInventoryAmount(item) === null,
+        orderUnits: item.orderingPlan ? getInventoryRoundedOrderQuantity(item) : null,
+        orderReason: getInventoryOrderingReason(item),
+      })),
+    }),
+    levels: () => kegWallItems.map((item) => {
+      const liveRow = getKegLiveRow(item);
+      return {
+        name: getKegDisplayBrand(item, liveRow),
+        tapNumber: item.tapNumber,
+        wall: item.wall,
+        fraction: getKegCurrentFraction(item, liveRow),
+        ounces: getKegCurrentLevelOz(liveRow, item),
+      };
+    }).filter((item) => !isPricingPlaceholder(item.name)),
+    recipes: () => getActiveRecipes().map((recipe) => {
+      const totals = getRecipeTotals(recipe);
+      return {
+        name: recipe.title,
+        oz: totals.oz,
+        cost: totals.cost,
+        costComplete: recipe.ingredients.every((item) => !toNumber(item.oz)
+          || clean(item.name).toLowerCase() === "water" || getIngredientCost(item).cost > 0),
+        abv: totals.abvPercent,
+        ingredients: recipe.ingredients.map((item) => ({ name: normalizeIngredientAlias(item.name) || item.name, oz: toNumber(item.oz) })),
+      };
+    }),
+    prices: () => [
+      ...ingredients.filter((item) => item.id !== "water" && !isHiddenPricingIngredient(item)).map((item) => {
+        const values = getIngredientPriceEditorValues(item);
+        const prepared = getPreparedIngredientPurchase(item.id);
+        return {
+          name: item.name,
+          unit: prepared?.priceInputLabel || "package",
+          price: values.bottlePrice,
+          oz: prepared ? null : item.vendorProduct?.bottleOz || values.bottleOz,
+          vendor: item.vendorProduct?.vendor,
+          updatedAt: values.updatedAt,
+        };
+      }),
+      ...kegPricingItems.filter((item) => !isPricingPlaceholder(item.name)).map((item) => ({
+        name: item.name,
+        unit: "keg",
+        price: getKegPrice(item),
+        oz: getKegPricingOz(item),
+        vendor: item.vendor,
+        updatedAt: kegPriceOverrides[item.id]?.updatedAt,
+      })),
+    ],
+    health: () => [
+      { name: "Inventory", state: getInventorySharedOverviewSource() },
+      { name: "Weekly usage", state: getWeeklyUsageSharedOverviewSource() },
+      { name: "Keg counts", state: getKegLevelsSharedOverviewSource() },
+    ],
+  };
+}
+
+function renderLocalBeverageAnswer(result) {
+  dashboardDataSearchFeedback.textContent = result.title;
+  dashboardDataSearchResults.innerHTML = `<section class="header-search-performance"><h3>${escapeHtml(result.title)}</h3><p>${escapeHtml(result.text)}</p>${result.rows.map((row) => `<article class="dashboard-data-search-result"><div><strong>${escapeHtml(row.name)}</strong><p>${escapeHtml(row.text)}</p></div></article>`).join("")}${result.notes.map((note) => `<p class="header-search-data-note">${escapeHtml(note)}</p>`).join("")}</section>`;
+}
+
+function renderDashboardQuestionExamples() {
+  return BEVERAGE_QUESTION_EXAMPLES.map(([category, examples]) => `<details class="header-search-question-examples"><summary>${escapeHtml(category)}</summary><div class="header-search-examples">${examples.map((example) => `<button type="button" class="mini-button" data-search-example="${escapeHtml(example)}">${escapeHtml(example)}</button>`).join("")}</div></details>`).join("");
 }
 
 function renderDashboardDataSearch({ submitted = false } = {}) {
   if (!dashboardDataSearchInput || !dashboardDataSearchResults || !dashboardDataSearchFeedback) return;
   if (submitted) setHeaderSearchResultsVisible(true);
   const query = clean(dashboardDataSearchInput.value);
+  const stockQuestion = /\b(?:on hand|in stock|inventory|cabinet|bottles?)\b/i.test(query)
+    && !/\b(?:order|buy|reorder|need|enough|cost|price|missing|uncounted|received|saved|save|pending|failed|status|why)\b/i.test(query);
+  const localAnswer = stockQuestion ? null : answerLocalBeverageQuestion(query, getLocalBeverageQuestionContext());
+  if (localAnswer) {
+    renderLocalBeverageAnswer(localAnswer);
+    return;
+  }
   const inventoryAnswer = answerLocalInventoryQuestion(query, inventoryItems, inventoryCountedItemsAt);
   if (inventoryAnswer) {
     dashboardDataSearchFeedback.textContent = "Answer from saved inventory";
@@ -3711,11 +3894,12 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
   const quickResults = quickMatches.length ? `<section class="header-search-matches"><h3>Open an item</h3><div class="header-search-match-grid">${quickMatches.map((item) => `<button type="button" class="header-search-match" data-header-search-item="${escapeHtml(item.id)}"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.section)}</span><small>${escapeHtml(item.subtitle || "")}</small></button>`).join("")}</div></section>` : "";
   if (!query) {
     dashboardDataSearchFeedback.textContent = "Find products, recipes, inventory, taps, or ask about performance.";
-    dashboardDataSearchResults.innerHTML = `${quickResults}<div class="header-search-examples">${["Tito's", "tap 31", "top 5 cocktails last 6 weeks", "lowest profit margin last week"].map((example) => `<button type="button" class="mini-button" data-search-example="${escapeHtml(example)}">${escapeHtml(example)}</button>`).join("")}</div>`;
+    dashboardDataSearchResults.innerHTML = `<p>Ask about saved usage, comparisons, trends, recipes, pricing, stock, or ordering. Answers stay local and do not change your data.</p>${renderDashboardQuestionExamples()}`;
     return;
   }
 
-  const search = searchDashboardData(buildDashboardDataSearchItems(), query);
+  const parsedQuestion = parseDashboardDataQuery(query);
+  const search = searchDashboardData(buildDashboardDataSearchItems(parsedQuestion.intent), query);
   const localExplanation = describeDashboardDataSearch(search);
   if (localExplanation) {
     // Queue after the synchronous result markup below, without reopening a closed panel.
@@ -3737,7 +3921,7 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
     ? `Top ${search.groups.top.length} and bottom ${search.groups.bottom.length}`
     : `${quickMatches.length} quick link${quickMatches.length === 1 ? "" : "s"} · ${search.results.length}${search.total > search.results.length ? ` of ${search.total}` : ""} performance result${search.results.length === 1 ? "" : "s"}`;
   if (!search.results.length) {
-    dashboardDataSearchResults.innerHTML = `${quickResults}<div class="dashboard-data-search-empty">${quickMatches.length ? "No recorded usage matches this question. The item links above are still available." : "No matches. Try a shorter product name or a tap number."}</div>`;
+    dashboardDataSearchResults.innerHTML = `${quickResults}<div class="dashboard-data-search-empty">${quickMatches.length ? "No verified usage matches this question. The item links above are still available." : "I couldn't match this question to verified dashboard data. Include a product, tap, or wall and a saved-week period, or choose an example below."}</div>${renderDashboardQuestionExamples()}`;
     return;
   }
 
@@ -3769,7 +3953,7 @@ function renderDashboardDataSearch({ submitted = false } = {}) {
       </article>
     `;
   }).join("");
-  dashboardDataSearchResults.innerHTML = quickResults + `<section class="header-search-performance"><h3>Usage &amp; performance</h3><p class="header-search-data-note">${search.intent.period === "recent" ? "Default: average of the last six saved weeks. " : ""}Sales and gross profit are estimates from recorded pours and available pricing, not POS totals. Multi-week results are weekly averages.</p>` + (search.groups
+  dashboardDataSearchResults.innerHTML = quickResults + `<section class="header-search-performance"><h3>Usage &amp; performance</h3><p class="header-search-data-note">${search.intent.period === "recent" ? "Period: last six saved weeks. " : ""}Sales and gross profit are estimates from recorded pours and available pricing, not POS totals. ${search.intent.aggregation === "total" ? "Showing recorded totals; missing or unverified weeks are not treated as zero." : "Multi-week results are weekly averages."}</p>` + (search.groups
     ? `<section class="dashboard-data-search-group"><h3>Top ${formatNumber(search.groups.top.length)}</h3>${renderSearchRows(search.groups.top)}</section>
        <section class="dashboard-data-search-group"><h3>Bottom ${formatNumber(search.groups.bottom.length)}</h3>${renderSearchRows(search.groups.bottom)}</section>`
     : renderSearchRows(search.results)) + "</section>";
@@ -3919,8 +4103,6 @@ function refreshGlobalSearchIndex() {
       section: "Weekly Usage",
       searchText: [item.type, item.wall, item.replacedBy, item.tapNumber ? `tap ${item.tapNumber}` : ""],
       tab: "weekly-usage",
-      filterId: "weekly-usage-search",
-      query: item.name,
     }));
 
   globalSearchItems = [
@@ -8411,7 +8593,6 @@ function renderKegLevels() {
     <div class="sync-panel sync-panel--keg-actions">
       <div class="sync-actions sync-actions--keg-primary">
       <button class="ghost-button" id="send-keg-config-update" type="button"${kegSyncLoading || kegConfigUpdateRunning ? " disabled" : ""}>${kegConfigUpdateRunning ? "Updating..." : "Repair tap connection"}</button>
-        <button class="ghost-button keg-clear-on-hand-button" id="clear-keg-on-hand" type="button">Clear all on hand</button>
       </div>
       <div id="keg-repair-status" role="status" aria-live="polite" aria-atomic="true">${kegRepairStatus ? `<p class="sync-status${kegRepairStatus.warning ? " sync-status--warning" : ""}"><strong>${escapeHtml(kegRepairStatus.message)}</strong>${kegRepairStatus.completedAt ? `<br>Completed ${escapeHtml(formatUpdatedAt(kegRepairStatus.completedAt))}.` : ""}</p>` : ""}</div>
       ${kegSyncAttempted && !kegConfigUpdateRunning && (kegLiveLevelsStale || liveCount < totalTaps || kegLiveLevelsError) ? `<p class="sync-status" role="status">${kegLiveLevelsStale || kegLiveLevelsError ? "Waiting for fresh PMB readings." : `${formatNumber(liveCount)} of ${formatNumber(totalTaps)} taps responding.`} Retrying automatically.</p>` : ""}
@@ -9046,7 +9227,7 @@ function renderWeeklyUsage() {
   if (dashboardRenderCoordinator.defer("weekly-usage", renderWeeklyUsage)) return;
   if (!weeklyUsageSummary || !weeklyUsageTable || !weeklyUsageHead) return;
 
-  const searchTerm = clean(weeklyUsageSearch?.value).toLowerCase();
+  const searchTerm = "";
   const visibleActiveItems = weeklyUsageItems
     .filter((item) => !searchTerm || weeklyUsageItemMatchesSearch(item, searchTerm))
     .map((item) => ({ ...item, isArchivedSearchResult: false }));
@@ -9904,6 +10085,10 @@ function applyPmbWeeklyUsageReport(report) {
       hasValue: true,
       source: "PMB",
       volumeOz: Math.round(toNumber(match.volumeOz) * 100) / 100,
+      zeroUsageVerified: match.zeroUsageVerified === true,
+      reportComplete: match.reportComplete === true,
+      historicalAssignmentVerified: match.historicalAssignmentVerified === true,
+      zeroUsageEvidence: match.zeroUsageEvidence || null,
       preThursdayVolumeOz: Number.isFinite(Number(match.preThursdayVolumeOz))
         ? Math.round(Number(match.preThursdayVolumeOz) * 100) / 100
         : null,
@@ -10019,6 +10204,10 @@ function applyCurrentTapZeroUsageRows(label, reportItems, usedReportIds) {
       preThursdayVolumeOz: Number.isFinite(Number(reportItem.preThursdayVolumeOz))
         ? Math.round(Number(reportItem.preThursdayVolumeOz) * 100) / 100
         : 0,
+      zeroUsageVerified: reportItem.zeroUsageVerified === true,
+      reportComplete: reportItem.reportComplete === true,
+      historicalAssignmentVerified: reportItem.historicalAssignmentVerified === true,
+      zeroUsageEvidence: reportItem.zeroUsageEvidence || null,
       ...getWeeklyUsagePriceSnapshot({
         ...item,
         tapNumber: reportItem.tapNumber ?? item.tapNumber,
@@ -11154,7 +11343,6 @@ function bindKegLevelEvents() {
     runKegParAgent();
   });
   document.querySelector("#recover-keg-counts")?.addEventListener("click", recoverConflictingKegCounts);
-  document.querySelector("#clear-keg-on-hand")?.addEventListener("click", clearAllKegOnHand);
   document.querySelector("#initialize-shared-keg-levels")?.addEventListener("click", () => {
     initializeSharedKegLevelsFromServiceComputer();
   });
@@ -12052,7 +12240,7 @@ function getParAgentStatusMessage() {
     return "Needs have not been calculated yet.";
   }
   if (!hasCurrentParAgentRecommendations()) {
-    return "Live needs use current keg levels and on-hand counts. Placed orders stay unchanged.";
+    return "";
   }
 
   const summary = recommendations.summary || {};
@@ -14367,6 +14555,7 @@ function renderInventorySpeechAssistant() {
           <button class="ghost-button inventory-speech-listen" type="button">${inventorySpeechListening ? "Finish count" : SpeechRecognition ? "Start count" : "Use keyboard dictation"}</button>
           <button class="primary-button inventory-speech-review" type="button">Review</button>
           <button class="ghost-button inventory-speech-clear" type="button">Clear</button>
+          ${kegOnly ? '<button class="ghost-button keg-clear-on-hand-button" id="clear-keg-on-hand" type="button">Clear all on hand</button>' : ""}
         </div>
         <p class="sync-status" role="status">${escapeHtml(inventorySpeechMessage || "")}</p>
         ${inventorySpeechProposals.length ? `
@@ -14381,6 +14570,7 @@ function renderInventorySpeechAssistant() {
 }
 
 function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
+  assistant.querySelector("#clear-keg-on-hand")?.addEventListener("click", clearAllKegOnHand);
   const transcriptInput = assistant.querySelector(".inventory-speech-transcript");
   assistant.querySelectorAll("[data-speech-scope]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -18531,6 +18721,8 @@ function getKegVendorLabel(item) {
 }
 
 function getKegVendorProduct(name, vendor, kegOz) {
+  // Bonbright prices are entered manually, not refreshed from Provi.
+  if (clean(vendor).toLowerCase() === "bonbright") return null;
   const saved = kegPriceOverrides[getKegPricingKey(name)]?.vendorMapping;
   if (saved) return { ...saved, bottleOz: kegOz };
   if (!KEG_PROVI_DISTRIBUTOR_HINTS[vendor]) return null;

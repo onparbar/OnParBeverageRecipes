@@ -796,13 +796,6 @@ export default function DashboardPage() {
         </section>
 
         <section className="panel" id="weekly-usage-panel" aria-labelledby="weekly-usage-tab">
-          <div className="toolbar">
-            <label className="search-field">
-              <span>Find tap or product</span>
-              <input id="weekly-usage-search" type="search" placeholder="Search tap, wall, liquor, beer, cocktail..." />
-            </label>
-          </div>
-
           <div className="inventory-layout">
             <aside className="weekly-usage-summary" id="weekly-usage-summary"></aside>
             <div className="inventory-sections">

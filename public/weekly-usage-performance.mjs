@@ -1,4 +1,5 @@
 import { isUsableWeeklyUsageEntry } from "./weekly-usage-evidence.mjs";
+import { getConfirmedTapUsageStart } from "./confirmed-tap-starts.mjs";
 
 const PERFORMANCE_CATEGORIES = new Set(["all", "beer", "cocktail", "liquor"]);
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -201,7 +202,13 @@ export function buildWeeklyUsagePerformance(
   const previousPeriod = periods.find((period) => period.startTime === expectedPreviousStartTime) || null;
   const eligibleItems = preparedItems.filter(({ item }) => (
     normalizedCategory === "all" || getWeeklyUsagePerformanceCategory(item) === normalizedCategory
-  ));
+  )).filter(({ item }) => {
+    const startDate = getConfirmedTapUsageStart(item);
+    // A product introduced after the reporting week has no usage to capture
+    // for that week. Do not count it as missing or create a historical zero.
+    return !startDate || !latestPeriod
+      || new Date(`${startDate}T00:00:00`).getTime() < latestPeriod.startTime + WEEK_MS;
+  });
 
   const tapRows = eligibleItems.map(({ item, history }) => {
     const currentEntry = latestPeriod

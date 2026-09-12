@@ -84,6 +84,8 @@ test("dashboard data search parses natural-language filters and comparisons", ()
     metric: "ounces",
     comparison: { operator: "lt", threshold: 10 },
     period: "recent",
+    aggregation: "average",
+    weekCount: null,
     sort: null,
     tapNumber: null,
     rankLimit: 1,

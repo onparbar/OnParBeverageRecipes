@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readWeeklyAssignmentHistory, verifyWeeklyReportZeros } from "../../../lib/pmb-weekly-zero-verification.mjs";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -612,13 +613,20 @@ export async function GET(request) {
     }
 
     const context = buildWeeklyUsageTapContext(currentTaps, tapLookup);
-    const reports = ranges.map((range, index) => buildWeeklyReport(
+    const assignments = await readWeeklyAssignmentHistory();
+    const reports = ranges.map((range, index) => verifyWeeklyReportZeros(buildWeeklyReport(
       range,
       transactionResults[index].json.taptransactions,
       preThursdayTransactionResults[index].json.taptransactions,
       productByPlu,
       context,
-    ));
+    ), {
+      currentTaps,
+      assignments,
+      startTime: range.start.getTime(),
+      endTime: range.endExclusive.getTime(),
+      reportDigest: createHash("sha256").update(JSON.stringify(transactionResults[index].json.taptransactions)).digest("hex"),
+    }));
     const primaryReport = reports[reports.length - 1] || buildWeeklyReport(getLastCompletedWeekRange(), [], [], productByPlu, context);
 
     return NextResponse.json({
