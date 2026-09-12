@@ -1,4 +1,5 @@
 import { normalizeLiquorTapProductName } from "./weekly-action-plan.mjs";
+import { applyInventoryCountPolicy, getUncountedInventoryAmount } from "./inventory-count-policy.mjs";
 
 const RESERVES = Object.freeze({
   "tito-s": 12, "jose-cuervo-silver": 16, "crown-apple": 6,
@@ -19,7 +20,8 @@ function nonnegative(value) {
   return Number.isFinite(result) && result >= 0 ? result : null;
 }
 function managed(item) {
-  return /^(Liquor|Mixer) Cabinet$/i.test(item.group || "") || ["simple-syrup", "vanilla"].includes(item.id);
+  return /^(Liquor|Mixer) Cabinet$/i.test(item.group || "") || ["simple-syrup", "vanilla"].includes(item.id)
+    || getUncountedInventoryAmount(item) !== null;
 }
 
 // Stock stays assigned to its tap. Sum ingredients only after forecasting whole
@@ -27,6 +29,7 @@ function managed(item) {
 export function buildRollingCocktailIngredientOrders({
   inventoryItems = [], tapInputs = [], recipes = [], recipeAliases = {},
 } = {}) {
+  inventoryItems = inventoryItems.map(applyInventoryCountPolicy);
   const demand = new Map();
   const issues = [];
   const seen = new Set();

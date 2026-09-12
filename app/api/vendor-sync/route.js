@@ -21,6 +21,7 @@ const KEG_SIZE_OVERRIDES = {
 export async function POST(request) {
   try {
     const body = await request.json();
+    if (body?.resolveOnly) return resolveSupplierProduct(body.mapping);
     const scope = body?.scope || "all";
     const items = Array.isArray(body?.items) ? body.items : [];
     const vendorNames = [...new Set(items.map((item) => item?.syncVendor || item?.vendorProduct?.syncVendor || item?.vendorProduct?.vendor).filter(Boolean))]
@@ -230,7 +231,7 @@ function findMatchingProviProductLine(results, item, distributorHints = [], dist
       line,
       score: getProductLineScore(line?.name, expectedName, expectedIngredientName),
     }))
-    .filter((entry) => entry.score >= 50)
+    .filter((entry) => entry.score >= (item?.vendorProduct?.requireExactMatch ? 100 : 50))
     .sort((a, b) => b.score - a.score)
     .map((entry) => entry.line);
 
@@ -297,6 +298,7 @@ function getPreferredInventory(product, item) {
       (entry) => normalizeSku(entry?.sku) === preferredSku && getInventoryPrice(entry, item) > 0,
     );
     if (preferredInventory) return preferredInventory;
+    if (item?.vendorProduct?.requireExactMatch) return null;
   }
   return inventory.find((entry) => getInventoryPrice(entry, item) > 0) || inventory[0] || null;
 }
@@ -477,4 +479,38 @@ function normalizeSku(value) {
 function isRoughlyEqual(left, right) {
   if (!Number.isFinite(left) || !Number.isFinite(right) || left <= 0 || right <= 0) return false;
   return Math.abs(left - right) < 0.2;
+}
+
+// Read-only product discovery, using the on-site account's existing Provi session.
+async function resolveSupplierProduct(input) {
+  const vendors = { Heidelberg: ["Heidelberg"], Bonbright: ["Bonbright"], OHLQ: ["Ohio Liquor", "OHLQ"], Proof: ["Southern Glazer", "SGWS"] };
+  const vendor = String(input?.vendor || "");
+  const name = String(input?.productName || "").trim();
+  const size = Number(input?.bottleOz);
+  if (!vendors[vendor] || !name || name.length > 160 || !Number.isFinite(size) || size <= 0 || size > 5000) {
+    return NextResponse.json({ error: "A supplier, full product name, and valid package size are required." }, { status: 400 });
+  }
+  const session = await loadProviSessionContext();
+  const lines = await fetchProviProductLines(name, session);
+  const matches = new Map();
+  for (const line of lines) {
+    if (!productLineMatchesDistributor(line, { distributorHints: vendors[vendor], distributorIds: vendor === "OHLQ" ? [16114] : [] })) continue;
+    const score = getProductLineScore(line.name, name, name);
+    if (score < 50) continue;
+    for (const product of line.products || []) {
+      const bottleOz = getProductBottleOz(product);
+      if (!isRoughlyEqual(bottleOz, size)) continue;
+      if (input.kind === "keg" && !/keg|bbl|barrel/i.test(product.container_size + " " + product.name) && bottleOz < 500) continue;
+      for (const inventory of product.inventory || []) {
+        // Do not guess a bottle price by dividing an unknown case size.
+        const price = toNumber(inventory.unit_price || inventory.price || (input.kind === "keg" ? inventory.keg_price : 0));
+        const sku = String(inventory.sku || "").trim();
+        if (!(price > 0) || !sku) continue;
+        const key = [sku, bottleOz, normalizeName(line.name)].join(":");
+        matches.set(key, { sku, name: String(line.name || product.name), size: String(product.container_size || bottleOz + " oz"), bottleOz, price, score });
+      }
+    }
+  }
+  const all = [...matches.values()].sort((a, b) => b.score - a.score);
+  return NextResponse.json({ automatic: all.length === 1 && all[0].score === 100, candidates: all.slice(0, 8) }, { headers: { "Cache-Control": "no-store" } });
 }

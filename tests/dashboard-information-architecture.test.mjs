@@ -336,8 +336,9 @@ test("Weekly Plan hides recommendations from a previous operating week", () => {
   assert.match(dashboardSource, /The previous plan is saved in Weekly Snapshots/);
 });
 
-test("inventory uses drag handles instead of row Edit buttons and retires Bubbly", () => {
-  assert.match(dashboardSource, /class="inventory-drag-handle"/);
+test("inventory item names are draggable without separate buttons and retire Bubbly", () => {
+  assert.match(dashboardSource, /class="inventory-item-drag-target" draggable="true" tabindex="0"/);
+  assert.doesNotMatch(dashboardSource, /class="inventory-drag-handle"/);
   assert.doesNotMatch(dashboardSource, /class="mini-button inventory-row-edit-toggle"/);
   assert.doesNotMatch(dashboardSource, /inventory-par-toggle/);
   assert.doesNotMatch(dashboardSource, /custom-inventory-price/);

@@ -400,7 +400,8 @@ test("learns each tap's Monday-to-Thursday usage share after three saved weeks",
   assert.equal(result.preThursdayUsageSharePct, 20);
   assert.equal(result.preThursdayForecastKegs, 0.2);
   assert.equal(result.projectedThursdayStockKegs, 0.8);
-  assert.equal(result.targetStockKegs, 1);
+  assert.equal(result.targetStockKegs, 1.1);
+  assert.equal(result.variabilityCushionPct, 10);
   assert.equal(result.orderQty, 1);
 });
 

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import vm from "node:vm";
 import { buildLastWeekProjectedSalesMix } from "../public/dashboard-beverage-pulse.mjs";
 
 const source = readFileSync(new URL("../public/dashboard.js", import.meta.url), "utf8");
@@ -32,13 +31,11 @@ test("profit mix accepts and counts estimated rates", () => {
   assert.equal(mix.categories.find((row) => row.category === "cocktail").sharePercent, 67);
 });
 
-test("optional morning repair cannot crash startup when omitted from a release", () => {
-  const guard = source.match(/if \(typeof refreshPmbMorningRepairStatus === "function"\) void refreshPmbMorningRepairStatus\(\);/);
-  assert.ok(guard);
-  assert.doesNotThrow(() => vm.runInNewContext(guard[0], {}));
-  const calls = source.split("\n").filter((line) => line.includes("void refreshPmbMorningRepairStatus()"));
-  assert.equal(calls.length, 3);
-  assert.ok(calls.every((line) => line.includes('typeof refreshPmbMorningRepairStatus === "function"')));
+test("scheduled repair is background-only without dashboard polling or notices", () => {
+  assert.doesNotMatch(source, /refreshPmbMorningRepairStatus|pmb-morning-repair-status/);
+  const runtime = readFileSync(new URL("../lib/pmb-morning-repair-runtime.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(runtime, /recordDashboardActivity/);
+  assert.match(runtime, /startPmbMorningRepairScheduler/);
 });
 
 test("stale and failed PMB pricing checks disable portion writes", () => {

@@ -1,3 +1,6 @@
+import { observePackagePrice, createSupplierMapping } from "./vendor-pricing-state.mjs";
+import { MINIMUM_KEG_CUSHION } from "./keg-demand-policy.mjs";
+import { applyInventoryCountPolicy, getUncountedInventoryAmount } from "./inventory-count-policy.mjs";
 import { renderSavedWeeklySnapshot } from "./weekly-snapshot-view.mjs";
 import { getSixWeekUsage } from "./six-week-usage.mjs";
 import "./operations-learning-ui.mjs";
@@ -609,6 +612,7 @@ const BONBRIGHT_KEG_ALIASES = {
   "two-hearted-ipa": ["Two Hearted IPA", "Bell's Two Hearted IPA"],
 };
 const KEG_VENDOR_MAPPINGS = {
+  psychopathy: "Bonbright",
   "michelob-ultra": "Heidelberg",
   "busch-light": "Heidelberg",
   "bud-light": "Heidelberg",
@@ -1358,7 +1362,6 @@ async function init() {
   syncRecipeBuilderSummary();
   clearBeerLookupResult();
   render();
-  if (typeof refreshPmbMorningRepairStatus === "function") void refreshPmbMorningRepairStatus();
   void hydrateComingSoonLiquorItemsFromUntappd();
   loadBeverageNews();
   void runOwnerLoginSync();
@@ -1593,6 +1596,7 @@ function isConservativeBundledPriceDefault(
   defaults,
   { excludeAmbiguous = true } = {},
 ) {
+  if (override?.vendorMapping || override?.priceChangeAlerts?.length) return false;
   const defaultOverride = defaults[id];
   if (!defaultOverride || !isPlainDashboardRecord(override)) return false;
   if (
@@ -3339,8 +3343,6 @@ function bindEvents() {
   });
   window.setInterval(() => {
     if (document.visibilityState === "visible") void refreshDashboardStaffPrepPlan();
-    if (document.visibilityState === "visible" && document.querySelector("#keg-levels-panel.is-active")
-      && typeof refreshPmbMorningRepairStatus === "function") void refreshPmbMorningRepairStatus();
   }, 30_000);
 }
 
@@ -3448,7 +3450,6 @@ function switchTab(tabName) {
     runTapPricingSync();
   }
   if (requestedTab === "dashboard") renderDashboardOverview();
-  if (requestedTab === "keg-levels" && typeof refreshPmbMorningRepairStatus === "function") void refreshPmbMorningRepairStatus();
   if (requestedTab === "insights") renderDashboardBeveragePulse();
   if (requestedTab === "print") renderTapPrintWorkspace();
 }
@@ -5186,6 +5187,7 @@ function renderIngredients() {
 
     items.forEach((ingredient) => {
       const override = getIngredientPriceEditorValues(ingredient);
+      const automaticPrice = Boolean(ingredient.vendorProduct && ["Provi", "OHLQ"].includes(getVendorSyncName(ingredient.vendorProduct)));
       const currentUnitCost = getCatalogUnitCost(ingredient);
       const mappedBottleOz = ingredient.vendorProduct?.bottleOz ? formatNumber(ingredient.vendorProduct.bottleOz) : "";
       const preparedPurchase = getPreparedIngredientPurchase(ingredient.id);
@@ -5197,17 +5199,15 @@ function renderIngredients() {
           <strong>${escapeHtml(ingredient.name)}</strong>
         </td>
         <td>${money(currentUnitCost)}</td>
-        <td>${preparedPurchase
-          ? `<span class="table-note">${escapeHtml(getPreparedIngredientYieldNote(ingredient.id))}</span><input type="hidden" value="${escapeHtml(preparedPurchase.purchaseUnitStorageValue)}">`
-          : `<input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(override.bottleOz ?? "")}" placeholder="${escapeHtml(mappedBottleOz)}" aria-label="Package size in ounces for ${escapeHtml(ingredient.name)}">`}</td>
-        <td><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(override.bottlePrice ?? "")}" aria-label="${escapeHtml(preparedPurchase?.priceInputLabel || `Package price for ${ingredient.name}`)}"></td>
-        <td class="muted">${override.recipeReference ? "Saved recipe price" : formatUpdatedAt(override.updatedAt)}${previousPriceNote ? `<span class="table-note">${escapeHtml(previousPriceNote)}</span>` : ""}</td>
-        <td><button class="mini-button" type="button">Update</button></td>
+        <td><span class="table-note">${escapeHtml(preparedPurchase ? getPreparedIngredientYieldNote(ingredient.id) : (formatNumber(toNumber(ingredient.vendorProduct?.bottleOz) || toNumber(override.bottleOz)) + " oz"))}</span></td>
+        <td>${automaticPrice ? money(toNumber(override.bottlePrice)) : `<input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(override.bottlePrice ?? "")}" aria-label="${escapeHtml(preparedPurchase?.priceInputLabel || `Package price for ${ingredient.name}`)}">`}</td>
+        <td class="muted">${automaticPrice ? "" : (override.recipeReference ? "Saved recipe price" : formatUpdatedAt(override.updatedAt))}${!automaticPrice && previousPriceNote ? `<span class="table-note">${escapeHtml(previousPriceNote)}</span>` : ""}</td>
+        <td>${automaticPrice ? '<span class="table-note">Provi</span>' : '<button class="mini-button" type="button">Update</button>'}</td>
       `;
-
-      const [bottleOzInput, bottlePriceInput] = row.querySelectorAll("input");
       const updateButton = row.querySelector("button");
-      updateButton.addEventListener("click", () => saveIngredientOverride(ingredient.id, bottleOzInput.value, bottlePriceInput.value));
+      updateButton?.addEventListener("click", () => saveIngredientOverride(ingredient.id,
+        preparedPurchase?.purchaseUnitStorageValue || ingredient.vendorProduct?.bottleOz || override.bottleOz || mappedBottleOz,
+        row.querySelector("input").value));
       ingredientTable.append(row);
     });
   });
@@ -5223,6 +5223,7 @@ function renderIngredients() {
       const currentUnitCost = getKegCatalogUnitCost(item);
       const previousPriceNote = getPreviousPriceNote(override);
       const staleSmallKegOverride = isStaleSmallBeerKegOverride(item, override);
+      const automaticPrice = Boolean(item.vendorProduct && ["Provi", "OHLQ"].includes(getVendorSyncName(item.vendorProduct)));
       const row = document.createElement("tr");
       row.dataset.globalSearchKey = `keg-price:${item.id}`;
       row.innerHTML = `
@@ -5232,15 +5233,16 @@ function renderIngredients() {
         </td>
         <td>${escapeHtml(vendorName)}</td>
         <td>${money(currentUnitCost)}</td>
-        <td><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(getKegOverrideDisplayOz(item, override))}" placeholder="${escapeHtml(formatNumber(item.kegOz))}" aria-label="Keg ounces for ${escapeHtml(item.name)}"></td>
-        <td><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(staleSmallKegOverride ? "" : override.kegPrice ?? "")}" aria-label="Keg price for ${escapeHtml(item.name)}"></td>
-        <td class="muted">${staleSmallKegOverride ? '<span class="table-note">Ignored old small-keg price</span>' : formatUpdatedAt(override.updatedAt)}${previousPriceNote && !staleSmallKegOverride ? `<span class="table-note">${escapeHtml(previousPriceNote)}</span>` : ""}</td>
+        <td><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" readOnly value="${escapeHtml(getKegOverrideDisplayOz(item, override))}" placeholder="${escapeHtml(formatNumber(item.kegOz))}" aria-label="Keg ounces for ${escapeHtml(item.name)}"></td>
+        <td><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" ${automaticPrice ? "disabled" : ""} value="${escapeHtml(staleSmallKegOverride ? "" : override.kegPrice ?? "")}" aria-label="Keg price for ${escapeHtml(item.name)}"></td>
+        <td class="muted">${automaticPrice ? "" : staleSmallKegOverride ? '<span class="table-note">Ignored old small-keg price</span>' : formatUpdatedAt(override.updatedAt)}${!automaticPrice && previousPriceNote && !staleSmallKegOverride ? `<span class="table-note">${escapeHtml(previousPriceNote)}</span>` : ""}</td>
         <td><button class="mini-button" type="button">Update</button></td>
       `;
 
       const [kegOzInput, kegPriceInput] = row.querySelectorAll("input");
       const updateButton = row.querySelector("button");
-      updateButton.addEventListener("click", () => saveKegPriceOverride(item.id, kegOzInput.value, kegPriceInput.value, item));
+      if (automaticPrice) updateButton.replaceWith(document.createTextNode("Provi"));
+      else updateButton.addEventListener("click", () => saveKegPriceOverride(item.id, kegOzInput.value, kegPriceInput.value, item));
       kegPricingTable?.append(row);
     });
   });
@@ -5278,7 +5280,8 @@ function renderInventory() {
 
 function getWeeklyPlanInventoryItems({ live = false } = {}) {
   const mondaySnapshot = getCurrentMondayInventorySnapshot(inventoryHistory, new Date());
-  const sourceItems = mondaySnapshot?.items || (live ? getInventorySnapshotItems() : []);
+  const sourceItems = (mondaySnapshot?.items || (live ? getInventorySnapshotItems() : []))
+    .map(applyInventoryCountPolicy);
   const frozenKegPlan = getCurrentMondayKegPlanSnapshot();
   const recommendationItems = Array.isArray(frozenKegPlan?.items)
     ? frozenKegPlan.items
@@ -5403,7 +5406,7 @@ function getWeeklyPlanRecommendations({ live = false } = {}) {
       ...item,
       internalId: pricingItem?.id || item.key,
       vendor: vendorCatalogProduct?.vendor || pricingItem?.vendor || "",
-      vendorSku: vendorCatalogProduct?.vendorSku || pricingItem?.vendorProduct?.preferredSku || pricingItem?.preferredSku || "",
+      vendorSku: vendorCatalogProduct?.vendorSku || getOrderingSku(pricingItem?.vendorProduct) || pricingItem?.preferredSku || "",
       vendorProductName: vendorCatalogProduct?.productName || pricingItem?.vendorProduct?.productName || pricingItem?.name || item.orderProductName || item.name,
       unitCost,
       vendorListPrice: vendorCatalogProduct?.listPrice ?? unitCost,
@@ -5439,7 +5442,7 @@ function getWeeklyPlanModel({ live = false } = {}) {
       if (!vendor && !unitCost) return null;
       return {
         vendor,
-        vendorSku: pricingItem?.vendorProduct?.preferredSku || pricingItem?.preferredSku || item.vendorSku,
+        vendorSku: getOrderingSku(pricingItem?.vendorProduct) || pricingItem?.preferredSku || item.vendorSku,
         vendorProductName: pricingItem?.vendorProduct?.productName || pricingItem?.name || item.vendorProductName,
         unitCost,
       };
@@ -6600,6 +6603,7 @@ function renderDashboardOverview() {
         <h2 id="thirty-second-briefing-title">Beverage Brief</h2>
       </header>
         <div class="thirty-second-briefing__lines">
+          ${renderSupplierPriceAlerts()}
           ${briefingLines.map((item) => {
             const content = `
               <strong>${escapeHtml(item.text)}</strong>
@@ -8331,7 +8335,7 @@ function renderKegLevels() {
   const visibleWallBlocks = selectedWall
     ? renderKegWallBlock(selectedWall, sortedTaps.filter((item) => item.wall === selectedWall))
     : renderKegWallBlock("All", sortedTaps, { hideHeader: true });
-  const activeComingSoonCount = getActiveComingSoonItems(comingSoonItems).length;
+  const activeComingSoonCount = getVisibleComingSoonItems().length;
   const wallFilterOptions = [
     ["all", `${formatNumber(totalTaps)} Taps`, kegWallItems.length],
     ...["Main", "Karaoke", "Patio"].map((wallName) => [wallName.toLowerCase(), wallName, kegWallItems.filter((item) => item.wall === wallName).length]),
@@ -8387,8 +8391,19 @@ function renderKegLevels() {
   bindKegLevelEvents();
 }
 
+function getVisibleComingSoonItems() {
+  const currentProducts = kegLiveLevelsStale ? [] : [...kegLiveLevels.values()]
+    .filter(item => toNumber(item.tapNumber) > 0 && clean(item.name || item.tapProduct));
+  return getActiveComingSoonItems(comingSoonItems).filter(item => !currentProducts.some(current => {
+    // PLUs can be reused. Require a matching name, retaining the liquor variant
+    // and ignoring only the wall suffix through the existing identity helper.
+    return [item.name, item.pmbProductName].filter(Boolean).some(name =>
+      isKegOnDeckProductInstalled({ name, plu: 0 }, { ...current, plu: 0 }));
+  }));
+}
+
 function renderComingSoonBlock() {
-  const items = getActiveComingSoonItems(comingSoonItems);
+  const items = getVisibleComingSoonItems();
 
   return `
     <section class="keg-wall-card coming-soon-card">
@@ -8410,12 +8425,8 @@ function renderComingSoonBlock() {
 }
 
 function renderComingSoonItem(item) {
-  const isBeer = item.kind === "beer";
-  const isRecipe = item.kind === "recipe";
-  const isLiquor = item.kind === "liquor";
   const imageUrl = getComingSoonImageUrl(item);
-  const currentMargin = toNumber(item.targetMargin) || DEFAULT_BEER_TARGET_MARGIN;
-  const currentPrice = getGeneratedBeerChargePerOz(item.kegCost, currentMargin);
+  const label = item.pmbActiveAt ? "Update PMB product" : item.plu ? "Update & activate on PMB" : "Create & activate on PMB";
   return `
     <article class="coming-soon-item" data-coming-soon-id="${escapeHtml(item.id)}">
       ${imageUrl ? `<img class="coming-soon-item__image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(item.name)}">` : ""}
@@ -8424,35 +8435,8 @@ function renderComingSoonItem(item) {
           <strong>${escapeHtml(item.name)}</strong>
           <span>${escapeHtml(getComingSoonKindLabel(item.kind))}</span>
         </div>
-        ${isRecipe ? renderComingSoonRecipeStats(item) : ""}
-        ${isLiquor ? renderComingSoonLiquorDetails(item) : ""}
-        ${isBeer ? `
-          <div class="coming-soon-controls">
-            <label>
-              <span>Margin %</span>
-              <input class="inventory-input coming-soon-margin" type="text" inputmode="decimal" value="${escapeHtml(formatNumber(currentMargin))}">
-            </label>
-            <span class="generated-beer-summary">${currentPrice ? `${money(currentPrice)}/oz generated` : "Add keg cost"}</span>
-            <button class="mini-button update-coming-soon-margin" type="button"${item.plu ? "" : " disabled"}>Update PMB pricing</button>
-          </div>
-        ` : ""}
-        ${isRecipe ? `
-          <div class="coming-soon-controls">
-            <button class="mini-button send-coming-soon-pmb" type="button">${item.plu ? "Update PMB product" : "Create PMB product"}</button>
-          </div>
-        ` : ""}
         <div class="coming-soon-controls">
-          <button class="mini-button activate-coming-soon-pmb" type="button"${item.pmbActiveAt || item.replacedAt ? " disabled" : ""}>${item.pmbActiveAt ? "Active on PMB" : "Make active on PMB"}</button>
-        </div>
-        <div class="coming-soon-controls">
-          <label>
-            <span>Replace tap</span>
-            <select class="coming-soon-replace-select"${item.replacedAt ? " disabled" : ""}>
-              <option value="">Choose current wall product</option>
-              ${getReplaceableTapOptions(item.replaceTapKey)}
-            </select>
-          </label>
-          <button class="primary-button replace-coming-soon" type="button"${item.replacedAt ? " disabled" : ""}>Replace wall product</button>
+          <button class="mini-button activate-coming-soon-pmb" type="button"${item.replacedAt ? " disabled" : ""}>${label}</button>
         </div>
       </div>
     </article>
@@ -11235,19 +11219,9 @@ function bindKegLevelEvents() {
 
   document.querySelectorAll(".coming-soon-item").forEach((card) => {
     const id = card.dataset.comingSoonId;
-    const marginInput = card.querySelector(".coming-soon-margin");
-    card.querySelector(".update-coming-soon-margin")?.addEventListener("click", () => {
-      updateComingSoonMargin(id, marginInput?.value);
-    });
-    card.querySelector(".send-coming-soon-pmb")?.addEventListener("click", () => {
-      sendComingSoonItemToPmb(id);
-    });
     card.querySelector(".activate-coming-soon-pmb")?.addEventListener("click", () => {
-      sendComingSoonItemToPmb(id, { activate: true });
-    });
-    card.querySelector(".replace-coming-soon")?.addEventListener("click", () => {
-      const tapKey = card.querySelector(".coming-soon-replace-select")?.value;
-      replaceTapWithComingSoonItem(id, tapKey);
+      const item = comingSoonItems.find(entry => entry.id === id);
+      sendComingSoonItemToPmb(id, { activate: !item?.pmbActiveAt });
     });
   });
 }
@@ -11362,7 +11336,7 @@ async function sendComingSoonItemToPmb(id, { activate = false } = {}) {
   }
 
   if (!confirmDashboardAction(
-    activate ? `Make ${item.name} active in Pour My Beer?` : `${item.plu ? "Update" : "Create"} ${item.name} in Pour My Beer?`,
+    activate ? `${item.plu ? "Update" : "Create"} and activate ${item.name} in Pour My Beer?` : `${item.plu ? "Update" : "Create"} ${item.name} in Pour My Beer?`,
     [
       item.plu ? `Existing PMB PLU: ${item.plu}` : "A new PMB product will be created.",
       `Charge: ${money(payload.pricePerOz)} / oz`,
@@ -12820,6 +12794,10 @@ function getKegNeedCalculation(item) {
   const savedPar = getKegParDisplay(item);
   const targetStock = savedPar.trim() !== "" ? toNumber(savedPar) : recommendation?.targetStockKegs;
   if (targetStock == null || !Number.isFinite(Number(targetStock))) return null;
+  const recentUsage = getSixWeekUsage(getWeeklyUsageForKegItem(item, getKegDisplayBrand(item, liveRow)) || {});
+  const averageUsage = recentUsage.sampleWeeks ? recentUsage.average : toNumber(recommendation?.avgWeeklyKegs);
+  // Old saved targets must not remove the minimum reserve from live ordering.
+  const bufferedTarget = Math.max(Number(targetStock), averageUsage * (1 + MINIMUM_KEG_CUSHION));
   const onDeck = getKegOnDeckItem(item);
   const position = buildInventoryPosition({
     connected: liveFraction,
@@ -12829,7 +12807,7 @@ function getKegNeedCalculation(item) {
   });
   const projectedStock = Math.max(0, position.available - toNumber(recommendation?.preThursdayForecastKegs));
   return buildStockGapRecommendation({
-    targetStock: Number(targetStock),
+    targetStock: bufferedTarget,
     position: buildInventoryPosition({ connected: projectedStock }),
   });
 }
@@ -12853,6 +12831,7 @@ function renderKegNeedCell(item, need) {
       <strong>${usage.sampleWeeks ? `${formatNumber(usage.average)} ${usageUnit} / week` : "Not available"}</strong>
       <span class="tap-product-detail__label">Need at least</span>
       <strong>${calculation ? `${formatNumber(calculation.targetStock)} ${unit}` : "Not available"}</strong>
+      ${calculation && unit === "kegs" && usage.average > 0 ? `<small>Includes at least ${formatNumber(MINIMUM_KEG_CUSHION * 100)}% reserve</small>` : ""}
     </div>
   </details>`;
 }
@@ -12877,11 +12856,23 @@ function renderKegNeedValue(item, need) {
 function getKegLiveRow(item) {
   const row = kegTemplateAssignments.get(getKegItemKey(item)) || null;
   if (!row) return row;
+  // The keg-level endpoint validates the controller response before setting
+  // levelAvailable. An explicit raw zero from that live physical tap is a
+  // valid empty reading, not an absent value or a fallback converted to zero.
+  const livePmbZero = !kegLiveLevelsStale
+    && row.levelAvailable === true
+    && row.rawPercent === 0
+    && row.fillLevelPercent === 0
+    && !row.lastKnownAt
+    && !row.levelError
+    && toNumber(row.deviceId) > 0
+    && toNumber(row.lineNum) > 0
+    && toNumber(row.tapNumber) === toNumber(item.tapNumber);
   const levelState = classifyPmbLevelState({
     levelAvailable: row.levelAvailable,
     levelPercent: row.fillLevelPercent,
     stale: row.stale === true,
-    zeroVerified: row.zeroVerified === true,
+    zeroVerified: row.zeroVerified === true || livePmbZero,
   });
   if (levelState.usable) return row;
   return {
@@ -13440,7 +13431,7 @@ async function loadSharedInventoryState() {
         return;
       }
       inventorySharedSaveError = "";
-      inventorySharedMessage = "Shared inventory is available on all signed-in manager devices.";
+      inventorySharedMessage = "";
     } else {
       inventorySharedMessage = "Setup needed: import inventory only from the service computer. Until then, changes stay on this device.";
     }
@@ -13946,8 +13937,9 @@ function bindInventorySummaryEvents() {
 }
 
 async function clearAllInventoryOnHand() {
-  const changes = inventoryItems.map((item) => ({ id: item.id, field: "onHand", value: "" }));
-  const populatedCount = inventoryItems.filter((item) => clean(item.onHandDisplay) !== "").length;
+  const countedItems = inventoryItems.filter((item) => getUncountedInventoryAmount(item) === null);
+  const changes = countedItems.map((item) => ({ id: item.id, field: "onHand", value: "" }));
+  const populatedCount = countedItems.filter((item) => clean(item.onHandDisplay) !== "").length;
   if (!changes.length || !confirmDashboardAction(
     "Clear every Inventory on-hand field?",
     [
@@ -13992,7 +13984,7 @@ function speechProposalNeedsReview(proposal) {
 }
 
 function getInventorySpeechSourceItems() {
-  const inventorySources = inventoryItems.map((item) => ({
+  const inventorySources = inventoryItems.filter((item) => getUncountedInventoryAmount(item) === null).map((item) => ({
     id: item.id,
     name: item.name,
     target: "inventory",
@@ -14526,7 +14518,7 @@ function mergeCustomInventoryItems(baseItems) {
     byId.set(normalized.id, normalized);
   });
 
-  return [...byId.values()].map((item) => ({
+  return [...byId.values()].map((item) => applyInventoryCountPolicy({
     ...item,
     group: inventoryGroupOverrides[item.id] || item.group,
   }));
@@ -14793,6 +14785,7 @@ function getInventoryVendorTotals(items) {
 
 function createInventoryRow(item, mode) {
   const row = document.createElement("tr");
+  const assumedOnHand = getUncountedInventoryAmount(item);
   row.dataset.inventoryId = item.id;
   if (mode === "stock") row.dataset.globalSearchKey = `inventory:${item.id}`;
   const orderQuantityForMode = mode === "order" ? getInventoryRoundedOrderQuantity(item) : item.orderQuantity;
@@ -14815,10 +14808,9 @@ function createInventoryRow(item, mode) {
       <input class="inventory-input inventory-input--par" data-field="par" name="inventory-par-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" value="${escapeHtml(item.parDisplay)}" aria-label="Fallback stock target for ${escapeHtml(item.name)}" ${isRowEditing ? "" : "readonly"}>
     </label>` : "";
   const linkedNotes = [];
-  if (mode === "stock") {
+  if (mode === "stock" && (isRowEditing || customInventoryPriceStatus.has(item.id))) {
     linkedNotes.push(`
       <div class="inventory-row-controls">
-        <button class="inventory-drag-handle" type="button" draggable="true" title="Drag to reorder; use arrow keys when focused" aria-label="Reorder ${escapeHtml(item.name)}">&#8942;&#8942;</button>
         ${isRowEditing ? `
           <button class="icon-button inventory-move-up" type="button" title="Move up" aria-label="Move ${escapeHtml(item.name)} up">&uarr;</button>
           <button class="icon-button inventory-move-down" type="button" title="Move down" aria-label="Move ${escapeHtml(item.name)} down">&darr;</button>
@@ -14835,10 +14827,10 @@ function createInventoryRow(item, mode) {
     ? money(item.unitCost)
     : '<span class="inventory-order-zero">Price needed</span>';
   row.innerHTML = `
-    <td><strong>${escapeHtml(item.name)}</strong>${isRowEditing && item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${item.orderHoldReason ? `<span class="table-note table-note--warning">Ordering hold: ${escapeHtml(item.orderHoldReason)}</span>` : ""}${linkedNotes.join("")}
+    <td><strong ${mode === "stock" ? 'class="inventory-item-drag-target" draggable="true" tabindex="0" title="Drag to reorder; use arrow keys when focused"' : ""}>${escapeHtml(item.name)}</strong>${isRowEditing && item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${item.orderHoldReason ? `<span class="table-note table-note--warning">Ordering hold: ${escapeHtml(item.orderHoldReason)}</span>` : ""}${linkedNotes.join("")}
       ${isRowEditing ? fallbackSetting : ""}
     </td>
-    <td>${mode === "stock" ? `<input class="inventory-input" data-field="onHand" name="inventory-on-hand-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" pattern="${item.allowsDecimal ? "[0-9]*[.]?[0-9]*" : "[0-9]*"}" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getInventoryDisplayValue(item, "onHand"))}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>
+    <td>${assumedOnHand !== null ? '<span class="inventory-not-counted">Not counted</span>' : mode === "stock" ? `<input class="inventory-input" data-field="onHand" name="inventory-on-hand-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" pattern="${item.allowsDecimal ? "[0-9]*[.]?[0-9]*" : "[0-9]*"}" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getInventoryDisplayValue(item, "onHand"))}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>
     ${mode === "order" ? `<td data-cell="two-week-need">${twoWeekNeed}</td>
     <td data-cell="order" class="${item.orderQuantity > 0 ? "inventory-order-flag" : "muted"}">${orderCell}</td>
     <td>${escapeHtml(packLabel)}</td>
@@ -14863,12 +14855,12 @@ function createInventoryRow(item, mode) {
     row.querySelector(".custom-inventory-delete")?.addEventListener("click", () => deleteCustomInventoryItem(item.id));
     row.querySelector(".inventory-move-up")?.addEventListener("click", () => moveInventoryItem(item.id, -1));
     row.querySelector(".inventory-move-down")?.addEventListener("click", () => moveInventoryItem(item.id, 1));
-    const dragHandle = row.querySelector(".inventory-drag-handle");
+    const dragHandle = row.querySelector(".inventory-item-drag-target");
     dragHandle?.addEventListener("keydown", (event) => {
       if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
       event.preventDefault();
       moveInventoryItem(item.id, event.key === "ArrowUp" ? -1 : 1);
-      inventoryTable.querySelector(`[data-inventory-id="${CSS.escape(item.id)}"] .inventory-drag-handle`)?.focus();
+      inventoryTable.querySelector(`[data-inventory-id="${CSS.escape(item.id)}"] .inventory-item-drag-target`)?.focus();
     });
     let touchDrag = null;
     const finishTouchDrag = (event, canceled = false) => {
@@ -14909,13 +14901,13 @@ function createInventoryRow(item, mode) {
     dragHandle?.addEventListener("pointerup", (event) => finishTouchDrag(event));
     dragHandle?.addEventListener("pointercancel", (event) => finishTouchDrag(event, true));
     dragHandle?.addEventListener("lostpointercapture", (event) => finishTouchDrag(event, true));
-    row.querySelector(".inventory-drag-handle")?.addEventListener("dragstart", (event) => {
+    dragHandle?.addEventListener("dragstart", (event) => {
       draggedInventoryItemId = item.id;
       row.classList.add("is-dragging");
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", item.id);
     });
-    row.querySelector(".inventory-drag-handle")?.addEventListener("dragend", () => {
+    dragHandle?.addEventListener("dragend", () => {
       draggedInventoryItemId = "";
       row.classList.remove("is-dragging");
       document.querySelectorAll(".inventory-row--drag-target").forEach((target) => target.classList.remove("inventory-row--drag-target"));
@@ -14976,6 +14968,7 @@ function reorderInventoryItemBefore(sourceId, targetId, after = false) {
 
 function applyInventoryCabinetMove({ id, group }) {
   if (!id || !["Liquor Cabinet", "Mixer Cabinet", "Other"].includes(group)) return;
+  if (getUncountedInventoryAmount(findInventoryItem(id)) !== null) group = "Other";
   inventoryGroupOverrides[id] = group;
   inventoryItems = inventoryItems.map((item) => item.id === id ? { ...item, group } : item);
   writeDashboardLocalStorageValue("onpar-inventory-group-overrides", inventoryGroupOverrides);
@@ -15179,6 +15172,7 @@ function getInventoryDisplayValue(item, field) {
 }
 
 function persistInventoryField(id, field, value) {
+  if (field === "onHand" && getUncountedInventoryAmount(findInventoryItem(id)) !== null) return;
   if (field === "par") {
     persistInventoryOverride(inventoryParOverrides, saveInventoryParOverrides, id, value);
   } else {
@@ -15208,6 +15202,7 @@ function normalizeInventoryInputValue(value, allowsDecimal) {
 }
 
 function recalculateInventoryItem(item) {
+  Object.assign(item, applyInventoryCountPolicy(item));
   item.onHand = toNumber(item.onHandDisplay);
   item.par = toNumber(item.parDisplay);
   item.totalValue = item.onHand * item.unitCost;
@@ -15526,7 +15521,8 @@ function getInventorySnapshotItems() {
     casePackaged: item.casePackaged,
     unitCost: item.unitCost,
     totalValue: item.totalValue,
-    note: item.note,
+    note: getUncountedInventoryAmount(item) === null ? item.note
+      : `Not counted; assumes ${getUncountedInventoryAmount(item)} units on hand.`,
   }));
 }
 
@@ -15681,7 +15677,7 @@ function saveIngredientOverride(id, bottleOz, bottlePrice) {
   if (!nextOverride.bottleOz && !nextOverride.bottlePrice) {
     delete priceOverrides[id];
   } else {
-    priceOverrides[id] = nextOverride;
+    priceOverrides[id] = observePackagePrice(priceOverrides[id], nextOverride, { name: ingredients.find(item => item.id === id)?.name || id });
   }
   saveOverrides();
   render();
@@ -15821,6 +15817,7 @@ async function addPmbProduct(event) {
     const payload = {
       productKind,
       name,
+      vendor: clean(document.querySelector("#pmb-product-vendor")?.value),
       pricePerOz,
       servingOz: document.querySelector("#pmb-product-serving")?.value,
       brewery: document.querySelector("#pmb-product-brewery")?.value,
@@ -15834,6 +15831,7 @@ async function addPmbProduct(event) {
       imageUrl: localImageUrl,
     };
 
+    payload.vendorMapping = await mapAddedProduct({ name, kind: "keg", vendor: payload.vendor, bottleOz: kegOz });
     const queued = enqueuePmbPublishItem(pmbPublishQueue, payload);
     pmbPublishQueue = queued.queue;
     savePmbPublishQueue();
@@ -15910,6 +15908,7 @@ async function addLiquorProduct(event) {
   setLiquorProductStatus("", "loading");
 
   try {
+    payload.vendorMapping = await mapAddedProduct({ name, kind: "ingredient", vendor: "OHLQ", bottleOz });
     const queued = enqueuePmbPublishItem(pmbPublishQueue, payload);
     pmbPublishQueue = queued.queue;
     savePmbPublishQueue();
@@ -16207,7 +16206,8 @@ function saveCustomBeerKegFromPmbProduct(payload, product = null) {
     wall: "New keg",
     type: "Beer",
     kegOz,
-    vendor: clean(payload.brewery) || "Manual",
+    vendor: clean(payload.vendorMapping?.vendor || payload.vendor) || getKegVendorLabel({ name }),
+    vendorMapping: payload.vendorMapping || existing?.vendorMapping || null,
     sourceNames: [name],
     sourceTaps: ["New keg"],
     sourceTypes: ["Beer"],
@@ -16225,8 +16225,16 @@ function saveCustomBeerKegFromPmbProduct(payload, product = null) {
     customBeerKegs.push(nextItem);
   }
 
-  if (kegCost) {
-    const existingOverride = kegPriceOverrides[id] || {};
+  const savedPrice = kegPriceOverrides[id] || {};
+  const hasMatchedVendorPrice = toNumber(savedPrice.kegPrice) > 0 && (
+    savedPrice.priceSource === "Provi"
+    || savedPrice.vendorMapping?.matchStatus === "matched"
+    || Boolean(clean(savedPrice.matchedSku))
+  );
+  // Publishing uses the queued product details, not a new supplier observation.
+  // Preserve the matched package price, size, timestamp, and price history.
+  if (kegCost && !hasMatchedVendorPrice) {
+    const existingOverride = savedPrice;
     kegPriceOverrides[id] = {
       ...existingOverride,
       kegOz: String(kegOz),
@@ -17673,6 +17681,10 @@ function buildIngredientCatalog(sourceRecipes) {
     });
   });
 
+  Object.entries(priceOverrides).forEach(([id, override]) => {
+    if (!override.vendorMapping || byId.has(id)) return;
+    byId.set(id, { id, name: override.vendorMapping.displayName || override.vendorMapping.productName, vendorProduct: override.vendorMapping, totalCost: 0, totalOz: 0, recipes: [] });
+  });
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -18136,10 +18148,13 @@ function getDefaultKegSizeOz(item) {
 }
 
 function getKegVendorLabel(item) {
-  return KEG_VENDOR_MAPPINGS[getKegPricingKey(item?.brand || item?.name || "")] || "Needs mapping";
+  const key = getKegPricingKey(item?.brand || item?.name || "");
+  return kegPriceOverrides[key]?.vendorMapping?.vendor || KEG_VENDOR_MAPPINGS[key] || "Needs mapping";
 }
 
 function getKegVendorProduct(name, vendor, kegOz) {
+  const saved = kegPriceOverrides[getKegPricingKey(name)]?.vendorMapping;
+  if (saved) return { ...saved, bottleOz: kegOz };
   if (!KEG_PROVI_DISTRIBUTOR_HINTS[vendor]) return null;
   const key = getKegPricingKey(name);
   const aliases = BONBRIGHT_KEG_ALIASES[key] || [];
@@ -18903,6 +18918,7 @@ function getRecipeFlavor(recipeTitle) {
 }
 
 function getVendorMapping(ingredientId) {
+  if (priceOverrides[ingredientId]?.vendorMapping) return priceOverrides[ingredientId].vendorMapping;
   if (INVENTORY_PROVI_MAPPINGS[ingredientId] || PROOF_MAPPINGS[ingredientId] || OHLQ_MAPPINGS[ingredientId]) {
     return INVENTORY_PROVI_MAPPINGS[ingredientId] || PROOF_MAPPINGS[ingredientId] || OHLQ_MAPPINGS[ingredientId] || null;
   }
@@ -19111,6 +19127,7 @@ function getVendorSyncName(vendorProduct) {
 }
 
 async function runVendorSync({ automatic = false } = {}) {
+  if (vendorSyncRunning || isEmployeeDashboard) return { ok: false, skipped: true };
   const syncScope = automatic ? "all" : vendorSyncScope;
   const candidates = getVendorMappedItems(syncScope);
   if (!candidates.length) {
@@ -19158,6 +19175,7 @@ async function runVendorSync({ automatic = false } = {}) {
     (result.updates || []).forEach((update) => {
       if (!update.id || !Number.isFinite(update.bottleOz) || !Number.isFinite(update.bottlePrice)) return;
       const candidate = candidatesByKey.get(`${update.priceType || "ingredient"}:${update.id}`);
+      if (!candidate) return;
       const expectedBottleOz = toNumber(candidate?.vendorProduct?.bottleOz);
       if (expectedBottleOz > 0 && !isRoughlyEqual(update.bottleOz, expectedBottleOz)) {
         rejected += 1;
@@ -19170,14 +19188,15 @@ async function runVendorSync({ automatic = false } = {}) {
         const pricingItem = getKegPricingItem(update.id);
         const nextKegOz = pricingItem && isBeerPricingTap(pricingItem) ? getExpectedBeerKegOz(pricingItem) : update.bottleOz;
         const didPriceChange = previousKegPrice > 0 && Math.abs(previousKegPrice - nextKegPrice) > 0.001;
-        kegPriceOverrides[update.id] = {
+        kegPriceOverrides[update.id] = observePackagePrice(existingOverride, {
           ...existingOverride,
           kegOz: String(nextKegOz),
           kegPrice: String(update.bottlePrice),
           updatedAt: update.updatedAt || new Date().toISOString(),
           previousKegPrice: didPriceChange ? String(previousKegPrice) : "",
           previousUpdatedAt: didPriceChange ? existingOverride.updatedAt || "" : "",
-        };
+          matchedSku: update.matchedSku || existingOverride.matchedSku || "",
+        }, { name: candidate?.name || update.id, kind: "keg", source: "Provi" });
         applied += 1;
         return;
       }
@@ -19186,7 +19205,7 @@ async function runVendorSync({ automatic = false } = {}) {
       const previousBottlePrice = toNumber(existingOverride.bottlePrice);
       const nextBottlePrice = Number(update.bottlePrice);
       const didPriceChange = previousBottlePrice > 0 && Math.abs(previousBottlePrice - nextBottlePrice) > 0.001;
-      priceOverrides[update.id] = {
+      priceOverrides[update.id] = observePackagePrice(existingOverride, {
         ...existingOverride,
         bottleOz: String(update.bottleOz),
         bottlePrice: String(update.bottlePrice),
@@ -19194,7 +19213,7 @@ async function runVendorSync({ automatic = false } = {}) {
         matchedSku: update.matchedSku || "",
         previousBottlePrice: didPriceChange ? String(previousBottlePrice) : "",
         previousUpdatedAt: didPriceChange ? existingOverride.updatedAt || "" : "",
-      };
+      }, { name: candidate?.name || update.id, source: "Provi" });
       applied += 1;
     });
 
@@ -19743,3 +19762,112 @@ function formatBatchLabel(value) {
   if (/^12\s*gallons?$/i.test(cleaned) || /^12\s*gallon\s*keg$/i.test(cleaned)) return DEFAULT_BATCH_LABEL;
   return cleaned;
 }
+
+function getOrderingSku(mapping) {
+  if (!mapping) return "";
+  return mapping.requireExactMatch ? mapping.orderingSku || "" : mapping.preferredSku || "";
+}
+
+function renderSupplierPriceAlerts() {
+  return [["ingredient", priceOverrides], ["keg", kegPriceOverrides]].flatMap(([kind, records]) =>
+    Object.entries(records).flatMap(([id, record]) => (record.priceChangeAlerts || []).filter(event => !event.dismissedAt).map(event =>
+      `<div class="thirty-second-briefing__line thirty-second-briefing__line--warning"><strong>${escapeHtml(event.name || id)}: price ${event.changePercent > 0 ? "increased" : "decreased"} ${formatNumber(Math.abs(event.changePercent))}%</strong><small>${money(event.oldPrice)} to ${money(event.newPrice)} per package</small><button class="mini-button" type="button" data-dismiss-price-kind="${kind}" data-dismiss-price-id="${escapeHtml(id)}" data-dismiss-price-event="${escapeHtml(event.id)}">Clear</button></div>`
+    ))).join("");
+}
+
+document.addEventListener("click", event => {
+  const button = event.target.closest?.("[data-dismiss-price-event]");
+  if (!button || isEmployeeDashboard) return;
+  const records = button.dataset.dismissPriceKind === "keg" ? kegPriceOverrides : priceOverrides;
+  const record = records[button.dataset.dismissPriceId];
+  if (!record) return;
+  record.priceChangeAlerts = (record.priceChangeAlerts || []).map(item => item.id === button.dataset.dismissPriceEvent ? { ...item, dismissedAt: new Date().toISOString() } : item);
+  if (button.dataset.dismissPriceKind === "keg") saveKegPriceOverrides(); else saveOverrides();
+  renderDashboardOverview();
+});
+
+async function findSupplierMatches(mapping) {
+  const response = await fetch("/api/vendor-sync", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ resolveOnly: true, mapping }), signal: AbortSignal.timeout(30_000) });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Supplier matching is unavailable.");
+  return result;
+}
+
+function storeSupplierMapping(mapping, match = null) {
+  const name = mapping.displayName || mapping.productName;
+  const id = mapping.kind === "keg" ? getKegPricingKey(name) : slugify(normalizeIngredientAlias(name));
+  const records = mapping.kind === "keg" ? kegPriceOverrides : priceOverrides;
+  const catalog = mapping.kind === "keg" ? getKegVendorCatalogProduct(name) : getVendorMapping(id);
+  const knownOrderSku = catalog?.vendor === mapping.vendor && isRoughlyEqual(toNumber(catalog?.kegOz || catalog?.bottleOz), mapping.bottleOz)
+    ? catalog.vendorSku || getOrderingSku(catalog) : "";
+  const saved = { ...mapping, displayName: name, orderingSku: mapping.orderingSku || knownOrderSku || "",
+    matchStatus: match ? "matched" : "pending", preferredSku: match?.sku || "", productName: match?.name || mapping.productName,
+    matchedAt: match ? new Date().toISOString() : "" };
+  saved.orderingStatus = saved.orderingSku ? "confirmed" : "needs-confirmation";
+  const previous = records[id] || {};
+  const update = { ...previous, vendorMapping: saved };
+  if (match) {
+    const kind = mapping.kind;
+    update[kind === "keg" ? "kegOz" : "bottleOz"] = String(mapping.bottleOz);
+    update[kind === "keg" ? "kegPrice" : "bottlePrice"] = String(match.price);
+    update.updatedAt = new Date().toISOString();
+    update.matchedSku = match.sku;
+    records[id] = observePackagePrice(previous, update, { name, kind, source: "Provi" });
+  } else records[id] = update;
+  if (mapping.kind === "keg") saveKegPriceOverrides(); else saveOverrides();
+  return saved;
+}
+
+async function mapAddedProduct({ name, vendor, bottleOz, kind }) {
+  const id = kind === "keg" ? getKegPricingKey(name) : slugify(normalizeIngredientAlias(name));
+  const existing = (kind === "keg" ? kegPriceOverrides : priceOverrides)[id]?.vendorMapping;
+  if (existing?.vendor === vendor && isRoughlyEqual(existing.bottleOz, bottleOz)) return existing;
+  const mapping = createSupplierMapping({ name, vendor, bottleOz, kind });
+  if (!mapping) return null;
+  storeSupplierMapping(mapping);
+  try {
+    const result = await findSupplierMatches(mapping);
+    if (result.automatic && result.candidates.length === 1) return storeSupplierMapping(mapping, result.candidates[0]);
+  } catch { /* Preserve the selected distributor when its catalog is unavailable. */ }
+  return mapping;
+}
+
+const supplierMappingForm = document.querySelector("#supplier-mapping-form");
+supplierMappingForm?.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (isEmployeeDashboard) return;
+  const values = new FormData(supplierMappingForm);
+  const mapping = createSupplierMapping(Object.fromEntries(values));
+  const status = document.querySelector("#supplier-mapping-status");
+  const results = document.querySelector("#supplier-mapping-results");
+  if (!mapping) { status.textContent = "Choose a supplier, product name, and positive package size."; return; }
+  const button = supplierMappingForm.querySelector('button[type="submit"]');
+  button.disabled = true;
+  results.replaceChildren();
+  storeSupplierMapping(mapping);
+  status.textContent = "Supplier saved. Looking for the same product and package in Provi...";
+  try {
+    const result = await findSupplierMatches(mapping);
+    const accept = match => {
+      const saved = storeSupplierMapping(mapping, match);
+      status.textContent = saved.orderingSku ? "Supplier, ordering item, and Provi price saved." : `Provi price saved. Confirm the ${saved.orderingSystem} item code to finish the ordering link.`;
+      results.replaceChildren();
+      ingredients = buildIngredientCatalog(getActiveRecipes());
+      kegPricingItems = buildKegPricingCatalog(kegWallItems, getCurrentKegPricingTapItems());
+      render();
+    };
+    if (result.automatic && result.candidates.length === 1) accept(result.candidates[0]);
+    else {
+      status.textContent = result.candidates.length ? "Choose the correct item. Similar names are not automatically linked." : "Supplier saved. No safe package match found; check the full brand name and package size.";
+      result.candidates.forEach(match => {
+        const choice = document.createElement("button");
+        choice.type = "button"; choice.className = "ghost-button";
+        choice.textContent = `${match.name} | ${match.size} | ${money(match.price)} | SKU ${match.sku}`;
+        choice.addEventListener("click", () => accept(match));
+        results.append(choice);
+      });
+    }
+  } catch (error) { status.textContent = `Supplier saved; price match pending. ${error.message}`; }
+  finally { button.disabled = false; }
+});

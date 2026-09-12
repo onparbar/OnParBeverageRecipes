@@ -53,6 +53,9 @@ test("order hover uses the same stock target as the recommendation", () => {
     getKegItemKey: () => "21", isLiquorOunceTap: () => false,
     getKegParDisplay: () => "2.25", getKegOnDeckItem: () => ({ kind: "beer", onHand: 1 }),
     getKegOnHandDisplay: () => "0", normalizeTitle: String, toNumber: Number,
+    getWeeklyUsageForKegItem: () => ({}), getSixWeekUsage: () => ({ sampleWeeks: 6, average: 1.8 }),
+    MINIMUM_KEG_CUSHION: 0.1,
+    getKegDisplayBrand: () => "Test beer",
     parAgentState: { recommendations: { items: [{ key: "21", preThursdayForecastKegs: 0.25 }] } },
     buildInventoryPosition, buildOperationalRecommendation, buildStockGapRecommendation,
   };

@@ -268,6 +268,7 @@ onpar_pm2_switch_release() {
     ONPAR_BUILD_SHA="${release_sha}" \
     ONPAR_BUILD_TIMESTAMP="${release_time}" \
     ONPAR_DEPLOYMENT_TARGET="on-site" \
+    ONPAR_PMB_REPAIR_SCHEDULER="1" \
     "${pm2_bin}" start "${npm_bin}" \
       --name "${app_name}" \
       --cwd "${release_dir}" \

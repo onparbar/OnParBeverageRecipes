@@ -388,6 +388,21 @@ export default function DashboardPage() {
 
         <section className="panel" id="add-panel" aria-labelledby="add-tab">
           <div className="add-workspace">
+          <details className="weekly-plan-phase">
+            <summary>Supplier &amp; pricing links</summary>
+            <form id="supplier-mapping-form" className="recipe-form">
+              <div className="form-grid">
+                <label>Product name<input name="name" required maxLength="160" placeholder="Full brand and product name" /></label>
+                <label>Product type<select name="kind" defaultValue="ingredient"><option value="ingredient">Liquor or mixer</option><option value="keg">Beer keg</option></select></label>
+                <label>Supplier<select name="vendor" defaultValue="OHLQ"><option value="OHLQ">OHLQ</option><option value="Proof">Proof</option><option value="Heidelberg">Heidelberg / BEES</option><option value="Bonbright">Bonbright</option></select></label>
+                <label>Package ounces<input name="bottleOz" type="number" min="0.01" max="5000" step="any" required /></label>
+                <label>Ordering item code, if known<input name="orderingSku" maxLength="80" placeholder="BEES, OHLQ, or Proof code" /></label>
+              </div>
+              <button className="primary-button" type="submit">Find &amp; save match</button>
+              <p id="supplier-mapping-status" role="status" aria-live="polite"></p>
+              <div id="supplier-mapping-results"></div>
+            </form>
+          </details>
           <div className="add-product-switcher" role="tablist" aria-label="Choose a product type">
             <button
               className="add-product-switcher__button is-active"
@@ -539,6 +554,14 @@ export default function DashboardPage() {
                 />
                 <div className="untappd-search-results" id="beer-untappd-results" role="listbox" hidden></div>
               </div>
+              <label>
+                <span>Distributor</span>
+                <select id="pmb-product-vendor" required defaultValue="">
+                  <option value="" disabled>Choose distributor</option>
+                  <option value="Heidelberg">Heidelberg / BEES</option>
+                  <option value="Bonbright">Bonbright</option>
+                </select>
+              </label>
               <label>
                 <span>Keg cost</span>
                 <input id="pmb-product-keg-cost" type="text" inputMode="decimal" required placeholder="185" />

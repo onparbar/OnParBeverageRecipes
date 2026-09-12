@@ -2068,6 +2068,7 @@ h1 {
 
 .dashboard-pulse-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
@@ -2098,6 +2099,7 @@ h1 {
 
 .dashboard-pulse-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 10px;
 }
@@ -2115,6 +2117,9 @@ h1 {
 }
 
 .dashboard-pulse-wall select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 44px;
   border: 1px solid rgba(31, 95, 84, 0.26);
   border-radius: 999px;
@@ -6051,6 +6056,38 @@ td {
   margin-top: 6px;
 }
 
+#inventory-panel .inventory-item-drag-target {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 10px;
+  margin: -8px -10px;
+  border-radius: 12px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+#inventory-panel .inventory-item-drag-target:active {
+  cursor: grabbing;
+}
+
+#inventory-panel .inventory-item-drag-target:focus-visible {
+  outline: 2px solid var(--juniper);
+  outline-offset: 3px;
+}
+
+.inventory-not-counted {
+  display: inline-block;
+  white-space: nowrap;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(31, 95, 84, 0.08);
+  color: var(--muted);
+  font-size: 0.85em;
+  font-weight: 700;
+}
+
 .inventory-row-controls .icon-button {
   width: 34px;
   min-height: 34px;
@@ -9701,6 +9738,8 @@ body {
 }
 
 .dashboard-pulse-title-lockup {
+  min-width: 0;
+  flex: 1 1 280px;
   align-items: center;
   display: flex;
   gap: clamp(0.7rem, 2.5vw, 1.4rem);
@@ -11934,7 +11973,41 @@ details.custom-inventory-editor[open] > summary {
 
 .dashboard-pulse-controls {
   width: min(100%, 820px);
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 360px;
   margin-inline: auto;
+}
+
+.dashboard-pulse-controls > label {
+  flex: 1 1 150px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 900px) {
+  .dashboard-pulse-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 18px;
+  }
+
+  .dashboard-pulse-header .dashboard-pulse-title-lockup,
+  .dashboard-pulse-header .dashboard-pulse-controls {
+    flex: none;
+    width: 100%;
+  }
+
+  .dashboard-pulse-header .dashboard-pulse-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .dashboard-pulse-header .dashboard-pulse-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .dashboard-pulse-story,
