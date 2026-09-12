@@ -98,8 +98,8 @@ test("finish-week views preserve shared checklist controls and escaped labels", 
     available: true,
     vendors: [{ id: "proof", vendor: "Proof", items: [{ id: "lime", name: "Lime Juice", status: "received", quantity: 1 }] }],
   });
-  assert.match(deliveries, /checked disabled/);
-  assert.match(deliveries, /Received/);
+  assert.doesNotMatch(deliveries, /type="checkbox"/);
+  assert.match(deliveries, /1 received/);
 
   const panel = renderFinishWeekPanel({
     planLocked: true,
@@ -148,7 +148,9 @@ test("Monday Run model preserves the five Monday operational steps and next-acti
   const lockedHtml = renderMondayRun(lockedInProgress);
   assert.match(lockedHtml, /<button type="button" disabled aria-disabled="true">\s*<span>1<\/span>/);
   assert.match(lockedHtml, /<button type="button" disabled aria-disabled="true">\s*<span>2<\/span>/);
-  assert.match(lockedHtml, /<button type="button" disabled aria-disabled="true">\s*<span>3<\/span>/);
+  assert.match(lockedHtml, /<button type="button" id="recall-weekly-plan">\s*<span>3<\/span>\s*<strong>Unlock plan<\/strong>/);
+  assert.match(renderMondayRun(lockedInProgress, { unlocking: true }), /id="recall-weekly-plan" disabled aria-disabled="true"/);
+  assert.doesNotMatch(renderMondayRun(locked), /Review this week|View all 5 steps|>Review<\/button>/);
   assert.match(lockedHtml, /data-monday-run-step="orders" data-dashboard-target="weekly-plan"/);
 
   const snapshotOnly = buildMondayRunModel({

@@ -114,6 +114,20 @@ export function validatePmbPriceIncrease(input = {}) {
   return { valid: true, message: "" };
 }
 
+export function validatePmbPriceChange(input = {}) {
+  const currentPricePerOz = positiveNumber(input.currentPricePerOz);
+  const text = clean(input.newPricePerOz);
+  const newPricePerOz = Number(text);
+  if (!currentPricePerOz || !/^\d+(?:\.\d{1,2})?$/.test(text)
+    || !Number.isFinite(newPricePerOz) || newPricePerOz <= 0 || newPricePerOz > 100) {
+    return { valid: false, message: "Enter a price from $0.01 to $100 per ounce, with no more than two decimal places." };
+  }
+  if (Math.round(newPricePerOz * 100) === Math.round(currentPricePerOz * 100)) {
+    return { valid: false, message: "Enter a different price before saving." };
+  }
+  return { valid: true, message: "" };
+}
+
 export function getPmbPriceEditorDefault(recommendation = {}) {
   const currentPricePerOz = positiveNumber(recommendation.currentPricePerOz);
   const recommendedPricePerOz = positiveNumber(recommendation.recommendedPricePerOz);

@@ -36,8 +36,17 @@ export function bindWeeklyPlanController({
   bindClick(documentRef, "#run-weekly-plan-agent", runWeeklyPlanUpdate);
   bindClick(documentRef, "#recall-weekly-plan", recallCurrentWeeklyPlan);
   bindClick(documentRef, "#weekly-plan-finish-save", saveWeeklyPlanFinishWeek);
+  bindClick(documentRef, "#weekly-plan-finish-save-deliveries", saveWeeklyPlanFinishWeek);
+  if (typeof saveWeeklyPlanFinishWeek === "function") {
+    root.querySelectorAll("[data-finish-prep-item], [data-finish-delivery-item]").forEach((input) => {
+      input.addEventListener("change", saveWeeklyPlanFinishWeek);
+    });
+  }
 
   documentRef.querySelector("#weekly-plan-finish-actor")?.addEventListener("input", (event) => {
+    setFinishWeekActor?.(event.currentTarget.value);
+  });
+  documentRef.querySelector("#weekly-plan-finish-actor-deliveries")?.addEventListener("input", (event) => {
     setFinishWeekActor?.(event.currentTarget.value);
   });
 

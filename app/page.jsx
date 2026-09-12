@@ -1,6 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
+
+function DashboardBrand() {
+  return (
+    <div className="dashboard-brand">
+      <span className="dashboard-brand__logo">
+        <Image src="/on-par-logo-white.png" alt="On Par Entertainment" width={300} height={154} priority />
+      </span>
+      <h1 className="dashboard-brand__title">
+        <span className="dashboard-brand__initials">OPE</span>{" "}
+        <span className="dashboard-brand__name">Beverage</span>
+      </h1>
+    </div>
+  );
+}
 
 const operationSections = [
   ["keg-levels", "Keg Levels"],
@@ -99,7 +114,7 @@ export default function DashboardPage() {
       <div className="shell">
         <header className="topbar">
           <div>
-            <h1>OPE Beverage</h1>
+            <DashboardBrand />
           </div>
         </header>
         <main>
@@ -115,8 +130,8 @@ export default function DashboardPage() {
     <div className="shell" data-dashboard-role={sessionRole}>
       <link rel="stylesheet" href="/inventory-reality-check.css" />
       <header className="topbar">
-        <div className="topbar-title-row">
-          <h1>OPE Beverage</h1>
+        <div className="topbar-title-row topbar-title-row--branded">
+          <DashboardBrand />
           <div className="topbar-account-tools">
           <div className="topbar-account-actions">
             <a className="logout-link dashboard-owner-only" href="/staff">Staff View</a>
@@ -292,7 +307,7 @@ export default function DashboardPage() {
         <section className="panel" id="pricing-panel" role="tabpanel" aria-label="Tap Pricing">
           <div className="toolbar">
             <label className="search-field">
-              <span>Find recipe</span>
+              <span>Find tap or product</span>
               <input id="pricing-search" type="search" placeholder="Search charge pricing..." />
             </label>
           </div>
@@ -324,7 +339,7 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          <details className="pricing-directory">
+          <details className="pricing-directory" open>
             <summary>All current tap prices</summary>
             <div className="pricing-layout dashboard-layout--full-width">
               <div className="dashboard-inline-status" id="pricing-summary"></div>
@@ -366,7 +381,6 @@ export default function DashboardPage() {
               <div>
                 <h2>Weekly Snapshots</h2>
               </div>
-              <span className="inventory-snapshots-block__hint">Latest week first</span>
             </div>
             <div className="inventory-history-list" id="inventory-history-list"></div>
           </section>

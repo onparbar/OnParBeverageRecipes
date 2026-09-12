@@ -3,7 +3,7 @@ import {
   readPmbLevelSnapshot,
   savePmbLevelSnapshot,
 } from "../../../lib/pmb-level-snapshot-store.mjs";
-import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
+import { getTapConfigRows, getKegTappedOnRows } from "../../../lib/pmb-tap-config.mjs";
 import {
   buildVerifiedKegSlotMap,
   PmbKegSafetyError,
@@ -129,7 +129,7 @@ export async function GET() {
     const config = getConfig();
     const token = await getAuthtoken(config);
 
-    const [products, tapConfigRows] = await Promise.all([
+    const [products, tapConfigRows, tappedOnRows] = await Promise.all([
       postJson(config.baseUrl, "/api/productlist", { id: String(config.clientId) }, token),
       getTapConfigRows(config).catch((error) => {
         throw new PmbKegSafetyError(
@@ -140,6 +140,8 @@ export async function GET() {
           },
         );
       }),
+      // History is optional: its availability must never interrupt live levels.
+      getKegTappedOnRows(config).catch(() => []),
     ]);
 
     if (products.status !== 200 || !Array.isArray(products.json?.productlist)) {
@@ -240,8 +242,15 @@ export async function GET() {
     const items = verifiedSlots.map((slot) => {
       const product = productByPlu.get(slot.plu) || {};
       const level = levelBySlot.get(`${slot.deviceId}:${slot.lineNum}`) || {};
+      const history = tappedOnRows.find((entry) => (
+        entry.deviceId === Number(slot.deviceId)
+        && entry.lineNum === Number(slot.lineNum)
+        && entry.tapNumber === Number(slot.tapNumber)
+        && normalizeProductName(entry.name).toLowerCase() === normalizeProductName(slot.product).toLowerCase()
+      ));
       return {
         slotKey: slot.slotKey,
+        tappedOn: history?.tappedOn || "",
         plu: slot.plu,
         name: normalizeProductName(product.name || slot.product || `PLU ${slot.plu}`),
         fillLevelPercent: level.fillLevelPercent ?? null,

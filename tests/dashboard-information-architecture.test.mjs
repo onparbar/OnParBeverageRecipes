@@ -88,11 +88,12 @@ test("speech inventory assigns On Deck units only where the On Deck product is d
   assert.match(onDeckSource, /unit: normalizeTitle\(onDeck\.kind\) === "liquor" \? "oz" : "kegs"/);
 });
 
-test("tap editing puts On Deck before detailed tap controls", () => {
+test("tap editing retains On Deck without level or cost panels", () => {
   const start = dashboardSource.indexOf("function renderKegLevelAdjustRow");
   const end = dashboardSource.indexOf("function syncKegAdjustPercentInput", start);
   const editPanelSource = dashboardSource.slice(start, end);
-  assert.ok(editPanelSource.indexOf("renderKegOnDeckControl(item)") < editPanelSource.indexOf("keg-edit-section--level"));
+  assert.match(editPanelSource, /renderKegOnDeckControl\(item\)/);
+  assert.doesNotMatch(editPanelSource, /keg-edit-section--level|keg-edit-section--costs/);
 });
 
 test("tap rows show On Deck beneath the current product", () => {
@@ -154,7 +155,7 @@ test("Home owns compact Guest Favorites while deeper analysis stays in Performan
 
 test("Weekly Plan uses one Monday lock action without print or CSV controls", () => {
   assert.match(dashboardSource, /Save & Lock Plan/);
-  assert.match(dashboardSource, /Recall Plan/);
+  assert.doesNotMatch(dashboardSource, /Recall Plan/);
   assert.match(dashboardSource, /action: "recall-weekly-plan"/);
   assert.match(dashboardSource, /id="weekly-plan-orders"/);
   assert.doesNotMatch(dashboardSource, /id="export-weekly-plan"/);
@@ -218,7 +219,7 @@ test("Tap Pricing displays only PMB-verified current wall products", () => {
   assert.match(dashboardSource, /const pricedTapCount = kegWallItems\.filter/);
   assert.match(dashboardSource, /\^coming soon!\?\$/i);
   assert.match(pageSource, /82% Price Suggestions/);
-  assert.match(dashboardSource, /Approve & update PMB/);
+  assert.match(dashboardSource, /Save price to PMB/);
 });
 
 test("owner login automatically attempts PMB and defers mapped vendor price refreshes", () => {

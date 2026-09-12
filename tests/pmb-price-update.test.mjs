@@ -39,7 +39,7 @@ const product = {
   price_per_unit: 72,
 };
 
-test("accepts only a strict beer or cocktail price increase with exact identity", () => {
+test("accepts beer or cocktail price changes while preserving exact identity safeguards", () => {
   assert.deepEqual(validatePmbPriceUpdateInput(input), {
     kind: "beer",
     identity: { plu: 4101, deviceId: 9001, lineNum: 2, tapNumber: 25, name: "Test IPA" },
@@ -55,12 +55,17 @@ test("accepts only a strict beer or cocktail price increase with exact identity"
     { ...input, kind: "liquor" },
     { ...input, kind: "wine" },
     { ...input, newPricePerOz: "0.72" },
-    { ...input, newPricePerOz: "0.70" },
+    { ...input, newPricePerOz: "0" },
+    { ...input, newPricePerOz: "-0.70" },
+    { ...input, newPricePerOz: "100.01" },
     { ...input, newPricePerOz: "0.781" },
     { ...input, exactIdentity: { ...input.exactIdentity, tapNumber: 5 } },
     { ...input, expectedAssignments: [] },
   ]) {
     assert.throws(() => validatePmbPriceUpdateInput(invalid));
+  }
+  for (const kind of ["beer", "cocktail"]) {
+    assert.equal(validatePmbPriceUpdateInput({ ...input, kind, newPricePerOz: "0.70" }).newPriceCents, 70);
   }
 });
 

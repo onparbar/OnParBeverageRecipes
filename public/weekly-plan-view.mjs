@@ -7,6 +7,7 @@ import {
 } from "./dashboard-formatters.mjs";
 import { getCocktailPrepDisplayName } from "./weekly-action-plan.mjs";
 import { kegDestination } from "./keg-destination.mjs";
+import { renderInlinePrepCompletion } from "./finish-week-view.mjs";
 
 export function getWeeklyPlanTapContext(item, unit, { compact = false } = {}) {
   const taps = item.tapNumbers.length
@@ -81,7 +82,7 @@ export function renderWeeklyPlanCocktailRows(items) {
           <strong>${escapeHtml(getCocktailPrepDisplayName(item.displayName || item.name, wall))}</strong>
           <span>${escapeHtml(details)}</span>
         </div>
-        <b>${escapeHtml(item.quantityLabel || `${formatNumber(item.quantity)} label${item.quantity === 1 ? "" : "s"}`)}</b>
+        ${item.completionItem ? renderInlinePrepCompletion(item.completionItem, "cocktail", { saving: item.completionSaving }) : `<b>${escapeHtml(item.quantityLabel || `${formatNumber(item.quantity)} label${item.quantity === 1 ? "" : "s"}`)}</b>`}
       </div>
     `;
   }).join("")}</div>`;
@@ -105,13 +106,15 @@ export function renderWeeklyPlanLiquorRefillRows(items) {
   return `<div class="weekly-plan-list">${items.map((item) => {
     const taps = (item.tapNumbers || []).filter(Boolean);
     const tapLabel = taps.length ? `Tap${taps.length === 1 ? "" : "s"} ${taps.join(", ")}` : "Tap unavailable";
+    const completed = item.completed === true;
+    const quantity = completed ? toNumber(item.actualQuantity ?? item.quantity) : toNumber(item.quantity);
     return `
       <div class="weekly-plan-item">
         <div>
           <strong>${escapeHtml(item.displayName || item.name)}</strong>
           <span>${escapeHtml(tapLabel)}</span>
         </div>
-        <b>${formatNumber(item.quantity)} bottle${item.quantity === 1 ? "" : "s"}</b>
+        ${item.completionItem ? renderInlinePrepCompletion(item.completionItem, "liquor", { saving: item.completionSaving }) : `<b>${formatNumber(quantity)} bottle${quantity === 1 ? "" : "s"} ${completed ? "added" : "to add"}</b>`}
       </div>
     `;
   }).join("")}</div>`;

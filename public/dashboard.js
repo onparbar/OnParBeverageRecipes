@@ -1,8 +1,11 @@
+import { renderSavedWeeklySnapshot } from "./weekly-snapshot-view.mjs";
+import { getSixWeekUsage } from "./six-week-usage.mjs";
 import "./operations-learning-ui.mjs";
 import { classifyShotPriceReadback } from "./shot-price-readback.mjs";
 import { inventorySnapshotInputsMatch } from "./inventory-snapshot-recovery.mjs";
 import {
   buildInventoryPosition,
+  buildOperationalRecommendation,
   buildStockGapRecommendation,
   classifyPmbLevelState,
   isOperationalProduct,
@@ -128,7 +131,7 @@ import {
   getPmbPriceEditorDefault,
   getPmbPriceUpdateEligibility,
   isPricingAdvisorEligibleKind,
-  validatePmbPriceIncrease,
+  validatePmbPriceChange,
 } from "./pricing-advisor.mjs";
 import {
   buildWeeklyUsagePerformance,
@@ -205,7 +208,7 @@ import {
   sum,
   toNumber,
 } from "./dashboard-formatters.mjs";
-import { renderFinishWeekPanel } from "./finish-week-view.mjs";
+import { formatPrepCompletionSummary, renderFinishWeekDeliveries, renderFinishWeekPanel } from "./finish-week-view.mjs";
 import {
   buildMondayRunModel as buildMondayRunModelView,
   renderMondayRun as renderMondayRunView,
@@ -1207,7 +1210,7 @@ let currentVendorOrderDraftViews = new Map();
 let dashboardStaffPrepPlan = { available: false, generatedAt: "", items: [], completedCount: 0, totalCount: 0 };
 let dashboardStaffPrepRefreshRunning = false;
 let activeKegAdjustKey = "";
-let activeKegWallFilter = "main";
+let activeKegWallFilter = "all";
 let pmbProductSaving = false;
 let liquorProductSaving = false;
 let activePmbQueuePublishId = "";
@@ -1255,6 +1258,7 @@ let activePmbPriceUpdateKey = "";
 const pmbPriceUpdateMessages = new Map();
 let pricingAdvisorInputsByKey = new Map();
 let pricingAdvisorShowAll = false;
+const tapPricingDrafts = new Map();
 let pricingAdvisorReviewOnly = false;
 let beverageNewsPayload = null;
 let beverageNewsLoading = false;
@@ -4336,9 +4340,38 @@ function renderPricing() {
   pricingTable.innerHTML = "";
 
   visibleTapRows.forEach((tapRow) => {
-    pricingTable.append(renderTapPricingRow(tapRow));
+    const row = renderTapPricingRow(tapRow);
+    const source = buildPricingAdvisorInput(tapRow);
+    if (isPricingAdvisorEligibleKind(source.kind)) {
+      const key = getPmbPriceUpdateKey(source);
+      const item = buildPricingAdvisor([source]).rows[0];
+      const identity = JSON.stringify([source.plu, source.currentPricePerOz, source.assignments]);
+      let draft = tapPricingDrafts.get(key);
+      if (draft && draft.identity !== identity) {
+        tapPricingDrafts.delete(key);
+        draft = null;
+      }
+      row.dataset.pricingAdvisorKey = key;
+      const editor = document.createElement("details");
+      editor.className = "shot-pricing-editor tap-price-editor";
+      editor.open = activePmbPriceUpdateKey === key || (draft?.open ?? pmbPriceUpdateMessages.has(key));
+      editor.innerHTML = `<summary>Edit tap price</summary>${renderPmbPriceUpdateControl(item, source)}`;
+      const rememberDraft = () => {
+        if (!editor.isConnected) return;
+        const input = editor.querySelector("[data-pmb-price-input]");
+        if (input) tapPricingDrafts.set(key, { identity, value: input.value, open: editor.open });
+      };
+      editor.addEventListener("input", rememberDraft);
+      editor.addEventListener("toggle", rememberDraft);
+      const advisorButton = [...pricingAdvisorTable.querySelectorAll("[data-pricing-tap-edit]")]
+        .find((button) => button.dataset.pricingTapEdit === key);
+      if (advisorButton) advisorButton.replaceWith(editor);
+      else row.children[3]?.append(editor);
+    }
+    pricingTable.append(row);
   });
   renderShotPricing(visibleTapRows);
+  bindPmbPriceUpdateControls();
 }
 
 const shotPricingDrafts = new Map();
@@ -4411,13 +4444,16 @@ function renderShotPricing(visibleTapRows = []) {
     };
     editor.addEventListener("input", rememberDraft);
     editor.addEventListener("toggle", rememberDraft);
-    chargeCell.append(editor);
+    const advisorButton = [...pricingAdvisorTable.querySelectorAll("[data-pricing-portion-tap]")]
+      .find((button) => Number(button.dataset.pricingPortionTap) === Number(row.tapNumber));
+    if (advisorButton) advisorButton.replaceWith(editor);
+    else chargeCell.append(editor);
   });
   bindShotPricingControls();
 }
 
 function bindShotPricingControls() {
-  shotPricingTable.querySelectorAll("[data-shot-pricing-key]").forEach((tableRow) => {
+  [shotPricingTable, pricingAdvisorTable].flatMap((scope) => [...scope.querySelectorAll("[data-shot-pricing-key]")]).forEach((tableRow) => {
     const key = clean(tableRow.dataset.shotPricingKey);
     const row = shotPricingRowsByKey.get(key);
     const inputs = [...tableRow.querySelectorAll("[data-shot-price-input]")];
@@ -4448,7 +4484,7 @@ async function submitPmbPortionPriceUpdate(updateKey) {
   const key = clean(updateKey);
   if (!key || activePmbPortionPriceUpdateKey) return;
   const row = shotPricingRowsByKey.get(key);
-  const tableRow = [...shotPricingTable.querySelectorAll("[data-shot-pricing-key]")]
+  const tableRow = [shotPricingTable, pricingAdvisorTable].flatMap((scope) => [...scope.querySelectorAll("[data-shot-pricing-key]")])
     .find((candidate) => candidate.dataset.shotPricingKey === key);
   const inputs = [...tableRow?.querySelectorAll("[data-shot-price-input]") || []];
   const values = inputs.map((input) => input.value);
@@ -4574,7 +4610,7 @@ function renderPricingAdvisor(visibleTapRows = []) {
     pricingAdvisorToggle.onclick = () => {
       pricingAdvisorReviewOnly = false;
       pricingAdvisorShowAll = !pricingAdvisorShowAll;
-      renderPricingAdvisor(visibleTapRows);
+      renderPricing();
     };
   }
   pricingAdvisorSummary.innerHTML = `
@@ -4587,19 +4623,19 @@ function renderPricingAdvisor(visibleTapRows = []) {
   pricingAdvisorSummary.querySelector("[data-pricing-review-filter]")?.addEventListener("click", () => {
     pricingAdvisorReviewOnly = !pricingAdvisorReviewOnly;
     pricingAdvisorShowAll = false;
-    renderPricingAdvisor(visibleTapRows);
+    renderPricing();
     pricingAdvisorTable.closest("table")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   });
 
   pricingAdvisorTable.innerHTML = displayedRows.map((item) => {
     const source = advisorByKey.get(item.updateKey || item.id) || {};
     const status = getPricingAdvisorStatus(item);
-    const issueCopy = item.issues.map((entry) => entry.message).join(" ");
+    const issueCopy = item.issues.filter((entry) => entry.code !== "large-change").map((entry) => entry.message).join(" ");
     const tapLabel = item.tapPosition
       ? `${item.tapPosition}${item.wall ? `<span>${escapeHtml(item.wall)}</span>` : ""}`
       : "—";
     const currentMargin = item.currentPricePerOz && item.costPerOz
-      ? `${formatNumber(item.currentMarginPercent)}%`
+      ? `${formatNumber(item.currentMarginPercent)}% / ${money(item.currentPricePerOz - item.costPerOz)} gross profit per oz`
       : "—";
     const delta = item.currentPricePerOz && item.recommendedPricePerOz
       ? `${item.priceChange > 0 ? "+" : ""}${money(item.priceChange)} / oz`
@@ -4607,13 +4643,13 @@ function renderPricingAdvisor(visibleTapRows = []) {
     const costNote = item.costPerOz ? `${money(item.costPerOz)} / oz cost` : "Cost needed";
     const portionValues = (field, suffix = "") => `<div class="portion-list">${item.portions.map((portion) => {
       const value = field === "currentMarginPercent"
-        ? (portion.costPerOz && portion.currentPricePerOz ? `${formatNumber(portion[field])}%` : "Not available")
+        ? (portion.costPerOz && portion.currentPricePerOz ? `${formatNumber(portion[field])}% / ${money(portion.currentPricePerOz - portion.costPerOz)} gross profit` : "Not available")
         : (field === "priceChange" || portion[field] > 0 ? `${money(portion[field])}${suffix}` : "Not available");
       return `<span><b>${escapeHtml(portion.portionName)}</b> ${escapeHtml(value)}</span>`;
     }).join("") || "Portion prices needed"}</div>`;
     const updateControl = item.portionPricing
       ? `<button type="button" data-pricing-portion-tap="${escapeHtml(item.tapPosition)}">Edit single / double prices</button>`
-      : renderPmbPriceUpdateControl(item, source);
+      : `<button type="button" data-pricing-tap-edit="${escapeHtml(getPmbPriceUpdateKey(source))}">Edit tap price</button>`;
 
     return `
       <tr class="pricing-advisor-row pricing-advisor-row--${escapeHtml(status.tone)}" data-pricing-advisor-key="${escapeHtml(source.updateKey || item.id)}">
@@ -4635,17 +4671,6 @@ function renderPricingAdvisor(visibleTapRows = []) {
     `;
   }).join("") || `<tr><td colspan="8" class="empty-state">${pricingAdvisorReviewOnly ? "No pricing items need review in this search." : pricingAdvisorShowAll ? "No tap-pricing rows match this search." : "No price changes suggested."}</td></tr>`;
 
-  bindPmbPriceUpdateControls();
-  pricingAdvisorTable.querySelectorAll("[data-pricing-portion-tap]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const row = document.querySelector(`#pricing-table tr[data-portion-pricing-tap="${button.dataset.pricingPortionTap}"]`);
-      if (!row) return;
-      const section = row.closest("details");
-      if (section) section.open = true;
-      row.querySelectorAll("details").forEach((details) => { details.open = true; });
-      row.scrollIntoView({ block: "center", behavior: "smooth" });
-    });
-  });
 }
 
 function buildPricingAdvisorInput({ livePrice, recipe, kegItem }) {
@@ -4732,7 +4757,7 @@ function renderPmbPriceUpdateControl(item, source) {
   const key = getPmbPriceUpdateKey(source);
   const eligibility = getPmbPriceUpdateEligibility(source);
   const isRunning = activePmbPriceUpdateKey === key;
-  const defaultPrice = getPmbPriceEditorDefault(item);
+  const defaultPrice = tapPricingDrafts.get(key)?.value ?? item.currentPricePerOz;
   const message = pmbPriceUpdateMessages.get(key);
   if (!eligibility.eligible) {
     const needsLiveRefresh = eligibility.blockers.some((blocker) => (
@@ -4749,7 +4774,7 @@ function renderPmbPriceUpdateControl(item, source) {
       </div>
     `;
   }
-  const noOpDefault = !validatePmbPriceIncrease({
+  const noOpDefault = !validatePmbPriceChange({
     currentPricePerOz: item.currentPricePerOz,
     newPricePerOz: defaultPrice,
   }).valid;
@@ -4759,14 +4784,15 @@ function renderPmbPriceUpdateControl(item, source) {
   return `
     <div class="pricing-advisor-action">
       <label>
-        <span class="sr-only">New PMB price per ounce for ${escapeHtml(item.name)}</span>
+        <span>Price per ounce</span>
         <span class="pricing-advisor-action__currency" aria-hidden="true">$</span>
         <input
           type="number"
           inputmode="decimal"
-          min="${escapeHtml(formatPriceInput(item.currentPricePerOz + 0.01))}"
+          min="0.01"
+          max="100"
           step="0.01"
-          value="${escapeHtml(formatPriceInput(defaultPrice))}"
+          value="${escapeHtml(String(defaultPrice))}"
           data-pmb-price-input
           data-current-price="${escapeHtml(formatPriceInput(item.currentPricePerOz))}"
           data-update-eligible="${eligibility.eligible ? "true" : "false"}"
@@ -4774,20 +4800,21 @@ function renderPmbPriceUpdateControl(item, source) {
           ${controlDisabled ? "disabled" : ""}
         >
       </label>
-      <button class="mini-button" type="button" data-pmb-price-update="${escapeHtml(key)}"${buttonDisabled ? " disabled" : ""}>${isRunning ? "Updating..." : "Approve & update PMB"}</button>
+      ${item.costPerOz > 0 && item.recommendedPricePerOz > 0 ? `<small class="shot-pricing-suggestion">Suggested (82% margin target): ${money(item.recommendedPricePerOz)} / oz</small>` : ""}
+      <button class="mini-button" type="button" data-pmb-price-update="${escapeHtml(key)}"${buttonDisabled ? " disabled" : ""}>${isRunning ? "Updating..." : "Save price to PMB"}</button>
       ${message ? `<span class="pricing-advisor-action__message pricing-advisor-action__message--${escapeHtml(message.tone)}" role="status">${escapeHtml(message.text)}</span>` : ""}
     </div>
   `;
 }
 
 function bindPmbPriceUpdateControls() {
-  pricingAdvisorTable.querySelectorAll("[data-pmb-price-update]").forEach((button) => {
+  [pricingTable, pricingAdvisorTable].flatMap((scope) => [...scope.querySelectorAll("[data-pmb-price-update]")]).forEach((button) => {
     const row = button.closest("[data-pricing-advisor-key]");
     const input = row?.querySelector("[data-pmb-price-input]");
-    button.addEventListener("click", () => submitPmbPriceIncrease(button.dataset.pmbPriceUpdate));
+    button.addEventListener("click", () => submitPmbPriceUpdate(button.dataset.pmbPriceUpdate));
     input?.addEventListener("input", () => {
       if (activePmbPriceUpdateKey || input.dataset.updateEligible !== "true") return;
-      button.disabled = !validatePmbPriceIncrease({
+      button.disabled = !validatePmbPriceChange({
         currentPricePerOz: input.dataset.currentPrice,
         newPricePerOz: input.value,
       }).valid;
@@ -4800,16 +4827,16 @@ function formatPriceInput(value) {
   return price ? price.toFixed(2) : "";
 }
 
-async function submitPmbPriceIncrease(updateKey) {
+async function submitPmbPriceUpdate(updateKey) {
   const key = clean(updateKey);
   if (!key || activePmbPriceUpdateKey) return;
   const source = pricingAdvisorInputsByKey.get(key);
   const eligibility = getPmbPriceUpdateEligibility(source);
-  const row = [...pricingAdvisorTable.querySelectorAll("[data-pricing-advisor-key]")]
-    .find((candidate) => candidate.dataset.pricingAdvisorKey === key);
+  const row = [pricingTable, pricingAdvisorTable].flatMap((scope) => [...scope.querySelectorAll("[data-pricing-advisor-key]")])
+    .find((candidate) => candidate.dataset.pricingAdvisorKey === key && candidate.querySelector("[data-pmb-price-input]"));
   const input = row?.querySelector("[data-pmb-price-input]");
-  const newPricePerOz = Math.round(toNumber(input?.value) * 100) / 100;
-  const validation = validatePmbPriceIncrease({
+  const newPricePerOz = toNumber(input?.value);
+  const validation = validatePmbPriceChange({
     currentPricePerOz: eligibility.currentPricePerOz,
     newPricePerOz,
   });
@@ -4847,11 +4874,11 @@ async function submitPmbPriceIncrease(updateKey) {
       `PMB PLU: ${eligibility.plu}`,
       ...assignmentDetails,
     ],
-    "This is a live price increase. No change is sent unless you confirm.",
+    "This changes the live selling price for every listed assignment. No change is sent unless you confirm.",
   )) return;
 
   activePmbPriceUpdateKey = key;
-  pmbPriceUpdateMessages.set(key, { tone: "pending", text: "Sending the confirmed increase to PMB..." });
+  pmbPriceUpdateMessages.set(key, { tone: "pending", text: "Sending the confirmed price change to PMB..." });
   renderPricing();
 
   try {
@@ -5669,8 +5696,12 @@ async function refreshDashboardStaffPrepPlan() {
   if (dashboardStaffPrepRefreshRunning || isEmployeeDashboard) return;
   dashboardStaffPrepRefreshRunning = true;
   try {
+    const previousPrepPlan = JSON.stringify(dashboardStaffPrepPlan);
     const refreshed = await loadDashboardStaffPrepPlan();
-    if (refreshed) renderDashboardOverview();
+    if (refreshed) {
+      renderDashboardOverview();
+      if (previousPrepPlan !== JSON.stringify(dashboardStaffPrepPlan)) renderWeeklyPlan();
+    }
   } finally {
     dashboardStaffPrepRefreshRunning = false;
   }
@@ -5680,10 +5711,12 @@ function getFinishWeekProgress() {
   return buildFinishWeekProgress({ weeklyOrderTracking, dashboardStaffPrepPlan });
 }
 
-function renderWeeklyPlanFinishWeek(planLocked, expandFirstIncomplete = true) {
+function renderWeeklyPlanFinishWeek(planLocked, expandFirstIncomplete = true, section = "all") {
   return renderFinishWeekPanel({
     planLocked,
     expandFirstIncomplete,
+    section,
+    inline: section !== "all",
     progress: getFinishWeekProgress(),
     weeklyOrderTracking,
     cocktails: Array.isArray(dashboardStaffPrepPlan.items) ? dashboardStaffPrepPlan.items : [],
@@ -5694,22 +5727,26 @@ function renderWeeklyPlanFinishWeek(planLocked, expandFirstIncomplete = true) {
   });
 }
 
-async function saveWeeklyPlanFinishWeek() {
+async function saveWeeklyPlanFinishWeek(event) {
   if (dashboardFinishWeekSaving) return;
-  const actorInput = document.querySelector("#weekly-plan-finish-actor");
-  const status = document.querySelector("#weekly-plan-finish-status");
-  dashboardFinishWeekActor = clean(actorInput?.value);
+  const changedInput = event?.currentTarget?.matches?.("[data-finish-prep-item], [data-finish-delivery-item]") ? event.currentTarget : null;
+  const controlSuffix = changedInput?.dataset.finishDeliveryItem || event?.currentTarget?.id === "weekly-plan-finish-save-deliveries" ? "-deliveries" : "";
+  const actorInput = document.querySelector(`#weekly-plan-finish-actor${controlSuffix}`);
+  const status = document.querySelector(`#weekly-plan-finish-status${controlSuffix}`);
+  dashboardFinishWeekActor = clean(actorInput?.value || globalThis.onParDashboardIdentity?.name || dashboardFinishWeekActor);
   if (!dashboardFinishWeekActor) {
     if (status) {
       status.hidden = false;
       status.textContent = "Enter the manager completing these items.";
       status.dataset.state = "error";
     }
+    if (changedInput) changedInput.checked = changedInput.dataset.completed === "true";
     actorInput?.focus();
     return;
   }
 
   const prepUpdates = [...document.querySelectorAll("[data-finish-prep-item]")]
+    .filter((input) => !changedInput || input === changedInput)
     .filter((input) => input.checked !== (input.dataset.completed === "true"))
     .map((input) => ({
       itemId: input.dataset.finishPrepItem,
@@ -5719,6 +5756,7 @@ async function saveWeeklyPlanFinishWeek() {
       } : {}),
     }));
     const deliveryUpdates = [...document.querySelectorAll("[data-finish-delivery-item]")]
+      .filter((input) => !changedInput || input === changedInput)
       .filter((input) => input.checked && input.dataset.completed !== "true")
       .map((input) => ({
           vendorId: input.dataset.vendorId,
@@ -5790,7 +5828,7 @@ async function saveWeeklyPlanFinishWeek() {
     await loadParAgentState();
     dashboardFinishWeekMessage = warnings.length
       ? warnings.join(" ")
-      : "Finish the Week updated for both admin and staff views.";
+      : "Selected items saved for both admin and staff views.";
   } catch (error) {
     dashboardFinishWeekMessage = error?.message || "The selected checklist changes could not be saved.";
   } finally {
@@ -5898,10 +5936,15 @@ function renderWeeklyPlanTapRows(items, { action, unit = "kegs" } = {}) {
 }
 
 function renderWeeklyPlanCocktailRows(items) {
+  const completionAvailable = dashboardStaffPrepPlan.available
+    && Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date()))
+    && clean(dashboardStaffPrepPlan.generatedAt) === clean(parAgentState?.recommendations?.generatedAt);
   const viewItems = items.map((item) => ({
     ...getWeeklyPlanProductViewItem(item),
     batchSizeOz: item.batchSizeOz,
     quantityLabel: `${formatNumber(item.quantity)} label${item.quantity === 1 ? "" : "s"}`,
+    completionItem: completionAvailable ? dashboardStaffPrepPlan.items.find((entry) => clean(entry.name).toLowerCase() === clean(item.name).toLowerCase()) : null,
+    completionSaving: dashboardFinishWeekSaving,
   }));
   return renderWeeklyPlanCocktailRowsView(viewItems);
 }
@@ -5953,7 +5996,22 @@ function renderWeeklyPlanLiquorTapRows(items) {
 }
 
 function renderWeeklyPlanLiquorRefillRows(items) {
-  return renderWeeklyPlanLiquorRefillRowsView(items.map(getWeeklyPlanProductViewItem));
+  const completionAvailable = dashboardStaffPrepPlan.available
+    && Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date()))
+    && clean(dashboardStaffPrepPlan.generatedAt) === clean(parAgentState?.recommendations?.generatedAt);
+  const tapKey = (item) => (item.tapNumbers || []).map(String).sort().join("|");
+  const savedRefills = completionAvailable ? dashboardStaffPrepPlan.liquorRefills || [] : [];
+  return renderWeeklyPlanLiquorRefillRowsView(items.map((item) => {
+    const saved = savedRefills.find((refill) => clean(refill.name).toLowerCase() === clean(item.name).toLowerCase()
+      && tapKey(refill) === tapKey(item));
+    return {
+      ...getWeeklyPlanProductViewItem(item),
+      completed: saved?.completed === true,
+      actualQuantity: saved?.actualQuantity,
+      completionItem: saved,
+      completionSaving: dashboardFinishWeekSaving,
+    };
+  }));
 }
 
 function renderWeeklyPlanGroup(title, count, content, accent = "") {
@@ -6325,7 +6383,7 @@ function getMondayRunModel(plan, freshness) {
 }
 
 function renderMondayRun(run) {
-  return renderMondayRunView(run);
+  return renderMondayRunView(run, { unlocking: weeklyPlanUpdating });
 }
 
 function renderMondayRunCompact(run) {
@@ -6344,7 +6402,8 @@ function openMondayRunStep(stepId, target) {
   const selector = {
     orders: "#weekly-plan-orders",
     prep: ".weekly-plan-column--prep",
-    finish: "#weekly-plan-finish-week",
+    finish: getFinishWeekProgress().sections[0]?.complete
+      ? ".weekly-plan-phase--prep" : "#weekly-plan-orders",
     review: ".weekly-plan-header",
   }[stepId];
   if (stepId !== "plan" && !selector) return;
@@ -7791,10 +7850,6 @@ function getVendorWorkflowState(draft, saved, vendor) {
   return { label: "Received", step: 4, receivedCount, exceptionCount, pendingCount, handedOff };
 }
 
-function renderVendorWorkflowProgress(workflow) {
-  return `<div class="vendor-order-progress" aria-label="${escapeHtml(workflow.label)}">${["Review", "Order", "Placed", "Received"].map((label, index) => `<span class="${index + 1 < workflow.step ? "is-complete" : index + 1 === workflow.step ? "is-current" : ""}">${escapeHtml(label)}</span>`).join("")}</div>`;
-}
-
 function findDraftLineAdjustmentCatalogItem(line, vendor) {
   const internalId = clean(line?.internalId || line?.id);
   const vendorSku = clean(line?.vendorSku);
@@ -7834,24 +7889,22 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
           const vendor = vendorsByName.get(draft.vendor);
           const workflow = getVendorWorkflowState(draft, saved, vendor);
           const manager = clean(saved.approvedBy || saved.createdBy || defaultManager);
-          const missingItems = (vendor?.items || []).filter((item) => ["partial", "not-received"].includes(item.status));
+          const placed = !orderRehearsalMode && vendor?.ordered === true;
           const removableLineCount = approved
             ? 0
             : draft.lines.filter((line) => findDraftLineAdjustmentCatalogItem(line, draft.vendor)).length;
           return `
-            <form class="vendor-order-draft-card vendor-order-draft-card--${approved ? "approved" : draft.status}" data-vendor-order-draft="${escapeHtml(draft.vendor)}" data-vendor-order-draft-id="${escapeHtml(draft.id)}" data-vendor-order-draft-status="${escapeHtml(saved.status || draft.status)}">
+            <form class="vendor-order-draft-card vendor-order-draft-card--${approved ? "approved" : draft.status}${placed ? " vendor-order-draft-card--placed" : ""}" data-vendor-order-draft="${escapeHtml(draft.vendor)}" data-vendor-order-draft-id="${escapeHtml(draft.id)}" data-vendor-order-draft-status="${escapeHtml(saved.status || draft.status)}">
               <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(draft.lineCount)} item${draft.lineCount === 1 ? "" : "s"} · ${money(draft.estimatedTotal)}</p></div><span>${escapeHtml(workflow.label)}</span></header>
-              ${renderVendorWorkflowProgress(workflow)}
               ${approved && !orderRehearsalMode && !vendor?.ordered ? `<div class="vendor-order-draft-actions"><button class="mini-button" type="button" data-order-draft-reopen data-order-draft-actor="${escapeHtml(manager)}">Reopen draft</button><small>Edit this draft and approve it again. This does not change an existing vendor cart.</small></div>` : ""}
-              <details class="vendor-order-draft-lines"${!approved || draft.blockers.length ? " open" : ""}>
-                <summary>${approved ? "View order" : `Review ${formatNumber(draft.lineCount)} item${draft.lineCount === 1 ? "" : "s"}`}</summary>
-                ${draft.lines.map((line) => {
+              ${placed ? '<div class="vendor-order-draft-lines vendor-order-draft-lines--inline">' : `<details class="vendor-order-draft-lines"${!approved || draft.blockers.length ? " open" : ""}><summary>${approved ? "View order" : "Order items"}</summary>`}
+                ${!orderRehearsalMode && vendor?.ordered ? renderFinishWeekDeliveries({ available: true, vendors: [vendor] }, { showVendor: false, saving: dashboardFinishWeekSaving }) : draft.lines.map((line) => {
                   const catalogItem = approved ? null : findDraftLineAdjustmentCatalogItem(line, draft.vendor);
                   const lineDetails = `${line.vendor === "Bonbright" ? "Text order" : line.vendorSku ? `SKU ${line.vendorSku}` : "SKU needed"} · ${line.requestedCases ? `${formatNumber(line.requestedCases)} case${line.requestedCases === 1 ? "" : "s"} / ` : ""}${formatNumber(line.requestedUnits)} unit${line.requestedUnits === 1 ? "" : "s"} · ${line.extendedCost ? money(line.extendedCost) : "Price needed"}`;
                   const copy = `<span class="vendor-order-draft-line__copy"><strong>${escapeHtml(line.productName)}</strong><span>${escapeHtml(lineDetails)}</span></span>`;
                   return `<div class="vendor-order-draft-line">${catalogItem ? `<label class="vendor-order-draft-line__select"><input type="checkbox" data-order-draft-remove-line value="${escapeHtml(catalogItem.catalogId)}" aria-label="Remove ${escapeHtml(line.productName)} from this order">${copy}</label>` : copy}<small>${escapeHtml(line.reason)}</small></div>`;
                 }).join("")}
-              </details>
+              ${placed ? "</div>" : "</details>"}
               ${draft.blockers.length ? `<div class="vendor-order-draft-issues vendor-order-draft-issues--blocked"><strong>Approval blockers</strong>${draft.blockers.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
               ${!approved && draft.warnings.length ? `<div class="vendor-order-draft-issues"><strong>Review</strong>${draft.warnings.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
               ${!approved ? `
@@ -7861,19 +7914,11 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
                 <label class="vendor-order-draft-confirm"><input type="checkbox" data-order-draft-confirm><span>Confirm ${escapeHtml(draft.vendor)} · ${money(draft.estimatedTotal)} · ${formatNumber(draft.lineCount)} items</span></label>
                 <div class="vendor-order-draft-actions"><button class="primary-button" type="submit"${draft.blockers.length ? " disabled" : ""}>Review &amp; approve</button></div>
               ` : ""}
-              ${approved ? renderAssistedOrderPanel(draft, saved) : ""}
+              ${approved && !placed ? renderAssistedOrderPanel(draft, saved) : ""}
               ${approved && !orderRehearsalMode && !vendor?.ordered ? `
                 <div class="vendor-order-place">
                   <button class="primary-button" type="button" data-weekly-order-place data-weekly-order-vendor-id="${escapeHtml(vendor?.id || "")}" data-weekly-ordered-by="${escapeHtml(manager)}" data-weekly-order-vendor="${escapeHtml(draft.vendor)}"${!vendor?.id || !workflow.handedOff ? " disabled" : ""}>Mark order placed</button>
                   ${workflow.handedOff ? "" : "<small>Use the order action above first.</small>"}
-                </div>
-              ` : ""}
-              ${!orderRehearsalMode && vendor?.ordered ? `
-                <div class="vendor-order-completion">
-                  <strong>Order placed</strong>
-                  <span>${escapeHtml(vendor.orderedBy)}${vendor.orderedAt ? ` · ${escapeHtml(formatUpdatedAt(vendor.orderedAt))}` : ""}</span>
-                  <b>${workflow.exceptionCount ? `${formatNumber(workflow.exceptionCount)} delivery issue${workflow.exceptionCount === 1 ? "" : "s"}` : workflow.pendingCount ? "Awaiting delivery" : "Delivery complete"}</b>
-                  ${missingItems.length ? `<small>${missingItems.map((item) => escapeHtml(item.name)).join(" · ")}</small>` : ""}
                 </div>
               ` : ""}
             </form>
@@ -8113,12 +8158,18 @@ function renderWeeklyPlan() {
   });
   const mondayRun = getMondayRunModel(plan, freshness);
   const orderStep = mondayRun.steps.find((step) => step.id === "orders");
+  const prepCompletionAvailable = planLocked && dashboardStaffPrepPlan.available
+    && clean(dashboardStaffPrepPlan.generatedAt) === clean(recommendations?.generatedAt);
+  const prepStatus = formatPrepCompletionSummary({
+    cocktails: prepCompletionAvailable ? dashboardStaffPrepPlan.items : plan.prep.cocktails,
+    liquor: prepCompletionAvailable ? dashboardStaffPrepPlan.liquorRefills : plan.orders.liquorTapBottles,
+    completionAvailable: prepCompletionAvailable,
+  });
   const demoToggle = ORDER_REHEARSAL_AVAILABLE && (planLocked || orderRehearsalMode)
     ? `<button class="ghost-button" id="toggle-order-rehearsal" type="button">${orderRehearsalMode ? "Exit Rehearsal" : "Rehearsal"}</button>`
     : "";
   const liveHeaderActions = `
-    ${demoToggle || planLocked ? `<details class="weekly-plan-tools" id="weekly-plan-tools"><summary>Plan tools</summary><div>${demoToggle}
-    ${planLocked ? `<button class="ghost-button" id="recall-weekly-plan" type="button"${weeklyPlanUpdating ? " disabled" : ""}>${weeklyPlanUpdating ? "Recalling..." : "Recall Plan"}</button>` : ""}</div></details>` : ""}
+    ${demoToggle ? `<details class="weekly-plan-tools" id="weekly-plan-tools"><summary>Plan tools</summary><div>${demoToggle}</div></details>` : ""}
     ${requiresLateSnapshotReason ? `
       <label class="weekly-plan-late-reason">
         <span>Reason required</span>
@@ -8135,7 +8186,7 @@ function renderWeeklyPlan() {
     ${priceNote ? `<p class="weekly-plan-cost-note">${escapeHtml(priceNote)}</p>` : ""}
     ${renderWeeklyPlanReview(plan)}
     ${planLocked
-      ? `<details class="weekly-plan-phase weekly-plan-phase--orders" id="weekly-plan-orders"${orderStep?.complete ? "" : " open"}><summary><span>${orderStep?.complete ? "Placed orders" : "Place orders"}</span><strong>${escapeHtml(orderStep?.status || "Review")}</strong></summary>${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)}</details>`
+      ? `<details class="weekly-plan-phase weekly-plan-phase--orders" id="weekly-plan-orders"${orderStep?.complete ? "" : " open"}><summary><span>${orderStep?.complete ? "Placed orders" : "Place orders"}</span><strong>${escapeHtml(orderStep?.status || "Review")}</strong></summary>${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)}${renderWeeklyPlanFinishWeek(planLocked, Boolean(orderStep?.complete), "deliveries")}</details>`
       : ""}
     <div class="weekly-plan-columns${planLocked ? " weekly-plan-columns--locked" : ""}">
       ${planLocked ? "" : `<section class="weekly-plan-column">
@@ -8143,16 +8194,17 @@ function renderWeeklyPlan() {
         ${renderWeeklyPlanByVendor(plan, vendorOrderModel.deferredOrders)}
       </section>`}
       <details class="weekly-plan-phase weekly-plan-phase--prep"${planLocked ? "" : " open"}>
-        <summary><span>Prep plan</span><strong>${formatNumber(summary.cocktailBatchTotal)} cocktail${toNumber(summary.cocktailBatchTotal) === 1 ? "" : "s"} to make, ${formatNumber(summary.liquorTapBottleTotal)} liquor tap refill${toNumber(summary.liquorTapBottleTotal) === 1 ? "" : "s"}</strong></summary>
+        <summary><span>Prep plan</span><strong>${escapeHtml(prepStatus)}</strong></summary>
         <section class="weekly-plan-column weekly-plan-column--prep">
           <div class="weekly-plan-column__header"><h2>Cocktails To Make</h2></div>
           ${renderWeeklyPlanCocktailRows(plan.prep.cocktails)}
           <div class="weekly-plan-column__header"><h2>Add Liquor To Kegs</h2></div>
           ${renderWeeklyPlanLiquorRefillRows(plan.orders.liquorTapBottles)}
         </section>
+        ${renderWeeklyPlanFinishWeek(planLocked, Boolean(orderStep?.complete), "prep")}
       </details>
     </div>
-    ${renderWeeklyPlanFinishWeek(planLocked, Boolean(orderStep?.complete))}` : `<section class="weekly-plan-empty" role="status"><h2>This week's plan has not been generated</h2><p>The previous plan is saved in Weekly Snapshots. Use Save &amp; Lock Plan after the current PMB usage and counts are ready.</p></section>`}
+    ` : `<section class="weekly-plan-empty" role="status"><h2>This week's plan has not been generated</h2><p>The previous plan is saved in Weekly Snapshots. Use Save &amp; Lock Plan after the current PMB usage and counts are ready.</p></section>`}
   `;
   let weeklyPlanBody = liveWeeklyPlanBody;
   if (orderRehearsalMode) {
@@ -8283,21 +8335,33 @@ function renderKegLevels() {
       const items = attentionItems.filter((item) => item.wall === wallName);
       return items.length ? renderKegWallBlock(wallName, items, { attentionOnly: true }) : "";
     }).join("") || '<div class="empty-state keg-attention-empty"><strong>All walls are clear.</strong><span>No tap needs attention right now.</span></div>'
-    : renderKegWallBlock(
+    : activeKegWallFilter === "all"
+      ? wallNames.map((wallName) => renderKegWallBlock(
+        wallName,
+        kegWallItems.filter((item) => item.wall === wallName),
+      )).join("")
+      : renderKegWallBlock(
       wallNames.find((wallName) => wallName.toLowerCase() === activeKegWallFilter) || "Main",
       kegWallItems.filter((item) => item.wall.toLowerCase() === activeKegWallFilter),
     );
   const activeComingSoonCount = getActiveComingSoonItems(comingSoonItems).length;
+  const wallFilterOptions = [
+    ["all", "All Tap", kegWallItems.length],
+    ...["Main", "Karaoke", "Patio"].map((wallName) => [wallName.toLowerCase(), wallName, kegWallItems.filter((item) => item.wall === wallName).length]),
+  ];
+  const selectedWallFilter = wallFilterOptions.find(([key]) => key === activeKegWallFilter) || wallFilterOptions[0];
   kegWalls.dataset.activeWallFilter = activeKegWallFilter;
   kegWalls.innerHTML = `
-    <nav class="keg-wall-switcher" aria-label="Choose a keg wall">
-      ${[
-        ["main", "Main"],
-        ["patio", "Patio"],
-        ["karaoke", "Karaoke"],
-        ["attention", `Needs Attention · ${attentionItems.length}`],
-      ].map(([key, label]) => `<button class="${key === activeKegWallFilter ? "is-active" : ""}" type="button" data-keg-wall-filter="${key}" aria-pressed="${key === activeKegWallFilter}">${escapeHtml(label)}</button>`).join("")}
-    </nav>
+    <details class="keg-wall-filter">
+      <summary aria-label="Filter taps: ${escapeHtml(selectedWallFilter[1])}">
+        <span class="keg-wall-filter__title">${escapeHtml(selectedWallFilter[1])}</span>
+        <span class="keg-wall-filter__count">${formatNumber(selectedWallFilter[2])} taps</span>
+        <span class="keg-wall-filter__arrow" aria-hidden="true">&#8964;</span>
+      </summary>
+      <nav class="keg-wall-filter__options" aria-label="Filter taps by wall">
+        ${wallFilterOptions.map(([key, label, count]) => `<button class="${key === activeKegWallFilter ? "is-active" : ""}" type="button" data-keg-wall-filter="${escapeHtml(key)}" aria-pressed="${key === activeKegWallFilter}"><span>${escapeHtml(label)}</span><span class="keg-wall-filter__option-count">${formatNumber(count)}</span></button>`).join("")}
+      </nav>
+    </details>
     <details class="inventory-speech" id="keg-speech-assistant"></details>
     ${visibleWallBlocks}
     <details class="keg-coming-soon">
@@ -8308,12 +8372,31 @@ function renderKegLevels() {
 
   kegWalls.querySelectorAll("[data-keg-wall-filter]").forEach((button) => {
     button.addEventListener("click", () => {
-      activeKegWallFilter = clean(button.dataset.kegWallFilter) || "main";
+      activeKegWallFilter = clean(button.dataset.kegWallFilter) || "all";
       renderKegLevels();
+      kegWalls.querySelector(".keg-wall-filter > summary")?.focus({ preventScroll: true });
     });
+  });
+  kegWalls.querySelector(".keg-wall-filter")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.currentTarget.open = false;
+    event.currentTarget.querySelector("summary")?.focus({ preventScroll: true });
   });
 
   renderInventorySpeechAssistant();
+  kegWalls.querySelectorAll(".tap-product-detail").forEach((detail) => {
+    detail.addEventListener("pointerenter", (event) => {
+      if (event.pointerType === "mouse") detail.open = true;
+    });
+    detail.addEventListener("pointerleave", (event) => {
+      if (event.pointerType === "mouse" && !detail.contains(document.activeElement)) detail.open = false;
+    });
+    detail.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      detail.open = false;
+      detail.querySelector("summary")?.focus({ preventScroll: true });
+    });
+  });
   bindKegLevelEvents();
 }
 
@@ -10057,6 +10140,7 @@ function buildWeeklyUsageSaveLabel() {
 
 function renderKegWallBlock(wallName, items, { attentionOnly = false } = {}) {
   const belowParCount = items.filter((item) => getKegNeed(item) > 0).length;
+  const unavailableCount = items.filter((item) => getKegNeed(item) === null).length;
   return `
     <section class="keg-wall-card" data-keg-wall="${escapeHtml(wallName.toLowerCase())}">
       <div class="keg-wall-card__header">
@@ -10065,7 +10149,7 @@ function renderKegWallBlock(wallName, items, { attentionOnly = false } = {}) {
         </div>
         <div class="keg-wall-card__meta">
           <strong>${items.length} ${attentionOnly ? "flagged" : "taps"}</strong>
-          <span class="keg-wall-card__badge">${attentionOnly ? "Needs attention" : `${belowParCount} need stock`}</span>
+          <span class="keg-wall-card__badge">${attentionOnly ? "Needs attention" : `${belowParCount} need stock${unavailableCount ? ` / ${unavailableCount} unavailable` : ""}`}</span>
         </div>
       </div>
       <div class="inventory-table-wrap">
@@ -10188,9 +10272,25 @@ function renderTapChangeControls(item, liveRow, displayBrand = item.brand) {
   const adjustDisabled = kegConfigUpdateRunning;
   const currentLabel = replacement ? `${displayBrand} (current replacement)` : displayBrand;
   const isEditing = activeKegAdjustKey === itemKey;
+  const usageItem = getWeeklyUsageForKegItem(item, displayBrand);
+  const usage = getSixWeekUsage(usageItem || {});
+  const usageUnit = usageItem?.displayUnit === "oz" ? "oz" : "kegs";
+  const usageText = usage.sampleWeeks
+    ? `${formatNumber(usage.average)} ${usageUnit} / week`
+    : "No completed-week usage available";
   return `
     <div class="tap-product-current">
-      <strong>${escapeHtml(displayBrand || item.brand)}</strong>
+      <details class="tap-product-detail">
+        <summary aria-label="Usage and keg history for ${escapeHtml(displayBrand || item.brand)}"><strong>${escapeHtml(displayBrand || item.brand)}</strong></summary>
+        <div class="tap-product-detail__body">
+          <span class="tap-product-detail__label">Rolling 6-week weekly usage</span>
+          <strong>${escapeHtml(usageText)}</strong>
+          ${usage.sampleWeeks && usage.sampleWeeks < 6 ? `<small>Based on ${usage.sampleWeeks} of the last 6 completed weeks.</small>` : ""}
+          <span class="tap-product-detail__label">Last tapped (PMB)</span>
+          <span>${escapeHtml(liveRow?.tappedOn || "Not reported by PMB")}</span>
+          ${liveRow?.tappedOn ? '<small>PMB server time</small>' : ""}
+        </div>
+      </details>
       ${replacement ? `<span class="table-note">Current replacement</span>` : ""}
     </div>
     ${onDeck ? `
@@ -10790,45 +10890,13 @@ function renderKegOnDeckControl(item) {
   `;
 }
 
-function renderKegLevelAdjustRow(item, liveRow, displayBrand = item.brand) {
-  const itemKey = getKegItemKey(item);
-  const disabled = !liveRow?.plu || !liveRow?.deviceId || !liveRow?.lineNum;
-  const targetPercent = liveRow?.fillLevelPercent == null ? "" : formatNumber(liveRow.fillLevelPercent);
-  const currentOz = getKegCurrentLevelOz(liveRow, item);
-  const fullOunces = getKegFullOunces(liveRow, item);
-  const currentText = currentOz == null
-    ? "PMB has not reported ounces for this tap."
-    : `${formatNumber(currentOz)} oz of ${formatNumber(fullOunces)} oz`;
-  const pmbText = liveRow?.deviceId && liveRow?.lineNum
-    ? `PMB PLU ${liveRow.plu || "-"} | device ${liveRow.deviceId} | line ${liveRow.lineNum}`
-    : "Refresh keg levels before adjusting this tap.";
+function renderKegLevelAdjustRow(item) {
   return `
     <tr class="keg-adjust-row">
       <td colspan="5">
         <div class="keg-adjust-panel keg-edit-panel">
           <section class="keg-edit-section keg-edit-section--on-deck">
             ${renderKegOnDeckControl(item)}
-          </section>
-          <section class="keg-edit-section keg-edit-section--level">
-            <div class="keg-adjust-panel__summary">
-              <strong>${escapeHtml(displayBrand || item.brand)}</strong>
-              <span>${escapeHtml(currentText)}</span>
-              <small>${escapeHtml(pmbText)}</small>
-            </div>
-            <div class="keg-level-edit-grid">
-              <label class="keg-adjust-field">
-                <span>Ounces +/-</span>
-                <input class="inventory-input keg-adjust-oz" data-keg-key="${escapeHtml(itemKey)}" type="text" inputmode="decimal" placeholder="-1" aria-label="Ounces to add or remove for ${escapeHtml(item.brand)}"${disabled ? " disabled" : ""}>
-              </label>
-              <label class="keg-adjust-field">
-                <span>Target %</span>
-                <input class="inventory-input keg-adjust-percent" data-keg-key="${escapeHtml(itemKey)}" type="text" inputmode="decimal" value="${escapeHtml(targetPercent)}" aria-label="Target keg level percent for ${escapeHtml(item.brand)}"${disabled ? " disabled" : ""}>
-              </label>
-              <button class="primary-button push-keg-level-adjust" data-keg-key="${escapeHtml(itemKey)}" type="button"${disabled || kegConfigUpdateRunning ? " disabled" : ""}>Push to tap</button>
-            </div>
-          </section>
-          <section class="keg-edit-section keg-edit-section--costs">
-            ${renderKegProductCostEditor(item, displayBrand)}
           </section>
         </div>
       </td>
@@ -12689,40 +12757,52 @@ function setKegOnDeckItem(key, comingSoonId) {
 
 function getKegNeed(item) {
   const liveRow = getKegLiveRow(item);
-  if (!liveRow || liveRow.levelAvailable === false) return null;
-  if (parAgentState?.recommendations?.generatedAt && !hasCurrentParAgentRecommendations()) return 0;
-  const recommendation = getParAgentRecommendation(item);
-  if (recommendation?.isLiquorTap) {
-    const activeBottleQty = toNumber(recommendation.orderQty);
-    const legacyDeferredQty = Math.max(
-      toNumber(recommendation.deferredQty),
-      toNumber(recommendation.suggestedRefillQty),
-    );
-    return Math.max(0, Math.round(activeBottleQty || legacyDeferredQty * 2));
-  }
-  if (recommendation && Number.isFinite(toNumber(recommendation.orderQty))) {
-    return Math.max(0, Math.round(toNumber(recommendation.orderQty)));
+  const liveFraction = getKegCurrentFraction(item, liveRow);
+  if (liveFraction === null) return null;
+  const key = getKegItemKey(item);
+  // Keep the saved usage target, but never reuse its old stock or order quantity.
+  const recommendation = (parAgentState?.recommendations?.items || []).find((entry) => (
+    entry.key === key || toNumber(entry.tapNumber) === toNumber(item.tapNumber)
+  ));
+  if (isLiquorOunceTap(toNumber(item.tapNumber))) {
+    const currentOunces = getKegCurrentLevelOz(liveRow, item);
+    if (!recommendation || currentOunces == null || !(toNumber(recommendation.bottleOz) > 0)) return null;
+    return buildOperationalRecommendation({
+      kind: "liquor",
+      averageUsage: toNumber(recommendation.avgWeeklyOunces),
+      reserve: 100,
+      bottleSize: toNumber(recommendation.bottleOz),
+      position: buildInventoryPosition({ connected: currentOunces }),
+    }).orderQuantity;
   }
 
-  const onHand = toNumber(getKegOnHandDisplay(item));
-  const par = toNumber(getKegParDisplay(item));
-  if (!par) return 0;
-  const liveFraction = isLiquorOunceTap(toNumber(item?.tapNumber)) ? 0 : getKegCurrentFraction(item, liveRow);
-  if (liveFraction === null) return null;
-  const position = buildInventoryPosition({ connected: liveFraction, onHand });
-  return buildStockGapRecommendation({ target: par, position }).orderQuantity;
+  const savedPar = getKegParDisplay(item);
+  const targetStock = savedPar.trim() !== "" ? toNumber(savedPar) : recommendation?.targetStockKegs;
+  if (targetStock == null || !Number.isFinite(Number(targetStock))) return null;
+  const onDeck = getKegOnDeckItem(item);
+  const position = buildInventoryPosition({
+    connected: liveFraction,
+    onHand: toNumber(getKegOnHandDisplay(item)),
+    onDeck: onDeck && normalizeTitle(onDeck.kind) !== "liquor" && onDeck.onHandUnit !== "oz"
+      ? toNumber(onDeck.onHand) : 0,
+  });
+  const projectedStock = Math.max(0, position.available - toNumber(recommendation?.preThursdayForecastKegs));
+  return buildStockGapRecommendation({
+    targetStock: Number(targetStock),
+    position: buildInventoryPosition({ connected: projectedStock }),
+  }).orderQuantity;
 }
 
 function renderKegNeedCell(item, need) {
   const recommendation = getParAgentRecommendation(item);
   if (need === null) {
-    return '<span class="inventory-order-zero">PMB sync issue</span>';
+    return '<span class="inventory-order-zero" title="Live level or usage target unavailable">-</span>';
   }
   if (!(need > 0)) return '<span class="inventory-order-zero">0</span>';
   const orderProductName = getCanonicalProductDisplayName(
     recommendation?.orderProductName || getKegOnDeckItem(item)?.name || getKegDisplayBrand(item, getKegLiveRow(item)),
   );
-  if (recommendation?.isLiquorTap) {
+  if (isLiquorOunceTap(toNumber(item.tapNumber))) {
     return `<span class="inventory-order-value">Order ${formatNumber(need)} bottle${need === 1 ? "" : "s"}${orderProductName ? ` of ${escapeHtml(orderProductName)}` : ""}</span>`;
   }
   const actionLabel = recommendation?.actionType === "make"
@@ -15388,107 +15468,42 @@ function getInventorySnapshotItems() {
 
 function renderInventoryHistory() {
   if (!inventoryHistoryList) return;
-
   if (!inventoryHistory.length) {
-    inventoryHistoryList.innerHTML = `<div class="empty-state">Save a Monday snapshot to create a shared week-by-week inventory history for managers.</div>`;
+    inventoryHistoryList.innerHTML = '<div class="empty-state">No weekly snapshots saved yet.</div>';
+    delete inventoryHistoryList.dataset.selectedSnapshotId;
     return;
   }
 
-  const renderSnapshotCard = (snapshot, { latest = false } = {}) => {
-    const reorderItems = snapshot.items.filter((item) => toNumber(item.orderDisplay) > 0);
-    const totalValue = sum(snapshot.items.map((item) => item.totalValue));
-    const reorderCost = sum(reorderItems.map((item) => toNumber(item.orderDisplay) * item.unitCost));
-    const valueSummary = snapshot.summary;
-    const outsideMondayReason = clean(snapshot?.captureMetadata?.outsideMondayReason);
-    const simpleSyrupNeeded = formatInventorySnapshotSimpleSyrupNeed(snapshot);
-    const totalBeverageValue = valueSummary
-      ? toNumber(valueSummary.totalBeverageInventoryValue)
-      : totalValue;
-
-    return `
-      <details class="inventory-history-card${latest ? " inventory-history-card--latest" : ""}">
-        <summary>
-          <div class="inventory-history-heading">
-            ${latest ? '<span class="inventory-history-heading__label">Current weekly snapshot</span>' : ""}
-            <strong>Week of ${escapeHtml(formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot)))}</strong>
-            <span>Saved ${escapeHtml(formatUpdatedAt(snapshot.savedAt))}</span>
-            ${outsideMondayReason ? `<span><strong>Submitted late:</strong> ${escapeHtml(outsideMondayReason)}</span>` : ""}
-            <span><strong>Simple syrup needed:</strong> ${escapeHtml(simpleSyrupNeeded)}</span>
-          </div>
-          <div class="inventory-history-stats">
-            <span><strong>${money(totalBeverageValue)}</strong><small>Total beverage</small></span>
-            <span><strong>${money(reorderCost)}</strong><small>To reorder</small></span>
-            <b class="inventory-history-toggle">View</b>
-          </div>
-        </summary>
-        <div class="inventory-history-card__body">
-          <div class="inventory-history-actions">
-            <button class="ghost-button inventory-history-restore" data-snapshot-id="${escapeHtml(snapshot.id)}" type="button">Recall counts</button>
-            <button class="ghost-button inventory-history-delete" data-snapshot-id="${escapeHtml(snapshot.id)}" type="button">Delete</button>
-          </div>
-          ${valueSummary ? renderInventorySnapshotValueSummary(valueSummary) : ""}
-          <details class="inventory-history-items">
-            <summary>View ${formatNumber(snapshot.items.length)} saved item counts</summary>
-            <div class="inventory-table-wrap">
-              <table class="inventory-table">
-                <thead>
-                  <tr>
-                    <th>Item</th>
-                    <th>On hand</th>
-                    <th>Order</th>
-                    <th>Unit cost</th>
-                    <th>Total value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${renderInventoryHistoryRows(snapshot.items)}
-                </tbody>
-              </table>
-            </div>
-          </details>
-        </div>
-      </details>
-    `;
-  };
-
-  const [latestSnapshot, ...earlierSnapshots] = inventoryHistory;
+  const snapshots = [...inventoryHistory].sort((a, b) => (
+    new Date(getInventorySnapshotDate(b)).getTime() - new Date(getInventorySnapshotDate(a)).getTime()
+    || new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime()
+  ));
+  const selected = snapshots.find((entry) => entry.id === inventoryHistoryList.dataset.selectedSnapshotId) || snapshots[0];
+  inventoryHistoryList.dataset.selectedSnapshotId = selected.id;
   inventoryHistoryList.innerHTML = `
-    ${renderSnapshotCard(latestSnapshot, { latest: true })}
-    ${earlierSnapshots.length ? `
-      <div class="inventory-history-archive">
-        <label class="inventory-history-archive__picker">
-          <span>Earlier snapshots</span>
-          <select class="inventory-history-archive__select" aria-label="Choose an earlier weekly snapshot">
-            ${earlierSnapshots.map((snapshot) => `
-              <option value="${escapeHtml(snapshot.id)}">Week of ${escapeHtml(formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot)))}</option>
-            `).join("")}
-          </select>
-        </label>
-        <div class="inventory-history-archive__selection">
-          ${renderSnapshotCard(earlierSnapshots[0])}
-        </div>
-      </div>
-    ` : ""}
+    <label class="weekly-snapshot-picker" for="weekly-snapshot-date">
+      <span>Snapshot date</span>
+      <select id="weekly-snapshot-date" aria-controls="weekly-snapshot-content">
+        ${snapshots.map((snapshot) => `<option value="${escapeHtml(snapshot.id)}"${snapshot.id === selected.id ? " selected" : ""}>${escapeHtml(formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot)))}</option>`).join("")}
+      </select>
+    </label>
+    <div id="weekly-snapshot-content"></div>
   `;
-
-  const bindSnapshotActions = (scope) => {
-    scope.querySelectorAll(".inventory-history-restore").forEach((button) => {
-      button.addEventListener("click", () => restoreInventorySnapshot(button.dataset.snapshotId));
+  const showSnapshot = (snapshot) => {
+    inventoryHistoryList.dataset.selectedSnapshotId = snapshot.id;
+    const content = inventoryHistoryList.querySelector("#weekly-snapshot-content");
+    content.innerHTML = renderSavedWeeklySnapshot(snapshot, {
+      escapeHtml, formatNumber, money, formatUpdatedAt,
+      dateLabel: formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot)),
+      valueSummary: snapshot.summary ? renderInventorySnapshotValueSummary(snapshot.summary) : "",
     });
-    scope.querySelectorAll(".inventory-history-delete").forEach((button) => {
-      button.addEventListener("click", () => deleteInventorySnapshot(button.dataset.snapshotId));
-    });
+    content.querySelector(".inventory-history-restore").addEventListener("click", () => restoreInventorySnapshot(snapshot.id));
+    content.querySelector(".inventory-history-delete").addEventListener("click", () => deleteInventorySnapshot(snapshot.id));
   };
-
-  bindSnapshotActions(inventoryHistoryList);
-
-  const earlierSnapshotSelect = inventoryHistoryList.querySelector(".inventory-history-archive__select");
-  earlierSnapshotSelect?.addEventListener("change", () => {
-    const selectedSnapshot = earlierSnapshots.find((snapshot) => snapshot.id === earlierSnapshotSelect.value);
-    const selectedSnapshotContainer = inventoryHistoryList.querySelector(".inventory-history-archive__selection");
-    if (!selectedSnapshot || !selectedSnapshotContainer) return;
-    selectedSnapshotContainer.innerHTML = renderSnapshotCard(selectedSnapshot);
-    bindSnapshotActions(selectedSnapshotContainer);
+  showSnapshot(selected);
+  inventoryHistoryList.querySelector("#weekly-snapshot-date").addEventListener("change", (event) => {
+    const snapshot = snapshots.find((entry) => entry.id === event.target.value);
+    if (snapshot) showSnapshot(snapshot);
   });
 }
 
