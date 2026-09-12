@@ -9874,7 +9874,6 @@ async function refreshSharedWeeklyUsageBeforeMondaySnapshot() {
     }
 
     const sharedRevision = Number(state.revision) || 0;
-    const outboxBaseRevision = Number(weeklyUsageSharedOutbox?.baseRevision) || 0;
 
     if (!weeklyUsageSharedOutbox) {
       clearTimeout(weeklyUsageSharedSaveTimer);
@@ -9884,9 +9883,7 @@ async function refreshSharedWeeklyUsageBeforeMondaySnapshot() {
       applySharedWeeklyUsageState(state);
       weeklyUsageSharedSaving = false;
       weeklyUsageSharedSaveError = "";
-      weeklyUsageSharedMessage = supersededRecovery
-        ? "Using the newest shared Weekly Usage."
-        : "Shared Weekly Usage is current.";
+      weeklyUsageSharedMessage = "Shared Weekly Usage is current.";
     } else {
       weeklyUsageSharedRevision = sharedRevision;
     }

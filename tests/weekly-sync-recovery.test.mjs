@@ -107,3 +107,81 @@ test("an unresolved conflict releases the busy counter rather than remaining per
   assert.equal(context.weeklyUsageSharedSaving, false);
   assert.equal(context.weeklyUsageSharedOutbox.id, "pending");
 });
+
+const mondayRefreshSource = dashboardSource.slice(
+  dashboardSource.indexOf("async function refreshSharedWeeklyUsageBeforeMondaySnapshot()"),
+  dashboardSource.indexOf("let mondayWeeklyUsageSyncPromise = null;"),
+);
+
+function mondayRefreshContext({ flushResult = true, state = { initialized: true, revision: 7 }, afterFlushOutbox = null, readError = null } = {}) {
+  const calls = [];
+  const context = vm.createContext({
+    weeklyUsageSharedOutbox: { id: "pending", baseRevision: 6 },
+    weeklyUsageSharedSaveTimer: 17,
+    weeklyUsageSharedSaving: true,
+    weeklyUsageSharedSaveError: "Previous save interruption",
+    weeklyUsageSharedMessage: "",
+    weeklyUsageSharedRevision: 6,
+    async flushPendingSharedWeeklyUsageSave() {
+      calls.push("flush");
+      if (flushResult) context.weeklyUsageSharedOutbox = afterFlushOutbox;
+      return flushResult;
+    },
+    async requestSharedWeeklyUsage() {
+      calls.push("read");
+      if (readError) throw readError;
+      return state;
+    },
+    clearTimeout(timer) { calls.push(["clear-timeout", timer]); },
+    saveWeeklyUsageSharedOutbox() { calls.push("persist-outbox"); },
+    applySharedWeeklyUsageState(value) {
+      calls.push(["apply", value.revision]);
+      context.weeklyUsageSharedRevision = value.revision;
+    },
+  });
+  vm.runInContext(mondayRefreshSource, context);
+  return { context, calls };
+}
+
+test("Monday snapshot refresh succeeds after the pending usage save is acknowledged", async () => {
+  const { context, calls } = mondayRefreshContext();
+  assert.equal(await context.refreshSharedWeeklyUsageBeforeMondaySnapshot(), true);
+  assert.deepEqual(calls, ["flush", "read", ["clear-timeout", 17], "persist-outbox", ["apply", 7]]);
+  assert.equal(context.weeklyUsageSharedRevision, 7);
+  assert.equal(context.weeklyUsageSharedOutbox, null);
+  assert.equal(context.weeklyUsageSharedSaveTimer, null);
+  assert.equal(context.weeklyUsageSharedSaving, false);
+  assert.equal(context.weeklyUsageSharedSaveError, "");
+  assert.equal(context.weeklyUsageSharedMessage, "Shared Weekly Usage is current.");
+});
+
+test("Monday snapshot refresh stops when pending usage cannot be saved", async () => {
+  const { context, calls } = mondayRefreshContext({ flushResult: false });
+  assert.equal(await context.refreshSharedWeeklyUsageBeforeMondaySnapshot(), false);
+  assert.deepEqual(calls, ["flush"]);
+  assert.equal(context.weeklyUsageSharedOutbox.id, "pending");
+  assert.equal(context.weeklyUsageSharedSaveError, "Previous save interruption");
+});
+
+test("Monday snapshot refresh preserves a new usage outbox queued during the refresh", async () => {
+  const outbox = { id: "new-report", baseRevision: 6 };
+  const { context, calls } = mondayRefreshContext({ afterFlushOutbox: outbox });
+  assert.equal(await context.refreshSharedWeeklyUsageBeforeMondaySnapshot(), true);
+  assert.deepEqual(calls, ["flush", "read"]);
+  assert.equal(context.weeklyUsageSharedOutbox, outbox);
+  assert.equal(context.weeklyUsageSharedRevision, 7);
+  assert.equal(context.weeklyUsageSharedSaveTimer, 17);
+});
+
+test("Monday snapshot refresh reports missing setup and read failures without claiming success", async () => {
+  for (const [options, message] of [
+    [{ state: { initialized: false, revision: 0 } }, "Shared Weekly Usage setup is incomplete."],
+    [{ readError: new Error("Storage unavailable") }, "Storage unavailable"],
+  ]) {
+    const { context, calls } = mondayRefreshContext(options);
+    assert.equal(await context.refreshSharedWeeklyUsageBeforeMondaySnapshot(), false);
+    assert.deepEqual(calls, ["flush", "read"]);
+    assert.equal(context.weeklyUsageSharedSaveError, message);
+    assert.equal(context.weeklyUsageSharedMessage, message);
+  }
+});
