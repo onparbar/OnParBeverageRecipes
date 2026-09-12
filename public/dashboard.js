@@ -2,6 +2,7 @@ import { renderSavedWeeklySnapshot } from "./weekly-snapshot-view.mjs";
 import { getSixWeekUsage } from "./six-week-usage.mjs";
 import "./operations-learning-ui.mjs";
 import { classifyShotPriceReadback } from "./shot-price-readback.mjs";
+import { waitForPmbTapReadiness } from "./pmb-repair-monitor.mjs";
 import { inventorySnapshotInputsMatch } from "./inventory-snapshot-recovery.mjs";
 import {
   buildInventoryPosition,
@@ -1440,8 +1441,13 @@ function releaseOwnerLoginSyncLock(token) {
 let unifiedPmbRefreshRunning = false;
 let tapRepairRefreshTimer = null;
 
-async function runUnifiedPmbRefresh() {
+async function runUnifiedPmbRefresh({ afterRepair = false } = {}) {
   if (isEmployeeDashboard || unifiedPmbRefreshRunning) return false;
+  if (kegConfigUpdateRunning && !afterRepair) {
+    kegSyncMessage = "Tap repair is still being checked. PMB will refresh automatically once all 102 taps are responding.";
+    renderKegLevels();
+    return false;
+  }
   const button = document.querySelector("#refresh-all-pmb");
   const lockToken = acquireOwnerLoginSyncLock();
   if (!lockToken) {
@@ -5179,7 +5185,7 @@ function renderIngredients() {
     ingredientTable.append(groupRow);
 
     items.forEach((ingredient) => {
-      const override = priceOverrides[ingredient.id] || {};
+      const override = getIngredientPriceEditorValues(ingredient);
       const currentUnitCost = getCatalogUnitCost(ingredient);
       const mappedBottleOz = ingredient.vendorProduct?.bottleOz ? formatNumber(ingredient.vendorProduct.bottleOz) : "";
       const preparedPurchase = getPreparedIngredientPurchase(ingredient.id);
@@ -5195,7 +5201,7 @@ function renderIngredients() {
           ? `<span class="table-note">${escapeHtml(getPreparedIngredientYieldNote(ingredient.id))}</span><input type="hidden" value="${escapeHtml(preparedPurchase.purchaseUnitStorageValue)}">`
           : `<input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(override.bottleOz ?? "")}" placeholder="${escapeHtml(mappedBottleOz)}" aria-label="Package size in ounces for ${escapeHtml(ingredient.name)}">`}</td>
         <td><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(override.bottlePrice ?? "")}" aria-label="${escapeHtml(preparedPurchase?.priceInputLabel || `Package price for ${ingredient.name}`)}"></td>
-        <td class="muted">${formatUpdatedAt(override.updatedAt)}${previousPriceNote ? `<span class="table-note">${escapeHtml(previousPriceNote)}</span>` : ""}</td>
+        <td class="muted">${override.recipeReference ? "Saved recipe price" : formatUpdatedAt(override.updatedAt)}${previousPriceNote ? `<span class="table-note">${escapeHtml(previousPriceNote)}</span>` : ""}</td>
         <td><button class="mini-button" type="button">Update</button></td>
       `;
 
@@ -8287,7 +8293,7 @@ function renderKegLevels() {
   if (dashboardRenderCoordinator.defer("keg-levels", renderKegLevels)) return;
   if (!kegSummary || !kegWalls) return;
 
-  const wallNames = ["Main", "Patio", "Karaoke"];
+  const wallNames = ["Main", "Karaoke", "Patio"];
   const totalTaps = kegWallItems.length;
   const liveCount = kegWallItems.filter((item) => {
     const row = getKegLiveRow(item);
@@ -8304,8 +8310,7 @@ function renderKegLevels() {
         <button class="ghost-button keg-clear-on-hand-button" id="clear-keg-on-hand" type="button">Clear all on hand</button>
       </div>
       <div id="keg-repair-status" role="status" aria-live="polite" aria-atomic="true">${kegRepairStatus ? `<p class="sync-status${kegRepairStatus.warning ? " sync-status--warning" : ""}"><strong>${escapeHtml(kegRepairStatus.message)}</strong>${kegRepairStatus.completedAt ? `<br>Completed ${escapeHtml(formatUpdatedAt(kegRepairStatus.completedAt))}.` : ""}</p>` : ""}</div>
-      <p class="sync-status">${escapeHtml(kegSyncMessage)}${kegUpdatedAt ? ` Last updated ${escapeHtml(formatUpdatedAt(kegUpdatedAt))}.` : ""}</p>
-      ${liveCount < totalTaps ? `<p class="sync-status sync-status--warning">${formatNumber(totalTaps - liveCount)} tap${totalTaps - liveCount === 1 ? " needs" : "s need"} update. Refresh the connection only when guest taps are clear.</p>` : ""}
+      ${kegSyncAttempted && !kegConfigUpdateRunning && (kegLiveLevelsStale || liveCount < totalTaps || kegLiveLevelsError) ? `<p class="sync-status" role="status">${kegLiveLevelsStale || kegLiveLevelsError ? "Waiting for fresh PMB readings." : `${formatNumber(liveCount)} of ${formatNumber(totalTaps)} taps responding.`} Retrying automatically.</p>` : ""}
     </div>
     <div class="keg-summary-stats">
       <div class="summary-line"><span>Total taps</span><strong>${totalTaps}</strong></div>
@@ -8321,32 +8326,14 @@ function renderKegLevels() {
     ${renderParAgentPanel()}
   `;
 
-  const attentionItems = kegWallItems.filter((item) => {
-    const liveRow = getKegLiveRow(item);
-    const level = liveRow?.fillLevelPercent;
-    const hasLiveLevel = liveRow?.levelAvailable !== false
-      && level != null
-      && String(level).trim() !== ""
-      && Number.isFinite(Number(level));
-    return getKegNeed(item) > 0 || !hasLiveLevel;
-  });
-  const visibleWallBlocks = activeKegWallFilter === "attention"
-    ? wallNames.map((wallName) => {
-      const items = attentionItems.filter((item) => item.wall === wallName);
-      return items.length ? renderKegWallBlock(wallName, items, { attentionOnly: true }) : "";
-    }).join("") || '<div class="empty-state keg-attention-empty"><strong>All walls are clear.</strong><span>No tap needs attention right now.</span></div>'
-    : activeKegWallFilter === "all"
-      ? wallNames.map((wallName) => renderKegWallBlock(
-        wallName,
-        kegWallItems.filter((item) => item.wall === wallName),
-      )).join("")
-      : renderKegWallBlock(
-      wallNames.find((wallName) => wallName.toLowerCase() === activeKegWallFilter) || "Main",
-      kegWallItems.filter((item) => item.wall.toLowerCase() === activeKegWallFilter),
-    );
+  const selectedWall = wallNames.find((wallName) => wallName.toLowerCase() === activeKegWallFilter);
+  const sortedTaps = [...kegWallItems].sort((a, b) => toNumber(a.tapNumber) - toNumber(b.tapNumber));
+  const visibleWallBlocks = selectedWall
+    ? renderKegWallBlock(selectedWall, sortedTaps.filter((item) => item.wall === selectedWall))
+    : renderKegWallBlock("All", sortedTaps, { hideHeader: true });
   const activeComingSoonCount = getActiveComingSoonItems(comingSoonItems).length;
   const wallFilterOptions = [
-    ["all", "All Tap", kegWallItems.length],
+    ["all", `${formatNumber(totalTaps)} Taps`, kegWallItems.length],
     ...["Main", "Karaoke", "Patio"].map((wallName) => [wallName.toLowerCase(), wallName, kegWallItems.filter((item) => item.wall === wallName).length]),
   ];
   const selectedWallFilter = wallFilterOptions.find(([key]) => key === activeKegWallFilter) || wallFilterOptions[0];
@@ -8355,11 +8342,11 @@ function renderKegLevels() {
     <details class="keg-wall-filter">
       <summary aria-label="Filter taps: ${escapeHtml(selectedWallFilter[1])}">
         <span class="keg-wall-filter__title">${escapeHtml(selectedWallFilter[1])}</span>
-        <span class="keg-wall-filter__count">${formatNumber(selectedWallFilter[2])} taps</span>
+        ${selectedWallFilter[0] === "all" ? "" : `<span class="keg-wall-filter__count">${formatNumber(selectedWallFilter[2])} taps</span>`}
         <span class="keg-wall-filter__arrow" aria-hidden="true">&#8964;</span>
       </summary>
       <nav class="keg-wall-filter__options" aria-label="Filter taps by wall">
-        ${wallFilterOptions.map(([key, label, count]) => `<button class="${key === activeKegWallFilter ? "is-active" : ""}" type="button" data-keg-wall-filter="${escapeHtml(key)}" aria-pressed="${key === activeKegWallFilter}"><span>${escapeHtml(label)}</span><span class="keg-wall-filter__option-count">${formatNumber(count)}</span></button>`).join("")}
+        ${wallFilterOptions.map(([key, label, count]) => `<button class="${key === activeKegWallFilter ? "is-active" : ""}" type="button" data-keg-wall-filter="${escapeHtml(key)}" aria-pressed="${key === activeKegWallFilter}"><span>${escapeHtml(label)}</span>${key === "all" ? "" : `<span class="keg-wall-filter__option-count">${formatNumber(count)}</span>`}</button>`).join("")}
       </nav>
     </details>
     <details class="inventory-speech" id="keg-speech-assistant"></details>
@@ -10138,12 +10125,12 @@ function buildWeeklyUsageSaveLabel() {
   return `${monday.getMonth() + 1}/${monday.getDate()}/${String(monday.getFullYear()).slice(-2)} - ${sunday.getMonth() + 1}/${sunday.getDate()}/${String(sunday.getFullYear()).slice(-2)}`;
 }
 
-function renderKegWallBlock(wallName, items, { attentionOnly = false } = {}) {
+function renderKegWallBlock(wallName, items, { attentionOnly = false, hideHeader = false } = {}) {
   const belowParCount = items.filter((item) => getKegNeed(item) > 0).length;
   const unavailableCount = items.filter((item) => getKegNeed(item) === null).length;
   return `
     <section class="keg-wall-card" data-keg-wall="${escapeHtml(wallName.toLowerCase())}">
-      <div class="keg-wall-card__header">
+      ${hideHeader ? "" : `<div class="keg-wall-card__header">
         <div>
           <h2>${escapeHtml(wallName)}</h2>
         </div>
@@ -10151,7 +10138,7 @@ function renderKegWallBlock(wallName, items, { attentionOnly = false } = {}) {
           <strong>${items.length} ${attentionOnly ? "flagged" : "taps"}</strong>
           <span class="keg-wall-card__badge">${attentionOnly ? "Needs attention" : `${belowParCount} need stock${unavailableCount ? ` / ${unavailableCount} unavailable` : ""}`}</span>
         </div>
-      </div>
+      </div>`}
       <div class="inventory-table-wrap">
         <table class="inventory-table keg-table">
           <thead>
@@ -10272,33 +10259,24 @@ function renderTapChangeControls(item, liveRow, displayBrand = item.brand) {
   const adjustDisabled = kegConfigUpdateRunning;
   const currentLabel = replacement ? `${displayBrand} (current replacement)` : displayBrand;
   const isEditing = activeKegAdjustKey === itemKey;
-  const usageItem = getWeeklyUsageForKegItem(item, displayBrand);
-  const usage = getSixWeekUsage(usageItem || {});
-  const usageUnit = usageItem?.displayUnit === "oz" ? "oz" : "kegs";
-  const usageText = usage.sampleWeeks
-    ? `${formatNumber(usage.average)} ${usageUnit} / week`
-    : "No completed-week usage available";
+  const history = liveRow?.productHistory;
+  const introducedAt = new Date(history?.introducedAt || "");
+  const now = new Date();
+  const cutoff = new Date(now);
+  cutoff.setMonth(cutoff.getMonth() - 3);
+  const showProductHistory = ["detected", "confirmed"].includes(history?.introductionSource)
+    && introducedAt > cutoff && introducedAt <= now;
   return `
     <div class="tap-product-current">
-      <details class="tap-product-detail">
-        <summary aria-label="Usage and keg history for ${escapeHtml(displayBrand || item.brand)}"><strong>${escapeHtml(displayBrand || item.brand)}</strong></summary>
+      ${showProductHistory ? `<details class="tap-product-detail">
+        <summary aria-label="Product swap history for ${escapeHtml(displayBrand || item.brand)}"><strong>${escapeHtml(displayBrand || item.brand)}</strong></summary>
         <div class="tap-product-detail__body">
-          <span class="tap-product-detail__label">Rolling 6-week weekly usage</span>
-          <strong>${escapeHtml(usageText)}</strong>
-          ${usage.sampleWeeks && usage.sampleWeeks < 6 ? `<small>Based on ${usage.sampleWeeks} of the last 6 completed weeks.</small>` : ""}
-          ${liveRow?.productHistory ? `
-            <span class="tap-product-detail__label">${liveRow.productHistory.changedAt
-              ? liveRow.productHistory.source === "confirmed" ? "PMB product change confirmed" : "Current product first detected"
-              : "Tracking this product since"}</span>
-            <span>${escapeHtml(formatUpdatedAt(liveRow.productHistory.changedAt || liveRow.productHistory.firstSeenAt))}</span>
-            ${liveRow.productHistory.previousName ? `<small>Previously: ${escapeHtml(liveRow.productHistory.previousName)}</small>` : '<small>Earlier product-change date not recorded.</small>'}
-          ` : '<span class="tap-product-detail__label">Product history</span><span>Not recorded yet</span>'}
-          ${liveRow?.productHistoryUnavailable ? '<small>Saved product history is temporarily unavailable.</small>' : ""}
-          <span class="tap-product-detail__label">${liveRow?.tappedOnCached || kegLiveLevelsStale ? "Last tapped (saved PMB reading)" : "Last tapped (PMB)"}</span>
-          <span>${escapeHtml(liveRow?.tappedOn || liveRow?.tappedOnError || "Not reported by PMB")}</span>
-          ${liveRow?.tappedOn ? '<small>PMB server time</small>' : ""}
+          <span class="tap-product-detail__label">${history.introductionSource === "confirmed" ? "First swapped in" : "First detected"}</span>
+          <span>${escapeHtml(formatUpdatedAt(history.introducedAt))}</span>
+          <span class="tap-product-detail__label">Replaced</span>
+          <span>${escapeHtml(history.introductionPreviousName || "Previous product not recorded")}</span>
         </div>
-      </details>
+      </details>` : `<strong>${escapeHtml(displayBrand || item.brand)}</strong>`}
       ${replacement ? `<span class="table-note">Current replacement</span>` : ""}
     </div>
     ${onDeck ? `
@@ -12456,12 +12434,30 @@ async function initializeSharedKegLevelsFromServiceComputer() {
   renderKegLevels();
 }
 
+let kegReadRetryTimer = null;
+
+function scheduleKegReadRetry() {
+  window.clearTimeout(kegReadRetryTimer);
+  kegReadRetryTimer = window.setTimeout(() => {
+    kegReadRetryTimer = null;
+    if (kegConfigUpdateRunning || unifiedPmbRefreshRunning || kegSyncLoading) {
+      scheduleKegReadRetry();
+      return;
+    }
+    void runKegLevelSync();
+  }, 30_000);
+}
+
 async function runKegLevelSync() {
+  if (kegSyncLoading) return false;
+  window.clearTimeout(kegReadRetryTimer);
+  kegReadRetryTimer = null;
   kegSyncAttempted = true;
   kegSyncLoading = true;
   kegSyncMessage = "Checking Pour My Beer for live keg levels...";
   renderKegLevels();
   let succeeded = false;
+  let retryAllowed = true;
 
   try {
     const { response, result } = await fetchPmbJsonWithRetry({
@@ -12476,6 +12472,7 @@ async function runKegLevelSync() {
       shouldRetryResult: (result) => result?.stale === true,
     });
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) retryAllowed = false;
       throw new Error(result?.error || "Could not load keg levels.");
     }
 
@@ -12523,6 +12520,7 @@ async function runKegLevelSync() {
       : getPmbConnectionErrorMessage(error, "Could not load live keg levels.");
   } finally {
     kegSyncLoading = false;
+    if (!succeeded && retryAllowed) scheduleKegReadRetry();
     renderKegLevels();
     renderWeeklyPlan();
     renderDashboardOverview();
@@ -12595,11 +12593,12 @@ async function runTapPricingSync() {
 }
 
 async function runKegConfigUpdate() {
+  if (kegConfigUpdateRunning || unifiedPmbRefreshRunning) return;
   if (!confirmDashboardAction(
     "Update the Pour My Beer tap connections?",
     [
-      "This temporarily disables the tap walls for several minutes.",
-      "Confirm that no guests are using the tap walls.",
+      "This temporarily disables all 102 taps for several minutes.",
+      "Confirm that no guests are using any of the 102 taps.",
     ],
     "Only continue after all guest taps are clear.",
   )) return;
@@ -12609,6 +12608,7 @@ async function runKegConfigUpdate() {
   kegSyncMessage = "Sending config update to Pour My Beer...";
   renderKegLevels();
 
+  let repairSent = false;
   try {
     const response = await fetch("/api/keg-config-update", {
       method: "POST",
@@ -12620,18 +12620,51 @@ async function runKegConfigUpdate() {
       throw new Error(result?.error || "Could not send config update.");
     }
 
-    kegSyncMessage = result.message || "Configuration update sent.";
+    repairSent = true;
+    const sentAt = new Date().toISOString();
     window.clearTimeout(tapRepairRefreshTimer);
     tapRepairRefreshTimer = null;
-    kegSyncMessage += " Refreshing PMB readings now; the tap repair will not be repeated.";
-    kegRepairStatus = { message: "Tap configuration update sent. Refreshing PMB now..." };
+    kegSyncMessage = "Configuration update sent. Waiting for all 102 taps to reconnect before refreshing PMB.";
+    kegRepairStatus = { message: kegSyncMessage };
     renderKegLevels();
-    const refreshed = await runUnifiedPmbRefresh();
+    await waitForPmbTapReadiness({
+      expectedTapNumbers: kegWallItems.map((item) => Number(item.tapNumber)),
+      sentAt,
+      readLevels: async (timeoutMs) => {
+        const response = await fetch("/api/keg-levels", {
+          cache: "no-store",
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        const levels = await parseJsonResponse(response);
+        if (!response.ok) throw new Error("PMB tap readings are not ready yet.");
+        return levels;
+      },
+      onProgress: (message) => {
+        kegRepairStatus = { message };
+        kegSyncMessage = message;
+        renderKegLevels();
+      },
+    });
+    kegRepairStatus = { message: "All 102 taps are responding. Refreshing PMB now..." };
+    kegSyncMessage = kegRepairStatus.message;
+    renderKegLevels();
+    let refreshed = await runUnifiedPmbRefresh({ afterRepair: true });
+    while (!refreshed) {
+      kegRepairStatus = { message: "Taps reconnected. Retrying the PMB refresh automatically; no additional repair will be sent." };
+      renderKegLevels();
+      await new Promise((resolve) => window.setTimeout(resolve, 30_000));
+      refreshed = await runUnifiedPmbRefresh({ afterRepair: true });
+    }
     kegRepairStatus = refreshed
-      ? { message: "Taps have been configured and PMB has been refreshed.", completedAt: new Date().toISOString() }
-      : { message: "Tap configuration update sent, but the PMB refresh could not be confirmed. Use Refresh PMB to retry; you do not need to repeat the tap repair.", warning: true };
+      ? { message: "Tap repair verified: all 102 taps are responding and PMB has been refreshed.", completedAt: new Date().toISOString() }
+      : { message: "All 102 taps responded after the repair, but the full PMB refresh could not be confirmed. Use Refresh PMB to retry; do not repeat the tap repair.", warning: true };
   } catch (error) {
-    kegRepairStatus = { message: "Tap configuration could not be confirmed. Review the connection message below before retrying.", warning: true };
+    kegRepairStatus = {
+      message: repairSent
+        ? error.message || "Repair sent, but tap readiness could not be confirmed. The repair was not repeated."
+        : "Tap configuration could not be confirmed. Review the connection message below before retrying.",
+      warning: true,
+    };
     kegSyncMessage = getPmbConnectionErrorMessage(
       error,
       "Could not send config update.",
@@ -12763,7 +12796,7 @@ function setKegOnDeckItem(key, comingSoonId) {
   };
 }
 
-function getKegNeed(item) {
+function getKegNeedCalculation(item) {
   const liveRow = getKegLiveRow(item);
   const liveFraction = getKegCurrentFraction(item, liveRow);
   if (liveFraction === null) return null;
@@ -12781,7 +12814,7 @@ function getKegNeed(item) {
       reserve: 100,
       bottleSize: toNumber(recommendation.bottleOz),
       position: buildInventoryPosition({ connected: currentOunces }),
-    }).orderQuantity;
+    });
   }
 
   const savedPar = getKegParDisplay(item);
@@ -12798,10 +12831,33 @@ function getKegNeed(item) {
   return buildStockGapRecommendation({
     targetStock: Number(targetStock),
     position: buildInventoryPosition({ connected: projectedStock }),
-  }).orderQuantity;
+  });
+}
+
+function getKegNeed(item) {
+  return getKegNeedCalculation(item)?.orderQuantity ?? null;
 }
 
 function renderKegNeedCell(item, need) {
+  const liveRow = getKegLiveRow(item);
+  const displayBrand = getKegDisplayBrand(item, liveRow);
+  const usageItem = getWeeklyUsageForKegItem(item, displayBrand);
+  const usage = getSixWeekUsage(usageItem || {});
+  const calculation = getKegNeedCalculation(item);
+  const unit = isLiquorOunceTap(toNumber(item.tapNumber)) ? "oz" : "kegs";
+  const usageUnit = usageItem?.displayUnit === "oz" ? "oz" : "kegs";
+  return `<details class="tap-product-detail tap-order-detail">
+    <summary aria-label="Order calculation for ${escapeHtml(displayBrand)}">${renderKegNeedValue(item, need)}</summary>
+    <div class="tap-product-detail__body">
+      <span class="tap-product-detail__label">Rolling 6-week weekly average</span>
+      <strong>${usage.sampleWeeks ? `${formatNumber(usage.average)} ${usageUnit} / week` : "Not available"}</strong>
+      <span class="tap-product-detail__label">Need at least</span>
+      <strong>${calculation ? `${formatNumber(calculation.targetStock)} ${unit}` : "Not available"}</strong>
+    </div>
+  </details>`;
+}
+
+function renderKegNeedValue(item, need) {
   const recommendation = getParAgentRecommendation(item);
   if (need === null) {
     return '<span class="inventory-order-zero" title="Live level or usage target unavailable">-</span>';
@@ -18165,6 +18221,24 @@ function normalizeKnownKegSizeOverrides(source = {}) {
     if (!knownKegOz || !override || typeof override !== "object") return [id, override];
     return [id, { ...override, kegOz: String(knownKegOz) }];
   }));
+}
+
+function getIngredientPriceEditorValues(ingredient) {
+  const override = priceOverrides[ingredient.id] || {};
+  // Package references from cocktail-recipes.csv: two 32 oz concentrate
+  // bottles cost $25.835; two 25 oz vanilla bottles cost $26.24.
+  const reference = {
+    "cold-brew-concentrate": { bottleOz: 32, bottlePrice: 25.835 / 2 },
+    "vanilla-syrup": { bottleOz: 25, bottlePrice: 26.24 / 2 },
+  }[ingredient.id];
+  if (!reference || (toNumber(override.bottleOz) > 0 && toNumber(override.bottlePrice) > 0)) return override;
+  const bottleOz = toNumber(override.bottleOz) > 0 ? toNumber(override.bottleOz) : reference.bottleOz;
+  return {
+    ...override,
+    bottleOz: String(bottleOz),
+    bottlePrice: toNumber(override.bottlePrice) > 0 ? override.bottlePrice : String(reference.bottlePrice * bottleOz / reference.bottleOz),
+    recipeReference: true,
+  };
 }
 
 function getIngredientBottleCost(ingredient) {

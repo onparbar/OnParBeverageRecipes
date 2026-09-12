@@ -260,8 +260,8 @@ test("vendor price sync remains automatic at login but stays outside the unified
   assert.match(dashboardSource, /const syncScope = automatic \? "all" : vendorSyncScope/);
   assert.match(dashboardSource, /Prices sync automatically/);
   assert.match(pageSource, /id="refresh-all-pmb"/);
-  assert.match(dashboardSource, /async function runUnifiedPmbRefresh\(\)/);
-  const unifiedStart = dashboardSource.indexOf("async function runUnifiedPmbRefresh()");
+  assert.match(dashboardSource, /async function runUnifiedPmbRefresh\(\{ afterRepair = false \} = \{\}\)/);
+  const unifiedStart = dashboardSource.indexOf("async function runUnifiedPmbRefresh(");
   const unifiedEnd = dashboardSource.indexOf("document.querySelector(\"#refresh-all-pmb\")", unifiedStart);
   assert.doesNotMatch(dashboardSource.slice(unifiedStart, unifiedEnd), /runVendorSync/);
   assert.doesNotMatch(dashboardSource, /id="run-vendor-sync"/);

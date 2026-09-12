@@ -12686,3 +12686,5 @@ details.custom-inventory-editor[open] > summary {
 }
 .tap-product-detail__label { font-size: 12px; font-weight: 700; color: #5c7368; }
 .tap-product-detail__label:not(:first-child) { margin-top: 10px; }
+.tap-order-detail > summary { text-align: inherit; }
+.tap-order-detail .tap-product-detail__body { text-align: left; font-weight: 400; }

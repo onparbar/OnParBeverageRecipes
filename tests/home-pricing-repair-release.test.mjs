@@ -22,11 +22,14 @@ test("Home omits the nonalcoholic beer cost warning without hiding other missing
   assert.deepEqual(alerts[0].details, ["Lime Juice · Inventory"]);
 });
 
-test("a successful repair starts the full PMB refresh without a one-minute timer", () => {
+test("a repair waits for tap readiness and retries refresh without repeating the repair", () => {
   const repair = source.match(/async function runKegConfigUpdate\(\) \{[\s\S]*?\n\}/)?.[0];
   assert.ok(repair);
-  assert.match(repair, /This temporarily disables the tap walls for several minutes\./);
-  assert.match(repair, /await runUnifiedPmbRefresh\(\)/);
-  assert.doesNotMatch(repair, /window\.setTimeout/);
+  assert.match(repair, /This temporarily disables all 102 taps for several minutes\./);
+  assert.match(repair, /await runUnifiedPmbRefresh\(\{ afterRepair: true \}\)/);
+  assert.ok(repair.indexOf("await waitForPmbTapReadiness(") < repair.indexOf("await runUnifiedPmbRefresh("));
+  assert.match(repair, /while \(!refreshed\)/);
+  assert.match(repair, /window\.setTimeout\(resolve, 30_000\)/);
+  assert.equal((repair.match(/fetch\("\/api\/keg-config-update"/g) || []).length, 1);
   assert.match(repair, /acknowledgeTapInterruption: true/);
 });
