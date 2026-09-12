@@ -11,10 +11,10 @@ test("keg counts roll over Monday at 7 Eastern in summer and winter", () => {
   assert.equal(getKegCountWeek(new Date("2026-01-05T12:00:00Z")), "2026-01-05");
 });
 
-test("receiving names physical coolers and does not guess missing assignments", () => {
-  assert.equal(kegDestination({ unit: "kegs", tapNumbers: [21] }), "Store in: Main cooler (Tap 21)");
-  assert.equal(kegDestination({ wall: "karaoke" }, { cocktail: true }), "Store in: Karaoke cooler");
-  assert.match(kegDestination({ unit: "kegs" }), /assignment needed/);
+test("receiving shows tap numbers and does not guess missing assignments", () => {
+  assert.equal(kegDestination({ unit: "kegs", tapNumbers: [21] }), "Tap 21");
+  assert.equal(kegDestination({ wall: "karaoke" }, { cocktail: true }), "Tap not assigned");
+  assert.match(kegDestination({ unit: "kegs" }), /Tap not assigned/);
   assert.equal(kegDestination({ unit: "bottles" }), "");
 });
 

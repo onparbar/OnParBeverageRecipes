@@ -19,7 +19,7 @@ function item({
 }
 
 function pmb(label, volumeOz, value = volumeOz) {
-  return { label, source: "PMB", volumeOz, value, hasValue: true };
+  return { label, source: "PMB", zeroUsageVerified: volumeOz === 0, volumeOz, value, hasValue: true };
 }
 
 const latest = "8/3/26 - 8/9/26";

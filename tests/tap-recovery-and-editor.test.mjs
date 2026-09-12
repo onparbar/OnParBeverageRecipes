@@ -53,7 +53,7 @@ test("all taps render in one numerically sorted list without wall headers or dup
     getWallCocktailRecipeCoverage: () => ({ missing: [] }), kegSyncLoading: false, kegConfigUpdateRunning: false,
     kegRepairStatus: null, kegSyncAttempted: true, kegLiveLevelsStale: false, kegLiveLevelsError: "", pmbMorningRepairMessage: "",
     formatNumber: String, escapeHtml: String, renderParAgentPanel: () => "", activeKegWallFilter: "all", toNumber: Number,
-    renderKegWallBlock: (name, items, options) => { calls.push({ name, items, options }); return "tap-table"; },
+    renderKegWallBlock: (name, items, options) => { calls.push({ name, items, options }); return `${options.headerContent || ""}tap-table`; },
     getVisibleComingSoonItems: () => [], comingSoonItems: [], renderComingSoonBlock: () => "",
     renderInventorySpeechAssistant: () => {}, bindKegLevelEvents: () => {},
   });

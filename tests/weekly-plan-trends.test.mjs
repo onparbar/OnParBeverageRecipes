@@ -13,7 +13,7 @@ const staleWeek = "7/13/26 - 7/19/26";
 const now = new Date(2026, 7, 12, 12, 0, 0);
 
 function pmb(label, volumeOz) {
-  return { label, source: "PMB", volumeOz, value: volumeOz };
+  return { label, source: "PMB", zeroUsageVerified: volumeOz === 0, volumeOz, value: volumeOz };
 }
 
 function item({

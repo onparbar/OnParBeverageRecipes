@@ -53,8 +53,8 @@ test("a missing immediately previous week never becomes a false week-over-week d
 
 test("keeps recorded zeroes and distinguishes flat or insufficient history", () => {
   const zero = buildWeeklyUsageTrend([
-    { label: newest, value: 0 },
-    { label: middle, value: 0 },
+    { label: newest, value: 0, zeroUsageVerified: true },
+    { label: middle, value: 0, zeroUsageVerified: true },
   ], [newest, middle]);
   assert.equal(zero.recordedCount, 2);
   assert.equal(zero.direction, "flat");

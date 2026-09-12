@@ -10,7 +10,7 @@ test("uses completed calendar weeks, excludes unknown values, and deduplicates d
     { label: "8/31/26", value: 20 },
     { label: "8/31/26", value: 20 },
     { label: "8/17/26", value: 0, hasValue: false },
-    { label: "7/27/26", value: 0 },
+    { label: "7/27/26", value: 0, zeroUsageVerified: true },
   ] }, new Date("2026-09-09T12:00:00Z"));
   assert.deepEqual(result.values, [20, 10, 0]);
   assert.equal(result.average, 10);

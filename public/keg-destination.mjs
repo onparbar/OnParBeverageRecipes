@@ -3,15 +3,13 @@ export function kegDestination(item = {}, { cocktail = false } = {}) {
     .map(Number).filter((tap) => Number.isInteger(tap) && tap > 0);
   const isKeg = cocktail || /keg|beer|cocktail/i.test(`${item.unit || ""} ${item.lineType || ""}`);
   if (!isKeg) return "";
-  const destinations = [];
-  for (const [label, min, max] of [["Main cooler", 21, 72], ["Karaoke cooler", 73, 102]]) {
-    const assigned = [...new Set(taps.filter((tap) => tap >= min && tap <= max))];
-    if (assigned.length) destinations.push(`${label} (Tap${assigned.length > 1 ? "s" : ""} ${assigned.join(", ")})`);
+  const assigned = [...new Set(taps)].sort((left, right) => left - right);
+  const orderedQuantity = Number(item.quantity);
+  if (item.quantity != null && Number.isFinite(orderedQuantity) && orderedQuantity >= 0) {
+    if (orderedQuantity === 0) return "";
+    // Never imply one ordered keg can be allocated to multiple taps.
+    if (assigned.length > orderedQuantity) return "Tap assignment needed";
   }
-  if (destinations.length) return `Store in: ${destinations.join("; ")}`;
-  const wall = String(item.wall || "").trim().toLowerCase();
-  if (!taps.length && ["main", "karaoke"].includes(wall)) {
-    return `Store in: ${wall === "main" ? "Main" : "Karaoke"} cooler`;
-  }
-  return "Cooler assignment needed - check with manager";
+  if (assigned.length) return `Tap${assigned.length > 1 ? "s" : ""} ${assigned.join(", ")}`;
+  return "Tap not assigned";
 }

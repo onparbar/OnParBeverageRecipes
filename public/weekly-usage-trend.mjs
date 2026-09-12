@@ -1,3 +1,5 @@
+import { isUsableWeeklyUsageEntry } from "./weekly-usage-evidence.mjs";
+
 function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -25,7 +27,7 @@ export function buildWeeklyUsageTrend(history = [], labelsNewestFirst = [], opti
   (Array.isArray(history) ? history : []).forEach((entry) => {
     const label = clean(entry?.label);
     if (!label || historyByLabel.has(label)) return;
-    historyByLabel.set(label, finiteUsageValue(entry?.value));
+    historyByLabel.set(label, isUsableWeeklyUsageEntry(entry) ? finiteUsageValue(entry?.value) : null);
   });
 
   const values = labels

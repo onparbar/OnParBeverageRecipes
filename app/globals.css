@@ -8411,9 +8411,23 @@ td {
   padding: 0 9px;
 }
 
+.manual-price-editor {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.manual-price-editor input,
+.manual-price-editor button {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+
 .pricing-table .shot-pricing-editor {
-  min-width: 10rem;
-  margin-top: 10px;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 0;
   white-space: normal;
   text-align: left;
 }
@@ -8437,6 +8451,8 @@ td {
 
 .pricing-table .shot-pricing-editor input {
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   min-height: 44px;
   padding: 8px 10px 8px 26px;
   font-size: 1rem;
@@ -11033,52 +11049,101 @@ tbody tr:hover {
   }
 }
 
-/* Keep the Keg Levels table readable when its horizontal scroller is in use. */
-table.keg-table {
+/* Fit all five tap columns within the available panel width. */
+#keg-walls,
+#keg-walls > .keg-wall-card,
+#keg-walls .inventory-table-wrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+#keg-walls table.keg-table {
   table-layout: fixed;
+  width: 100%;
+  min-width: 0;
 }
 
-table.keg-table th:nth-child(1),
-table.keg-table td:nth-child(1) {
-  width: 64px !important;
-  min-width: 64px !important;
-  max-width: 64px !important;
+#keg-walls table.keg-table th,
+#keg-walls table.keg-table td {
+  box-sizing: border-box;
+  min-width: 0 !important;
+  max-width: none !important;
 }
 
-table.keg-table th:nth-child(2),
-table.keg-table td:nth-child(2) {
-  left: 64px !important;
-  width: 316px !important;
-  min-width: 316px !important;
-  max-width: 316px !important;
+#keg-walls table.keg-table th:nth-child(1),
+#keg-walls table.keg-table td:nth-child(1) {
+  width: 7% !important;
+  left: auto;
 }
 
-table.keg-table th:nth-child(3),
-table.keg-table td:nth-child(3) {
-  width: 130px !important;
-  min-width: 130px !important;
-  max-width: 130px !important;
+#keg-walls table.keg-table th:nth-child(2),
+#keg-walls table.keg-table td:nth-child(2) {
+  left: auto !important;
+  width: 41% !important;
+}
+
+#keg-walls table.keg-table th:nth-child(3),
+#keg-walls table.keg-table td:nth-child(3) {
+  width: 19% !important;
   text-align: center;
 }
 
-table.keg-table th:nth-child(4),
-table.keg-table td:nth-child(4) {
-  width: 120px !important;
-  min-width: 120px !important;
-  max-width: 120px !important;
+#keg-walls table.keg-table th:nth-child(4),
+#keg-walls table.keg-table td:nth-child(4) {
+  width: 16% !important;
   text-align: center;
 }
 
-table.keg-table th:nth-child(5),
-table.keg-table td:nth-child(5) {
-  width: 130px !important;
-  min-width: 130px !important;
-  max-width: 130px !important;
+#keg-walls table.keg-table th:nth-child(5),
+#keg-walls table.keg-table td:nth-child(5) {
+  width: 17% !important;
   text-align: center;
 }
 
-table.keg-table td:nth-child(4) input {
+#keg-walls table.keg-table td:nth-child(4) input {
   margin-inline: auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 90px;
+  box-sizing: border-box;
+}
+
+#keg-walls .keg-on-hand-stack {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  #keg-walls .keg-table > thead > tr > th,
+  #keg-walls .keg-table > tbody > tr[data-keg-row-key] > td {
+    padding: 12px clamp(4px, 1vw, 9px);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #keg-walls .keg-table > thead > tr > th {
+    font-size: clamp(10px, 1.7vw, 13px);
+    letter-spacing: 0.02em;
+  }
+
+  #keg-walls .keg-table > tbody > tr[data-keg-row-key] > td {
+    font-size: clamp(12px, 1.9vw, 16px);
+  }
+
+  #keg-walls .keg-product-cell :is(button, select) {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  #keg-walls .keg-table td:nth-child(4) input {
+    padding-inline: 4px;
+    font-size: 16px;
+  }
+
+  #keg-walls .tap-order-detail .tap-product-detail__body {
+    padding: 8px;
+    overflow-wrap: anywhere;
+  }
 }
 
 /* Guided, read-only presentation of the weekly operating loop. */
@@ -12679,23 +12744,28 @@ details.custom-inventory-editor[open] > summary {
 }
 .keg-wall-filter > summary {
   display: flex;
+  flex-direction: column;
+  justify-content: center;
   align-items: center;
-  gap: 16px;
+  gap: 4px;
+  text-align: center;
+  background: #2b695b;
+  color: #fff;
+  border-radius: inherit;
   min-height: 76px;
   padding: 18px 24px;
   cursor: pointer;
   list-style: none;
 }
 .keg-wall-filter > summary::-webkit-details-marker { display: none; }
+.keg-wall-filter > summary::marker { content: ""; }
 .keg-wall-filter__title {
   font-family: inherit;
   font-size: clamp(22px, 2.5vw, 30px);
   font-weight: 800;
   line-height: 1.15;
 }
-.keg-wall-filter__count { margin-left: auto; white-space: nowrap; font-size: 14px; }
-.keg-wall-filter__arrow { font-size: 28px; line-height: 1; }
-.keg-wall-filter[open] .keg-wall-filter__arrow { transform: rotate(180deg); }
+.keg-wall-filter__count { white-space: nowrap; font-size: 14px; }
 .keg-wall-filter__options {
   display: grid;
   gap: 5px;

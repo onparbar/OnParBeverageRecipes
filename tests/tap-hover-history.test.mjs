@@ -54,8 +54,10 @@ test("order hover uses the same stock target as the recommendation", () => {
     getKegParDisplay: () => "2.25", getKegOnDeckItem: () => ({ kind: "beer", onHand: 1 }),
     getKegOnHandDisplay: () => "0", normalizeTitle: String, toNumber: Number,
     getWeeklyUsageForKegItem: () => ({}), getSixWeekUsage: () => ({ sampleWeeks: 6, average: 1.8 }),
-    MINIMUM_KEG_CUSHION: 0.1,
+    MINIMUM_KEG_CUSHION: 0.25,
     getKegDisplayBrand: () => "Test beer",
+    getKegFullOunces: () => 1984,
+    getEightWeekPeakUsage: () => ({ sampleWeeks: 8, peak: 1.8, targetStock: 2.25 }),
     parAgentState: { recommendations: { items: [{ key: "21", preThursdayForecastKegs: 0.25 }] } },
     buildInventoryPosition, buildOperationalRecommendation, buildStockGapRecommendation,
   };
@@ -80,12 +82,16 @@ test("liquor targets and missing readings keep existing order behavior", () => {
   const scope = {
     getKegLiveRow: () => ({}), getKegCurrentFraction: () => 0.5, getKegItemKey: () => "21",
     toNumber: Number, isLiquorOunceTap: () => true, getKegCurrentLevelOz: () => 110,
+    getKegDisplayBrand: () => "Test liquor", getWeeklyUsageForKegItem: () => ({ displayUnit: "oz" }),
+    getSixWeekUsage: () => ({ sampleWeeks: 6, average: 150 }),
+    normalizeIngredientAlias: String, normalizeLiquorTapProductName: String, slugify: String,
+    inventoryItems: [], priceOverrides: {}, getVendorMapping: () => ({ bottleOz: 50 }),
     parAgentState: { recommendations: { items: [{ key: "21", avgWeeklyOunces: 150, bottleOz: 50 }] } },
-    buildInventoryPosition, buildOperationalRecommendation,
+    buildInventoryPosition, buildOperationalRecommendation, buildStockGapRecommendation,
   };
   const result = load("getKegNeedCalculation", scope)(item);
   assert.equal(result.targetStock, 250);
-  assert.equal(result.orderQuantity, 2);
+  assert.equal(result.orderQuantity, 3);
   assert.equal(load("getKegNeedCalculation", { ...scope, getKegCurrentFraction: () => null })(item), null);
 });
 

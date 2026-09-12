@@ -39,7 +39,7 @@ test("the owner dashboard is the initial page and recipes appear later in naviga
   assert.match(mixSource, /renderDashboardCategoryMix\(profitMix\)/);
   assert.doesNotMatch(mixSource, /renderDashboardCategoryMix\(volumeMix\)/);
   assert.match(dashboardSource, /Sales mix by estimated profit/);
-  assert.match(dashboardSource, /Sales mix by wall/);
+  assert.match(dashboardSource, /Estimated profit by wall/);
   assert.doesNotMatch(dashboardSource, /data-dashboard-mix-metric/);
   assert.match(dashboardSource, /option value="profit"/);
   assert.match(dashboardSource, /option value="twelve-weeks"/);
@@ -51,8 +51,8 @@ test("Performance keeps shot filters compatible and preserves the requested rank
   assert.match(dashboardSource, /sellerRankingCategory === "liquor" && sellerRankingWall === "main"/);
   assert.match(dashboardSource, /sellerRankingWall = "patio"/);
   assert.match(dashboardSource, /function getSellerRankingPeriod/);
-  assert.match(dashboardSource, /topLimit: 25/);
-  assert.match(dashboardSource, /bottomLimit: 25/);
+  assert.match(dashboardSource, /topLimit: 26/);
+  assert.match(dashboardSource, /bottomLimit: 26/);
   assert.match(dashboardSource, /const bottom = \(period\?\.bottom \|\| \[\]\)\.slice\(0, listSize\)/);
   assert.match(dashboardSource, /All walls/);
   assert.match(dashboardSource, /option value="margin"/);
@@ -234,7 +234,7 @@ test("owner login automatically attempts PMB and defers mapped vendor price refr
   assert.match(dashboardSource, /flushPendingInventoryFieldSyncs\(\)/);
   assert.match(dashboardSource, /flushPendingParAgentStateSync\(\)/);
   assert.match(dashboardSource, /isRecommendationForOperatingWeek/);
-  assert.match(dashboardSource, /parAgentRunning = false;\s+renderKegLevels\(\);\s+renderWeeklyPlan\(\);\s+renderDashboardOverview\(\)/);
+  assert.match(dashboardSource, /parAgentRunning = false;[\s\S]*?renderKegLevels\(\);\s+renderWeeklyPlan\(\);\s+renderDashboardOverview\(\)/);
   assert.match(dashboardSource, /Automatic PMB check paused for owner review/);
   assert.match(dashboardSource, /nothing was accepted or saved automatically/);
   assert.match(dashboardSource, /pending Weekly Usage report was already saved by another dashboard tab/);
@@ -395,9 +395,9 @@ test("the initial Dashboard uses a light visual beverage pulse and change-only O
   assert.match(pulseSource, /buildLastWeekPourLeaders/);
   assert.match(pulseSource, /No liquor pours were saved for the Patio or Karaoke wall last week/);
   assert.match(pulseSource, /Sales mix/);
-  assert.match(pulseSource, /const volumeMix = buildLastWeekProjectedSalesMix\(/);
+  assert.doesNotMatch(pulseSource, /const volumeMix = buildLastWeekProjectedSalesMix\(/);
   assert.match(pulseSource, /const profitMix = buildLastWeekProjectedSalesMix\(/);
-  assert.match(pulseSource, /renderDashboardProjectedWallMix\(volumeMix\.walls\)/);
+  assert.match(pulseSource, /renderDashboardProjectedWallMix\(profitMix\.walls\)/);
   assert.doesNotMatch(pulseSource, /PMB ounces × saved\/current prices/);
   assert.match(pulseSource, /dashboard-pulse-bar/);
   assert.match(pulseSource, /data-seller-ranking-wall/);

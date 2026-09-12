@@ -32,14 +32,14 @@ test("pricing advisor exposes a confirmed Owner-only PMB update flow", async () 
   assert.match(styles, /\.pricing-advisor-action \.mini-button \{[\s\S]*white-space: normal;/);
 });
 
-test("price editors appear in their advisor cards without duplicated editors or scroll jumps", async () => {
+test("tap price advisors retain editors and liquor prices stay directly editable", async () => {
   const dashboard = await readFile("public/dashboard.js", "utf8");
   const renderStart = dashboard.indexOf("function renderPricing()");
   const renderEnd = dashboard.indexOf("function bindShotPricingControls", renderStart);
   const renderers = dashboard.slice(renderStart, renderEnd);
-  assert.equal(renderers.split("advisorButton.replaceWith(editor)").length - 1, 2);
+  assert.equal(renderers.split("advisorButton.replaceWith(editor)").length - 1, 1);
   assert.match(renderers, /else row\.children\[3\]\?\.append\(editor\)/);
-  assert.match(renderers, /else chargeCell\.append\(editor\)/);
+  assert.match(renderers, /chargeCell\.replaceChildren\(editor\)/);
   const advisor = dashboard.slice(dashboard.indexOf("function renderPricingAdvisor("), dashboard.indexOf("function buildPricingAdvisorInput("));
   const editorMarkup = advisor.slice(advisor.indexOf("pricingAdvisorTable.innerHTML ="));
   assert.doesNotMatch(editorMarkup, /scrollIntoView|addEventListener\("click"/);

@@ -16,7 +16,7 @@ test("shot pricing edits both portions inside the unified tap pricing table", ()
   assert.doesNotMatch(page, /id="shot-pricing-table"/);
   assert.match(dashboard, /const shotPricingTable = document.querySelector\("#pricing-table"\)/);
   assert.match(dashboard, /buildShotPricingRows/);
-  assert.match(dashboard, /Update both in PMB/);
+  assert.match(dashboard, /Save in PMB/);
   assert.match(dashboard, /Update both shot prices/);
   assert.match(dashboard, /fetch\("\/api\/pmb-portion-price-update"/);
   assert.match(dashboard, /expectedAssignments: row\.assignments\.map/);
@@ -33,7 +33,8 @@ test("shot price drafts remain editable during verification but saving stays gat
   assert.match(editor, /draft\?\.values\[index\]/);
   assert.match(editor, /draft\.identity !== draftIdentity/);
   assert.match(editor, /editor\.addEventListener\("input", rememberDraft\)/);
-  assert.match(editor, /editor\.addEventListener\("toggle", rememberDraft\)/);
+  assert.doesNotMatch(editor, /editor\.addEventListener\("toggle", rememberDraft\)/);
+  assert.match(editor, /chargeCell\.replaceChildren\(editor\)/);
 });
 
 test("the portion endpoint authenticates first and remains fail-closed until the PMB form is verified", () => {

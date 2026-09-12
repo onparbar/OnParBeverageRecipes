@@ -684,15 +684,7 @@ export default function DashboardPage() {
         </section>
 
         <section className="panel" id="ingredients-panel" role="tabpanel" aria-label="Ingredient and Keg Costs">
-          <div className="toolbar">
-            <label className="search-field">
-              <span>Find pricing item</span>
-              <input id="ingredient-search" type="search" placeholder="Search ingredient or keg pricing..." />
-            </label>
-          </div>
-
           <div className="ingredient-layout dashboard-layout--full-width">
-            <div className="dashboard-inline-filters" id="ingredient-summary"></div>
             <div className="pricing-sections">
               <section className="inventory-block">
                 <div className="inventory-block__header">
@@ -708,8 +700,6 @@ export default function DashboardPage() {
                         <th>Current $/oz</th>
                         <th>Package size</th>
                         <th>Package price</th>
-                        <th>Last updated</th>
-                        <th></th>
                       </tr>
                     </thead>
                     <tbody id="ingredient-table"></tbody>
@@ -733,8 +723,6 @@ export default function DashboardPage() {
                         <th>Current $/oz</th>
                         <th>Keg oz</th>
                         <th>Keg price</th>
-                        <th>Last updated</th>
-                        <th></th>
                       </tr>
                     </thead>
                     <tbody id="keg-pricing-table"></tbody>

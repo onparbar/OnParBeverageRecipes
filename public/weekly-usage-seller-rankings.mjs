@@ -566,8 +566,8 @@ export function buildWeeklyUsageSellerRankings(
   const normalizedWall = RANKING_WALLS.has(normalizedWallValue) ? normalizedWallValue : "all";
   const normalizedMetric = RANKING_METRICS.has(normalizedMetricValue) ? normalizedMetricValue : "volume";
   const normalizedRecentWeekLimit = clampInteger(recentWeekLimit, 6, 1, 52);
-  const normalizedTopLimit = clampInteger(topLimit, 5, 1, 25);
-  const normalizedBottomLimit = clampInteger(bottomLimit, 3, 1, 25);
+  const normalizedTopLimit = clampInteger(topLimit, 5, 1, 26);
+  const normalizedBottomLimit = clampInteger(bottomLimit, 3, 1, 26);
   const resolveBottomEligibility = typeof isBottomEligible === "function" ? isBottomEligible : () => true;
   const sourceItems = Array.isArray(items) ? items.filter(Boolean) : [];
   const identifiedSourceItems = sourceItems.filter((item) => (

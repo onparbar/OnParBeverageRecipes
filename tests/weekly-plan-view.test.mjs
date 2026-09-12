@@ -70,7 +70,7 @@ test("sorts cocktail labels by tap and applies wall-specific display naming", ()
     { name: "Apple Jack 1", displayName: "Apple Jack", quantity: 2, quantityLabel: "2 labels", tapNumbers: [55], walls: ["Main"], batchSizeOz: 1456 },
   ]);
   assert.ok(html.indexOf("Apple Jack") < html.indexOf("Blue Dot"));
-  assert.match(html, /Main cooler.*1,456 oz/);
+  assert.match(html, /Tap 55.*1,456 oz/);
   assert.match(html, /2 labels/);
 });
 

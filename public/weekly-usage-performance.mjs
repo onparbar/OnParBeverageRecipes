@@ -1,3 +1,5 @@
+import { isUsableWeeklyUsageEntry } from "./weekly-usage-evidence.mjs";
+
 const PERFORMANCE_CATEGORIES = new Set(["all", "beer", "cocktail", "liquor"]);
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -48,11 +50,20 @@ function getTimedPmbHistory(item) {
 
 export function getWeeklyUsagePerformanceCategory(item) {
   if (item?.isLiquorShot || clean(item?.displayUnit).toLowerCase() === "oz") return "liquor";
-  if (clean(item?.type).toLowerCase() === "cocktail") return "cocktail";
-  return "beer";
+  const tap = Number(item?.tapNumber || item?.tapPosition);
+  if ((tap >= 1 && tap <= 20) || (tap >= 83 && tap <= 92)) return "liquor";
+  if ((tap >= 47 && tap <= 72) || (tap >= 93 && tap <= 102)) return "cocktail";
+  if ((tap >= 21 && tap <= 46) || (tap >= 73 && tap <= 82)) return "beer";
+  const type = clean(item?.type).toLowerCase();
+  if (/^(shot|shots|liquor|spirit|spirits)$/.test(type)) return "liquor";
+  if (/^cocktails?$/.test(type)) return "cocktail";
+  if (/^(beer|lager|ale|ipa|pale ale|stout|porter|pilsner|wheat beer|sour beer|non alcoholic beer|cider|seltzer|hard seltzer|soda|wine)$/.test(type)) return "beer";
+  // Unclassified PMB catalog rows must not contaminate beer price estimates.
+  return "unknown";
 }
 
 export function getWeeklyUsageEntryPouredOz(item, entry, getFullOunces = () => 0) {
+  if (!isUsableWeeklyUsageEntry(entry)) return null;
   const exactPouredOz = finiteNonNegativeNumber(entry?.volumeOz);
   if (exactPouredOz !== null) return exactPouredOz;
 

@@ -1,4 +1,6 @@
-export function getSixWeekUsage(item, now = new Date()) {
+import { isUsableWeeklyUsageEntry } from "./weekly-usage-evidence.mjs";
+
+export function getSixWeekUsage(item, now = new Date(), windowWeeks = 6) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
   }).formatToParts(now).map(({ type, value }) => [type, value]));
@@ -8,12 +10,13 @@ export function getSixWeekUsage(item, now = new Date()) {
   const weekMs = 7 * 86400000;
   const weeks = new Map();
   for (const entry of item.history || []) {
+    if (!isUsableWeeklyUsageEntry(entry)) continue;
     const match = String(entry.label || "").match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
     if (!match || entry.hasValue === false || entry.value == null || entry.value === "") continue;
     const year = Number(match[3]) < 100 ? 2000 + Number(match[3]) : Number(match[3]);
     const start = Date.UTC(year, Number(match[1]) - 1, Number(match[2]));
     const value = Number(entry.value);
-    if (start < end - 6 * weekMs || start >= end || (end - start) % weekMs !== 0 || !Number.isFinite(value) || value < 0) continue;
+    if (start < end - windowWeeks * weekMs || start >= end || (end - start) % weekMs !== 0 || !Number.isFinite(value) || value < 0) continue;
     if (!weeks.has(start)) weeks.set(start, { ...entry, value });
   }
   const entries = [...weeks].sort(([a], [b]) => b - a).map(([, entry]) => entry);

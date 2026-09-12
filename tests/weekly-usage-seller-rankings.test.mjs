@@ -17,7 +17,7 @@ const labels = [
 ];
 
 function pmb(label, volumeOz) {
-  return { label, source: "PMB", volumeOz, value: volumeOz, hasValue: true };
+  return { label, source: "PMB", zeroUsageVerified: volumeOz === 0, volumeOz, value: volumeOz, hasValue: true };
 }
 
 function item({

@@ -128,6 +128,8 @@ function getProductIdentity(item, category) {
   };
 }
 
+import { isUsableWeeklyUsageEntry } from "./weekly-usage-evidence.mjs";
+
 function buildPmbHistoryMap(item, labelsByTime) {
   const entriesByTime = new Map();
   const invalidTimes = new Set();
@@ -142,7 +144,7 @@ function buildPmbHistoryMap(item, labelsByTime) {
     if (!currentLabel || compareText(label, currentLabel) < 0) labelsByTime.set(time, label);
 
     const volumeOz = finiteNonNegativeNumber(entry.volumeOz);
-    if (volumeOz === null) {
+    if (volumeOz === null || !isUsableWeeklyUsageEntry(entry)) {
       invalidTimes.add(time);
       return;
     }
