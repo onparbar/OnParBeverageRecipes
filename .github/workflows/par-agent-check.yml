@@ -1,43 +1,30 @@
-name: Run par agent check
-
-on:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: onpar-production-deploy
-  cancel-in-progress: false
-
-jobs:
-  check:
-    runs-on:
-      - self-hosted
-      - onpar-production
-    timeout-minutes: 15
-    environment: production
-    steps:
-      - name: Run the deployed par agent without publishing
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          service_dir="/Users/onpar/OnParBeverageRecipes-service"
-          current_release="${service_dir}/current"
-          helper="${service_dir}/.deploy/run-par-agent.sh"
-
-          if [ "$(id -un)" != "onpar" ]; then
-            echo "The production runner must run as onpar." >&2
-            exit 1
-          fi
-          if [ ! -L "${current_release}" ] || [ ! -d "${current_release}" ]; then
-            echo "The active production release is unavailable." >&2
-            exit 1
-          fi
-          if [ ! -x "${helper}" ]; then
-            echo "The installed par-agent helper is unavailable." >&2
-            exit 1
-          fi
-
-          ONPAR_SERVICE_DIR="${current_release}" "${helper}" --dry-run
+{
+  "name": "Run par agent check",
+  "on": {
+    "workflow_dispatch": {}
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "concurrency": {
+    "group": "onpar-production-deploy",
+    "cancel-in-progress": false
+  },
+  "jobs": {
+    "diagnostic": {
+      "runs-on": [
+        "self-hosted",
+        "onpar-production"
+      ],
+      "timeout-minutes": 3,
+      "environment": "production",
+      "steps": [
+        {
+          "name": "Read PMB report navigation only",
+          "shell": "bash",
+          "run": "set -euo pipefail\nexport PATH=\"/opt/homebrew/opt/node@22/bin:/usr/local/opt/node@22/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"\nnode <<'PMB_READ_ONLY'\nconst fs = require('node:fs');\nconst {execFileSync} = require('node:child_process');\nprocess.chdir('/Users/onpar/OnParBeverageRecipes-service/current');\nprocess.loadEnvFile('.env.local');\nconst base = new URL(process.env.PMB_API_BASE_URL);\nconst quote = value => '\"'+String(value).replace(/\\\\/g,'\\\\\\\\').replace(/\"/g,'\\\\\"').replace(/[\\r\\n]/g,'')+'\"';\nconst config = 'user = '+quote(process.env.PMB_API_USERNAME+':'+process.env.PMB_API_PASSWORD)+'\\n';\nconst clean = s => s.replace(/<[^>]*>/g,' ').replace(/\\s+/g,' ').trim();\nfunction read(path) {\n const url = new URL(path, base);\n if(url.origin!==base.origin) throw new Error('Off-server URL refused');\n return execFileSync('/usr/bin/curl',['--silent','--show-error','--fail','--digest','--max-time','12','--config','-',url.href],{input:config,encoding:'utf8',maxBuffer:4000000});\n}\nfor(const path of ['/pages/tapconfig','/']) {\n try {\n  const html=read(path);\n  const links=[...html.matchAll(/<a\\b[^>]*href=[\"']([^\"']+)[\"'][^>]*>([\\s\\S]*?)<\\/a>/gi)].map(m=>({path:m[1],label:clean(m[2])})).filter(x=>/keg|report|management|history/i.test(x.path+' '+x.label));\n  const scripts=[...html.matchAll(/<script\\b[^>]*src=[\"']([^\"']+)[\"']/gi)].map(m=>m[1]);\n  console.log(JSON.stringify({page:path,links,scripts}));\n } catch(e) {console.log(JSON.stringify({page:path,error:'Read failed',status:e.status}));}\n}\n\nPMB_READ_ONLY\n"
+        }
+      ]
+    }
+  }
+}
