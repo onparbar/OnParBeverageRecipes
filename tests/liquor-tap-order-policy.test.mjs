@@ -17,6 +17,13 @@ for (const [oz, bottles] of [[59.1745, 2], [59.17, 2], [33.814, 3], [33.81, 3], 
     assert.equal(result.orderQty, bottles); assert.equal(result.refillBottleQty, bottles);
   });
 }
+test('Buffalo Trace uses its 1 L catalog bottle when PMB omits bottle size', () => {
+  const tap = { key: 'patio-15', tapNumber: 15, wall: 'Patio', type: 'Shots', name: 'Buffalo Trace Bourbon 3', plu: 15 };
+  const result = buildRawRecommendation(tap, { fillLevelPercent: 10, rawKegSize: 500, rawKegSizeDp: 0 }, [{ volumeOz: 150 }], { onHandOverrides: {}, onDeckOverrides: {} }, {});
+  assert.equal(result.bottleOz, 33.814);
+  assert.equal(result.orderQty, 3);
+  assert.equal(result.refillBottleQty, 3);
+});
 test('partial cabinet coverage does not leave a one-bottle purchase for standard sizes', () => {
   const items = [{ id: 'test', name: 'Test', group: 'Liquor Cabinet', rollingIngredientVersion: 1, onHand: 1, hasCurrentCount: true }];
   const [result] = netRollingLiquorTapRecommendations([{ name: 'Test 3', isLiquorTap: true, actionType: 'order', orderQty: 2, bottleOz: 59.17 }], items);
