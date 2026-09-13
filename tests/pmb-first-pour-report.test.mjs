@@ -59,6 +59,16 @@ test("empty history remains no recorded pour, not an invented date", async () =>
   assert.equal(result.reportRequests, 1);
 });
 
+test("timestamp evidence excludes customer and payment values", () => {
+  const result = summarizeFirstPourTransactions([{
+    plu: 54705, volume_amount: 4, time: "2026-08-29T12:00:00",
+    customer_name: "private customer", card_id: "private card",
+  }], target);
+  assert.deepEqual(result.timestampSamples, [{ time: "2026-08-29T12:00:00" }]);
+  assert.ok(!JSON.stringify(result).includes("private customer"));
+  assert.ok(!JSON.stringify(result).includes("private card"));
+});
+
 test("report failures and inconsistent date windows do not silently advance the start", async () => {
   let calls = 0;
   await assert.rejects(findFirstPourInRange({ target, startDate: "2026-08-01", endDate: "2026-08-02", now,
