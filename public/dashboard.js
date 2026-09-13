@@ -13186,12 +13186,13 @@ function getKegNeedCalculation(item) {
     const onHandBottles = inventoryItem
       ? toNumber(inventoryOnHandOverrides[inventoryItem.id] ?? inventoryItem.onHandDisplay)
       : 0;
-    const calculation = buildStockGapRecommendation({
-      targetStock: averageOunces + 100,
+    return buildOperationalRecommendation({
+      kind: "liquor",
+      averageUsage: averageOunces,
+      reserve: 100,
+      bottleSize,
       position: buildInventoryPosition({ connected: currentOunces, onHand: onHandBottles * bottleSize }),
     });
-    const orderQuantity = Math.ceil(calculation.gap / bottleSize);
-    return { ...calculation, orderQuantity, uncappedOrderQuantity: orderQuantity };
   }
 
   const peakUsage = getEightWeekPeakUsage(usageItem || {}, new Date(), getKegFullOunces(liveRow, item));

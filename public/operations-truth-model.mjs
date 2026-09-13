@@ -1,3 +1,5 @@
+import { getLiquorTapBottleBatch } from "./liquor-tap-order-policy.mjs";
+
 function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -98,7 +100,8 @@ export function buildOperationalRecommendation({
     return { ...stockGap, kind: normalizedKind, averageUsage: usage, reserve: reserveAmount };
   }
   const ouncesPerBottle = nonNegative(bottleSize);
-  const bottles = ouncesPerBottle > 0 ? Math.ceil(reserveAmount / ouncesPerBottle) : 0;
+  const bottles = getLiquorTapBottleBatch(ouncesPerBottle)
+    || (ouncesPerBottle > 0 ? Math.ceil(reserveAmount / ouncesPerBottle) : 0);
   const cap = Number.isFinite(Number(maxOrder))
     ? Math.max(0, Math.floor(Number(maxOrder)))
     : Number.POSITIVE_INFINITY;
@@ -109,7 +112,8 @@ export function buildOperationalRecommendation({
     reserve: reserveAmount,
     bottleSize: ouncesPerBottle,
     uncappedOrderQuantity: bottles,
-    orderQuantity: Math.min(bottles, cap),
+    // A cap can hold the refill, but must not split its bottle batch.
+    orderQuantity: bottles <= cap ? bottles : 0,
     orderCapApplied: bottles > cap,
   };
 }

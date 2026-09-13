@@ -1,5 +1,6 @@
 import { normalizeLiquorTapProductName } from "./weekly-action-plan.mjs";
 import { applyInventoryCountPolicy, getUncountedInventoryAmount } from "./inventory-count-policy.mjs";
+import { getLiquorTapBottleBatch } from "./liquor-tap-order-policy.mjs";
 
 const RESERVES = Object.freeze({
   "tito-s": 12, "jose-cuervo-silver": 16, "crown-apple": 6,
@@ -112,9 +113,12 @@ export function netRollingLiquorTapRecommendations(recommendations = [], invento
     const remaining = available.has(item.id) ? available.get(item.id) : Math.max(0, Math.floor(Number(item.onHand) - reserved));
     const requested = Math.max(0, Number(r.orderQty) || 0);
     const used = Math.min(requested, remaining);
+    const batch = getLiquorTapBottleBatch(r.bottleOz);
+    const shortage = requested - used;
+    const orderQty = shortage > 0 && batch ? Math.ceil(shortage / batch) * batch : shortage;
     available.set(item.id, remaining - used);
     return {
-      ...r, orderQty: requested - used, suggestedBottleOrderQty: requested - used,
+      ...r, orderQty, suggestedBottleOrderQty: orderQty,
       actionType: requested > used ? "order" : "none", cabinetUsedQty: used,
       cabinetReservedForCocktails: reserved, cabinetInventoryId: item.id,
       reason: `${r.reason || ""} ${used} cabinet bottles cover the refill after reserving two Thursday sessions and the small reserve.`.trim(),

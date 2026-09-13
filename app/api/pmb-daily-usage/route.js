@@ -5,6 +5,7 @@ import { buildVerifiedKegSlotMap } from '../../../lib/pmb-keg-safety.mjs';
 import { parsePmbJson } from '../../../lib/pmb-json.mjs';
 import { buildDailyReport, dailyWindows, projectDailyReport, reportDays } from '../../../lib/pmb-daily-report.mjs';
 import { readDaily, readDailyRange, readAssignmentEvents, saveDaily, readMoneyUnits } from '../../../lib/pmb-daily-store.mjs';
+import { requireDailyReportOrigin } from '../../../lib/pmb-daily-origin.mjs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,10 +27,7 @@ export async function POST(request) {
   let claimed = false;
   try {
     await requireDashboardRequestRole(request, { owner: true });
-    const origin = request.headers.get('origin');
-    if ((origin && origin !== new URL(request.url).origin) || request.headers.get('sec-fetch-site') === 'cross-site') {
-      throw Object.assign(new Error('Same-origin request required.'), { status: 403 });
-    }
+    requireDailyReportOrigin(request);
     const raw = await request.text();
     if (raw.length > 100000) throw Object.assign(new Error('Report request is too large.'), { status: 413 });
     const input = JSON.parse(raw);

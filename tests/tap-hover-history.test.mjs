@@ -80,7 +80,7 @@ test("order hover uses the same stock target as the recommendation", () => {
   assert.doesNotMatch(html, /Last tapped|Replaced/);
 });
 
-test("liquor targets and missing readings keep existing order behavior", () => {
+test("liquor targets use the shared refill batch and preserve missing readings", () => {
   const scope = {
     getKegLiveRow: () => ({}), getKegCurrentFraction: () => 0.5, getKegItemKey: () => "21",
     toNumber: Number, isLiquorOunceTap: () => true, getKegCurrentLevelOz: () => 110,
@@ -93,7 +93,7 @@ test("liquor targets and missing readings keep existing order behavior", () => {
   };
   const result = load("getKegNeedCalculation", scope)(item);
   assert.equal(result.targetStock, 250);
-  assert.equal(result.orderQuantity, 3);
+  assert.equal(result.orderQuantity, 2);
   assert.equal(load("getKegNeedCalculation", { ...scope, getKegCurrentFraction: () => null })(item), null);
 });
 
