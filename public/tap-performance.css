@@ -1,0 +1,15 @@
+.tap-performance { margin-bottom: 28px; padding: clamp(18px,3vw,36px); border: 1px solid #ccdad4; border-radius: 24px; background: linear-gradient(135deg,#fffdf7,#edf4ef); }
+.tap-performance-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
+.tap-performance-heading h2 { margin: 4px 0; }
+.tap-performance-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.tap-performance-filters label { display: grid; gap: 6px; flex: 1 1 145px; }
+.tap-performance-filters input,.tap-performance-filters select { min-width: 0; width: 100%; }
+.tap-performance-presets { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+.tap-performance-presets button { padding: 8px 14px; border: 1px solid #becfc5; border-radius: 30px; background: #fffdf7; color: #205649; cursor: pointer; }
+.tap-performance-totals { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin: 20px 0; }
+.tap-performance-totals article { display: grid; gap: 12px; padding: 20px; background: #fffdf8; border: 1px solid #cbd8ce; border-radius: 16px; }
+.tap-performance-totals strong { font-size: clamp(20px,2.5vw,32px); overflow-wrap: anywhere; }
+.tap-performance .table-note { display: block; }
+.tap-performance-notes { margin-top: 22px; }
+.tap-performance [data-status] { overflow-wrap: anywhere; }
+@media(max-width:600px) { .tap-performance-totals { grid-template-columns: 1fr; } .tap-performance-heading { align-items: start; } .tap-performance-filters button { flex: 1 1 160px; } }

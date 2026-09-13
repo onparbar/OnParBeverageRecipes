@@ -8,6 +8,9 @@ import { answerLocalBeverageQuestion, BEVERAGE_QUESTION_EXAMPLES } from "./local
 import { requestLocalAiAnswer } from "./local-ai-client.mjs";
 import { renderSavedWeeklySnapshot } from "./weekly-snapshot-view.mjs";
 import { getSixWeekUsage } from "./six-week-usage.mjs";
+import { getCurrentTapUsage } from "./current-tap-usage.mjs";
+import { getTapFirstPour } from "./tap-first-pour.mjs";
+import { mountTapPerformance } from "./tap-performance.mjs";
 import "./operations-learning-ui.mjs";
 import { classifyShotPriceReadback } from "./shot-price-readback.mjs";
 import { waitForPmbTapReadiness } from "./pmb-repair-monitor.mjs";
@@ -10560,23 +10563,30 @@ function renderTapChangeControls(item, liveRow, displayBrand = item.brand) {
   const currentLabel = replacement ? `${displayBrand} (current replacement)` : displayBrand;
   const isEditing = activeKegAdjustKey === itemKey;
   const history = liveRow?.productHistory;
-  const introducedAt = new Date(history?.introducedAt || "");
+  const swappedAt = new Date(history?.changedAt || "");
   const now = new Date();
   const cutoff = new Date(now);
   cutoff.setMonth(cutoff.getMonth() - 3);
-  const showProductHistory = ["detected", "confirmed"].includes(history?.introductionSource)
-    && introducedAt > cutoff && introducedAt <= now;
+  const showProductHistory = ["detected", "confirmed"].includes(history?.source)
+    && swappedAt > cutoff && swappedAt <= now;
+  const firstPour = replacement ? null : getTapFirstPour({
+    ...liveRow,
+    tapNumber: item.tapNumber,
+  });
   return `
     <div class="tap-product-current">
-      ${showProductHistory ? `<details class="tap-product-detail">
-        <summary aria-label="Product swap history for ${escapeHtml(displayBrand || item.brand)}"><strong>${escapeHtml(displayBrand || item.brand)}</strong></summary>
+      ${showProductHistory || firstPour ? `<details class="tap-product-detail">
+        <summary class="keg-product-edit-trigger" data-keg-key="${escapeHtml(itemKey)}" aria-label="Change product for ${escapeHtml(displayBrand || item.brand)}" aria-expanded="${isEditing}"><strong>${escapeHtml(displayBrand || item.brand)}</strong></summary>
         <div class="tap-product-detail__body">
-          <span class="tap-product-detail__label">${history.introductionSource === "confirmed" ? "First swapped in" : "First detected"}</span>
-          <span>${escapeHtml(formatUpdatedAt(history.introducedAt))}</span>
+          ${firstPour ? `<span class="tap-product-detail__label">${escapeHtml(firstPour.label)}</span>
+          <span>${escapeHtml(firstPour.date)}</span>
+          <span class="table-note">${escapeHtml(firstPour.note)}</span>` : ""}
+          ${showProductHistory ? `<span class="tap-product-detail__label">${history.source === "confirmed" ? "Swapped in" : "Swap detected"}</span>
+          <span>${escapeHtml(formatUpdatedAt(history.changedAt))}</span>
           <span class="tap-product-detail__label">Replaced</span>
-          <span>${escapeHtml(history.introductionPreviousName || "Previous product not recorded")}</span>
+          <span>${escapeHtml(history.previousName || "Previous product not recorded")}</span>` : ""}
         </div>
-      </details>` : `<strong>${escapeHtml(displayBrand || item.brand)}</strong>`}
+      </details>` : `<strong class="keg-product-edit-trigger" data-keg-key="${escapeHtml(itemKey)}" role="button" tabindex="0" aria-label="Change product for ${escapeHtml(displayBrand || item.brand)}" aria-expanded="${isEditing}">${escapeHtml(displayBrand || item.brand)}</strong>`}
       ${replacement ? `<span class="table-note">Current replacement</span>` : ""}
     </div>
     ${onDeck ? `
@@ -10585,7 +10595,7 @@ function renderTapChangeControls(item, liveRow, displayBrand = item.brand) {
         <button class="keg-on-deck-remove" data-keg-key="${escapeHtml(itemKey)}" type="button" aria-label="Remove ${escapeHtml(onDeck.name)} from On Deck for tap ${escapeHtml(item.tapNumber)}">Remove</button>
       </span>
     ` : ""}
-    <div class="tap-change-controls">
+    ${isEditing ? `<div class="tap-change-controls">
       <button class="mini-button toggle-keg-adjust" data-keg-key="${escapeHtml(itemKey)}" type="button" aria-expanded="${isEditing}"${adjustDisabled ? " disabled" : ""}>Change product</button>
       ${isEditing ? `
         <select class="tap-change-select" data-keg-key="${escapeHtml(itemKey)}" aria-label="Replacement product for ${escapeHtml(item.brand)}"${selectDisabled ? " disabled" : ""}>
@@ -10594,7 +10604,7 @@ function renderTapChangeControls(item, liveRow, displayBrand = item.brand) {
         </select>
         <button class="mini-button change-tap-product" data-keg-key="${escapeHtml(itemKey)}" type="button"${changeDisabled || kegConfigUpdateRunning ? " disabled" : ""}>${kegConfigUpdateRunning ? "Updating..." : "Change"}</button>
       ` : ""}
-    </div>
+    </div>` : ""}
   `;
 }
 
@@ -10694,18 +10704,16 @@ function getUnmappedKegWallPricing(livePrice) {
 function getWeeklyUsageForKegItem(item, displayBrand = item?.brand) {
   const tapNumber = toNumber(item?.tapNumber);
   const tapMatch = weeklyUsageItems.find((entry) => toNumber(entry.tapNumber) === tapNumber);
-  if (tapMatch) return tapMatch;
-
-  const exactKeys = getWeeklyUsageNameKeys(displayBrand || item?.brand, { stripWallNumber: false });
-  const exactMatch = weeklyUsageItems.find((entry) => (
-    getWeeklyUsageNameKeys(entry.name, { stripWallNumber: false }).some((key) => exactKeys.includes(key))
-  ));
-  if (exactMatch) return exactMatch;
-
-  const looseKeys = getWeeklyUsageNameKeys(displayBrand || item?.brand, { stripWallNumber: true });
-  return weeklyUsageItems.find((entry) => (
-    getWeeklyUsageNameKeys(entry.name, { stripWallNumber: true }).some((key) => looseKeys.includes(key))
-  )) || null;
+  const liveRow = getKegLiveRow(item);
+  const liveName = liveRow?.name || liveRow?.tapProduct || "";
+  const sameLiveProduct = getWeeklyUsageNameKeys(liveName, { stripWallNumber: true })
+    .some((key) => getWeeklyUsageNameKeys(displayBrand, { stripWallNumber: true }).includes(key));
+  return getCurrentTapUsage(tapMatch, {
+    tapNumber,
+    name: displayBrand || item?.brand,
+    plu: sameLiveProduct ? liveRow?.plu : null,
+    productHistory: sameLiveProduct ? liveRow?.productHistory : null,
+  });
 }
 
 function getLiveTapPriceForKegWallItem(item, displayBrand = item?.brand) {
@@ -11343,6 +11351,22 @@ function bindKegLevelEvents() {
   document.querySelector("#initialize-shared-keg-levels")?.addEventListener("click", () => {
     initializeSharedKegLevelsFromServiceComputer();
   });
+  document.querySelectorAll(".keg-product-edit-trigger").forEach((trigger) => {
+    const openControls = (event) => {
+      event.preventDefault();
+      if (kegConfigUpdateRunning) return;
+      const key = trigger.dataset.kegKey;
+      activeKegAdjustKey = key;
+      renderKegLevels();
+      [...document.querySelectorAll(".toggle-keg-adjust")]
+        .find((button) => button.dataset.kegKey === key)?.focus();
+    };
+    trigger.addEventListener("dblclick", openControls);
+    trigger.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") openControls(event);
+    });
+  });
+
   document.querySelectorAll(".toggle-keg-adjust").forEach((button) => {
     button.addEventListener("click", () => {
       const key = button.dataset.kegKey;
@@ -20422,3 +20446,12 @@ supplierMappingForm?.addEventListener("submit", async event => {
   } catch (error) { status.textContent = `Supplier saved; price match pending. ${error.message}`; }
   finally { button.disabled = false; }
 });
+
+mountTapPerformance(document.querySelector('#tap-performance'), () => kegWallItems.flatMap((item) => {
+  const liveRow = getKegLiveRow(item);
+  const resolution = getKegCanonicalResolution(item, liveRow);
+  if (!resolution.operationallyVerified || !liveRow?.plu) return [];
+  const product = liveRow.name || liveRow.tapProduct;
+  const pricing = getKegWallPricing(item, getKegDisplayBrand(item, liveRow));
+  return product && pricing.costPerOz > 0 ? [{ tapNumber: item.tapNumber, plu: liveRow.plu, product, costPerOz: pricing.costPerOz }] : [];
+}));

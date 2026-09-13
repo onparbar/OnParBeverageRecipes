@@ -129,6 +129,7 @@ export default function DashboardPage() {
   return (
     <div className="shell" data-dashboard-role={sessionRole}>
       <link rel="stylesheet" href="/inventory-reality-check.css" />
+      <link rel="stylesheet" href="/tap-performance.css" />
       <header className="topbar">
         <div className="topbar-title-row topbar-title-row--branded">
           <DashboardBrand />
@@ -181,7 +182,7 @@ export default function DashboardPage() {
               <button className="dashboard-menu-item" data-menu-tab="ingredients" type="button">Ingredient &amp; Keg Costs</button>
               <button className="dashboard-menu-item" id="recipes-tab" data-menu-tab="recipes" data-recipe-view="current" type="button">Recipes</button>
               <button className="dashboard-menu-item" id="add-tab" data-menu-tab="add" type="button">Add Product</button>
-              <button className="dashboard-menu-item" data-menu-tab="performance" type="button">Performance</button>
+              <button className="dashboard-menu-item" data-menu-tab="performance" type="button">Tap Performance</button>
               <button className="dashboard-menu-item" data-menu-tab="print" type="button">Print</button>
             </div>
           </details>
@@ -216,6 +217,7 @@ export default function DashboardPage() {
 
 
         <section className="panel" id="performance-panel" role="tabpanel" aria-label="Performance">
+          <section className="tap-performance" id="tap-performance" aria-label="Tap Performance"></section>
           <div id="search-performance-view">
             <section className="onpar-insights" id="onpar-insights" aria-labelledby="onpar-insights-title"></section>
           </div>

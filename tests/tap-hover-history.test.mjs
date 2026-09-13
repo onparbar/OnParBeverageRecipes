@@ -20,31 +20,32 @@ const base = {
   tapReplacementOverrides: {}, getTapReplacementProductOptions: () => "",
   kegConfigUpdateRunning: false, activeKegAdjustKey: "", escapeHtml,
   formatUpdatedAt: (date) => date,
+  getTapFirstPour: () => null,
 };
 const renderProduct = load("renderTapChangeControls", base);
 const monthsAgo = (months) => { const date = new Date(); date.setMonth(date.getMonth() - months); return date.toISOString(); };
 
-test("product hover contains only recent introduction and previous product", () => {
+test("product hover contains the recent tap swap and previous product", () => {
   const introducedAt = monthsAgo(1);
-  const html = renderProduct(item, { tappedOn: "old keg timestamp", productHistory: { introducedAt, introductionSource: "confirmed", introductionPreviousName: "Previous <beer>" } });
-  assert.match(html, /Product swap history/);
+  const html = renderProduct(item, { tappedOn: "old keg timestamp", productHistory: { changedAt: introducedAt, source: "confirmed", previousName: "Previous <beer>" } });
+  assert.match(html, /Swapped in/);
   assert.ok(html.includes(introducedAt));
   assert.match(html, /Previous &lt;beer>/);
   assert.doesNotMatch(html, /weekly|Last tapped|old keg timestamp/);
 });
 
-test("old returning products, unknown baselines, and invalid dates have no new-product hover", () => {
+test("old swaps, unknown baselines, and invalid dates have no recent-swap hover", () => {
   for (const history of [
-    { introducedAt: monthsAgo(4), changedAt: new Date().toISOString(), introductionSource: "confirmed" },
-    { introducedAt: monthsAgo(1), introductionSource: "baseline" },
-    { introducedAt: "invalid", introductionSource: "confirmed" },
-    { introducedAt: monthsAgo(-1), introductionSource: "confirmed" },
+    { changedAt: monthsAgo(4), source: "confirmed" },
+    { changedAt: monthsAgo(1), source: "baseline" },
+    { changedAt: "invalid", source: "confirmed" },
+    { changedAt: monthsAgo(-1), source: "confirmed" },
     null,
-  ]) assert.doesNotMatch(renderProduct(item, { productHistory: history }), /Product swap history/);
+  ]) assert.doesNotMatch(renderProduct(item, { productHistory: history }), /Swapped in|Swap detected/);
 });
 
-test("observed rather than confirmed introductions are labeled first detected", () => {
-  assert.match(renderProduct(item, { productHistory: { introducedAt: monthsAgo(1), introductionSource: "detected" } }), /First detected/);
+test("observed rather than confirmed swaps are labeled detected", () => {
+  assert.match(renderProduct(item, { productHistory: { changedAt: monthsAgo(1), source: "detected" } }), /Swap detected/);
 });
 
 test("order hover uses the same stock target as the recommendation", () => {

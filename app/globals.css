@@ -5371,6 +5371,22 @@ td {
   text-transform: none;
 }
 
+.tap-product-current .keg-product-edit-trigger {
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(44, 106, 94, 0.16);
+  border-radius: 12px;
+  background: rgba(44, 106, 94, 0.05);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.tap-product-current .keg-product-edit-trigger:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
 .tap-change-controls {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
