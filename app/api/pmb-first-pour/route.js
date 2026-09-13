@@ -3,7 +3,7 @@ import { requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
 import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
 import { buildVerifiedKegSlotMap } from "../../../lib/pmb-keg-safety.mjs";
 import { parsePmbJson } from "../../../lib/pmb-json.mjs";
-import { findFirstPourInRange, getFirstPourWindow } from "../../../lib/pmb-first-pour-report.mjs";
+import { findFirstPourInRange, findFirstPoursForTaps, getFirstPourWindow } from "../../../lib/pmb-first-pour-report.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,10 +15,11 @@ export async function GET(request) {
   try {
     await requireDashboardRequestRole(request, { owner: true });
     const params = new URL(request.url).searchParams;
+    const allTaps = params.get("tap") === "all";
     const tapNumber = Number(params.get("tap"));
     const startDate = params.get("startDate");
     const endDate = params.get("endDate");
-    if (!Number.isSafeInteger(tapNumber) || tapNumber < 1 || tapNumber > 250) {
+    if (!allTaps && (!Number.isSafeInteger(tapNumber) || tapNumber < 1 || tapNumber > 250)) {
       throw Object.assign(new Error("Choose a valid tap number."), { status: 422 });
     }
     getFirstPourWindow(startDate, endDate);
@@ -58,9 +59,10 @@ export async function GET(request) {
     if (!auth.authtoken) throw Object.assign(new Error("PMB report authentication failed."), { status: 502 });
     const taps = [...buildVerifiedKegSlotMap(await getTapConfigRows(config, { timeoutMs: 5000 })).values()];
     const target = taps.find((tap) => Number(tap.tapNumber) === tapNumber);
-    if (!target) throw Object.assign(new Error("PMB did not return that tap's current product assignment."), { status: 404 });
-    const result = await findFirstPourInRange({
-      target, startDate, endDate,
+    if (!allTaps && !target) throw Object.assign(new Error("PMB did not return that tap's current product assignment."), { status: 404 });
+    const findReport = allTaps ? findFirstPoursForTaps : findFirstPourInRange;
+    const result = await findReport({
+      target, targets: taps, startDate, endDate,
       readTransactions: async (range) => {
         const report = await post("/api/transactions", { id: config.clientId, ...range }, auth.authtoken);
         return report.taptransactions;
