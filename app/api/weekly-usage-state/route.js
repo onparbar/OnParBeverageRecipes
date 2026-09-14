@@ -1,4 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { GET as getPmbWeeklyReport } from "../pmb-weekly-usage/route.js";
+import { recoverWeeklyUsageState } from "../../../lib/weekly-usage-recovery.mjs";
 import {
   initializeSharedWeeklyUsageState,
   readSharedWeeklyUsageState,
@@ -48,7 +50,17 @@ function errorResponse(error) {
 export async function GET(request) {
   try {
     await requireOwner(request);
-    return jsonResponse(await readSharedWeeklyUsageState());
+    const state = await readSharedWeeklyUsageState();
+    return jsonResponse(await recoverWeeklyUsageState(state, async (week) => {
+      const url = new URL(request.url);
+      url.pathname = "/api/pmb-weekly-usage";
+      url.search = "";
+      url.searchParams.set("weeks", week.startDate);
+      const response = await getPmbWeeklyReport(new NextRequest(url, { headers: request.headers }));
+      const report = await response.json();
+      if (!response.ok) throw new Error(report.error || report.message || "PMB weekly usage is unavailable.");
+      return report;
+    }));
   } catch (error) {
     return errorResponse(error);
   }

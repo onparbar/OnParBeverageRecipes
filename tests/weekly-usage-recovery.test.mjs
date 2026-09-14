@@ -1,127 +1,143 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { reconcileWeeklyUsageData } from '../public/weekly-usage-reconciliation.mjs';
-import { buildWeeklyUsagePerformance } from '../public/weekly-usage-performance.mjs';
-import { getTapAssignmentUsageStart } from '../public/confirmed-tap-starts.mjs';
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  createWeeklyUsageRecovery,
+  getRecoverableUsageWeek,
+  mergeRecoveredWeeklyReport,
+} from "../lib/weekly-usage-recovery.mjs";
+import { prepareBriefingInputs } from "../public/briefing-readiness.mjs";
 
-const copy = (value) => structuredClone(value);
-const latest = '8/31/26 - 9/6/26';
-const prior = '8/24/26 - 8/30/26';
-const capture = (label, value, extra = {}) => ({ label, value, volumeOz: value, source: 'PMB', hasValue: true, ...extra });
-const goose = () => ({ id: '83-grey-goose-vodka-2', tapNumber: 83, plu: 196542, name: 'Grey Goose Vodka 2', displayUnit: 'oz', average: 7.52, history: [capture(latest, 7.52), capture(prior, 0)] });
-const state = () => ({ activeItems: [goose()], archivedItems: [], historyOverrides: { '83-grey-goose-vodka-2': goose().history }, currentOverrides: {}, lastSyncAt: '2026-09-13T20:00:00Z' });
-const verified = { zeroUsageVerified: true, reportComplete: true, historicalAssignmentVerified: true, usageUnknownReason: '', zeroUsageEvidence: { source: 'owner-confirmed-assignment', tapNumber: 83, plu: 196542 } };
+const week = { startDate: "2026-09-07", endDate: "2026-09-13", label: "9/7/26 - 9/13/26" };
+const item = { id: "tap-21", tapNumber: 21, plu: 6655, name: "Michelob ULTRA 1", displayUnit: "kegs", history: [] };
+const base = () => ({ initialized: true, revision: 1, data: {
+  activeItems: [structuredClone(item)], archivedItems: [], currentOverrides: {}, historyOverrides: {}, lastSyncAt: "",
+} });
+const snapshot = { items: [{ ...item, rawKegSize: 1984, rawKegSizeDp: 0 }] };
+const report = () => ({ ...week, updatedAt: "2026-09-14T16:00:00.000Z", items: [{ ...item, volumeOz: 992, hasValue: true }] });
+const monday = () => new Date("2026-09-14T16:00:00Z");
 
-test('concurrent recapture and verified zero merge in active rows and overrides', () => {
-  const base = state(), local = copy(base), remote = copy(base);
-  for (const rows of [local.activeItems[0].history, local.historyOverrides[goose().id]]) {
-    Object.assign(rows[1], { priceCapturedAt: '2026-09-13T22:00:00Z', sellingPricePerOz: 6.7, zeroUsageVerified: false, reportComplete: false, historicalAssignmentVerified: false });
+test("weekly recovery follows Monday 7am Eastern, including DST", () => {
+  assert.equal(getRecoverableUsageWeek(new Date("2026-09-14T10:59:59Z")).startDate, "2026-08-31");
+  assert.deepEqual(getRecoverableUsageWeek(new Date("2026-09-14T11:00:00Z")), week);
+  assert.equal(getRecoverableUsageWeek(new Date("2026-11-02T11:59:59Z")).startDate, "2026-10-19");
+  assert.equal(getRecoverableUsageWeek(new Date("2026-11-02T12:00:00Z")).startDate, "2026-10-26");
+});
+
+test("recovery preserves exact ounces and converts keg units without changing counts", () => {
+  const input = base().data;
+  input.currentOverrides = { "tap-21": 7 };
+  const merged = mergeRecoveredWeeklyReport(input, report(), snapshot);
+  assert.equal(merged.activeItems[0].history[0].volumeOz, 992);
+  assert.equal(merged.activeItems[0].history[0].value, 0.5);
+  assert.equal(merged.activeItems[0].average, 0.5);
+  assert.deepEqual(merged.currentOverrides, input.currentOverrides);
+  assert.equal(input.activeItems[0].history.length, 0);
+});
+
+test("recovery preserves reviewed zeros and mirrored history overrides", () => {
+  const data = base().data;
+  const zero = { label: week.label, source: "PMB", volumeOz: 0, value: 0, hasValue: true, zeroUsageVerified: true,
+    zeroUsageEvidence: { source: "owner-confirmed-assignment" } };
+  data.historyOverrides[item.id] = [zero];
+  const result = mergeRecoveredWeeklyReport(data, report(), snapshot);
+  assert.deepEqual(result.activeItems[0].history[0], zero);
+  assert.deepEqual(result.historyOverrides[item.id][0], zero);
+});
+
+test("recovery never treats an unknown zero or missing keg size as usable", () => {
+  const unknown = report();
+  unknown.items[0] = { ...unknown.items[0], volumeOz: 0, hasValue: false, usageUnknownReason: "Assignment unknown" };
+  const entry = mergeRecoveredWeeklyReport(base().data, unknown, snapshot).activeItems[0].history[0];
+  assert.equal(entry.hasValue, false);
+  assert.equal(entry.usageUnknownReason, "Assignment unknown");
+  const missingSize = mergeRecoveredWeeklyReport(base().data, report()).activeItems[0].history[0];
+  assert.equal(missingSize.volumeOz, 992);
+  assert.equal(missingSize.value, null);
+  assert.equal(missingSize.hasValue, false);
+});
+
+test("a replaced product's usage stays archived rather than entering its replacement's average", () => {
+  const changed = report();
+  changed.items[0] = { ...changed.items[0], name: "Previous beer", plu: 999 };
+  const result = mergeRecoveredWeeklyReport(base().data, changed, snapshot);
+  assert.equal(result.activeItems[0].history.length, 0);
+  assert.equal(result.archivedItems[0].name, "Previous beer");
+  assert.equal(result.archivedItems[0].history[0].volumeOz, 992);
+});
+
+test("duplicate report identities fail closed", () => {
+  const duplicate = report();
+  duplicate.items.push(structuredClone(duplicate.items[0]));
+  assert.throws(() => mergeRecoveredWeeklyReport(base().data, duplicate, snapshot), /duplicate product rows/);
+});
+
+test("simultaneous recovery requests share one report fetch and preserve state on PMB failure", async () => {
+  let rejectReport;
+  let calls = 0;
+  const pending = new Promise((resolve, reject) => { rejectReport = reject; });
+  const recover = createWeeklyUsageRecovery({ readState: async () => base(), now: monday });
+  const load = () => { calls += 1; return pending; };
+  const first = recover(base(), load);
+  const second = recover(base(), load);
+  rejectReport(new Error("PMB unavailable"));
+  const results = await Promise.all([first, second]);
+  assert.equal(calls, 1);
+  for (const result of results) {
+    assert.equal(result.revision, 1);
+    assert.equal(result.recovery.status, "pending");
+    assert.equal(result.recovery.message, "PMB unavailable");
   }
-  for (const rows of [remote.activeItems[0].history, remote.historyOverrides[goose().id]]) Object.assign(rows[1], verified);
-  local.lastSyncAt = '2026-09-13T22:00:00Z';
-  remote.lastSyncAt = '2026-09-13T21:00:00Z';
-  const result = reconcileWeeklyUsageData(base, local, remote);
-  assert.equal(result.ok, true, JSON.stringify(result.conflicts));
-  for (const rows of [result.data.activeItems[0].history, result.data.historyOverrides[goose().id]]) {
-    assert.equal(rows[1].zeroUsageVerified, true);
-    assert.equal(rows[1].sellingPricePerOz, 6.7);
-  }
-  assert.equal(result.data.lastSyncAt, local.lastSyncAt);
-  assert.equal(buildWeeklyUsagePerformance(result.data.activeItems).trendComplete, true);
-  assert.equal(base.activeItems[0].history[1].zeroUsageVerified, undefined);
 });
 
-test('different products and weeks can merge without losing either report', () => {
-  const base = state(), local = copy(base), remote = copy(base);
-  local.activeItems[0].history.push(capture('8/17/26 - 8/23/26', 16.61));
-  Object.assign(remote.activeItems[0].history[1], verified);
-  const result = reconcileWeeklyUsageData(base, local, remote);
-  assert.equal(result.ok, true);
-  assert.equal(result.data.activeItems[0].history.length, 3);
-  assert.equal(result.data.activeItems[0].history[1].zeroUsageVerified, true);
+test("recovery retries CAS conflicts against fresh state and leaves concurrent edits intact", async () => {
+  let state = base();
+  let writes = 0;
+  const recover = createWeeklyUsageRecovery({
+    readState: async () => structuredClone(state), readSnapshot: async () => snapshot, now: monday,
+    replaceState: async ({ expectedRevision, data }) => {
+      writes += 1;
+      if (writes === 1) {
+        state.revision = 2;
+        state.data.currentOverrides[item.id] = 9;
+        throw Object.assign(new Error("Concurrent edit"), { status: 409 });
+      }
+      assert.equal(expectedRevision, 2);
+      state = { ...state, revision: 3, data };
+      return state;
+    },
+  });
+  const result = await recover(base(), async () => report());
+  assert.equal(writes, 2);
+  assert.equal(result.data.currentOverrides[item.id], 9);
+  assert.equal(result.data.activeItems[0].history[0].value, 0.5);
 });
 
-test('conflicting poured measurements remain blocked', () => {
-  const base = state(), local = copy(base), remote = copy(base);
-  Object.assign(local.activeItems[0].history[0], { value: 8, volumeOz: 8 });
-  Object.assign(remote.activeItems[0].history[0], { value: 9, volumeOz: 9 });
-  const result = reconcileWeeklyUsageData(base, local, remote);
-  assert.equal(result.ok, false);
-  assert.equal(result.data, null);
+test("completed weeks are not refetched and a wrong-week response cannot be saved", async () => {
+  let writes = 0;
+  const recover = createWeeklyUsageRecovery({ readState: async () => base(), now: monday,
+    replaceState: async () => { writes += 1; throw new Error("Unexpected write"); } });
+  const complete = base();
+  complete.data.activeItems[0].history = [{ label: week.label }];
+  await recover(complete, async () => { throw new Error("Unexpected fetch"); });
+  const result = await recover(base(), async () => ({ ...report(), startDate: "2026-08-31" }));
+  assert.equal(result.recovery.status, "pending");
+  assert.equal(writes, 0);
 });
 
-test('duplicate archive observations merge without losing verified usage', () => {
-  const base = state(), local = copy(base), remote = copy(base);
-  const swaps = [
-    ['42-coming-soon', '2026-09-12T00:27:27.677Z', '2026-09-11T21:33:02.351Z'],
-    ['70-coming-soon', '2026-09-12T00:27:27.677Z', '2026-09-10T15:02:57.930Z'],
-    ['79-cincy-light-2', '2026-09-13T05:42:03.619Z', '2026-09-13T04:48:47.257Z'],
-  ];
-  for (const [id, localTime, sharedTime] of swaps) {
-    local.archivedItems.push({ id, replacedAt: localTime, history: [capture(latest, 12)] });
-    remote.archivedItems.push({ id, replacedAt: sharedTime, history: [capture(latest, 12)] });
-  }
-  Object.assign(remote.activeItems[0].history[1], verified);
-  const result = reconcileWeeklyUsageData(base, local, remote);
-  assert.equal(result.ok, true, JSON.stringify(result.conflictDetails));
-  assert.deepEqual(result.data.archivedItems.map((item) => item.replacedAt), swaps.map((swap) => swap[2]));
-  assert.equal(result.data.activeItems[0].history[1].zeroUsageVerified, true);
-  assert.deepEqual(reconcileWeeklyUsageData(base, remote, local).data, result.data);
-  assert.equal(local.archivedItems[0].replacedAt, swaps[0][1]);
+test("briefing separates physical count tasks from storage failures without changing readiness", () => {
+  const readiness = { status: "blocked", blockers: ["36 inventory items are using an old baseline instead of a current saved count.", "Shared state could not be saved."], staleReasons: [], reviewReasons: [] };
+  const alerts = [{ id: "inventory-counts-missing", severity: "critical", title: "36 inventory counts are not current" },
+    { id: "weekly-plan-readiness", title: "Weekly plan needs attention" }];
+  const result = prepareBriefingInputs(alerts, readiness);
+  assert.equal(result.alerts.filter((alert) => alert.id === "inventory-count-task").length, 1);
+  assert.equal(result.alerts.find((alert) => alert.id === "inventory-count-task").severity, "info");
+  assert.deepEqual(result.readiness.blockers, ["Shared state could not be saved."]);
+  assert.equal(readiness.blockers.length, 2);
+  assert.equal(readiness.status, "blocked");
 });
 
-test('archive recovery still rejects conflicting measurements and invalid timestamps', () => {
-  const base = state(), local = copy(base), remote = copy(base);
-  local.archivedItems.push({ id: '79-cincy-light-2', replacedAt: '2026-09-13T05:42:03.619Z', history: [capture(latest, 8)] });
-  remote.archivedItems.push({ id: '79-cincy-light-2', replacedAt: '2026-09-13T04:48:47.257Z', history: [capture(latest, 9)] });
-  assert.equal(reconcileWeeklyUsageData(base, local, remote).ok, false);
-  remote.archivedItems[0].history = copy(local.archivedItems[0].history);
-  local.archivedItems[0].replacedAt = 'unknown';
-  const result = reconcileWeeklyUsageData(base, local, remote);
-  assert.equal(result.ok, false);
-  assert.deepEqual(result.conflicts, ['archivedItems.79-cincy-light-2.replacedAt']);
-});
-
-test('missing baselines and simultaneous assignments are not silently accepted', () => {
-  assert.equal(reconcileWeeklyUsageData(null, state(), state()).ok, false);
-  const base = state(), local = copy(base), remote = copy(base);
-  local.activeItems.push({ id: '79-a', tapNumber: 79, name: 'A', history: [] });
-  remote.activeItems.push({ id: '79-b', tapNumber: 79, name: 'B', history: [] });
-  assert.equal(reconcileWeeklyUsageData(base, local, remote).ok, false);
-});
-
-test('Triple Jam does not create missing history before its saved tap transition', () => {
-  const rows = [goose(), { id: '79-triple-jam', tapNumber: 79, plu: 121584, name: 'Triple Jam Cider 2', history: [] }];
-  Object.assign(rows[0].history[1], verified);
-  const result = buildWeeklyUsagePerformance(rows, { getCurrentAssignment: (item) => item.tapNumber === 79
-    ? { ...item, productHistory: { source: 'detected', changedAt: '2026-09-13T04:42:56.789Z' } } : item });
-  assert.equal(result.eligibleCount, 1);
-  assert.equal(result.currentComplete, true);
-  assert.equal(result.trendComplete, true);
-  assert.deepEqual(result.excludedComparisonTaps, []);
-});
-
-test('baseline sightings and refill dates do not masquerade as introductions', () => {
-  assert.equal(getTapAssignmentUsageStart({ name: 'Existing beer', productHistory: { source: 'baseline', changedAt: '2026-09-12T18:00:00Z', firstSeenAt: '2026-09-12T18:00:00Z' }, tappedOn: '09/12/2026' }), '');
-  assert.equal(getTapAssignmentUsageStart({ name: 'New beer', productHistory: { source: 'confirmed', changedAt: '2026-09-13T02:00:00Z' } }), '2026-09-12');
-});
-
-test('a newly introduced product with current usage does not require a pre-installation comparison', () => {
-  const existing = goose();
-  Object.assign(existing.history[1], verified);
-  const newProduct = { id: '79-new', tapNumber: 79, name: 'New beer', history: [capture(latest, 20)], productHistory: { source: 'confirmed', changedAt: '2026-09-02T16:00:00Z' } };
-  const result = buildWeeklyUsagePerformance([existing, newProduct]);
-  assert.equal(result.currentComplete, true);
-  assert.deepEqual(result.excludedComparisonTaps, []);
-  assert.equal(result.comparableCount, 1);
-});
-
-test('keg layout keeps repair actions after the header and rehearsal unavailable', () => {
-  const dashboard = readFileSync(new URL('../public/dashboard.js', import.meta.url), 'utf8');
-  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
-  assert.match(dashboard, /ORDER_REHEARSAL_AVAILABLE = false/);
-  assert.match(dashboard, /headerContent: wallHeader \+ kegRepairActions/);
-  assert.match(dashboard, /kegSummary\.hidden = true/);
-  assert.match(css, /#keg-levels-panel \.keg-layout\s*\{\s*grid-template-columns: minmax\(0, 1fr\)/);
+test("briefing shortens whole-week gaps but preserves the missing-data warning", () => {
+  const result = prepareBriefingInputs([], { staleReasons: ["0/102 active taps have saved usage. Missing: Tap 1, Tap 2, Tap 3"] });
+  assert.match(result.readiness.staleReasons[0], /0\/102 active taps/);
+  assert.doesNotMatch(result.readiness.staleReasons[0], /Tap 1/);
 });

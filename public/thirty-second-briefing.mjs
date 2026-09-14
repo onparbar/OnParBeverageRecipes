@@ -72,6 +72,7 @@ function buildOutstandingWorkBullets(staffPrepPlan = {}, orders = {}, now = new 
 }
 
 function consolidateReadinessAlerts(alerts, readiness = {}, mondayRun = {}) {
+  ({ alerts, readiness } = prepareBriefingInputs(alerts, readiness));
   const groups = new Map();
   const other = [];
   const definitions = {
@@ -81,6 +82,7 @@ function consolidateReadinessAlerts(alerts, readiness = {}, mondayRun = {}) {
     plan: ["Weekly plan needs attention", "weekly-plan"],
   };
   const reasonGroup = (message) => {
+    if (/weekly usage|usage report|saved usage|active taps.*usage/i.test(message)) return "usage";
     if (/save|saving|setup|unsynced|recovery|durabl/i.test(message)) return "shared";
     if (/weekly usage|usage report|saved usage|active taps.*usage/i.test(message)) return "usage";
     if (/PMB|tap repair|tap prices|keg levels.*(?:refresh|unavailable|reading)/i.test(message)) return "pmb";
@@ -401,3 +403,4 @@ export function buildThirtySecondBriefing(...args) {
   }
   return result;
 }
+import { prepareBriefingInputs } from "./briefing-readiness.mjs";
