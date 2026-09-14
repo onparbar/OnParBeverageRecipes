@@ -599,12 +599,21 @@ export function buildVendorOrderDrafts(plan = {}, {
     if (vendor !== "Proof" || proofPrepRequirement !== "not-required") return true;
     const estimatedTotal = lines.reduce((total, line) => total + (numberOrNull(line.extendedCost) || 0), 0);
     const hasUnresolvedLine = lines.some((line) => line.blockers.length > 0);
-    if (estimatedTotal >= proofMinimum || hasUnresolvedLine) return true;
+    const hasRequestedProofOrder = manualAdjustments.some(adjustment => (
+      Number(adjustment?.quantity) > 0 && manualCatalog.some(item => (
+        clean(item?.vendor).toLowerCase() === "proof"
+        && clean(item?.catalogId)
+        && clean(item.catalogId) === clean(adjustment?.catalogId)
+      ))
+    ));
+    if (hasUnresolvedLine || hasRequestedProofOrder) return true;
     deferredOrders.push({
       vendor,
       lineCount: lines.length,
       estimatedTotal,
-      reason: `Below $${proofMinimum}; inventory covers this week's cocktail prep.`,
+      reason: estimatedTotal < proofMinimum
+        ? `Below $${proofMinimum}; inventory covers this week's cocktail prep.`
+        : "Inventory covers this week's and next week's cocktail prep; no automatic Proof order is needed.",
     });
     return false;
   });

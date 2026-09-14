@@ -1,4 +1,17 @@
+import { carryForwardPlannedProofPrep } from "./proof-planned-prep.mjs";
+
 export const PROOF_PREP_LOOK_AHEAD_WEEKS = 8;
+
+export function buildProofPrepOrderContext(options = {}) {
+  if (!Array.isArray(options.tapInputs) || !options.tapInputs.length) {
+    return buildProofPrepOrderContextFromInputs(options);
+  }
+  const carried = carryForwardPlannedProofPrep(options);
+  const context = buildProofPrepOrderContextFromInputs(carried.options);
+  return carried.unresolved && context.requirement === "not-required"
+    ? { ...context, requirement: "unknown" }
+    : context;
+}
 
 function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -109,7 +122,7 @@ function getProjectedProofUsage({
   return { projectedOzById, unresolvedRecipe };
 }
 
-export function buildProofPrepOrderContext(options = {}) {
+function buildProofPrepOrderContextFromInputs(options = {}) {
   const inventoryItems = applySavedInventoryCounts(
     Array.isArray(options.inventoryItems) ? options.inventoryItems : [],
     Array.isArray(options.savedInventoryItems) ? options.savedInventoryItems : [],
@@ -218,12 +231,13 @@ function buildProofLookAheadContext(options) {
       remaining = Math.max(0, remaining + batches - average);
     }
   }
-  // Preserve explicit locked prep without counting it twice in the same week.
+  // Planned batches already credit their own tap's stock. The simulation now
+  // represents additional batches, so reserve the planned ingredients once.
   const locked = getProjectedProofUsage(options);
   unresolved ||= locked.unresolvedRecipe || !seen.size;
   for (const [id, entry] of locked.projectedOzById) {
     const projected = usage.get(id) || { item: entry.item, ounces: Array(PROOF_PREP_LOOK_AHEAD_WEEKS).fill(0) };
-    projected.ounces[0] = Math.max(projected.ounces[0], entry.projectedOz);
+    projected.ounces[0] += entry.projectedOz;
     usage.set(id, projected);
   }
   let required = false;
