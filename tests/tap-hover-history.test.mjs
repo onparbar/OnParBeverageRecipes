@@ -20,17 +20,18 @@ const base = {
   tapReplacementOverrides: {}, getTapReplacementProductOptions: () => "",
   kegConfigUpdateRunning: false, activeKegAdjustKey: "", escapeHtml,
   formatUpdatedAt: (date) => date,
-  getTapFirstPour: () => null,
+  clean: (value) => String(value || "").trim(),
+  getTapNewBadge: () => null,
 };
 const renderProduct = load("renderTapChangeControls", base);
 const monthsAgo = (months) => { const date = new Date(); date.setMonth(date.getMonth() - months); return date.toISOString(); };
 
-test("product hover contains the recent tap swap and previous product", () => {
+test("regular product names no longer open a swap-history panel", () => {
   const introducedAt = monthsAgo(1);
   const html = renderProduct(item, { tappedOn: "old keg timestamp", productHistory: { changedAt: introducedAt, source: "confirmed", previousName: "Previous <beer>" } });
-  assert.match(html, /Swapped in/);
-  assert.ok(html.includes(introducedAt));
-  assert.match(html, /Previous &lt;beer>/);
+  assert.match(html, /<strong class="keg-product-edit-trigger"/);
+  assert.match(html, /Test beer 1/);
+  assert.doesNotMatch(html, /Swapped in|Swap detected|Previous &lt;beer>|tap-new-badge/);
   assert.doesNotMatch(html, /weekly|Last tapped|old keg timestamp/);
 });
 
@@ -44,8 +45,13 @@ test("old swaps, unknown baselines, and invalid dates have no recent-swap hover"
   ]) assert.doesNotMatch(renderProduct(item, { productHistory: history }), /Swapped in|Swap detected/);
 });
 
-test("observed rather than confirmed swaps are labeled detected", () => {
-  assert.match(renderProduct(item, { productHistory: { changedAt: monthsAgo(1), source: "detected" } }), /Swap detected/);
+test("only the New badge opens the first-record date", () => {
+  const render = load("renderTapChangeControls", { ...base, getTapNewBadge: () => ({ date: "Sep 11, 2026" }) });
+  const html = render(item, item);
+  assert.match(html, /tap-new-badge">New<\/span>/);
+  assert.match(html, /Added: Sep 11, 2026/);
+  assert.doesNotMatch(html, /<summary class="keg-product-edit-trigger"|Swapped in|Replaced/);
+  assert.doesNotMatch(render(item, { ...item, tapProduct: "Different beer" }), /tap-new-badge/);
 });
 
 test("order hover uses the same stock target as the recommendation", () => {

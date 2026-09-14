@@ -281,7 +281,10 @@ test("PMB refresh alerts distinguish attempted failures from unchecked feeds", (
 
 test("Tap Pricing gives slow PMB configuration reads time to finish and marks them retryable", async () => {
   const tapPricingRoute = await readFile("app/api/tap-pricing/route.js", "utf8");
-  assert.match(tapPricingRoute, /PMB_TAP_CONFIG_TIMEOUT_MS = 15000/);
+  const pricingReader = await readFile("lib/pmb-pricing-reader.mjs", "utf8");
+  assert.match(tapPricingRoute, /readCurrentPmbPricing\(config\)/);
+  assert.match(pricingReader, /limitedConfig\(bounded, 12_000\)/);
+  assert.match(pricingReader, /readPmbPricingManagementPage/);
   assert.match(tapPricingRoute, /status: upstreamFailure \? 503 : 500/);
 });
 

@@ -5382,10 +5382,11 @@ td {
 .tap-product-current .keg-product-edit-trigger {
   width: fit-content;
   max-width: 100%;
-  padding: 8px 10px;
-  border: 1px solid rgba(44, 106, 94, 0.16);
-  border-radius: 12px;
-  background: rgba(44, 106, 94, 0.05);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
   cursor: pointer;
   touch-action: manipulation;
 }
@@ -12878,3 +12879,43 @@ details.custom-inventory-editor[open] > summary {
 .tap-product-detail__label:not(:first-child) { margin-top: 10px; }
 .tap-order-detail > summary { text-align: inherit; }
 .tap-order-detail .tap-product-detail__body { text-align: left; font-weight: 400; }
+
+.tap-product-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.tap-new-detail {
+  position: relative;
+  flex: 0 0 auto;
+}
+.tap-new-detail > summary {
+  text-decoration: none;
+  line-height: 1;
+}
+.tap-new-badge {
+  display: inline-block;
+  padding: 4px 7px;
+  border: 1px solid #c0d3c9;
+  border-radius: 999px;
+  background: #edf4ee;
+  color: #234c40;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+.tap-new-detail .tap-product-detail__body {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  right: 0;
+  width: max-content;
+  max-width: min(220px, 70vw);
+  margin: 6px 0 0;
+  padding: 9px 12px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 400;
+}

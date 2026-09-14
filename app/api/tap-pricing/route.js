@@ -5,10 +5,9 @@ import {
   readLatestPmbDataBackup,
   savePmbDataBackup,
 } from "../../../lib/pmb-data-backup-store.mjs";
-import { verifyPmbPortionManagementReadOnly } from "../../../lib/pmb-item-management.mjs";
+import { readCurrentPmbPricing, readPmbPricingCapability } from "../../../lib/pmb-pricing-reader.mjs";
 import { normalizePmbPortionItem } from "../../../lib/pmb-portion-price-update.mjs";
 import { resolvePmbPortionSchema } from "../../../lib/pmb-portion-schema.mjs";
-import { getTapConfigRows } from "../../../lib/pmb-tap-config.mjs";
 import {
   attachVerifiedPmbPortionIdentity,
   getOwnerVerifiedPmbPortionRows,
@@ -23,77 +22,6 @@ import { filterCurrentTapPricingItems } from "../../../public/keg-pricing-scope.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const PMB_API_TIMEOUT_MS = 15000;
-const PMB_TAP_CONFIG_TIMEOUT_MS = 15000;
-
-function parseJsonLoose(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    const safe = [];
-    let inString = false;
-    let escaping = false;
-    for (const char of String(text || "")) {
-      if (!inString) {
-        if (char === '"') inString = true;
-        safe.push(char);
-        continue;
-      }
-      if (escaping) {
-        safe.push(char);
-        escaping = false;
-        continue;
-      }
-      if (char === "\\") {
-        safe.push(char);
-        escaping = true;
-        continue;
-      }
-      if (char === '"') {
-        safe.push(char);
-        inString = false;
-        continue;
-      }
-      if (char === "\n") {
-        safe.push("\\n");
-        continue;
-      }
-      if (char === "\r") {
-        safe.push("\\r");
-        continue;
-      }
-      safe.push(char);
-    }
-
-    try {
-      return JSON.parse(safe.join("").replace(/,\s*([}\]])/g, "$1"));
-    } catch {
-      return null;
-    }
-  }
-}
-
-async function postJson(baseUrl, path, body, token = "") {
-  const response = await fetch(`${baseUrl}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(body),
-    cache: "no-store",
-    signal: AbortSignal.timeout(PMB_API_TIMEOUT_MS),
-  });
-
-  const raw = await response.text();
-  return {
-    status: response.status,
-    json: parseJsonLoose(raw),
-    raw,
-  };
-}
 
 function getConfig() {
   const baseUrl = (process.env.PMB_API_BASE_URL || "").trim().replace(/\/$/, "");
@@ -111,23 +39,6 @@ function getConfig() {
     clientId: Number(process.env.PMB_API_CLIENT_ID || "910423"),
     clientName: (process.env.PMB_API_CLIENT_NAME || "PourMyBeer API").trim(),
   };
-}
-
-async function getAuthtoken(config) {
-  const auth = await postJson(config.baseUrl, "/api/authtoken", {
-    username: config.username,
-    password: config.password,
-    id: config.clientId,
-    name: config.clientName,
-    type: "json-server-control",
-    version: 1,
-  });
-
-  if (auth.status !== 200 || !auth.json?.authtoken) {
-    throw new Error(`PMB authtoken failed (${auth.status})`);
-  }
-
-  return String(auth.json.authtoken);
 }
 
 function normalizeProductName(name) {
@@ -339,22 +250,11 @@ function buildItemPriceMap(itemlist = [], schema = null) {
 export async function GET() {
   try {
     const config = getConfig();
-    const token = await getAuthtoken(config);
-    const [products, itemPrices, tapLookup, tapConfigRows] = await Promise.all([
-      postJson(config.baseUrl, "/api/productlist", { id: String(config.clientId) }, token),
-      postJson(config.baseUrl, "/api/itemlist", { id: String(config.clientId) }, token),
-      getTapLookup(),
-      getTapConfigRows(config, { timeoutMs: PMB_TAP_CONFIG_TIMEOUT_MS }),
-    ]);
-
-    if (products.status !== 200 || !Array.isArray(products.json?.productlist)) {
-      throw new Error(`PMB productlist failed (${products.status})`);
-    }
-    if (!tapConfigRows.length) {
-      throw new Error("PMB tap configuration returned no current physical taps.");
-    }
-
-    const rawItemRows = Array.isArray(itemPrices.json?.itemlist) ? itemPrices.json.itemlist : [];
+    const pricing = await readCurrentPmbPricing(config);
+    const tapLookup = await getTapLookup();
+    const tapConfigRows = pricing.tapConfigRows;
+    const previousPricing = pricing.itemPricesAvailable ? null : await readLatestPmbDataBackup("tap-pricing").catch(() => null);
+    const rawItemRows = pricing.itemlist;
     const discoveredPortionSchema = resolvePmbPortionSchema(rawItemRows);
     const verifiedItemRows = attachVerifiedPmbPortionIdentity(rawItemRows);
     const ownerVerifiedRows = getOwnerVerifiedPmbPortionRows(rawItemRows);
@@ -372,7 +272,7 @@ export async function GET() {
     };
     if (portionSchema.ok) {
       try {
-        portionManagement = await verifyPmbPortionManagementReadOnly(config, managementRows, portionSchema.schema);
+        portionManagement = await readPmbPricingCapability(config, managementRows, portionSchema.schema);
       } catch (error) {
         portionManagement = {
           ok: false,
@@ -390,7 +290,7 @@ export async function GET() {
         .filter(Boolean),
     );
 
-    const items = filterCurrentTapPricingItems(products.json.productlist
+    const items = filterCurrentTapPricingItems(pricing.products
       .flatMap((product) => {
         const chargePerOz = getChargePerOz(product);
         const name = normalizeProductName(product.name);
@@ -402,7 +302,15 @@ export async function GET() {
         const matchedTap = currentTap || (fallbackTap && !occupiedTapNumbers.has(toNumber(fallbackTap.tapNumber)) ? fallbackTap : null);
         const physicalAssignments = expandTapPricingAssignments(assignments);
         const visibleAssignments = physicalAssignments.length ? physicalAssignments : matchedTap ? [matchedTap] : [];
-        return visibleAssignments.map((assignment) => ({
+        return visibleAssignments.map((assignment) => {
+          const isShot = assignment?.tapNumber && isLiquorTap(assignment.tapNumber);
+          const saved = !pricing.itemPricesAvailable && isShot
+            ? previousPricing?.data?.items?.find((item) => Number(item.plu) === plu
+              && Number(item.tapPosition) === Number(assignment.tapNumber)
+              && normalizeProductName(item.name).toLowerCase() === name.toLowerCase())
+            : null;
+          const portions = isShot ? (pricing.itemPricesAvailable ? itemPricesByPlu.get(plu) || [] : saved?.portions || []) : [];
+          return {
           tapPosition: assignment?.tapNumber ?? null,
           wall: assignment?.wall || "",
           type: assignment?.type || "",
@@ -414,7 +322,9 @@ export async function GET() {
           plu,
           name,
           chargePerOz,
-          portions: assignment?.tapNumber && isLiquorTap(assignment.tapNumber) ? itemPricesByPlu.get(plu) || [] : [],
+          portions,
+          portionPriceSource: isShot ? (pricing.itemPricesAvailable ? "live" : portions.length ? "saved" : "unavailable") : "",
+          portionPricesCapturedAt: isShot ? (pricing.itemPricesAvailable ? pricing.updatedAt : saved?.portionPricesCapturedAt || previousPricing?.capturedAt || "") : "",
           pricePerUnitCents: Number(product.price_per_unit || 0),
           happyHour1PerOz: Number(product.price_per_unit_happyhour1 || 0) / 100 || null,
           happyHour2PerOz: Number(product.price_per_unit_happyhour2 || 0) / 100 || null,
@@ -423,20 +333,27 @@ export async function GET() {
           isInUse: Number(product.is_in_use || 0) === 1,
           isCurrentTap: physicalAssignments.length > 0,
           tapMatchSource: physicalAssignments.length ? "pmb-tap-config" : matchedTap ? "template-fallback" : "",
-        }));
+          };
+        });
       })
       .filter(Boolean));
 
-    const updatedAt = new Date().toISOString();
+    const updatedAt = pricing.updatedAt;
     const payload = {
       updatedAt,
       items,
+      pricingSource: pricing.source,
+      pricingConnection: { productPricesLive: true, portionPricesLive: pricing.itemPricesAvailable, sourceErrors: pricing.sourceErrors },
       portionPricing: {
         writeAvailable: Boolean(portionSchema.ok && portionManagement.ok),
+        stale: !pricing.itemPricesAvailable,
+        dataSource: pricing.itemPricesAvailable ? "live" : items.some((item) => item.portionPriceSource === "saved") ? "saved" : "unavailable",
         schemaConfigured: Boolean(portionSchema.ok),
         schemaSource: portionSchema.source || "",
-        code: portionManagement.ok ? "" : portionManagement.code,
-        message: portionManagement.ok
+        code: !pricing.itemPricesAvailable ? "PMB_PORTION_PRICES_UNAVAILABLE" : portionManagement.ok ? "" : portionManagement.code,
+        message: !pricing.itemPricesAvailable
+          ? "Current tap prices were verified. Shot prices could not be refreshed; any saved shot prices remain read-only."
+          : portionManagement.ok
           ? "Live PMB portion identities and price controls were verified read-only."
           : portionManagement.message,
       },
@@ -451,7 +368,8 @@ export async function GET() {
     });
   } catch (error) {
     const message = error.message || "Could not load tap pricing.";
-    const upstreamFailure = /PMB|tap configuration|timed out|fetch|socket|network/i.test(message);
+    const upstreamFailure = /PMB|tap configuration|timed out|fetch|socket|network|abort/i.test(message)
+      || ["AbortError", "TimeoutError"].includes(error.name);
     if (upstreamFailure) {
       const backup = await readLatestPmbDataBackup("tap-pricing").catch(() => null);
       if (backup?.data?.items) {

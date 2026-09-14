@@ -10,7 +10,7 @@ import { renderSavedWeeklySnapshot } from "./weekly-snapshot-view.mjs";
 import { getSixWeekUsage } from "./six-week-usage.mjs";
 import { getCurrentTapUsage } from "./current-tap-usage.mjs";
 import { reconcileWeeklyUsageData } from "./weekly-usage-reconciliation.mjs";
-import { getTapFirstPour } from "./tap-first-pour.mjs";
+import { getTapHistoryContext, getTapNewBadge } from "./tap-first-pour.mjs";
 import { mountTapPerformance } from "./tap-performance.mjs";
 import "./operations-learning-ui.mjs";
 import { classifyShotPriceReadback } from "./shot-price-readback.mjs";
@@ -3820,12 +3820,15 @@ function getLocalBeverageQuestionContext() {
     }),
     levels: () => kegWallItems.map((item) => {
       const liveRow = getKegLiveRow(item);
+      const name = getKegDisplayBrand(item, liveRow);
+      const historyMatches = clean(name).toLowerCase() === clean(liveRow?.name || liveRow?.tapProduct).toLowerCase();
       return {
-        name: getKegDisplayBrand(item, liveRow),
+        name,
         tapNumber: item.tapNumber,
         wall: item.wall,
         fraction: getKegCurrentFraction(item, liveRow),
         ounces: getKegCurrentLevelOz(liveRow, item),
+        ...getTapHistoryContext(historyMatches ? { ...liveRow, tapNumber: item.tapNumber } : null),
       };
     }).filter((item) => !isPricingPlaceholder(item.name)),
     recipes: () => getActiveRecipes().map((recipe) => {
@@ -10634,30 +10637,20 @@ function renderTapChangeControls(item, liveRow, displayBrand = item.brand) {
   const adjustDisabled = kegConfigUpdateRunning;
   const currentLabel = replacement ? `${displayBrand} (current replacement)` : displayBrand;
   const isEditing = activeKegAdjustKey === itemKey;
-  const history = liveRow?.productHistory;
-  const swappedAt = new Date(history?.changedAt || "");
-  const now = new Date();
-  const cutoff = new Date(now);
-  cutoff.setMonth(cutoff.getMonth() - 3);
-  const showProductHistory = ["detected", "confirmed"].includes(history?.source)
-    && swappedAt > cutoff && swappedAt <= now;
-  const firstPour = replacement ? null : getTapFirstPour({
+  const historyMatches = clean(displayBrand || item.brand).toLowerCase() === clean(liveRow?.name || liveRow?.tapProduct).toLowerCase();
+  const newBadge = replacement || !historyMatches ? null : getTapNewBadge({
     ...liveRow,
     tapNumber: item.tapNumber,
   });
   return `
     <div class="tap-product-current">
-      ${showProductHistory || firstPour ? `<details class="tap-product-detail">
-        <summary class="keg-product-edit-trigger" data-keg-key="${escapeHtml(itemKey)}" aria-label="Change product for ${escapeHtml(displayBrand || item.brand)}" aria-expanded="${isEditing}"><strong>${escapeHtml(displayBrand || item.brand)}</strong></summary>
-        <div class="tap-product-detail__body">
-          ${firstPour ? `<span class="tap-product-detail__label">${escapeHtml(firstPour.label)}</span>
-          <span>${escapeHtml(firstPour.date)}</span>` : ""}
-          ${showProductHistory ? `<span class="tap-product-detail__label">${history.source === "confirmed" ? "Swapped in" : "Swap detected"}</span>
-          <span>${escapeHtml(formatUpdatedAt(history.changedAt))}</span>
-          <span class="tap-product-detail__label">Replaced</span>
-          <span>${escapeHtml(history.previousName || "Previous product not recorded")}</span>` : ""}
-        </div>
-      </details>` : `<strong class="keg-product-edit-trigger" data-keg-key="${escapeHtml(itemKey)}" role="button" tabindex="0" aria-label="Change product for ${escapeHtml(displayBrand || item.brand)}" aria-expanded="${isEditing}">${escapeHtml(displayBrand || item.brand)}</strong>`}
+      <div class="tap-product-heading">
+        <strong class="keg-product-edit-trigger" data-keg-key="${escapeHtml(itemKey)}" role="button" tabindex="0" aria-label="Change product for ${escapeHtml(displayBrand || item.brand)}" aria-expanded="${isEditing}">${escapeHtml(displayBrand || item.brand)}</strong>
+        ${newBadge ? `<details class="tap-product-detail tap-new-detail">
+          <summary aria-label="New product. Added: ${escapeHtml(newBadge.date)}"><span class="tap-new-badge">New</span></summary>
+          <div class="tap-product-detail__body">Added: ${escapeHtml(newBadge.date)}</div>
+        </details>` : ""}
+      </div>
       ${replacement ? `<span class="table-note">Current replacement</span>` : ""}
     </div>
     ${onDeck ? `
@@ -13006,6 +12999,10 @@ async function runTapPricingSync() {
     const matchedCount = getActiveRecipes().filter((recipe) => getLiveTapPrice(recipe)).length;
     liveTapPricingMessage = stalePricing
       ? "PMB live verification failed. Showing saved prices; editing is paused."
+      : result.portionPricing?.stale
+      ? result.portionPricing.dataSource === "saved"
+        ? "Current tap prices loaded. Shot prices are using saved values; shot-price editing is paused."
+        : "Current tap prices loaded. PMB shot prices could not be refreshed."
       : `Matched ${matchedCount} recipes from Pour My Beer.`;
     renderPricing();
     renderKegLevels();
