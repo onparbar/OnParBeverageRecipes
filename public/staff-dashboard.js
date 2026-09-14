@@ -218,7 +218,7 @@ async function loadStaffRecipeSection() {
   renderStaffRecipes();
   statusPanel.textContent = recipesAvailable
     ? (sharedResult.available
-      ? "Current shared recipe updates are included."
+      ? ""
       : "Core recipes are available. Shared recipe updates could not be checked right now.")
     : "Recipes could not be loaded.";
   if (recipesAvailable) delete statusPanel.dataset.state;
@@ -540,8 +540,8 @@ function renderWeeklyOrderTracking() {
   orderStatusPanel.textContent = isStaffRehearsalMode()
     ? "Rehearsal copy of the current delivery plan. Live delivery records are unchanged."
     : orderTracking.generatedAt
-    ? `Showing deliveries for the shared ${formatPlanWeek(orderTracking.generatedAt)} plan.`
-    : "Showing the current shared weekly order.";
+    ? formatPlanWeek(orderTracking.generatedAt)
+    : "";
   orderSummary.textContent = orderTracking.itemCount
     ? `${formatNumber(orderTracking.receivedCount)} fully received · ${formatNumber(orderTracking.notReceivedCount)} short or missing · ${formatNumber(orderTracking.itemCount)} total items`
     : "No vendor deliveries are on this week's plan.";
@@ -819,6 +819,10 @@ function bindSmartReceivingEvents() {
 }
 
 function renderStaffPrepPlan() {
+  const completedOpen = {
+    cocktail: Boolean(prepList.querySelector(".staff-completed-group[open]")),
+    liquor: Boolean(liquorList.querySelector(".staff-completed-group[open]")),
+  };
   staffPrepBatchViews = [];
   prepList.replaceChildren();
   liquorList.replaceChildren();
@@ -839,8 +843,8 @@ function renderStaffPrepPlan() {
   delete prepStatusPanel.dataset.state;
   delete liquorStatusPanel.dataset.state;
   const planMessage = prepPlan.generatedAt
-    ? `Showing the shared ${formatPlanWeek(prepPlan.generatedAt)} plan.`
-    : "Showing the current shared weekly plan.";
+    ? formatPlanWeek(prepPlan.generatedAt)
+    : "";
   prepStatusPanel.textContent = planMessage;
   liquorStatusPanel.textContent = planMessage;
   const liquorRefills = Array.isArray(prepPlan.liquorRefills) ? prepPlan.liquorRefills : [];
@@ -852,18 +856,34 @@ function renderStaffPrepPlan() {
     : "No liquor to add this week.";
 
   if (prepPlan.items.length) {
-    prepList.append(createStaffPrepBatchControls("cocktail"));
-    prepPlan.items.forEach((item) => prepList.append(createStaffPrepItem(item)));
+    appendStaffPrepGroups(prepList, prepPlan.items, "cocktail", completedOpen.cocktail);
   } else {
     prepList.append(createEmptyState("No cocktails need to be made this week."));
   }
   if (liquorRefills.length) {
-    liquorList.append(createStaffPrepBatchControls("liquor-refill"));
-    liquorRefills.forEach((item) => liquorList.append(createStaffPrepItem(item)));
+    appendStaffPrepGroups(liquorList, liquorRefills, "liquor-refill", completedOpen.liquor);
   } else {
     liquorList.append(createEmptyState("No liquor needs to be added to kegs this week."));
   }
   updateStaffPrepBatchControls();
+}
+
+function appendStaffPrepGroups(root, items, kind, completedOpen) {
+  const pending = items.filter((item) => !item.completed);
+  const completed = items.filter((item) => item.completed);
+  root.append(createStaffPrepBatchControls(kind));
+  pending.forEach((item) => root.append(createStaffPrepItem(item)));
+  if (!pending.length) root.append(createEmptyState(kind === "cocktail"
+    ? "All cocktails are prepared." : "All liquor refills are complete."));
+  if (!completed.length) return;
+  const group = document.createElement("details");
+  group.className = "staff-completed-group";
+  group.open = completedOpen || completed.some((item) => staffPrepDrafts.has(item.id));
+  const summary = document.createElement("summary");
+  summary.textContent = `Completed (${completed.length})`;
+  group.append(summary);
+  completed.forEach((item) => group.append(createStaffPrepItem(item)));
+  root.append(group);
 }
 
 function getStaffPrepDraftsForKind(kind) {
@@ -880,9 +900,9 @@ function createStaffPrepBatchControls(kind = "cocktail") {
   const copy = document.createElement("div");
   copy.className = "staff-prep-batch__copy";
   const title = document.createElement("strong");
-  title.textContent = "Save several at once";
+  title.textContent = "Save completed work";
   const hint = document.createElement("span");
-  hint.textContent = "Check every completed item, enter your name once, then save.";
+  hint.textContent = "Select completed items below.";
   copy.append(title, hint);
 
   const nameField = document.createElement("label");
@@ -934,7 +954,7 @@ function updateStaffPrepBatchControls({ message = "", state = "", kind = "" } = 
         : "Save selected";
     view.status.textContent = (showMessage ? message : "") || (count > 0
       ? `${count} change${count === 1 ? "" : "s"} ready to save.`
-      : "Select completed items below.");
+      : "");
     if (showMessage && state) view.status.dataset.state = state;
     else delete view.status.dataset.state;
   });
@@ -1043,18 +1063,19 @@ function createStaffPrepItem(item) {
   form.className = `staff-prep-item${item.completed ? " is-complete" : ""}`;
   form.dataset.staffPrepItemId = item.id;
   const isLiquorRefill = item.kind === "liquor-refill";
+  const draft = staffPrepDrafts.get(item.id);
   const recipe = isLiquorRefill ? null : findStaffRecipeForPrepItem(item);
 
   const checkLabel = document.createElement("label");
   checkLabel.className = "staff-prep-check";
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
-  checkbox.checked = item.completed === true;
+  checkbox.checked = draft?.completed ?? (item.completed === true);
   checkbox.dataset.staffPrepItemInput = "true";
   const checkText = document.createElement("span");
   checkText.textContent = item.completed
     ? (isLiquorRefill ? "Added" : "Prepared")
-    : (isLiquorRefill ? "Check off when added" : "Check off when prepared");
+    : (isLiquorRefill ? "Mark added" : "Mark prepared");
   checkLabel.append(checkbox, checkText);
 
   const details = document.createElement("div");
@@ -1117,7 +1138,9 @@ function createStaffPrepItem(item) {
     actualQuantityInput.autoComplete = "off";
     actualQuantityInput.dataset.lpignore = "true";
     actualQuantityInput.dataset.staffPrepItemInput = "true";
-    actualQuantityInput.value = String(Math.max(1, Number(item.actualQuantity ?? item.quantity) || 1));
+    actualQuantityInput.value = draft?.actualQuantity !== undefined
+      ? String(draft.actualQuantity)
+      : String(Math.max(1, Number(item.actualQuantity ?? item.quantity) || 1));
     actualField.append(actualLabel, actualQuantityInput);
     details.append(actualField);
   }
@@ -1149,13 +1172,14 @@ function createStaffPrepItem(item) {
     form.classList.toggle("has-unsaved-change", completionChanged || actualQuantityChanged);
     checkText.textContent = checkbox.checked
       ? (isLiquorRefill ? "Added" : "Prepared")
-      : (isLiquorRefill ? "Check off when added" : "Check off when prepared");
+      : (isLiquorRefill ? "Mark added" : "Mark prepared");
     updateStaffPrepBatchControls();
   };
   checkbox.addEventListener("change", updateDraft);
   actualQuantityInput?.addEventListener("input", updateDraft);
 
-  form.append(checkLabel, details);
+  if (draft) updateDraft();
+  form.append(details, checkLabel);
   if (recipePanel) form.append(recipePanel);
   return form;
 }
@@ -1476,6 +1500,16 @@ function bindStaffSectionEvents() {
   bindSmartReceivingEvents();
   sectionTabButtons.forEach((button) => {
     button.addEventListener("click", () => switchStaffSection(button.dataset.staffSectionTab));
+    button.addEventListener("keydown", (event) => {
+      const index = sectionTabButtons.indexOf(button);
+      const next = event.key === "ArrowRight" ? (index + 1) % sectionTabButtons.length
+        : event.key === "ArrowLeft" ? (index - 1 + sectionTabButtons.length) % sectionTabButtons.length
+          : event.key === "Home" ? 0 : event.key === "End" ? sectionTabButtons.length - 1 : -1;
+      if (next < 0) return;
+      event.preventDefault();
+      switchStaffSection(sectionTabButtons[next].dataset.staffSectionTab);
+      sectionTabButtons[next].focus({ preventScroll: true });
+    });
   });
   overviewTargets.forEach((button) => {
     button.addEventListener("click", () => switchStaffSection(button.dataset.staffSectionTarget));
@@ -1525,16 +1559,17 @@ function renderStaffOverview() {
 
   if (prepPlan.available) {
     const remainingPrep = Math.max(0, prepPlan.totalCount - prepPlan.completedCount);
-    overviewPrepValue.textContent = `${formatNumber(remainingPrep)} left`;
+    overviewPrepValue.textContent = remainingPrep ? `${formatNumber(remainingPrep)} left` : prepPlan.totalCount ? "Done" : "None needed";
     overviewPrepDetail.textContent = `${formatNumber(prepPlan.completedCount)} of ${formatNumber(prepPlan.totalCount)} prepared`;
     const remainingLiquor = Math.max(0, prepPlan.liquorRefillTotalCount - prepPlan.liquorRefillCompletedCount);
-    overviewLiquorValue.textContent = `${formatNumber(remainingLiquor)} left`;
+    overviewLiquorValue.textContent = remainingLiquor ? `${formatNumber(remainingLiquor)} left` : prepPlan.liquorRefillTotalCount ? "Done" : "None needed";
     overviewLiquorDetail.textContent = `${formatNumber(prepPlan.liquorRefillCompletedCount)} of ${formatNumber(prepPlan.liquorRefillTotalCount)} added`;
   } else if (prepPlanLoaded) {
-    overviewPrepValue.textContent = "No plan";
-    overviewPrepDetail.textContent = "Waiting for the Monday plan";
-    overviewLiquorValue.textContent = "No plan";
-    overviewLiquorDetail.textContent = "Waiting for the Monday plan";
+    const unavailable = isRetryableStaffMessage(prepPlan.message);
+    overviewPrepValue.textContent = unavailable ? "Unavailable" : "No plan";
+    overviewPrepDetail.textContent = unavailable ? "Retry loading the plan" : "Waiting for the Monday plan";
+    overviewLiquorValue.textContent = unavailable ? "Unavailable" : "No plan";
+    overviewLiquorDetail.textContent = overviewPrepDetail.textContent;
   } else {
     overviewPrepValue.textContent = "—";
     overviewPrepDetail.textContent = "Loading prep plan...";
@@ -1545,13 +1580,16 @@ function renderStaffOverview() {
   if (orderTracking.available) {
     const checkedOrders = orderTracking.receivedCount + orderTracking.notReceivedCount;
     const remainingOrders = Math.max(0, orderTracking.itemCount - checkedOrders);
-    overviewOrderValue.textContent = `${formatNumber(remainingOrders)} left`;
+    overviewOrderValue.textContent = orderTracking.notReceivedCount
+      ? `${formatNumber(orderTracking.notReceivedCount)} short`
+      : remainingOrders ? `${formatNumber(remainingOrders)} left` : orderTracking.itemCount ? "Done" : "None expected";
     overviewOrderDetail.textContent = orderTracking.notReceivedCount
-      ? `${formatNumber(orderTracking.notReceivedCount)} short or missing`
+      ? `${formatNumber(remainingOrders)} unchecked; short or missing items still need follow-up`
       : `${formatNumber(checkedOrders)} of ${formatNumber(orderTracking.itemCount)} checked`;
   } else if (orderTrackingLoaded) {
-    overviewOrderValue.textContent = "No plan";
-    overviewOrderDetail.textContent = "Waiting for the Monday plan";
+    const unavailable = isRetryableStaffMessage(orderTracking.message);
+    overviewOrderValue.textContent = unavailable ? "Unavailable" : "No plan";
+    overviewOrderDetail.textContent = unavailable ? "Retry loading deliveries" : "Waiting for the Monday plan";
   } else {
     overviewOrderValue.textContent = "—";
     overviewOrderDetail.textContent = "Loading delivery plan...";
@@ -1625,10 +1663,10 @@ function renderStats(visibleCount) {
 }
 
 function createRecipeCard(recipe) {
-  const article = document.createElement("article");
+  const article = document.createElement("details");
   article.className = "recipe-card staff-recipe-card";
 
-  const header = document.createElement("div");
+  const header = document.createElement("summary");
   header.className = "recipe-card__header staff-recipe-card__header";
   const headingGroup = document.createElement("div");
   const heading = document.createElement("h2");

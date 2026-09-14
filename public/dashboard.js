@@ -69,6 +69,7 @@ import {
 } from "./beer-keg-pricing.mjs";
 import {
   buildKegOnDeckOptions,
+  buildLinkedComingSoonItems,
   isKegOnDeckProductInstalled,
   normalizeKegOnDeckOverrides,
   resolveKegOnDeckOption,
@@ -1294,8 +1295,12 @@ let globalSearchItems = [];
 let visibleGlobalSearchResults = [];
 let activeGlobalSearchResultIndex = -1;
 let ownerLoginSyncStarted = false;
+let dashboardBriefingInitialLoadPending = true;
 
-init();
+init().finally(() => {
+  dashboardBriefingInitialLoadPending = false;
+  renderDashboardOverview();
+});
 
 async function init() {
   try {
@@ -1373,7 +1378,7 @@ async function init() {
   render();
   void hydrateComingSoonLiquorItemsFromUntappd();
   loadBeverageNews();
-  void runOwnerLoginSync();
+  await runOwnerLoginSync();
 }
 
 async function runOwnerLoginSync() {
@@ -1487,6 +1492,7 @@ async function runUnifiedPmbRefreshAttempt({ afterRepair = false } = {}) {
     button.disabled = true;
     button.textContent = "Refreshing...";
   }
+  renderDashboardOverview();
   try {
     await dashboardRenderCoordinator.batch(async () => {
       // Recover pending writes before replacing locally cached PMB reports.
@@ -5388,12 +5394,18 @@ function renderIngredients() {
         </td>
         <td>${money(currentUnitCost)}</td>
         <td><span class="table-note">${escapeHtml(preparedPurchase ? getPreparedIngredientYieldNote(ingredient.id) : (formatNumber(toNumber(ingredient.vendorProduct?.bottleOz) || toNumber(override.bottleOz)) + " oz"))}</span></td>
-        <td>${automaticPrice ? money(toNumber(override.bottlePrice)) : `<div class="manual-price-editor"><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(override.bottlePrice ?? "")}" aria-label="${escapeHtml(preparedPurchase?.priceInputLabel || `Package price for ${ingredient.name}`)}"><button class="mini-button" type="button">Save</button></div>`}</td>
+        <td>${automaticPrice ? money(toNumber(override.bottlePrice)) : `<div class="manual-price-editor"><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(override.bottlePrice ?? "")}" aria-label="${escapeHtml(preparedPurchase?.priceInputLabel || `Package price for ${ingredient.name}`)}"></div>`}</td>
       `;
-      const updateButton = row.querySelector("button");
-      updateButton?.addEventListener("click", () => saveIngredientOverride(ingredient.id,
+      const ingredientPriceInput = row.querySelector("input");
+      ingredientPriceInput?.addEventListener("change", () => saveIngredientOverride(ingredient.id,
         preparedPurchase?.purchaseUnitStorageValue || ingredient.vendorProduct?.bottleOz || override.bottleOz || mappedBottleOz,
-        row.querySelector("input").value));
+        ingredientPriceInput.value));
+      ingredientPriceInput?.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          ingredientPriceInput.blur();
+        }
+      });
       ingredientTable.append(row);
     });
   });
@@ -5419,12 +5431,17 @@ function renderIngredients() {
         <td>${escapeHtml(vendorName)}</td>
         <td>${money(currentUnitCost)}</td>
         <td><span class="table-note">${escapeHtml(getKegOverrideDisplayOz(item, override) || formatNumber(item.kegOz))} oz</span></td>
-        <td>${automaticPrice ? money(getKegPrice(item)) : `<div class="manual-price-editor"><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(staleSmallKegOverride ? "" : override.kegPrice ?? "")}" aria-label="Keg price for ${escapeHtml(item.name)}"><button class="mini-button" type="button">Save</button></div>`}</td>
+        <td>${automaticPrice ? money(getKegPrice(item)) : `<div class="manual-price-editor"><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(staleSmallKegOverride ? "" : override.kegPrice ?? "")}" aria-label="Keg price for ${escapeHtml(item.name)}"></div>`}</td>
       `;
 
       const kegPriceInput = row.querySelector("input");
-      const updateButton = row.querySelector("button");
-      updateButton?.addEventListener("click", () => saveKegPriceOverride(item.id, getKegOverrideDisplayOz(item, override) || item.kegOz, kegPriceInput.value, item));
+      kegPriceInput?.addEventListener("change", () => saveKegPriceOverride(item.id, getKegOverrideDisplayOz(item, override) || item.kegOz, kegPriceInput.value, item));
+      kegPriceInput?.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          kegPriceInput.blur();
+        }
+      });
       kegPricingTable?.append(row);
     });
   });
@@ -6678,6 +6695,13 @@ function acknowledgeComingSoonStarkDraftContact(value) {
 function renderDashboardOverview() {
   if (dashboardRenderCoordinator.defer("overview", renderDashboardOverview)) return;
   if (!dashboardOverview || isEmployeeDashboard) return;
+  // Loading is not a failed readiness check. Keep the real alerts intact and
+  // reveal them after the initial reads, retries, or current refresh settle.
+  const briefingLoading = dashboardBriefingInitialLoadPending
+    || unifiedPmbRefreshRunning
+    || kegSyncLoading
+    || tapPricingSyncLoading
+    || weeklyUsageSyncLoading;
   const lockedForWeek = hasPublishedWeeklyPlanRecommendations();
   const plan = getWeeklyPlanModel();
   const livePlan = lockedForWeek ? getWeeklyPlanModel({ live: true }) : plan;
@@ -6781,13 +6805,13 @@ function renderDashboardOverview() {
       </div>
     </header>
 
-    <section class="thirty-second-briefing" aria-labelledby="thirty-second-briefing-title">
+    <section class="thirty-second-briefing" aria-labelledby="thirty-second-briefing-title" aria-busy="${briefingLoading}">
       <header>
         <h2 id="thirty-second-briefing-title">Beverage Brief</h2>
       </header>
         <div class="thirty-second-briefing__lines">
-          ${renderSupplierPriceAlerts()}
-          ${briefingLines.map((item) => {
+          ${briefingLoading ? '<p class="sync-status" role="status">Checking the latest information...</p>' : renderSupplierPriceAlerts()}
+          ${(briefingLoading ? [] : briefingLines).map((item) => {
             const content = `
               <strong>${escapeHtml(item.text)}</strong>
               ${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}
@@ -7314,7 +7338,8 @@ function renderOnParInsights() {
   container.innerHTML = `
     <header class="onpar-insights__header">
       <div>
-        <h2 id="onpar-insights-title">Performance</h2>
+        <p class="eyebrow">02 / Weekly comparisons</p>
+        <h2 id="onpar-insights-title">Drink rankings</h2>
       </div>
       <div class="onpar-insights__controls">
         <label class="select-field"><span>Drinks</span><select data-seller-ranking-category>
@@ -8696,12 +8721,13 @@ function renderKegLevels() {
 function getVisibleComingSoonItems() {
   const currentProducts = kegLiveLevelsStale ? [] : [...kegLiveLevels.values()]
     .filter(item => toNumber(item.tapNumber) > 0 && clean(item.name || item.tapProduct));
-  return getActiveComingSoonItems(comingSoonItems).filter(item => !currentProducts.some(current => {
-    // PLUs can be reused. Require a matching name, retaining the liquor variant
-    // and ignoring only the wall suffix through the existing identity helper.
-    return [item.name, item.pmbProductName].filter(Boolean).some(name =>
-      isKegOnDeckProductInstalled({ name, plu: 0 }, { ...current, plu: 0 }));
-  }));
+  return buildLinkedComingSoonItems({
+    comingSoonItems,
+    onDeckOverrides: kegOnDeckOverrides,
+    recipes,
+    currentProducts,
+    taps: kegWallItems.map((item) => ({ key: getKegItemKey(item), tapNumber: item.tapNumber, wall: item.wall })),
+  });
 }
 
 function renderComingSoonBlock() {
@@ -8729,6 +8755,9 @@ function renderComingSoonBlock() {
 function renderComingSoonItem(item) {
   const imageUrl = getComingSoonImageUrl(item);
   const label = item.pmbActiveAt ? "Update PMB product" : item.plu ? "Update & activate on PMB" : "Create & activate on PMB";
+  const onDeckLocations = (item.onDeckAssignments || []).map((assignment) => assignment.tapNumber
+    ? `${assignment.wall ? `${assignment.wall} · ` : ""}Tap ${assignment.tapNumber}`
+    : "Assigned tap");
   return `
     <article class="coming-soon-item" data-coming-soon-id="${escapeHtml(item.id)}">
       ${imageUrl ? `<img class="coming-soon-item__image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(item.name)}">` : ""}
@@ -8737,6 +8766,7 @@ function renderComingSoonItem(item) {
           <strong>${escapeHtml(item.name)}</strong>
           <span>${escapeHtml(getComingSoonKindLabel(item.kind))}</span>
         </div>
+        ${onDeckLocations.length ? `<span class="table-note table-note--accent">On Deck: ${escapeHtml(onDeckLocations.join(", "))}</span>` : ""}
         <div class="coming-soon-controls">
           <button class="mini-button activate-coming-soon-pmb" type="button"${item.replacedAt ? " disabled" : ""}>${label}</button>
         </div>
@@ -9999,6 +10029,7 @@ async function runPmbWeeklyUsageSyncAttempt({ automatic = false } = {}) {
   weeklyUsageSyncLoading = true;
   weeklyUsageSyncMessage = `${automatic ? "Automatically checking" : "Pulling"} ${weekStarts.length} completed PMB week${weekStarts.length === 1 ? "" : "s"}...`;
   renderWeeklyUsage();
+  renderDashboardOverview();
 
   try {
     const weekBatches = [];
@@ -12888,6 +12919,7 @@ async function runKegLevelSyncAttempt() {
   kegSyncLoading = true;
   kegSyncMessage = "Checking Pour My Beer for live keg levels...";
   renderKegLevels();
+  renderDashboardOverview();
   let succeeded = false;
   let retryAllowed = true;
 
@@ -12967,6 +12999,7 @@ async function runTapPricingSync() {
   tapPricingSyncLoading = true;
   liveTapPricingMessage = "Checking Pour My Beer for current tap prices...";
   renderPricingSummary();
+  renderDashboardOverview();
   let succeeded = false;
 
   try {
@@ -13146,7 +13179,9 @@ function getKegOnDeckItem(itemOrKey) {
   const key = typeof itemOrKey === "string" ? itemOrKey : getKegItemKey(itemOrKey);
   const saved = kegOnDeckOverrides[key];
   if (!saved) return null;
-  const option = resolveKegOnDeckOption(getKegOnDeckOptions(key), saved);
+  const option = resolveKegOnDeckOption(buildKegOnDeckOptions({
+    comingSoonItems, recipes, selected: saved,
+  }), saved);
   if (option) {
     return {
       comingSoonId: option.id,
@@ -13165,7 +13200,7 @@ function getKegOnDeckItem(itemOrKey) {
 function getKegOnDeckOptions(itemOrKey) {
   const key = typeof itemOrKey === "string" ? itemOrKey : getKegItemKey(itemOrKey);
   return buildKegOnDeckOptions({
-    comingSoonItems,
+    comingSoonItems: getVisibleComingSoonItems(),
     recipes,
     selected: kegOnDeckOverrides[key],
   });
@@ -13176,6 +13211,7 @@ function getShareableKegOnDeckOverrides(overrides = kegOnDeckOverrides) {
 }
 
 function clearKegOnDeckIfInstalled(itemOrKey, currentProduct) {
+  if (kegLiveLevelsStale || currentProduct?.levelAvailable === false) return null;
   const key = typeof itemOrKey === "string" ? itemOrKey : getKegItemKey(itemOrKey);
   const onDeck = getKegOnDeckItem(key);
   if (!key || !onDeck || !isKegOnDeckProductInstalled(onDeck, currentProduct)) return null;
@@ -13197,6 +13233,7 @@ function reconcileInstalledKegOnDeckProducts() {
   comingSoonItems = comingSoonItems.map((item) => {
     const installed = cleared.find((entry) => entry.comingSoonId === item.id);
     if (!installed || item.replacedAt) return item;
+    if (Object.keys(kegOnDeckOverrides).some((key) => getKegOnDeckItem(key)?.comingSoonId === item.id)) return item;
     comingSoonChanged = true;
     return {
       ...item,
@@ -13221,6 +13258,18 @@ function setKegOnDeckItem(key, comingSoonId) {
   if (!item) {
     delete kegOnDeckOverrides[key];
     return;
+  }
+  // Promote a recovered legacy selection into the shared queue once, so its
+  // name, PMB identity, and recipe details have one persistent product record.
+  if (!comingSoonItems.some((entry) => entry.id === item.id)) {
+    const recipe = recipes.find((entry) => entry.id === item.recipeId);
+    const queuedItem = { ...item };
+    delete queuedItem.onDeckAssignments;
+    upsertComingSoonItem({
+      ...(recipe ? buildComingSoonItemFromRecipe(recipe) : {}),
+      ...queuedItem,
+      createdAt: item.createdAt || new Date().toISOString(),
+    });
   }
   kegOnDeckOverrides[key] = {
     comingSoonId: item.id,
@@ -16199,6 +16248,8 @@ function renderInventoryHistory() {
     || new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime()
   ));
   const selected = snapshots.find((entry) => entry.id === inventoryHistoryList.dataset.selectedSnapshotId) || snapshots[0];
+  const openSectionKeys = new Set([...inventoryHistoryList.querySelectorAll("[data-snapshot-section][open]")]
+    .map((section) => section.dataset.snapshotSection));
   inventoryHistoryList.dataset.selectedSnapshotId = selected.id;
   inventoryHistoryList.innerHTML = `
     <label class="weekly-snapshot-picker" for="weekly-snapshot-date">
@@ -16212,8 +16263,15 @@ function renderInventoryHistory() {
   const showSnapshot = (snapshot) => {
     inventoryHistoryList.dataset.selectedSnapshotId = snapshot.id;
     const content = inventoryHistoryList.querySelector("#weekly-snapshot-content");
+    if (content.querySelector(".weekly-snapshot-record")) {
+      openSectionKeys.clear();
+      content.querySelectorAll("[data-snapshot-section][open]").forEach((section) => {
+        openSectionKeys.add(section.dataset.snapshotSection);
+      });
+    }
     content.innerHTML = renderSavedWeeklySnapshot(snapshot, {
       escapeHtml, formatNumber, money, formatUpdatedAt,
+      openSections: [...openSectionKeys],
       dateLabel: formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot)),
       valueSummary: snapshot.summary ? renderInventorySnapshotValueSummary(snapshot.summary) : "",
     });
@@ -17092,8 +17150,15 @@ function syncRecipeCreativeDefaults({ preserveDescription = false, preserveImage
 
 function scheduleRecipeImageLookup() {
   clearTimeout(recipeLookupTimer);
+  recipeLookupRequestId += 1;
   recipeLookupItems = [];
   recipeLookupImageIndex = 0;
+
+  const currentImage = clean(newRecipeImageInput?.value);
+  if (!currentImage || currentImage === lastGeneratedRecipeImage) {
+    setRecipeImage("");
+    lastGeneratedRecipeImage = "";
+  }
 
   const query = getRecipeImageLookupQuery();
   if (!query) return;
@@ -17117,7 +17182,7 @@ async function ensureRecipeImageLookup({ force = false } = {}) {
   try {
     const response = await fetch(`/api/cocktail-lookup?q=${encodeURIComponent(query)}`, { cache: "no-store" });
     const result = await response.json();
-    if (requestId !== recipeLookupRequestId) return false;
+    if (requestId !== recipeLookupRequestId || query !== getRecipeImageLookupQuery()) return false;
     if (!response.ok) throw new Error(result?.error || "Cocktail image lookup failed.");
 
     recipeLookupItems = (result.items || []).filter((item) => item.imageUrl);
@@ -17137,7 +17202,8 @@ function getRecipeImageLookupQuery() {
     .filter(Boolean)
     .slice(0, 4)
     .join(" ");
-  return clean(`${title} ${ingredients} cocktail`);
+  if (!title && !ingredients) return "";
+  return clean(`${title} ${ingredients} cocktail`).slice(0, 120);
 }
 
 function applyRecipeLookupImage(index) {
@@ -17586,25 +17652,83 @@ function getRecipeBuilderPrimaryIngredient() {
 }
 
 function buildDefaultImageUrl(name, kind, shuffleIndex) {
+  if (kind === "cocktail") return "/on-par-logo-white.png";
   const seed = encodeURIComponent(slugify(`${kind}-${name || "default"}-${shuffleIndex || 1}`));
   return `https://picsum.photos/seed/${seed}/720/480`;
 }
 
 function setRecipeImage(url) {
-  if (newRecipeImageInput) newRecipeImageInput.value = url || "";
-  if (newRecipeImagePreview) newRecipeImagePreview.src = url || buildDefaultImageUrl("New Cocktail", "cocktail", recipeImageShuffleIndex);
+  const placeholder = buildDefaultImageUrl("New Cocktail", "cocktail", recipeImageShuffleIndex);
+  const imageUrl = clean(url);
+  const selectedImage = !imageUrl || imageUrl === placeholder || /^https?:\/\/picsum\.photos\//i.test(imageUrl) ? "" : imageUrl;
+  if (newRecipeImageInput) newRecipeImageInput.value = selectedImage;
+  if (!newRecipeImagePreview) return;
+
+  const requestId = String(Number(newRecipeImagePreview.dataset.imageRequest || 0) + 1);
+  newRecipeImagePreview.dataset.imageRequest = requestId;
+  const showPlaceholder = () => {
+    newRecipeImagePreview.src = placeholder;
+    newRecipeImagePreview.alt = "On Par Entertainment";
+    newRecipeImagePreview.style.objectFit = "contain";
+    newRecipeImagePreview.style.padding = "2rem";
+    newRecipeImagePreview.style.background = "#28665c";
+    newRecipeImagePreview.style.boxSizing = "border-box";
+  };
+  showPlaceholder();
+  if (!selectedImage) return;
+
+  const candidate = new Image();
+  candidate.onload = () => {
+    if (newRecipeImagePreview.dataset.imageRequest !== requestId) return;
+    newRecipeImagePreview.src = selectedImage;
+    newRecipeImagePreview.alt = "Cocktail preview";
+    newRecipeImagePreview.style.objectFit = "contain";
+    newRecipeImagePreview.style.padding = "0";
+    newRecipeImagePreview.style.background = "#f3efe7";
+  };
+  candidate.onerror = () => {
+    if (newRecipeImagePreview.dataset.imageRequest !== requestId) return;
+    if (newRecipeImageInput) newRecipeImageInput.value = "";
+    showPlaceholder();
+  };
+  candidate.src = selectedImage;
 }
 
 function setPmbProductImage(url) {
-  if (pmbProductImageInput) pmbProductImageInput.value = url || "";
+  const placeholder = "/on-par-logo-white.png";
+  const imageUrl = clean(url);
+  const selectedImage = !imageUrl || imageUrl === placeholder || /^https?:\/\/picsum\.photos\//i.test(imageUrl) ? "" : imageUrl;
+  if (pmbProductImageInput) pmbProductImageInput.value = selectedImage;
   if (pmbProductImagePreview) {
-    if (url) {
-      pmbProductImagePreview.src = url;
+    const requestId = String(Number(pmbProductImagePreview.dataset.imageRequest || 0) + 1);
+    pmbProductImagePreview.dataset.imageRequest = requestId;
+    const showPlaceholder = () => {
+      pmbProductImagePreview.src = placeholder;
+      pmbProductImagePreview.alt = "On Par Entertainment";
       pmbProductImagePreview.hidden = false;
-    } else {
-      pmbProductImagePreview.removeAttribute("src");
-      pmbProductImagePreview.hidden = true;
-    }
+      pmbProductImagePreview.style.objectFit = "contain";
+      pmbProductImagePreview.style.padding = "2rem";
+      pmbProductImagePreview.style.background = "#28665c";
+      pmbProductImagePreview.style.boxSizing = "border-box";
+    };
+    showPlaceholder();
+    if (!selectedImage) return;
+
+    const candidate = new Image();
+    candidate.onload = () => {
+      if (pmbProductImagePreview.dataset.imageRequest !== requestId) return;
+      pmbProductImagePreview.src = selectedImage;
+      pmbProductImagePreview.alt = "Beer product preview";
+      pmbProductImagePreview.style.objectFit = "contain";
+      pmbProductImagePreview.style.padding = "0";
+      pmbProductImagePreview.style.background = "transparent";
+    };
+    candidate.onerror = () => {
+      if (pmbProductImagePreview.dataset.imageRequest !== requestId) return;
+      if (pmbProductImageInput) pmbProductImageInput.value = "";
+      showPlaceholder();
+    };
+    candidate.src = selectedImage;
   }
 }
 

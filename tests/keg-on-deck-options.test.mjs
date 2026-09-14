@@ -14,34 +14,12 @@ const recipes = [
   { id: "washington-apple", title: "Washington Apple" },
 ];
 
-test("includes all static On Deck recipes when Coming Soon is empty", () => {
-  assert.deepEqual(buildKegOnDeckOptions({ recipes }), [
-    {
-      id: "recipe:bacardi-sunset",
-      recipeId: "bacardi-sunset",
-      name: "Bacardi Sunset",
-      kind: "recipe",
-      plu: 0,
-    },
-    {
-      id: "recipe:on-par-tee",
-      recipeId: "on-par-tee",
-      name: "On Par Tee (Crown Royal) 1",
-      kind: "recipe",
-      plu: 0,
-    },
-    {
-      id: "recipe:whiskey-smash",
-      recipeId: "whiskey-smash",
-      name: "Whiskey Smash (Jim Beam) 1",
-      kind: "recipe",
-      plu: 0,
-    },
-  ]);
+test("does not invent On Deck options when the shared Coming Soon queue is empty", () => {
+  assert.deepEqual(buildKegOnDeckOptions({ recipes }), []);
 });
 
-test("keeps Bacardi Sunset available without a saved recipe card", () => {
-  assert.deepEqual(buildKegOnDeckOptions(), [
+test("keeps an already-selected legacy Bacardi Sunset without a saved recipe card", () => {
+  assert.deepEqual(buildKegOnDeckOptions({ selected: { comingSoonId: "recipe:bacardi-sunset" } }), [
     {
       id: "recipe:bacardi-sunset",
       recipeId: "bacardi-sunset",
@@ -62,10 +40,7 @@ test("retains active custom cocktail and beer options in alphabetic order", () =
   });
 
   assert.deepEqual(options.map(({ id }) => id), [
-    "recipe:bacardi-sunset",
     "custom:blue-horizon",
-    "recipe:on-par-tee",
-    "recipe:whiskey-smash",
     "beer:88",
   ]);
   assert.equal(resolveKegOnDeckOption(options, "beer:88")?.name, "Zesty Lager");
@@ -137,6 +112,13 @@ test("offers an active Octoberfest Coming Soon beer for On Deck selection", () =
   });
 
   assert.equal(resolveKegOnDeckOption(options, "beer:octoberfest")?.name, "Octoberfest");
+});
+
+test("a different wall copy or reused PLU never clears the queued product", () => {
+  assert.equal(isKegOnDeckProductInstalled({ name: "Vodka Cran 2", plu: 100 }, { name: "Vodka Cran 1", plu: 100 }), false);
+  assert.equal(isKegOnDeckProductInstalled({ name: "Vodka Cran 2", plu: 100 }, { name: "Vodka Cran 2", plu: 101 }), false);
+  assert.equal(isKegOnDeckProductInstalled({ name: "Vodka Cran 2", plu: 100 }, { name: "Different Cocktail 2", plu: 100 }), false);
+  assert.equal(isKegOnDeckProductInstalled({ name: "Vodka Cran 2", plu: 100 }, { name: "Vodka Cran 2", plu: 100 }), true);
 });
 
 test("offers an active queued liquor tap for On Deck selection", () => {

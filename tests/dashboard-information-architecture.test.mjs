@@ -223,7 +223,8 @@ test("Tap Pricing displays only PMB-verified current wall products", () => {
 });
 
 test("owner login automatically attempts PMB and defers mapped vendor price refreshes", () => {
-  assert.match(dashboardSource, /void runOwnerLoginSync\(\)/);
+  assert.match(dashboardSource, /await runOwnerLoginSync\(\)/);
+  assert.match(dashboardSource, /dashboardBriefingInitialLoadPending/);
   assert.match(dashboardSource, /acquireOwnerLoginSyncLock\(\)/);
   assert.match(dashboardSource, /releaseOwnerLoginSyncLock\(lockToken\)/);
   assert.match(dashboardSource, /runKegLevelSync\(\)/);

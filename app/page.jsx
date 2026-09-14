@@ -467,7 +467,7 @@ export default function DashboardPage() {
               </label>
               <div className="image-picker" data-picker="recipe">
                 <div className="image-picker__preview">
-                  <img id="new-recipe-image-preview" alt="Recipe default" />
+                  <img id="new-recipe-image-preview" src="/on-par-logo-white.png" alt="On Par Entertainment" style={{ objectFit: "contain", padding: "2rem", background: "#28665c", boxSizing: "border-box" }} />
                 </div>
                 <div className="image-picker__controls">
                   <span>Default picture</span>
@@ -577,10 +577,10 @@ export default function DashboardPage() {
               </label>
               <div className="image-picker pmb-product-image" data-picker="pmb-product">
                 <div className="image-picker__preview">
-                  <img id="pmb-product-image-preview" alt="Beer product default" />
+                  <img id="pmb-product-image-preview" src="/on-par-logo-white.png" alt="On Par Entertainment" style={{ objectFit: "contain", padding: "2rem", background: "#28665c", boxSizing: "border-box" }} />
                 </div>
                 <div className="image-picker__controls">
-                  <span>676x540 preview</span>
+                  <span>Image preview</span>
                   <input id="pmb-product-image" type="hidden" />
                   <div className="image-picker__actions">
                     <button className="ghost-button" id="shuffle-pmb-product-image" type="button">Shuffle image</button>
@@ -653,7 +653,7 @@ export default function DashboardPage() {
             <div className="pmb-product-status" id="liquor-product-status"></div>
           </form>
 
-          <section className="pmb-publish-queue dashboard-owner-only" aria-labelledby="pmb-publish-queue-title">
+          <section className="pmb-publish-queue" hidden aria-hidden="true" style={{ display: "none" }} aria-labelledby="pmb-publish-queue-title">
             <div className="pmb-publish-queue__header">
               <div>
                 <h2 id="pmb-publish-queue-title">Pour My Beer publishing queue</h2>

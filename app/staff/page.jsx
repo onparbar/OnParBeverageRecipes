@@ -10,6 +10,7 @@ export default function StaffRecipePage() {
     <div className="shell staff-recipe-shell" data-staff-dashboard="true">
       <link rel="stylesheet" href="/smart-receiving.css" />
       <link rel="stylesheet" href="/staff-receiving.css" />
+      <link rel="stylesheet" href="/staff-simple.css" />
       <section className="staff-rehearsal-banner" id="staff-rehearsal-banner" hidden aria-live="polite">
         <div className="staff-rehearsal-banner__copy">
           <strong id="staff-rehearsal-title">Staff Rehearsal</strong>
@@ -23,22 +24,24 @@ export default function StaffRecipePage() {
         </div>
       </section>
       <header className="topbar">
-        <div>
-          <p className="staff-view-mark">Staff View</p>
-          <h1>Weekly Plan</h1>
+        <div className="staff-brand">
+          <img src="/on-par-logo-white.png" alt="On Par Entertainment" width="64" height="64" />
+          <div>
+            <p className="staff-view-mark">Staff</p>
+            <h1>This week</h1>
+          </div>
         </div>
         <div className="topbar-actions">
-          <span className="staff-recipe-badge">Prep + recipe access</span>
           <a className="logout-link" href="/api/logout">Log out</a>
         </div>
       </header>
 
       <nav className="staff-section-tabs" role="tablist" aria-label="Staff workspaces">
-        <button className="staff-section-tab is-active" data-staff-section-tab="overview" type="button" role="tab" aria-controls="staff-overview-panel" aria-selected="true">Overview</button>
-        <button className="staff-section-tab" data-staff-section-tab="prep" type="button" role="tab" aria-controls="staff-prep-panel" aria-selected="false" tabIndex={-1}>Cocktails to Make</button>
-        <button className="staff-section-tab" data-staff-section-tab="liquor" type="button" role="tab" aria-controls="staff-liquor-panel" aria-selected="false" tabIndex={-1}>Liquor to Add</button>
+        <button className="staff-section-tab is-active" data-staff-section-tab="overview" type="button" role="tab" aria-controls="staff-overview-panel" aria-selected="true">Home</button>
+        <button className="staff-section-tab" data-staff-section-tab="prep" type="button" role="tab" aria-controls="staff-prep-panel" aria-selected="false" tabIndex={-1}>Cocktails</button>
+        <button className="staff-section-tab" data-staff-section-tab="liquor" type="button" role="tab" aria-controls="staff-liquor-panel" aria-selected="false" tabIndex={-1}>Liquor</button>
+        <button className="staff-section-tab" data-staff-section-tab="orders" type="button" role="tab" aria-controls="staff-orders-panel" aria-selected="false" tabIndex={-1}>Deliveries</button>
         <button className="staff-section-tab" data-staff-section-tab="recipes" type="button" role="tab" aria-controls="staff-recipes-panel" aria-selected="false" tabIndex={-1}>Recipes</button>
-        <button className="staff-section-tab" data-staff-section-tab="orders" type="button" role="tab" aria-controls="staff-orders-panel" aria-selected="false" tabIndex={-1}>Orders to Receive</button>
         <button className="staff-section-tab" data-staff-section-tab="taps" type="button" role="tab" aria-controls="staff-taps-panel" aria-selected="false" tabIndex={-1}>Tap Sheets</button>
       </nav>
 
@@ -46,8 +49,7 @@ export default function StaffRecipePage() {
         <section className="panel is-active staff-overview-panel" id="staff-overview-panel" role="tabpanel" aria-labelledby="staff-overview-title">
           <div className="staff-recipe-intro">
             <div>
-              <p className="eyebrow">Current weekly plan</p>
-              <h2 id="staff-overview-title">Weekly overview</h2>
+              <h2 id="staff-overview-title">Your tasks</h2>
             </div>
             <div className="staff-overview-week-wrap">
               <p id="staff-overview-week" className="staff-overview-week">Loading this week&apos;s plan...</p>
@@ -70,21 +72,20 @@ export default function StaffRecipePage() {
               <strong id="staff-overview-order-value">—</strong>
               <small id="staff-overview-order-detail">Loading delivery plan...</small>
             </button>
-            <button className="staff-overview-card" data-staff-section-target="recipes" type="button">
-              <span>Cocktail recipes</span>
-              <strong id="staff-overview-recipe-value">—</strong>
-              <small id="staff-overview-recipe-detail">Loading recipes...</small>
-            </button>
+          </div>
+          <div className="staff-reference-links" aria-label="Quick references">
+            <button className="ghost-button" data-staff-section-target="recipes" type="button">Find a recipe</button>
+            <button className="ghost-button" data-staff-section-target="taps" type="button">View tap sheets</button>
+            <span hidden><span id="staff-overview-recipe-value">—</span><span id="staff-overview-recipe-detail">Loading recipes...</span></span>
           </div>
         </section>
 
         <section className="panel staff-prep-panel" id="staff-prep-panel" role="tabpanel" aria-labelledby="staff-prep-title" hidden>
           <div className="staff-recipe-intro">
             <div>
-              <p className="eyebrow">Current weekly plan</p>
               <h2 id="staff-prep-title">Cocktails to make</h2>
             </div>
-            <p id="staff-prep-help">Enter who prepared each cocktail, check it off, and save. Updates are shared with the current Monday–Sunday plan.</p>
+            <p id="staff-prep-help" className="sr-only">Check completed cocktails, enter your name, and save.</p>
           </div>
           <div id="staff-prep-status" className="staff-recipe-status" role="status" aria-live="polite">
             Loading this week&apos;s prep checklist...
@@ -96,10 +97,9 @@ export default function StaffRecipePage() {
         <section className="panel staff-prep-panel" id="staff-liquor-panel" role="tabpanel" aria-labelledby="staff-liquor-title" hidden>
           <div className="staff-recipe-intro">
             <div>
-              <p className="eyebrow">Current weekly plan</p>
-              <h2 id="staff-liquor-title">Liquor to add to kegs</h2>
+              <h2 id="staff-liquor-title">Liquor to add</h2>
             </div>
-            <p id="staff-liquor-help">Add the listed bottles directly to each keg, then check it off.</p>
+            <p id="staff-liquor-help" className="sr-only">Enter the bottles actually added to each keg, check it off, and save.</p>
           </div>
           <div id="staff-liquor-status" className="staff-recipe-status" role="status" aria-live="polite">
             Loading this week&apos;s liquor checklist...
@@ -111,10 +111,9 @@ export default function StaffRecipePage() {
         <section className="panel staff-order-panel" id="staff-orders-panel" role="tabpanel" aria-labelledby="staff-order-title" hidden>
           <div className="staff-recipe-intro">
             <div>
-              <p className="eyebrow">Delivery checklist</p>
-              <h2 id="staff-order-title">Orders to receive</h2>
+              <h2 id="staff-order-title">Receive a delivery</h2>
             </div>
-            <p id="staff-order-help">Choose a delivery, check what arrived, and see where it goes. Each receipt saves as you go using your signed-in name.</p>
+            <p id="staff-order-help" className="sr-only">Choose a delivery and check what arrived. Each receipt saves immediately.</p>
           </div>
           <div id="staff-order-status" className="staff-recipe-status" role="status" aria-live="polite">
             Loading this week&apos;s order checklist...
@@ -126,10 +125,10 @@ export default function StaffRecipePage() {
           <div id="staff-order-summary" className="staff-prep-summary" aria-live="polite"></div>
           <div id="staff-order-list" className="staff-order-list" aria-busy="true"></div>
           <details className="staff-receiving-voice">
-            <summary>Prefer to speak or type the delivery?</summary>
+            <summary>Receive by voice or text</summary>
           <section className="smart-receiving" aria-labelledby="smart-receiving-title">
             <div className="smart-receiving__header">
-              <h3 id="smart-receiving-title">Smart receiving</h3>
+              <h3 id="smart-receiving-title">Delivery update</h3>
               <button className="ghost-button" id="smart-receiving-speak" type="button">Speak</button>
             </div>
             <div className="smart-receiving__fields">
@@ -144,7 +143,7 @@ export default function StaffRecipePage() {
             </label>
             <div className="smart-receiving__actions">
               <button className="ghost-button" id="smart-receiving-review" type="button">Review</button>
-              <button className="primary-button" id="smart-receiving-apply" type="button" disabled>Apply reviewed delivery</button>
+              <button className="primary-button" id="smart-receiving-apply" type="button" disabled>Save reviewed delivery</button>
             </div>
             <p className="smart-receiving__status" id="smart-receiving-status" role="status" aria-live="polite"></p>
             <div className="smart-receiving__review" id="smart-receiving-review-list"></div>
@@ -155,7 +154,6 @@ export default function StaffRecipePage() {
         <section className="panel" id="staff-taps-panel" role="tabpanel" aria-labelledby="staff-taps-title" hidden>
           <div className="staff-recipe-intro">
             <div>
-              <p className="eyebrow">Cooler lists</p>
               <h2 id="staff-taps-title">Tap sheets</h2>
             </div>
           </div>
@@ -166,10 +164,8 @@ export default function StaffRecipePage() {
         <section className="panel" id="staff-recipes-panel" role="tabpanel" aria-labelledby="staff-recipes-title" hidden>
           <div className="staff-recipe-intro">
             <div>
-              <p className="eyebrow">Batch preparation</p>
               <h2 id="staff-recipes-title">Cocktail recipes</h2>
             </div>
-            <p>Search by cocktail or ingredient. This view contains recipe quantities only.</p>
           </div>
 
           <div className="recipe-view-switcher staff-recipe-view-switcher" role="tablist" aria-label="Recipe status">
@@ -190,7 +186,7 @@ export default function StaffRecipePage() {
               aria-selected="false"
               tabIndex={-1}
             >
-              Deactivated <span id="staff-inactive-recipe-count"></span>
+              Past recipes <span id="staff-inactive-recipe-count"></span>
             </button>
           </div>
 
@@ -210,7 +206,7 @@ export default function StaffRecipePage() {
           <div id="staff-recipe-status" className="staff-recipe-status" role="status" aria-live="polite">
             Loading current recipes...
           </div>
-          <div className="stats-grid staff-stats-grid" id="staff-stats-grid" aria-label="Recipe summary"></div>
+          <div className="stats-grid staff-stats-grid" id="staff-stats-grid" hidden aria-hidden="true"></div>
           <div className="recipe-grid" id="staff-recipe-grid" aria-busy="true"></div>
           <noscript><p className="empty-state">JavaScript is required to load the recipe cards.</p></noscript>
         </section>
@@ -249,7 +245,7 @@ export default function StaffRecipePage() {
             `,
           }}
         />
-        <Script type="module" src="/staff-dashboard.js?v=20260911-staff-access" strategy="afterInteractive" />
+        <Script type="module" src="/staff-dashboard.js?v=20260914-staff-simple" strategy="afterInteractive" />
     </div>
   );
 }

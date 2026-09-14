@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [stylesheet, dashboardSource, staffDashboardSource, staffPageSource] = await Promise.all([
+const [stylesheet, dashboardSource, staffDashboardSource, staffPageSource, staffStyles] = await Promise.all([
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   readFile(new URL("../public/dashboard.js", import.meta.url), "utf8"),
   readFile(new URL("../public/staff-dashboard.js", import.meta.url), "utf8"),
   readFile(new URL("../app/staff/page.jsx", import.meta.url), "utf8"),
+  readFile(new URL("../public/staff-simple.css", import.meta.url), "utf8"),
 ]);
 
 test("cocktail recipe card headers use one clean uppercase sans-serif style", () => {
@@ -28,12 +29,12 @@ test("staff cocktail names share one normalized title-case font treatment", () =
   assert.match(stylesheet, /\.staff-cocktail-name \{[^}]*font-family: var\(--staff-cocktail-font\) !important[^}]*text-transform: none/s);
 });
 
-test("staff header presents Weekly Plan with a decorative Staff View accent", () => {
-  assert.match(staffPageSource, /<p className="staff-view-mark">Staff View<\/p>/);
-  assert.match(staffPageSource, /<h1>Weekly Plan<\/h1>/);
-  const staffViewMarkRule = stylesheet.match(/\.staff-view-mark \{(?<body>[^}]+)\}/)?.groups?.body || "";
-  assert.match(staffViewMarkRule, /font-family: "Caveat", "Comic Sans MS", cursive/);
-  assert.match(staffViewMarkRule, /color: var\(--tomato\)/);
+test("staff header uses a compact branded heading without access-description clutter", () => {
+  assert.match(staffPageSource, /<p className="staff-view-mark">Staff<\/p>/);
+  assert.match(staffPageSource, /<h1>This week<\/h1>/);
+  assert.match(staffPageSource, /src="\/on-par-logo-white.png"/);
+  assert.doesNotMatch(staffPageSource, /Prep \+ recipe access/);
+  assert.match(staffStyles, /\.staff-brand img/);
 });
 
 test("staff overview makes the active plan date range prominent", () => {
@@ -114,7 +115,7 @@ test("employee recipes match the 30 current menu cards and separate deactivated 
   assert.match(staffDashboardSource, /activeRecipeView === "inactive" \? inactiveRecipes : currentRecipes/);
   assert.match(staffPageSource, /data-staff-recipe-view="current"/);
   assert.match(staffPageSource, /data-staff-recipe-view="inactive"/);
-  assert.match(staffPageSource, /Deactivated <span id="staff-inactive-recipe-count"/);
+  assert.match(staffPageSource, /Past recipes <span id="staff-inactive-recipe-count"/);
 });
 
 test("the employee view opens on a weekly overview with separate work tabs", async () => {
@@ -133,9 +134,11 @@ test("the employee view opens on a weekly overview with separate work tabs", asy
   assert.match(staffPageSource, /id="staff-liquor-panel"/);
   assert.match(staffDashboardSource, /function switchStaffSection\(section\)/);
   assert.match(staffDashboardSource, /function renderStaffOverview\(\)/);
-  assert.match(staffDashboardSource, /liquorList\.append\(createStaffPrepItem\(item\)\)/);
+  assert.match(staffDashboardSource, /appendStaffPrepGroups\(liquorList, liquorRefills, "liquor-refill"/);
+  assert.match(staffDashboardSource, /pending\.forEach\(\(item\) => root\.append\(createStaffPrepItem\(item\)\)\)/);
+  assert.match(staffDashboardSource, /group\.className = "staff-completed-group"/);
   assert.match(stylesheet, /\.staff-section-tabs \{[^}]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/s);
-  assert.match(stylesheet, /\.staff-overview-grid \{[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/s);
+  assert.match(staffStyles, /\.staff-overview-grid \{[^}]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/s);
 });
 
 test("cocktails in the employee prep list expand their matching recipe inline", () => {

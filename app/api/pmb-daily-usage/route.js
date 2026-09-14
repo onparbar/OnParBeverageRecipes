@@ -6,12 +6,27 @@ import { parsePmbJson } from '../../../lib/pmb-json.mjs';
 import { buildDailyReport, dailyWindows, projectDailyReport, reportDays } from '../../../lib/pmb-daily-report.mjs';
 import { readDaily, readDailyRange, readAssignmentEvents, saveDaily, readMoneyUnits } from '../../../lib/pmb-daily-store.mjs';
 import { requireDailyReportOrigin } from '../../../lib/pmb-daily-origin.mjs';
+import { readSharedInventoryState } from '../../../lib/inventory-shared-store.mjs';
+import { reconcileDailyReportAssignments } from '../../../lib/pmb-daily-assignments.mjs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store' };
 let importing = false;
 function failure(error) { return NextResponse.json({ error: error.message || 'Daily reporting is unavailable.' }, { status: error.status || 503, headers }); }
+async function assignmentContext(events) {
+  // Optional historical evidence must not make already-saved sales reports unavailable.
+  const context = { events: events || [], snapshots: [] };
+  if (!events) {
+    try { context.events = await readAssignmentEvents(); }
+    catch { /* Keep unresolved rows unresolved when the history store is unavailable. */ }
+  }
+  try {
+    const inventory = await readSharedInventoryState();
+    if (inventory.initialized) context.snapshots = inventory.snapshots;
+  } catch { /* The original PMB report remains readable without inventory snapshots. */ }
+  return context;
+}
 export async function GET(request) {
   try {
     await requireDashboardRequestRole(request, { owner: true });
@@ -19,7 +34,9 @@ export async function GET(request) {
     const days = reportDays(p.get('startDate'), p.get('endDate'));
     const records = await readDailyRange(days[0], days.at(-1));
     const units = await readMoneyUnits();
-    const reports = records.map(r => projectDailyReport(r.data, units));
+    const unresolved = records.some(r => r.data?.rows?.some(row => !row.tapNumber));
+    const context = unresolved ? await assignmentContext() : {};
+    const reports = records.map(r => projectDailyReport(reconcileDailyReportAssignments(r.data, context), units));
     return NextResponse.json({ reports, missingDays: days.filter(day => !reports.some(r => r.day === day)), timeZone: 'America/New_York' }, { headers });
   } catch (e) { return failure(e); }
 }
@@ -63,7 +80,8 @@ export async function POST(request) {
       throw new Error('The new reads are less complete than the saved report. The saved report was kept.');
     }
     await saveDaily(report, previous);
-    return NextResponse.json({ report: projectDailyReport(report, units), saved: true }, { headers });
+    const context = report.rows.some(row => !row.tapNumber) ? await assignmentContext(events) : {};
+    return NextResponse.json({ report: projectDailyReport(reconcileDailyReportAssignments(report, context), units), saved: true }, { headers });
   } catch (e) { return failure(e); }
   finally { if (claimed) importing = false; }
 }

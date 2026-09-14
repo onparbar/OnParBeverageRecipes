@@ -1,4 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+@import "./tap-pricing-layout.css";
+@import "./performance-layout.css";
+@import "./weekly-snapshot-layout.css";
 
 :root {
   --ink: #18211f;
@@ -12918,4 +12921,17 @@ details.custom-inventory-editor[open] > summary {
   border-radius: 9px;
   font-size: 12px;
   font-weight: 400;
+}
+
+/* Keep weekly usage metadata in the background, without a separate summary card. */
+#weekly-usage-summary {
+  display: none !important;
+}
+
+#weekly-usage-panel :has(> #weekly-usage-summary) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#weekly-usage-summary ~ * {
+  grid-column: 1 / -1;
 }

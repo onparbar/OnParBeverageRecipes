@@ -96,7 +96,7 @@ export function renderStaffReceiving({ root, tracking, saveReceipts }) {
   top.append(title);
   root.append(top);
   if (vendor.deliveryNote) root.append(element("p", "receiving-note", vendor.deliveryNote));
-  root.append(element("p", "receiving-help", "Check the product and quantity, then tap Received as ordered. Each receipt saves immediately. Keep shorts open for a later delivery."));
+  root.append(element("p", "receiving-help", "Receipts save immediately. Short deliveries stay open."));
 
   async function save(lines) {
     if (saving) return;
@@ -115,7 +115,7 @@ export function renderStaffReceiving({ root, tracking, saveReceipts }) {
       }
       remember();
       tracking = result.tracking;
-      message = result.warning || "Saved. Inventory and delivery progress are up to date.";
+      message = result.warning || "Receipt saved.";
       messageError = Boolean(result.warning);
     } catch (error) {
       message = `${error.message || "The save could not be confirmed."} Your entries are kept here. Refresh the delivery status before retrying if the connection was interrupted.`;
@@ -130,7 +130,7 @@ export function renderStaffReceiving({ root, tracking, saveReceipts }) {
   }
   const unchecked = vendor.items.filter((item) => item.status === "pending" && !drafts[`${currentWeek}:${item.id}`]);
   if (unchecked.length) {
-    const bulk = button("Everything unchecked arrived as ordered", () => {
+    const bulk = button("Receive all unchecked items", () => {
       const currentUnchecked = vendor.items.filter((item) => item.status === "pending" && !drafts[`${currentWeek}:${item.id}`]);
       if (!currentUnchecked.length) {
         message = "There are no unchecked items without a difference draft. Save those differences individually.";
@@ -193,7 +193,7 @@ export function renderStaffReceiving({ root, tracking, saveReceipts }) {
     const noteLabel = element("label", "", "Note for the manager (optional)");
     const note = element("textarea"); note.rows = 2; note.maxLength = 100;
     note.value = drafts[key]?.note || ""; noteLabel.append(note);
-    const help = element("p", "receiving-help", "Enter the total accepted for this order, including earlier deliveries, not just today's extra. Do not count damaged or substituted products as the original item; describe the substitute in the note for manager review.");
+    const help = element("p", "receiving-help", "Include earlier deliveries in the total. Exclude damaged or substituted items; describe substitutes in the note.");
     const store = () => { drafts[key] = { reason: reason.value, quantity: count.value, note: note.value, coolers: Object.fromEntries(coolerInputs.map(({ destinationId, input }) => [destinationId, input.value])) }; remember(); };
     [reason, count, note, ...coolerInputs.map((entry) => entry.input)].forEach((input) => { input.disabled = saving; input.addEventListener("input", store); });
     const submit = element("button", "primary-button", "Save difference"); submit.type = "submit"; submit.disabled = saving;
