@@ -1,3 +1,5 @@
+export const PROOF_PREP_LOOK_AHEAD_WEEKS = 8;
+
 function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -71,6 +73,7 @@ function applySavedInventoryCounts(inventoryItems = [], savedInventoryItems = []
       ...item,
       onHandDisplay: getSavedInventoryValue(savedItem, "onHandDisplay", "onHand"),
       parDisplay: getSavedInventoryValue(savedItem, "parDisplay", "par"),
+      hasCurrentCount: savedItem.hasCurrentCount ?? item.hasCurrentCount,
     };
   });
 }
@@ -128,7 +131,8 @@ export function buildProofPrepOrderContext(options = {}) {
     const vendorSku = clean(item?.vendorSku || item?.matchedSku || item?.vendorProduct?.preferredSku);
     const projectedPrepUseUnits = bottleOz > 0 ? Math.ceil(projectedOz / bottleOz) : 0;
     const rawOnHand = item?.onHandDisplay ?? item?.onHand;
-    if (!(projectedPrepUseUnits > 0) || clean(rawOnHand) === "") {
+    if (!(projectedPrepUseUnits > 0) || item.hasCurrentCount === false
+      || clean(rawOnHand) === "" || !Number.isFinite(Number(rawOnHand)) || Number(rawOnHand) < 0) {
       unresolvedInventory = true;
       return [];
     }
@@ -136,7 +140,8 @@ export function buildProofPrepOrderContext(options = {}) {
     if (onHandUnits < projectedPrepUseUnits) prepPurchaseRequired = true;
     const replacementNeedUnits = Math.max(0, Math.ceil(projectedPrepUseUnits - onHandUnits));
     if (!(replacementNeedUnits > 0)) return [];
-    if (!item?.casePackaged || !vendorSku || !(unitCost > 0)) return [];
+    if (!item?.casePackaged || !vendorSku || !(unitCost > 0)
+      || item.shelfStable === false || item.vendorProduct?.shelfStable === false) return [];
     return [{
       id: clean(item.id),
       name: clean(item.name),
@@ -168,7 +173,8 @@ export function buildProofPrepReplacementCandidates(options = {}) {
 }
 
 // Forecast production per tap. Only ingredient demand is combined, never keg stock.
-// Weeks 0-1 are the purchasing window; weeks 2-3 are optional minimum top-ups.
+// Weeks 0-1 are the purchasing window. Later sessions justify shelf-stable
+// minimum top-ups, selected in the order their ingredients will be needed.
 function buildProofLookAheadContext(options) {
   const usage = new Map();
   const recipes = Array.isArray(options.recipes) ? options.recipes : [];
@@ -180,7 +186,7 @@ function buildProofLookAheadContext(options) {
       const item = getProofInventoryItem(ingredient, inventoryItems);
       if (!item || !(number(ingredient.oz) > 0)) continue;
       const id = clean(item.id);
-      const entry = usage.get(id) || { item, ounces: [0, 0, 0, 0] };
+      const entry = usage.get(id) || { item, ounces: Array(PROOF_PREP_LOOK_AHEAD_WEEKS).fill(0) };
       entry.ounces[week] += number(ingredient.oz) * batches;
       usage.set(id, entry);
     }
@@ -195,7 +201,8 @@ function buildProofLookAheadContext(options) {
     const recipe = getRecipe(tap, recipes, options.recipeAliases);
     const average = Number(tap.avgWeeklyKegs);
     const stock = Number(tap.currentStockKegs);
-    if (!recipe || clean(tap.avgWeeklyKegs) === "" || clean(tap.currentStockKegs) === ""
+    if (!recipe || tap.inventoryStateMissing
+      || clean(tap.avgWeeklyKegs) === "" || clean(tap.currentStockKegs) === ""
       || !Number.isFinite(average) || average < 0 || !Number.isFinite(stock) || stock < 0) {
       unresolved = true;
       continue;
@@ -205,7 +212,7 @@ function buildProofLookAheadContext(options) {
     const preThursdayShare = clean(tap.preThursdayUsageSharePct) === ""
       ? 3 / 7 : Math.min(1, Math.max(0, number(tap.preThursdayUsageSharePct) / 100));
     let remaining = Math.max(0, stock - average * preThursdayShare);
-    for (let week = 0; week < 4; week += 1) {
+    for (let week = 0; week < PROOF_PREP_LOOK_AHEAD_WEEKS; week += 1) {
       const batches = Math.max(0, Math.ceil(average * (1 + cushion) - remaining - 1e-9));
       if (batches) addRecipe(recipe, batches, week);
       remaining = Math.max(0, remaining + batches - average);
@@ -213,9 +220,9 @@ function buildProofLookAheadContext(options) {
   }
   // Preserve explicit locked prep without counting it twice in the same week.
   const locked = getProjectedProofUsage(options);
-  unresolved ||= locked.unresolvedRecipe;
+  unresolved ||= locked.unresolvedRecipe || !seen.size;
   for (const [id, entry] of locked.projectedOzById) {
-    const projected = usage.get(id) || { item: entry.item, ounces: [0, 0, 0, 0] };
+    const projected = usage.get(id) || { item: entry.item, ounces: Array(PROOF_PREP_LOOK_AHEAD_WEEKS).fill(0) };
     projected.ounces[0] = Math.max(projected.ounces[0], entry.projectedOz);
     usage.set(id, projected);
   }
@@ -224,7 +231,8 @@ function buildProofLookAheadContext(options) {
   for (const { item, ounces } of usage.values()) {
     const bottleOz = number(item.bottleOz || item.vendorProduct?.bottleOz);
     const rawOnHand = item.onHandDisplay ?? item.onHand;
-    if (!(bottleOz > 0) || clean(rawOnHand) === "" || !Number.isFinite(Number(rawOnHand)) || Number(rawOnHand) < 0) {
+    if (!(bottleOz > 0) || item.hasCurrentCount === false || clean(rawOnHand) === ""
+      || !Number.isFinite(Number(rawOnHand)) || Number(rawOnHand) < 0) {
       unresolved = true;
       continue;
     }
@@ -235,7 +243,7 @@ function buildProofLookAheadContext(options) {
       return { week, units: Math.max(0, Math.ceil(cumulativeOz / bottleOz - 1e-9)) };
     });
     if ((ounces[0] + ounces[1]) / bottleOz > onHandUnits) required = true;
-    const replacementNeedUnits = Math.max(0, forecastDemands[3].units - onHandUnits);
+    const replacementNeedUnits = Math.max(0, forecastDemands[PROOF_PREP_LOOK_AHEAD_WEEKS - 1].units - onHandUnits);
     const packSize = Math.max(1, Math.floor(number(item.packSize) || 1));
     const unitCost = number(item.unitCost) || number(item.caseCost) / packSize;
     const vendorSku = clean(item.vendorSku || item.matchedSku || item.vendorProduct?.preferredSku);
@@ -248,8 +256,10 @@ function buildProofLookAheadContext(options) {
       onHandUnits, parUnits: 0, replacementNeedUnits,
       projectedPrepUseUnits: Math.ceil(cumulativeOz / bottleOz),
       projectedPrepUseOz: cumulativeOz, forecastDemands,
-      forecastSource: "Per-tap Thursday prep forecast; four weeks maximum; missing tap profiles use a 10% cushion and 3/7 pre-Thursday usage.",
+      forecastSource: `Per-tap Thursday prep forecast; ${PROOF_PREP_LOOK_AHEAD_WEEKS} weeks maximum; missing tap profiles use a 10% cushion and 3/7 pre-Thursday usage.`,
     });
   }
-  return { candidates: unresolved ? [] : candidates, requirement: required ? "required" : unresolved ? "unknown" : "not-required" };
+  // Known demand remains a valid lower bound when another tap is unresolved.
+  // Keep those candidates, but never claim complete coverage of missing data.
+  return { candidates, requirement: required ? "required" : unresolved ? "unknown" : "not-required" };
 }

@@ -1,4 +1,5 @@
 import { groupWeeklyPlanOrdersByVendor } from "./weekly-action-plan.mjs";
+import { PROOF_PREP_LOOK_AHEAD_WEEKS } from "./proof-prep-replacements.mjs";
 
 const CONFIGURED_VENDORS = new Set(["Bonbright", "Heidelberg", "Proof", "OHLQ"]);
 const VENDOR_ORDER_IDENTITY_FALLBACKS = new Map([
@@ -54,7 +55,7 @@ export function normalizeVendorOrderPolicy(policy = {}) {
         replacementNeedUnits: Math.max(0, Math.ceil(numberOrNull(item?.replacementNeedUnits) || 0)),
         unitCost: Math.max(0, numberOrNull(item?.unitCost) || 0),
         forecastDemands: (Array.isArray(item?.forecastDemands) ? item.forecastDemands : [])
-          .filter((entry) => Number.isInteger(entry?.week) && entry.week >= 0 && entry.week < 4
+          .filter((entry) => Number.isInteger(entry?.week) && entry.week >= 0 && entry.week < PROOF_PREP_LOOK_AHEAD_WEEKS
             && numberOrNull(entry.units) !== null && Number(entry.units) >= 0)
           .map((entry) => ({ week: entry.week, units: Math.ceil(Number(entry.units)) }))
           .sort((a, b) => a.week - b.week),
@@ -498,7 +499,7 @@ function selectProofMinimumTopUps(candidates = [], subtotal = 0, minimum = 350, 
       selected.set(item.id, {
         ...item, quantity, caseCount, estimatedCost: quantity * item.unitCost,
         hasKnownPrice: true,
-        reason: `Minimum top-up; replaces projected cocktail prep usage for Thursday ${week + 1} of the four-week look-ahead. ${clean(item.forecastSource)}`,
+        reason: `Minimum top-up; replaces projected cocktail prep usage for upcoming Thursday ${week + 1}. ${clean(item.forecastSource)}`,
       });
       addedCents += item.caseCostCents;
     }
