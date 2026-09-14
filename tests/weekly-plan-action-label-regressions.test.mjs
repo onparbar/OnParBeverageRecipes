@@ -34,6 +34,13 @@ for (const [view, render] of [["compact", renderMondayRunCompact], ["expanded", 
     const run = buildMondayRunModel({ inventorySharedInitialized: true, inventoryCountedThisWeek: true });
     assert.match(render(run), /class="primary-button"[^>]*>Continue<\/button>/);
   });
+
+  test(`${view} weekly plan starts at keg levels and retains later destinations`, () => {
+    const start = buildMondayRunModel({ ...ready, inventoryCountedThisWeek: false });
+    assert.match(render(start), /data-dashboard-target="keg-levels">Start<\/button>/);
+    const next = buildMondayRunModel({ ...ready, inventoryCountedThisWeek: true });
+    assert.match(render(next), /data-dashboard-target="weekly-plan">Continue<\/button>/);
+  });
 }
 
 test("locked weekly plans retain their existing actions", () => {

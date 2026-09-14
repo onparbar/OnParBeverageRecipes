@@ -5853,6 +5853,29 @@ td {
   justify-content: flex-start;
 }
 
+#inventory-panel .inventory-toolbar > #custom-inventory-editor:not([open]) {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: fit-content;
+  max-width: 100%;
+}
+
+#inventory-panel .inventory-toolbar > #custom-inventory-editor:not([open]) > summary {
+  min-height: 44px;
+  padding: 8px 22px;
+  font-size: 0.875rem;
+}
+
+#inventory-panel .inventory-submit-actions {
+  display: flex;
+  justify-content: center;
+  padding: 20px;
+}
+
+#inventory-panel .inventory-submit-actions > .primary-button {
+  width: min(220px, 100%);
+}
+
 #inventory-panel .inventory-toolbar .custom-inventory-form,
 #inventory-panel .inventory-toolbar #cabinet-reserve-settings {
   padding: 16px;

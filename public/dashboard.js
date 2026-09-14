@@ -987,6 +987,8 @@ const customInventoryPackSizeInput = document.querySelector("#custom-inventory-p
 const customInventorySubmitButton = document.querySelector("#custom-inventory-submit");
 const customInventoryCancelButton = document.querySelector("#custom-inventory-cancel");
 const inventoryTable = document.querySelector("#inventory-table");
+const inventorySubmitCountButton = document.querySelector("#inventory-submit-count");
+let inventoryCountSubmitting = false;
 const inventoryOrderTable = document.querySelector("#inventory-order-table");
 const inventorySummary = document.querySelector("#inventory-summary");
 const inventoryHistoryList = document.querySelector("#inventory-history-list");
@@ -14908,29 +14910,40 @@ function buildCompletedInventorySectionChanges(group, submittedChanges) {
   return [...changes.values()];
 }
 
-async function submitInventorySectionCount(group, button) {
-  if (!["Liquor Cabinet", "Mixer Cabinet"].includes(group) || !inventorySharedInitialized) return;
-  button.disabled = true;
+async function submitInventoryCount() {
+  if (inventoryCountSubmitting || !inventorySharedInitialized) return;
+  inventoryCountSubmitting = true;
+  if (inventorySubmitCountButton) {
+    inventorySubmitCountButton.disabled = true;
+    inventorySubmitCountButton.textContent = "Submitting...";
+  }
   try {
     if (!(await flushPendingInventorySyncs())) {
       throw new Error("The entered counts have not finished saving. They are preserved for retry.");
     }
-    const entered = inventoryItems.filter((item) => item.group === group
-      && getUncountedInventoryAmount(item) === null
+    const entered = inventoryItems.filter((item) => getUncountedInventoryAmount(item) === null
       && isRecommendationForOperatingWeek(inventoryCountedItemsAt[item.id], new Date()))
       .map((item) => ({ id: item.id, target: "inventory", value: clean(item.onHandDisplay) || "0" }));
-    const changes = buildCompletedInventorySectionChanges(group, entered);
+    const changes = ["Liquor Cabinet", "Mixer Cabinet", "Other"].reduce(
+      (pending, group) => buildCompletedInventorySectionChanges(group, pending),
+      entered,
+    );
     if (!changes.length) return;
+    if (!confirmDashboardAction(
+      "Submit inventory count?",
+      ["Liquor Cabinet, Mixer Cabinet, and Other will be submitted together."],
+      "Counts entered this week will be kept. Uncounted items will be recorded as zero.",
+    )) return;
     const saved = await runSharedInventoryAction({
       action: "batch-update-fields",
       source: "section-count",
       changes: changes.map((change) => ({ id: change.id, field: "onHand", value: change.value })),
-    }, { successMessage: `${group} count received. Unmentioned items are zero.`, rebuild: true });
-    if (!saved) throw new Error("The section count could not be saved. It is preserved for retry.");
+    }, { successMessage: "Inventory count received.", rebuild: true });
+    if (!saved) throw new Error("The inventory count could not be saved. It is preserved for retry.");
   } catch (error) {
     inventorySharedMessage = error.message;
   } finally {
-    button.disabled = false;
+    inventoryCountSubmitting = false;
     renderInventory();
     renderWeeklyPlan();
   }
@@ -15021,6 +15034,11 @@ async function applyReviewedInventorySpeechChanges() {
 
 function renderInventoryStockTable(groupedItems) {
   inventoryTable.innerHTML = "";
+  if (inventorySubmitCountButton) {
+    inventorySubmitCountButton.disabled = inventoryCountSubmitting || !inventorySharedInitialized;
+    inventorySubmitCountButton.textContent = inventoryCountSubmitting ? "Submitting..." : "Submit inventory";
+    inventorySubmitCountButton.onclick = () => void submitInventoryCount();
+  }
   const filter = document.querySelector("#inventory-group-filter");
   const selectedGroup = filter?.dataset.group || "all";
   if (filter) {
@@ -15056,16 +15074,6 @@ function renderInventoryStockTable(groupedItems) {
         status.textContent = progress.complete ? "Count received this week"
           : `${progress.total - progress.missing.length} of ${progress.total} counted this week`;
         heading.firstElementChild.append(status);
-        if ((!progress.complete || countProgress.get("Other")?.missing.length)
-          && ["Liquor Cabinet", "Mixer Cabinet"].includes(groupName)) {
-          const finish = document.createElement("button");
-          finish.type = "button";
-          finish.className = "mini-button";
-          finish.textContent = "Submit section count";
-          finish.setAttribute("aria-label", `Submit ${groupName} count; unmentioned items are zero`);
-          finish.addEventListener("click", () => void submitInventorySectionCount(groupName, finish));
-          heading.firstElementChild.append(finish);
-        }
       }
       inventoryTable.append(heading);
     }
@@ -15462,7 +15470,7 @@ function createInventoryRow(item, mode) {
     ? money(item.unitCost)
     : '<span class="inventory-order-zero">Price needed</span>';
   row.innerHTML = `
-    <td><strong ${mode === "stock" ? 'class="inventory-item-drag-target" draggable="true" tabindex="0" title="Drag to reorder; use arrow keys when focused"' : ""}>${escapeHtml(item.name)}</strong>${isRowEditing && item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${item.orderHoldReason ? `<span class="table-note table-note--warning">Ordering hold: ${escapeHtml(item.orderHoldReason)}</span>` : ""}${linkedNotes.join("")}
+    <td><strong ${mode === "stock" ? 'class="inventory-item-drag-target" draggable="true" tabindex="0" title="Drag to reorder; use arrow keys when focused"' : ""}>${escapeHtml(item.name)}</strong>${isRowEditing && item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${linkedNotes.join("")}
       ${isRowEditing ? fallbackSetting : ""}
     </td>
     <td>${assumedOnHand !== null ? '<span class="inventory-not-counted">Not counted</span>' : mode === "stock" ? `<input class="inventory-input" data-field="onHand" name="inventory-on-hand-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" pattern="${item.allowsDecimal ? "[0-9]*[.]?[0-9]*" : "[0-9]*"}" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getInventoryDisplayValue(item, "onHand"))}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>

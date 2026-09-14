@@ -142,6 +142,10 @@ function getMondayRunActionLabel(run) {
   return run.nextIndex === 0 && !planLocked ? "Start" : "Continue";
 }
 
+function getMondayRunActionTarget(run) {
+  return getMondayRunActionLabel(run) === "Start" ? "keg-levels" : run.nextStep.target;
+}
+
 export function renderMondayRun(run, { unlocking = false } = {}) {
   run = getVisibleMondayRun(run);
   const progress = run.steps.length ? Math.round((run.completedCount / run.steps.length) * 100) : 0;
@@ -152,7 +156,7 @@ export function renderMondayRun(run, { unlocking = false } = {}) {
     <section class="monday-run" aria-labelledby="monday-run-title">
       <header class="monday-run__header">
         <div><h2 id="monday-run-title">Monday Run</h2><span>Step ${formatNumber(currentStepNumber)} of ${formatNumber(run.steps.length)}</span></div>
-        ${run.complete ? "" : `<button class="primary-button" type="button" data-monday-run-step="${escapeHtml(focusStep.id)}" data-dashboard-target="${escapeHtml(focusStep.target)}">${getMondayRunActionLabel(run)}</button>`}
+        ${run.complete ? "" : `<button class="primary-button" type="button" data-monday-run-step="${escapeHtml(focusStep.id)}" data-dashboard-target="${escapeHtml(getMondayRunActionTarget(run))}">${getMondayRunActionLabel(run)}</button>`}
       </header>
       <div class="monday-run__progress" role="progressbar" aria-label="Monday Run progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="--monday-run-progress: ${progress}%"></span></div>
       <details class="monday-run__details monday-run__focus${run.complete ? " is-complete" : ""}" id="monday-run-steps">
@@ -186,7 +190,7 @@ export function renderMondayRunCompact(run) {
     <section class="monday-run monday-run--compact${run.complete ? " is-complete" : ""}" aria-label="Weekly Plan">
       <header class="monday-run__header">
         <div><h2>Weekly Plan</h2><span>${planLocked ? "Locked" : run.complete ? "Complete" : `Step ${formatNumber(currentStepNumber)} of ${formatNumber(run.steps.length)}`}</span></div>
-        ${planLocked ? '<button class="primary-button" type="button" data-dashboard-target="weekly-plan">View plan</button>' : run.complete ? "" : `<button class="primary-button" type="button" data-monday-run-step="${escapeHtml(run.nextStep.id)}" data-dashboard-target="${escapeHtml(run.nextStep.target)}">${getMondayRunActionLabel(run)}</button>`}
+        ${planLocked ? '<button class="primary-button" type="button" data-dashboard-target="weekly-plan">View plan</button>' : run.complete ? "" : `<button class="primary-button" type="button" data-monday-run-step="${escapeHtml(run.nextStep.id)}" data-dashboard-target="${escapeHtml(getMondayRunActionTarget(run))}">${getMondayRunActionLabel(run)}</button>`}
       </header>
       ${run.complete ? "" : `<p class="monday-run__current-step"><span>Next:</span> <strong>${escapeHtml(run.nextStep.label)}</strong></p>`}
       <div class="monday-run__progress" role="progressbar" aria-label="Weekly Plan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="--monday-run-progress: ${progress}%"></span></div>

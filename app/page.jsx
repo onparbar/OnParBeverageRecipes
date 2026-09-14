@@ -788,6 +788,9 @@ export default function DashboardPage() {
                     <tbody id="inventory-table"></tbody>
                   </table>
                 </div>
+                <div className="inventory-submit-actions">
+                  <button className="primary-button" id="inventory-submit-count" type="button" aria-label="Submit all inventory counts" disabled>Submit inventory</button>
+                </div>
 
               </section>
 
