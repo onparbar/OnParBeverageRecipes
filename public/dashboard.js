@@ -6784,16 +6784,9 @@ function renderDashboardOverview() {
       comingSoonItems,
       tapPrintSheets: buildTapWallPrintSheets(),
     });
-    const currentOrderVendors = Array.isArray(weeklyOrderTracking.vendors)
-      ? weeklyOrderTracking.vendors
-      : [];
-    const ordersComplete = weeklyOrderTracking.available === true
-      && currentOrderVendors.every((vendor) => vendor?.ordered === true);
-    const visibleKpis = overview.kpis.filter((kpi) => {
-      if (kpi.id === "items-to-order") return !ordersComplete;
-      if (kpi.id === "cocktails-to-make") return false;
-      return true;
-    });
+    const visibleKpis = overview.kpis.filter((kpi) => (
+      !["items-to-order", "cocktails-to-make"].includes(kpi.id)
+    ));
 
     const briefingLines = briefing.lines.filter((item) => !(
       clean(item.text) === "Tap sheets need printing"
