@@ -51,6 +51,38 @@ test('conflicting poured measurements remain blocked', () => {
   assert.equal(result.data, null);
 });
 
+test('duplicate archive observations merge without losing verified usage', () => {
+  const base = state(), local = copy(base), remote = copy(base);
+  const swaps = [
+    ['42-coming-soon', '2026-09-12T00:27:27.677Z', '2026-09-11T21:33:02.351Z'],
+    ['70-coming-soon', '2026-09-12T00:27:27.677Z', '2026-09-10T15:02:57.930Z'],
+    ['79-cincy-light-2', '2026-09-13T05:42:03.619Z', '2026-09-13T04:48:47.257Z'],
+  ];
+  for (const [id, localTime, sharedTime] of swaps) {
+    local.archivedItems.push({ id, replacedAt: localTime, history: [capture(latest, 12)] });
+    remote.archivedItems.push({ id, replacedAt: sharedTime, history: [capture(latest, 12)] });
+  }
+  Object.assign(remote.activeItems[0].history[1], verified);
+  const result = reconcileWeeklyUsageData(base, local, remote);
+  assert.equal(result.ok, true, JSON.stringify(result.conflictDetails));
+  assert.deepEqual(result.data.archivedItems.map((item) => item.replacedAt), swaps.map((swap) => swap[2]));
+  assert.equal(result.data.activeItems[0].history[1].zeroUsageVerified, true);
+  assert.deepEqual(reconcileWeeklyUsageData(base, remote, local).data, result.data);
+  assert.equal(local.archivedItems[0].replacedAt, swaps[0][1]);
+});
+
+test('archive recovery still rejects conflicting measurements and invalid timestamps', () => {
+  const base = state(), local = copy(base), remote = copy(base);
+  local.archivedItems.push({ id: '79-cincy-light-2', replacedAt: '2026-09-13T05:42:03.619Z', history: [capture(latest, 8)] });
+  remote.archivedItems.push({ id: '79-cincy-light-2', replacedAt: '2026-09-13T04:48:47.257Z', history: [capture(latest, 9)] });
+  assert.equal(reconcileWeeklyUsageData(base, local, remote).ok, false);
+  remote.archivedItems[0].history = copy(local.archivedItems[0].history);
+  local.archivedItems[0].replacedAt = 'unknown';
+  const result = reconcileWeeklyUsageData(base, local, remote);
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.conflicts, ['archivedItems.79-cincy-light-2.replacedAt']);
+});
+
 test('missing baselines and simultaneous assignments are not silently accepted', () => {
   assert.equal(reconcileWeeklyUsageData(null, state(), state()).ok, false);
   const base = state(), local = copy(base), remote = copy(base);

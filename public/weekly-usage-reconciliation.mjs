@@ -50,6 +50,13 @@ export function reconcileWeeklyUsageData(base, local, remote) {
     if (key === "lastSyncAt" && [l, r].every((value) => Number.isFinite(Date.parse(value)))) {
       return Date.parse(l) > Date.parse(r) ? l : r;
     }
+    // Independent syncs can archive the same former assignment at different
+    // times. Keep the earliest observation, not a fabricated pour/swap date.
+    // Other record fields still follow the normal conflict checks below.
+    if (key === "replacedAt" && /^archivedItems\.[^.]+\.replacedAt$/.test(path)
+      && [l, r].every((value) => typeof value === "string" && Number.isFinite(Date.parse(value)))) {
+      return Date.parse(l) < Date.parse(r) ? l : r;
+    }
     if ([l, r].every(Array.isArray) && (b === undefined || Array.isArray(b))) {
       const history = key === "history" || key === "excludedUnverifiedHistory" || path.startsWith("historyOverrides.");
       const records = key === "activeItems" || key === "archivedItems";
