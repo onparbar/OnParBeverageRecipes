@@ -117,8 +117,10 @@ test("completed weeks are not refetched and a wrong-week response cannot be save
   const recover = createWeeklyUsageRecovery({ readState: async () => base(), now: monday,
     replaceState: async () => { writes += 1; throw new Error("Unexpected write"); } });
   const complete = base();
-  complete.data.activeItems[0].history = [{ label: week.label }];
-  await recover(complete, async () => { throw new Error("Unexpected fetch"); });
+  complete.data.activeItems[0].history = [{ label: week.label, volumeOz: 992, value: 0.5, hasValue: true }];
+  let completeFetches = 0;
+  await recover(complete, async () => { completeFetches += 1; throw new Error("Unexpected fetch"); });
+  assert.equal(completeFetches, 0);
   const result = await recover(base(), async () => ({ ...report(), startDate: "2026-08-31" }));
   assert.equal(result.recovery.status, "pending");
   assert.equal(writes, 0);
