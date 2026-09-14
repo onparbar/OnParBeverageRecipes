@@ -27,16 +27,11 @@ export function prepareBriefingInputs(alerts = [], readiness = {}) {
     return [{ ...alert, message: compact(alert.message),
       ...(Array.isArray(alert.details) ? { details: alert.details.map(compact) } : {}) }];
   });
-  if (countAlert || countReasons.length) {
-    const count = String(countAlert?.title || countReasons[0]).match(/\d+/)?.[0];
-    nextAlerts.push({
-      id: "inventory-count-task", severity: "info", priority: 65,
-      title: "Count this week's inventory",
-      message: count ? `${count} items still need this week's physical count.` : "Save this week's physical inventory counts.",
-      details: [], action: { label: "Count inventory", target: "inventory" },
-    });
-    // Do not replace the removed duplicate warning with a generic plan error.
-    if (!remainingReasons.length && readiness.status === "blocked") nextReadiness.status = "ready";
+  // Routine counting is already represented by the incomplete Weekly Plan.
+  // Keep the actual ordering safeguard, but do not repeat it as a briefing alert.
+  if ((countAlert || countReasons.length) && !remainingReasons.length
+    && readiness.status === "blocked") {
+    nextReadiness.status = "ready";
   }
   return { alerts: nextAlerts, readiness: nextReadiness };
 }

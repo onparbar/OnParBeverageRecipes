@@ -124,16 +124,29 @@ test("completed weeks are not refetched and a wrong-week response cannot be save
   assert.equal(writes, 0);
 });
 
-test("briefing separates physical count tasks from storage failures without changing readiness", () => {
+test("briefing omits routine count reminders but retains storage failures and ordering safeguards", () => {
   const readiness = { status: "blocked", blockers: ["36 inventory items are using an old baseline instead of a current saved count.", "Shared state could not be saved."], staleReasons: [], reviewReasons: [] };
   const alerts = [{ id: "inventory-counts-missing", severity: "critical", title: "36 inventory counts are not current" },
     { id: "weekly-plan-readiness", title: "Weekly plan needs attention" }];
   const result = prepareBriefingInputs(alerts, readiness);
-  assert.equal(result.alerts.filter((alert) => alert.id === "inventory-count-task").length, 1);
-  assert.equal(result.alerts.find((alert) => alert.id === "inventory-count-task").severity, "info");
+  assert.equal(result.alerts.filter((alert) => /inventory-count/.test(alert.id)).length, 0);
   assert.deepEqual(result.readiness.blockers, ["Shared state could not be saved."]);
   assert.equal(readiness.blockers.length, 2);
   assert.equal(readiness.status, "blocked");
+});
+
+test("routine Monday counts alone produce no briefing error while the plan stays blocked", () => {
+  const reason = "36 inventory items are using an old baseline instead of a current saved count.";
+  const readiness = { status: "blocked", blockers: [reason], staleReasons: [], reviewReasons: [] };
+  const alerts = [
+    { id: "inventory-counts-missing", severity: "critical", title: "36 inventory counts are not current" },
+    { id: "weekly-plan-readiness", title: "Weekly plan needs attention", message: reason, details: [reason] },
+  ];
+  const result = prepareBriefingInputs(alerts, readiness);
+  assert.deepEqual(result.alerts, []);
+  assert.equal(result.readiness.status, "ready");
+  assert.equal(readiness.status, "blocked");
+  assert.deepEqual(readiness.blockers, [reason]);
 });
 
 test("briefing shortens whole-week gaps but preserves the missing-data warning", () => {
