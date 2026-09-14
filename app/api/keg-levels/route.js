@@ -11,6 +11,7 @@ import {
 } from "../../../lib/pmb-keg-safety.mjs";
 import { findExactLastKnownKegLevel } from "../../../public/keg-level-fallback.mjs";
 import { attachTapProductHistory, recordTapProductObservations, sameTapProduct } from "../../../lib/pmb-tap-product-history.mjs";
+import { observeSharedKegChanges } from "../../../lib/keg-par-agent-shared-store.mjs";
 
 function parseJsonLoose(text) {
   try {
@@ -292,6 +293,9 @@ export async function GET() {
       items = attachTapProductHistory(items, [], { unavailable: true });
     }
 
+    const coolerEstimate = await observeSharedKegChanges(items, observedAt).catch(() => ({
+      available: false, changed: false,
+    }));
     const snapshot = {
       updatedAt: new Date().toISOString(),
       items,
@@ -318,6 +322,7 @@ export async function GET() {
       configUpdateRecommended: partial,
       unreachableTaps,
       sharedSnapshotSaved,
+      coolerEstimate,
     });
   } catch (error) {
     try {

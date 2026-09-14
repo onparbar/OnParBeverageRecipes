@@ -415,7 +415,11 @@ function buildDraftLine(item, vendor, sourceDate) {
     unitCost,
     extendedCost,
     excludeFromOrderCost,
-    reason: getLineReason(item),
+    reason: [
+      ...(item.kegDestinations || []).map((destination) => `${destination.cooler}: ${destination.quantity} keg${destination.quantity === 1 ? "" : "s"} (tap ${destination.tapNumber}).`),
+      getLineReason(item),
+    ].filter(Boolean).join(" "),
+    kegDestinations: Array.isArray(item.kegDestinations) ? item.kegDestinations : [],
     currentStockKegs: Math.max(0, Number(item.currentStockKegs) || 0),
     avgWeeklyKegs: Math.max(0, Number(item.avgWeeklyKegs) || 0),
     currentStockOunces: Math.max(0, Number(item.currentStockOunces) || 0),

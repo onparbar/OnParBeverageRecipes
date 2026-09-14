@@ -2,6 +2,7 @@ import {
   getCocktailRecipeYieldOz,
   normalizeCocktailRecipeName,
 } from "./cocktail-recipe-yields.mjs";
+import { beerDeliveryDestination, withBeerDeliveryDestinations } from "./beer-delivery-destinations.mjs";
 
 function number(value) {
   const parsed = Number(value);
@@ -121,6 +122,11 @@ function aggregateTapActions(
       existing.hasKnownPrice = false;
     }
     existing.reasons.push(item.reason);
+    if (category === "beer-kegs") {
+      existing.kegDestinations ||= [];
+      const destination = beerDeliveryDestination(item);
+      if (destination) existing.kegDestinations.push(destination);
+    }
     grouped.set(key, existing);
   });
 
@@ -774,7 +780,17 @@ export function getCurrentWeeklyPlanSnapshot(recommendations, now = new Date()) 
   if (clean(snapshot.generatedAt) !== clean(recommendations?.generatedAt)) return null;
   if (!isRecommendationForOperatingWeek(snapshot.generatedAt, now)) return null;
   if (!hasWeeklyPlanShape(snapshot.plan)) return null;
-  return snapshot;
+  return {
+    ...snapshot,
+    plan: {
+      ...snapshot.plan,
+      orders: {
+        ...snapshot.plan.orders,
+        beerKegs: (snapshot.plan.orders.beerKegs || []).map((line) =>
+          withBeerDeliveryDestinations(line, recommendations.items || [])),
+      },
+    },
+  };
 }
 
 export function groupWeeklyPlanOrdersByVendor(plan = {}) {

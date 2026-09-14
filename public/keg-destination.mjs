@@ -1,4 +1,8 @@
+import { beerDeliveryLabel } from "./beer-delivery-destinations.mjs";
+
 export function kegDestination(item = {}, { cocktail = false } = {}) {
+  const beerLabel = beerDeliveryLabel(item);
+  if (beerLabel) return beerLabel;
   const taps = (Array.isArray(item.tapNumbers) ? item.tapNumbers : [item.tapNumber])
     .map(Number).filter((tap) => Number.isInteger(tap) && tap > 0);
   const isKeg = cocktail || /keg|beer|cocktail/i.test(`${item.unit || ""} ${item.lineType || ""}`);

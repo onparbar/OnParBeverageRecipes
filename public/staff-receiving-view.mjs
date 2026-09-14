@@ -1,4 +1,5 @@
 import { kegDestination } from "./keg-destination.mjs";
+import { resolveBeerReceiptAllocations } from "./beer-delivery-destinations.mjs";
 
 let selectedVendor = "";
 let currentWeek = "";
@@ -137,7 +138,7 @@ export function renderStaffReceiving({ root, tracking, saveReceipts }) {
         rerender();
         return;
       }
-      const summary = currentUnchecked.map((item) => `${item.name}: ${quantity(item)}`).join("\n");
+      const summary = currentUnchecked.map((item) => `${item.name}: ${quantity(item)}${kegDestination(item) ? ` / ${kegDestination(item)}` : ""}`).join("\n");
       if (window.confirm(`Confirm these ${currentUnchecked.length} unchecked items arrived in full:\n\n${summary}\n\nPreviously received items, saved discrepancies, and unsaved difference drafts will not change.`)) {
         void save(currentUnchecked.map(fullReceipt));
       }
@@ -176,12 +177,25 @@ export function renderStaffReceiving({ root, tracking, saveReceipts }) {
     count.type = "number"; count.min = "0"; count.max = "9999"; count.step = "1"; count.inputMode = "numeric"; count.required = true;
     count.value = drafts[key]?.quantity ?? (item.status === "pending" ? "" : String(item.receivedQuantity));
     countLabel.append(count);
+    const coolerInputs = [];
+    const coolerFields = element("div", "receiving-cooler-counts");
+    if (item.lineType === "Beer keg" && item.kegDestinations?.length > 1) {
+      for (const destination of item.kegDestinations) {
+        const label = element("label", "", `${destination.cooler} / tap ${destination.tapNumber}: total accepted`);
+        const input = element("input");
+        input.type = "number"; input.min = "0"; input.max = "9999"; input.step = "1"; input.inputMode = "numeric"; input.required = true;
+        input.value = drafts[key]?.coolers?.[destination.id]
+          ?? String(item.kegAllocations?.find((entry) => entry.destinationId === destination.id)?.quantity || 0);
+        label.append(input); coolerFields.append(label);
+        coolerInputs.push({ destinationId: destination.id, input });
+      }
+    }
     const noteLabel = element("label", "", "Note for the manager (optional)");
     const note = element("textarea"); note.rows = 2; note.maxLength = 100;
     note.value = drafts[key]?.note || ""; noteLabel.append(note);
     const help = element("p", "receiving-help", "Enter the total accepted for this order, including earlier deliveries, not just today's extra. Do not count damaged or substituted products as the original item; describe the substitute in the note for manager review.");
-    const store = () => { drafts[key] = { reason: reason.value, quantity: count.value, note: note.value }; remember(); };
-    [reason, count, note].forEach((input) => { input.disabled = saving; input.addEventListener("input", store); });
+    const store = () => { drafts[key] = { reason: reason.value, quantity: count.value, note: note.value, coolers: Object.fromEntries(coolerInputs.map(({ destinationId, input }) => [destinationId, input.value])) }; remember(); };
+    [reason, count, note, ...coolerInputs.map((entry) => entry.input)].forEach((input) => { input.disabled = saving; input.addEventListener("input", store); });
     const submit = element("button", "primary-button", "Save difference"); submit.type = "submit"; submit.disabled = saving;
     const error = element("p", "receiving-feedback is-error"); error.setAttribute("role", "status");
     form.addEventListener("submit", (event) => {
@@ -192,9 +206,16 @@ export function renderStaffReceiving({ root, tracking, saveReceipts }) {
       store();
       const detail = reason.value === "damaged" && amount === 0 ? "rejected" : `${reason.value}${note.value.trim() ? `: ${note.value.trim()}` : ""}`;
       const status = amount > Number(item.quantity) ? "extra" : detail === "rejected" && amount === 0 ? "rejected" : amount >= Number(item.quantity) ? "received" : amount > 0 ? "partial" : "not-received";
-      void save([{ itemId: item.id, receivedQuantity: amount, status, reason: detail }]);
+      let kegAllocations;
+      if (item.lineType === "Beer keg") {
+        try {
+          kegAllocations = resolveBeerReceiptAllocations(item, amount, coolerInputs.length
+            ? coolerInputs.map(({ destinationId, input }) => ({ destinationId, quantity: Number(input.value) })) : undefined);
+        } catch (issue) { error.textContent = `${issue.message} The cooler quantities must add up to the total received.`; return; }
+      }
+      void save([{ itemId: item.id, receivedQuantity: amount, status, reason: detail, ...(kegAllocations ? { kegAllocations } : {}) }]);
     });
-    form.append(reasonLabel, countLabel, noteLabel, help, submit, error);
+    form.append(reasonLabel, countLabel, coolerFields, noteLabel, help, submit, error);
     exception.append(form); actions.append(exception); card.append(actions); parent.append(card);
   }
   vendor.items.filter((item) => !complete(item)).forEach((item) => itemCard(item, root));

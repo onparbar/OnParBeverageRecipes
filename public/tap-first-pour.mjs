@@ -19,7 +19,7 @@ export function getTapFirstPour(current, snapshot = firstPourSnapshot) {
     && normalizeName(row.product) === name
   ));
   const timestamp = Date.parse(record?.firstRecordedPourAt || "");
-  if (!Number.isFinite(timestamp)) return null;
+  if (!Number.isFinite(timestamp) || timestamp < Date.parse("2026-01-01T00:00:00-05:00")) return null;
   return {
     label: "Earliest PMB pour found",
     date: easternDate.format(timestamp),

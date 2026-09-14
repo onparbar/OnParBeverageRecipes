@@ -12,6 +12,7 @@ import {
   planReceiptInventoryContributions,
 } from "../../../lib/inventory-contributions.mjs";
 import { executeInventoryBackedOperation } from "../../../lib/inventory-backed-operation.mjs";
+import { applyBeerReceiptCounts } from "../../../lib/beer-receipt-counts.mjs";
 
 export const runtime = "nodejs";
 
@@ -121,12 +122,16 @@ export async function POST(request) {
       }
       assertInventoryContributionPlan(inventoryPlan);
     }
+    const receiptState = inventoryPlan ? applyBeerReceiptCounts(
+      state, updatedRecommendations, priorTracking,
+      buildWeeklyOrderTracking(updatedRecommendations), effectiveBody,
+    ) : { ...state, recommendations: updatedRecommendations };
     const persist = async () => {
       const nextRevision = Number(state.revision) + 1;
       return writeParAgentState({
-        ...state,
+        ...receiptState,
         recommendations: {
-          ...updatedRecommendations,
+          ...receiptState.recommendations,
           publishedStateRevision: nextRevision,
         },
       }, {

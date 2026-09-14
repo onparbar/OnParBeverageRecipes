@@ -775,7 +775,6 @@ export default function DashboardPage() {
                     </div>
                     </form>
                   </details>
-                <button className="ghost-button inventory-clear-on-hand-button" id="clear-inventory-on-hand" type="button">Clear on hand</button>
                   </div>
                 <div className="dashboard-inline-status" id="inventory-summary" hidden></div>
                 <div className="inventory-table-wrap">

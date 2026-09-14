@@ -10651,8 +10651,7 @@ function renderTapChangeControls(item, liveRow, displayBrand = item.brand) {
         <summary class="keg-product-edit-trigger" data-keg-key="${escapeHtml(itemKey)}" aria-label="Change product for ${escapeHtml(displayBrand || item.brand)}" aria-expanded="${isEditing}"><strong>${escapeHtml(displayBrand || item.brand)}</strong></summary>
         <div class="tap-product-detail__body">
           ${firstPour ? `<span class="tap-product-detail__label">${escapeHtml(firstPour.label)}</span>
-          <span>${escapeHtml(firstPour.date)}</span>
-          <span class="table-note">${escapeHtml(firstPour.note)}</span>` : ""}
+          <span>${escapeHtml(firstPour.date)}</span>` : ""}
           ${showProductHistory ? `<span class="tap-product-detail__label">${history.source === "confirmed" ? "Swapped in" : "Swap detected"}</span>
           <span>${escapeHtml(formatUpdatedAt(history.changedAt))}</span>
           <span class="tap-product-detail__label">Replaced</span>
@@ -12932,6 +12931,7 @@ async function runKegLevelSyncAttempt() {
     kegLiveLevelsError = kegLiveLevelsStale
       ? getPmbConnectionErrorMessage(new Error(result.liveError || "PMB returned saved readings instead of live levels."), "Live keg levels could not be refreshed.")
       : "";
+    if (result.coolerEstimate?.available && !kegLiveLevelsStale) await loadParAgentState();
     const partial = Boolean(result.partial);
     const installedOnDeckItems = kegLiveLevelsStale || partial ? [] : reconcileInstalledKegOnDeckProducts();
     if (!kegLiveLevelsStale && !partial) savePmbCurrentTapSnapshot();
@@ -14412,7 +14412,6 @@ function renderInventorySummary() {
 
 function bindInventorySummaryEvents() {
   document.querySelector("#reconcile-inventory-snapshot")?.addEventListener("click", reconcileInventorySnapshotConflict);
-  document.querySelector("#clear-inventory-on-hand")?.addEventListener("click", clearAllInventoryOnHand);
   document.querySelector("#initialize-shared-inventory")?.addEventListener(
     "click",
     initializeSharedInventoryFromServiceComputer,
@@ -14649,7 +14648,7 @@ function renderInventorySpeechAssistant() {
           <button class="ghost-button inventory-speech-listen" type="button">${inventorySpeechListening ? "Finish count" : SpeechRecognition ? "Start count" : "Use keyboard dictation"}</button>
           <button class="primary-button inventory-speech-review" type="button">Review</button>
           <button class="ghost-button inventory-speech-clear" type="button">Clear</button>
-          ${kegOnly ? '<button class="ghost-button keg-clear-on-hand-button" id="clear-keg-on-hand" type="button">Clear all on hand</button>' : ""}
+          ${kegOnly ? '<button class="ghost-button keg-clear-on-hand-button" id="clear-keg-on-hand" type="button">Clear all on hand</button>' : `<button class="ghost-button inventory-clear-on-hand-button" id="clear-inventory-on-hand" type="button"${inventorySharedSaving ? " disabled" : ""}>Clear all on hand</button>`}
         </div>
         <p class="sync-status" role="status">${escapeHtml(inventorySpeechMessage || "")}</p>
         ${inventorySpeechProposals.length ? `
@@ -14665,6 +14664,7 @@ function renderInventorySpeechAssistant() {
 
 function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
   assistant.querySelector("#clear-keg-on-hand")?.addEventListener("click", clearAllKegOnHand);
+  assistant.querySelector("#clear-inventory-on-hand")?.addEventListener("click", clearAllInventoryOnHand);
   const transcriptInput = assistant.querySelector(".inventory-speech-transcript");
   assistant.querySelectorAll("[data-speech-scope]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -15023,7 +15023,8 @@ function renderInventoryStockTable(groupedItems) {
       }
       inventoryTable.append(heading);
     }
-    items.forEach((item) => inventoryTable.append(createInventoryRow(item, "stock")));
+    items.filter((item) => clean(item.name).toLowerCase() !== "cold brew")
+      .forEach((item) => inventoryTable.append(createInventoryRow(item, "stock")));
   });
 }
 
