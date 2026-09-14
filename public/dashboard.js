@@ -9,6 +9,7 @@ import { requestLocalAiAnswer } from "./local-ai-client.mjs";
 import { renderSavedWeeklySnapshot } from "./weekly-snapshot-view.mjs";
 import { getSixWeekUsage } from "./six-week-usage.mjs";
 import { getCurrentTapUsage } from "./current-tap-usage.mjs";
+import { reconcileWeeklyUsageData } from "./weekly-usage-reconciliation.mjs";
 import { getTapFirstPour } from "./tap-first-pour.mjs";
 import { mountTapPerformance } from "./tap-performance.mjs";
 import "./operations-learning-ui.mjs";
@@ -290,7 +291,7 @@ const DASHBOARD_STATE_OUTBOX_STORAGE_KEY = "cocktail-dashboard-shared-state-outb
 const EMPLOYEE_SHARED_RECIPE_CACHE_STORAGE_KEY = "cocktail-dashboard-employee-shared-recipes";
 const OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY = "cocktail-dashboard-owner-login-sync-lock";
 const OWNER_LOGIN_SYNC_LOCK_MAX_AGE_MS = 2 * 60 * 1000;
-const ORDER_REHEARSAL_AVAILABLE = true;
+const ORDER_REHEARSAL_AVAILABLE = false;
 const DASHBOARD_STATE_REQUEST_TIMEOUT_MS = 6000;
 const OPERATIONAL_SHARED_REQUEST_TIMEOUT_MS = 8000;
 const PAR_AGENT_RUN_REQUEST_TIMEOUT_MS = 30000;
@@ -3353,11 +3354,17 @@ function bindEvents() {
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
+    void refreshSharedWeeklyUsageForDisplay();
     void refreshWeeklyOrderTracking();
     void refreshDashboardStaffPrepPlan();
   });
+  window.addEventListener("focus", () => {
+    void refreshSharedWeeklyUsageForDisplay();
+  });
   window.setInterval(() => {
-    if (document.visibilityState === "visible") void refreshDashboardStaffPrepPlan();
+    if (document.visibilityState !== "visible") return;
+    void refreshDashboardStaffPrepPlan();
+    void refreshSharedWeeklyUsageForDisplay();
   }, 30_000);
 }
 
@@ -6674,6 +6681,14 @@ function renderDashboardOverview() {
   const usagePerformance = buildWeeklyUsagePerformance(getAnalyticsUsageItems({ includeArchived: false }), {
     category: "all",
     getFullOunces: getWeeklyUsageFullOunces,
+    getCurrentAssignment: (item) => {
+      const live = [...kegLiveLevels.values()].find((row) => (
+        toNumber(row.tapNumber) === toNumber(item.tapNumber)
+        && toNumber(row.plu) > 0 && toNumber(row.plu) === toNumber(item.plu)
+        && hasExactWeeklyUsageProductNameMatch(row.name || row.tapProduct, item.name)
+      ));
+      return live ? { ...item, productHistory: live.productHistory || item.productHistory } : item;
+    },
     limit: 10,
   });
   const pricingAdvisor = buildPricingAdvisor(
@@ -8591,19 +8606,15 @@ function renderKegLevels() {
   }).length;
   const recipeCoverage = getWallCocktailRecipeCoverage();
 
-  kegSummary.innerHTML = `
-    <h2>Keg Levels</h2>
-    <div class="sync-panel sync-panel--keg-actions">
+  kegSummary.hidden = true;
+  kegSummary.innerHTML = "";
+  const kegRepairActions = `
+    <div class="sync-panel sync-panel--keg-actions keg-wall-repair-actions">
       <div class="sync-actions sync-actions--keg-primary">
       <button class="ghost-button" id="send-keg-config-update" type="button"${kegSyncLoading || kegConfigUpdateRunning ? " disabled" : ""}>${kegConfigUpdateRunning ? "Updating..." : "Repair tap connection"}</button>
       </div>
       <div id="keg-repair-status" role="status" aria-live="polite" aria-atomic="true">${kegRepairStatus ? `<p class="sync-status${kegRepairStatus.warning ? " sync-status--warning" : ""}"><strong>${escapeHtml(kegRepairStatus.message)}</strong>${kegRepairStatus.completedAt ? `<br>Completed ${escapeHtml(formatUpdatedAt(kegRepairStatus.completedAt))}.` : ""}</p>` : ""}</div>
       ${kegSyncAttempted && !kegConfigUpdateRunning && (kegLiveLevelsStale || liveCount < totalTaps || kegLiveLevelsError) ? `<p class="sync-status" role="status">${kegLiveLevelsStale || kegLiveLevelsError ? "Waiting for fresh PMB readings." : `${formatNumber(liveCount)} of ${formatNumber(totalTaps)} taps responding.`} Retrying automatically.</p>` : ""}
-    </div>
-    <div class="keg-summary-stats">
-      <div class="summary-line"><span>Total taps</span><strong>${totalTaps}</strong></div>
-      <div class="summary-line"><span>Live levels found</span><strong>${liveCount}</strong></div>
-      ${recipeCoverage.missing.length ? `<div class="summary-line"><span>Missing recipes</span><strong>${recipeCoverage.missing.length}</strong></div>` : ""}
     </div>
     ${recipeCoverage.missing.length ? `
       <div class="recipe-coverage-summary">
@@ -8611,7 +8622,7 @@ function renderKegLevels() {
         <button class="mini-button" id="view-missing-recipes" type="button">View missing recipes</button>
       </div>
     ` : ""}
-    ${renderParAgentPanel()}
+    ${parAgentError || parAgentState?.initialized === false ? renderParAgentPanel() : ""}
   `;
 
   const selectedWall = wallNames.find((wallName) => wallName.toLowerCase() === activeKegWallFilter);
@@ -8636,7 +8647,7 @@ function renderKegLevels() {
   const visibleWallBlocks = renderKegWallBlock(
     selectedWall || "All",
     selectedWall ? sortedTaps.filter((item) => item.wall === selectedWall) : sortedTaps,
-    { hideHeader: true, headerContent: wallHeader },
+    { hideHeader: true, headerContent: wallHeader + kegRepairActions },
   );
   kegWalls.dataset.activeWallFilter = activeKegWallFilter;
   kegWalls.innerHTML = `
@@ -8874,12 +8885,14 @@ function syncWeeklyUsageWithCurrentPmbTaps(rawTaps = []) {
     id: item.id,
     tapNumber: item.tapNumber,
     name: item.name,
+    productHistory: item.productHistory || null,
     history: (item.history || []).map((entry) => entry.label),
   })));
   const nextSignature = JSON.stringify(nextItems.map((item) => ({
     id: item.id,
     tapNumber: item.tapNumber,
     name: item.name,
+    productHistory: item.productHistory || null,
     history: (item.history || []).map((entry) => entry.label),
   })));
   changed = previousSignature === nextSignature ? 0 : nextItems.length;
@@ -8965,6 +8978,7 @@ function buildWeeklyUsageItemFromAssignment(assignment, matches = []) {
     type: assignment.type || best.type || "",
     plu: toNumber(assignment.plu) || toNumber(best.plu),
     templateBrand: assignment.templateBrand || best.templateBrand || "",
+    productHistory: assignment.productHistory || best.productHistory || null,
     displayUnit,
     isLiquorShot: displayUnit === "oz",
     rawOz: 0,
@@ -9043,6 +9057,7 @@ function normalizeCurrentTapAssignment(source) {
     wall: clean(source?.wall),
     type: clean(source?.type),
     templateBrand: clean(source?.templateBrand || source?.matchedBrand),
+    productHistory: source?.productHistory || null,
   };
 }
 
@@ -9595,6 +9610,59 @@ function applySharedWeeklyUsageState(state) {
   }
 }
 
+let weeklyUsageDisplayRefreshPromise = null;
+
+function refreshSharedWeeklyUsageForDisplay() {
+  if (weeklyUsageDisplayRefreshPromise) return weeklyUsageDisplayRefreshPromise;
+  // A saved report conflict needs a field-level rebase, not a permanent pause.
+  // The queue preserves unresolved measurements and uses revision-checked writes.
+  if (!isEmployeeDashboard && weeklyUsageSharedInitialized && weeklyUsageSharedOutbox?.conflict
+    && !weeklyUsageSharedSaving && !weeklyUsageSharedPendingWrites
+    && weeklyUsageSharedSaveTimer === null && !weeklyUsageSyncLoading
+    && !weeklyUsageApplyingSharedState && !unifiedPmbRefreshRunning) {
+    weeklyUsageDisplayRefreshPromise = queueSharedWeeklyUsageSave().finally(() => {
+      weeklyUsageDisplayRefreshPromise = null;
+    });
+    return weeklyUsageDisplayRefreshPromise;
+  }
+  const hasLocalWork = () => weeklyUsageSharedOutbox
+    || weeklyUsageSharedSaving
+    || weeklyUsageSharedPendingWrites > 0
+    || weeklyUsageSharedSaveTimer !== null
+    || weeklyUsageSyncLoading
+    || weeklyUsageApplyingSharedState
+    || unifiedPmbRefreshRunning;
+  if (isEmployeeDashboard || !weeklyUsageSharedInitialized || hasLocalWork()) {
+    return Promise.resolve(false);
+  }
+
+  const revisionAtStart = weeklyUsageSharedRevision;
+  weeklyUsageDisplayRefreshPromise = (async () => {
+    try {
+      const state = await requestSharedWeeklyUsage();
+      // A read must never replace edits or another refresh that arrived in flight.
+      if (hasLocalWork() || weeklyUsageSharedRevision !== revisionAtStart
+        || !state.initialized || !(Number(state.revision) > revisionAtStart)) return false;
+      applySharedWeeklyUsageState(state);
+      weeklyUsageSharedSaveError = "";
+      weeklyUsageSharedMessage = "Shared Weekly Usage is current.";
+      await dashboardRenderCoordinator.batch(() => {
+        renderWeeklyUsage();
+        renderOnParInsights();
+        renderDashboardOverview();
+      });
+      return true;
+    } catch {
+      // Keep the last saved report during a transient read failure. The next
+      // visible refresh retries without discarding data or creating a write.
+      return false;
+    } finally {
+      weeklyUsageDisplayRefreshPromise = null;
+    }
+  })();
+  return weeklyUsageDisplayRefreshPromise;
+}
+
 async function loadSharedWeeklyUsageState() {
   try {
     const state = await requestSharedWeeklyUsage();
@@ -9687,7 +9755,7 @@ function tryRebaseWeeklyUsageOutbox(state) {
   }
   const merged = entry.baseRevision === Number(state.revision)
     ? { ok: true, data: entry.payload.data }
-    : mergeOperationalRecord(entry.payload.baseData, entry.payload.data, state.data);
+    : reconcileWeeklyUsageData(entry.payload.baseData, entry.payload.data, state.data);
   if (!merged.ok) {
     weeklyUsageSharedSaveError = "Weekly usage differs from the shared report. Your local report is preserved; no newer report was overwritten.";
     weeklyUsageSharedOutbox = markOperationalOutboxFailure(entry, {

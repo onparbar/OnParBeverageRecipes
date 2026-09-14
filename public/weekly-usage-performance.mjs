@@ -1,5 +1,5 @@
 import { isUsableWeeklyUsageEntry } from "./weekly-usage-evidence.mjs";
-import { getConfirmedTapUsageStart } from "./confirmed-tap-starts.mjs";
+import { getTapAssignmentUsageStart } from "./confirmed-tap-starts.mjs";
 
 const PERFORMANCE_CATEGORIES = new Set(["all", "beer", "cocktail", "liquor"]);
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -176,6 +176,7 @@ export function buildWeeklyUsagePerformance(
   {
     category = "all",
     getFullOunces = () => 0,
+    getCurrentAssignment = (item) => item,
     limit = 10,
   } = {},
 ) {
@@ -203,7 +204,7 @@ export function buildWeeklyUsagePerformance(
   const eligibleItems = preparedItems.filter(({ item }) => (
     normalizedCategory === "all" || getWeeklyUsagePerformanceCategory(item) === normalizedCategory
   )).filter(({ item }) => {
-    const startDate = getConfirmedTapUsageStart(item);
+    const startDate = getTapAssignmentUsageStart(getCurrentAssignment(item) || item);
     // A product introduced after the reporting week has no usage to capture
     // for that week. Do not count it as missing or create a historical zero.
     return !startDate || !latestPeriod
@@ -211,6 +212,9 @@ export function buildWeeklyUsagePerformance(
   });
 
   const tapRows = eligibleItems.map(({ item, history }) => {
+    const startDate = getTapAssignmentUsageStart(getCurrentAssignment(item) || item);
+    const previousExpected = !startDate || !previousPeriod
+      || new Date(`${startDate}T00:00:00`).getTime() < previousPeriod.startTime + WEEK_MS;
     const currentEntry = latestPeriod
       ? history.find((record) => record.startTime === latestPeriod.startTime)?.entry || null
       : null;
@@ -236,6 +240,7 @@ export function buildWeeklyUsagePerformance(
       previousOz,
       currentEntryFound: Boolean(currentEntry),
       previousEntryFound: Boolean(previousEntry),
+      previousExpected,
       hasOlderPmbUsage,
       trendOz: currentOz !== null && previousOz !== null ? currentOz - previousOz : null,
       trendPercent: currentOz !== null && previousOz !== null && previousOz > 0
@@ -253,14 +258,14 @@ export function buildWeeklyUsagePerformance(
   const currentComplete = eligibleItems.length > 0 && currentTapRows.length === eligibleItems.length;
   const previousComplete = Boolean(previousPeriod)
     && eligibleItems.length > 0
-    && previousTapRows.length === eligibleItems.length;
+    && tapRows.filter((row) => row.previousExpected).every((row) => row.previousOz !== null);
   const trendComplete = currentComplete && previousComplete;
   const totalCurrentOz = currentTapRows.reduce((total, row) => total + row.currentOz, 0);
   const totalPreviousOz = previousTapRows.reduce((total, row) => total + row.previousOz, 0);
   const comparableCurrentOz = comparableTapRows.reduce((total, row) => total + row.currentOz, 0);
   const comparablePreviousOz = comparableTapRows.reduce((total, row) => total + row.previousOz, 0);
   const excludedComparisonTaps = tapRows
-    .filter((row) => row.currentOz === null || row.previousOz === null)
+    .filter((row) => row.currentOz === null || (row.previousExpected && row.previousOz === null))
     .map((row) => ({
       tapNumber: row.tapNumber,
       name: row.name,

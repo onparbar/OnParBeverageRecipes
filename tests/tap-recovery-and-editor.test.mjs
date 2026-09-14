@@ -51,6 +51,7 @@ test("all taps render in one numerically sorted list without wall headers or dup
     dashboardRenderCoordinator: { defer: () => false }, kegSummary: { innerHTML: "" }, kegWalls: walls,
     kegWallItems, getKegLiveRow: () => ({ levelAvailable: true, fillLevelPercent: 50 }),
     getWallCocktailRecipeCoverage: () => ({ missing: [] }), kegSyncLoading: false, kegConfigUpdateRunning: false,
+    parAgentError: "", parAgentState: { initialized: true },
     kegRepairStatus: null, kegSyncAttempted: true, kegLiveLevelsStale: false, kegLiveLevelsError: "", pmbMorningRepairMessage: "",
     formatNumber: String, escapeHtml: String, renderParAgentPanel: () => "", activeKegWallFilter: "all", toNumber: Number,
     renderKegWallBlock: (name, items, options) => { calls.push({ name, items, options }); return `${options.headerContent || ""}tap-table`; },
@@ -62,6 +63,8 @@ test("all taps render in one numerically sorted list without wall headers or dup
   assert.equal(calls[0].options.hideHeader, true);
   assert.deepEqual(Array.from(calls[0].items, (item) => item.tapNumber), Array.from({ length: 102 }, (_, i) => i + 1));
   assert.match(walls.innerHTML, /102 Taps/);
+  assert.ok(walls.innerHTML.indexOf("send-keg-config-update") > walls.innerHTML.indexOf("102 Taps"));
+  assert.ok(walls.innerHTML.indexOf("send-keg-config-update") < walls.innerHTML.indexOf("tap-table"));
   assert.doesNotMatch(walls.innerHTML, /All Tap|keg-wall-filter__count/);
 });
 

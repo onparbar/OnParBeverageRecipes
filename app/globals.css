@@ -4268,8 +4268,16 @@ td {
 }
 
 #keg-levels-panel .keg-layout {
-  grid-template-columns: minmax(190px, 220px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+}
+
+#keg-levels-panel .keg-summary[hidden] {
+  display: none;
+}
+
+.keg-wall-repair-actions {
+  margin-bottom: 16px;
 }
 
 #keg-levels-panel .keg-summary {
