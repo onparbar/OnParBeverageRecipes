@@ -37,7 +37,10 @@ function mergeCapture(left, right) {
 
 export function reconcileWeeklyUsageData(base, local, remote) {
   const conflicts = [];
-  if (![base, local, remote].every(object)) return { ok: false, data: null, conflicts: ["missing-baseline"] };
+  const conflictDetails = [];
+  const preview = (value) => Array.isArray(value) ? { records: value.length }
+    : object(value) ? { fields: Object.keys(value).slice(0, 12) } : value ?? null;
+  if (![base, local, remote].every(object)) return { ok: false, data: null, conflicts: ["missing-baseline"], conflictDetails: [{ path: "missing-baseline", base: Boolean(base), local: Boolean(local), shared: Boolean(remote) }] };
 
   function merge(b, l, r, path, key = "") {
     if (key === "capture" && sameMeasurement(l, r)) return mergeCapture(l, r);
@@ -83,6 +86,7 @@ export function reconcileWeeklyUsageData(base, local, remote) {
       return result;
     }
     conflicts.push(path || "data");
+    conflictDetails.push({ path: path || "data", base: preview(b), local: preview(l), shared: preview(r) });
     return undefined;
   }
 
@@ -95,5 +99,5 @@ export function reconcileWeeklyUsageData(base, local, remote) {
     if (taps.has(tap)) conflicts.push(`activeItems:tap-${tap}`);
     taps.add(tap);
   }
-  return { ok: conflicts.length === 0, data: conflicts.length ? null : data, conflicts };
+  return { ok: conflicts.length === 0, data: conflicts.length ? null : data, conflicts, conflictDetails };
 }

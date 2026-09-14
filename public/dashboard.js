@@ -1073,6 +1073,7 @@ let weeklyUsageSharedInitialized = false;
 let weeklyUsageSharedProvisioned = false;
 let weeklyUsageSharedSaving = false;
 let weeklyUsageSharedSaveError = "";
+let weeklyUsageConflictDetails = [];
 let weeklyUsageSharedMessage = "Loading shared Weekly Usage...";
 let weeklyUsageApplyingSharedState = false;
 let weeklyUsageSharedSaveTimer = null;
@@ -9314,6 +9315,7 @@ function renderWeeklyUsage() {
       <p class="sync-status">${escapeHtml(weeklyUsageSyncMessage)}</p>
       ${weeklyUsageSharedProvisioned && !weeklyUsageSharedInitialized ? '<button class="ghost-button" id="initialize-shared-weekly-usage" type="button">Import from service computer</button>' : ""}
       ${!weeklyUsageSharedInitialized || weeklyUsageSharedSaveError ? `<p class="sync-status">${escapeHtml(weeklyUsageSharedMessage)}</p>` : ""}
+      ${weeklyUsageSharedOutbox?.conflict && weeklyUsageConflictDetails.length ? `<details id="weekly-usage-recovery-details"><summary>Report recovery details</summary><pre>${escapeHtml(JSON.stringify(weeklyUsageConflictDetails.slice(0, 30), null, 2))}</pre></details>` : ""}
     </div>
     ${renderWeeklyUsageArchiveSummary()}
   `;
@@ -9757,6 +9759,7 @@ function tryRebaseWeeklyUsageOutbox(state) {
     ? { ok: true, data: entry.payload.data }
     : reconcileWeeklyUsageData(entry.payload.baseData, entry.payload.data, state.data);
   if (!merged.ok) {
+    weeklyUsageConflictDetails = merged.conflictDetails?.length ? merged.conflictDetails : merged.conflicts.map((path) => ({ path }));
     weeklyUsageSharedSaveError = "Weekly usage differs from the shared report. Your local report is preserved; no newer report was overwritten.";
     weeklyUsageSharedOutbox = markOperationalOutboxFailure(entry, {
       conflict: true, currentRevision: state.revision, message: weeklyUsageSharedSaveError,
@@ -9768,6 +9771,7 @@ function tryRebaseWeeklyUsageOutbox(state) {
     ...entry, baseRevision: Number(state.revision), conflict: false, currentRevision: null, lastError: "",
     payload: { ...entry.payload, data: merged.data, baseData: cloneWeeklyUsageValue(state.data) },
   };
+  weeklyUsageConflictDetails = [];
   weeklyUsageSharedRevision = Number(state.revision);
   weeklyUsageSharedBaseline = cloneWeeklyUsageValue(state.data);
   weeklyUsageSharedSaveError = "";
