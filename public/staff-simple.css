@@ -44,7 +44,17 @@
   letter-spacing: .12em;
   text-transform: uppercase;
 }
-.staff-recipe-shell[data-staff-dashboard] .topbar-actions { width: auto; margin: 0; }
+.staff-recipe-shell[data-staff-dashboard] .topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: auto;
+  max-width: 100%;
+  margin: 0 auto;
+  text-align: center;
+}
 .staff-recipe-shell[data-staff-dashboard] .logout-link { min-height: 44px; padding: 10px 16px; border-radius: 10px; }
 
 .staff-recipe-shell[data-staff-dashboard] .staff-section-tabs {

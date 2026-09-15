@@ -4,10 +4,62 @@ const dollars = value => value === null ? 'Unavailable' : new Intl.NumberFormat(
 const amount = value => new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
 const sumKnown = (rows, field) => rows.length && rows.every(r => r[field] !== null && r[field] !== undefined) ? rows.reduce((sum, r) => sum + r[field], 0) : null;
 
+import { fillDailyReportCost } from './daily-report-costs.mjs';
+
+function formatReportDay(value) {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime())) return value;
+  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' }).format(date);
+  const shortDate = new Intl.DateTimeFormat('en-US', { month: 'numeric', day: 'numeric', year: '2-digit', timeZone: 'UTC' }).format(date);
+  return `${weekday}- ${shortDate}`;
+}
+
+function reportWall(row) {
+  const wallForTap = value => {
+    const tap = Number(value);
+    if (!Number.isInteger(tap)) return '';
+    if (tap >= 1 && tap <= 20) return 'patio';
+    if (tap >= 21 && tap <= 72) return 'main';
+    if (tap >= 73 && tap <= 102) return 'karaoke';
+    return '';
+  };
+  const recordedWall = wallForTap(row.tapNumber);
+  if (recordedWall) return recordedWall;
+  // Product suffixes preserve wall identity in older PMB exports without taps.
+  const suffix = String(row.product || '').match(/\s+([123])\s*$/)?.[1];
+  return ({ '1': 'main', '2': 'karaoke', '3': 'patio' })[suffix]
+    || wallForTap(row.suggestedTapNumber);
+}
+
 function renderPerformanceGroup(group) {
-  const tap = group.displayTapNumber ? `Tap ${group.displayTapNumber}` : 'Tap not recorded';
-  const heading = `<strong>${escape(tap)}</strong>`;
-  return `<tr><td>${escape(group.day)}</td><td>${heading}</td><td>${escape(group.product)}</td><td>${amount(group.members.reduce((sum, row) => sum + row.volumeOz, 0))}</td><td>${dollars(sumKnown(group.members, 'revenue'))}</td><td>${dollars(sumKnown(group.members, 'estimatedCost'))}</td><td>${dollars(sumKnown(group.members, 'estimatedGrossProfit'))}</td></tr>`;
+  return `<tr><td>${escape(group.product)}</td><td>${amount(group.members.reduce((sum, row) => sum + row.volumeOz, 0))}</td><td>${dollars(sumKnown(group.members, 'estimatedGrossProfit'))}</td></tr>`;
+}
+
+function exportPerformanceCsv(groups, startDate, endDate) {
+  const csvCell = value => {
+    let text = value === null || value === undefined ? '' : String(value);
+    // Keep product names from being interpreted as spreadsheet formulas.
+    if (typeof value === 'string' && /^[\s]*[=+@-]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+  const rows = [['Product', 'Ounces', 'Estimated gross profit']];
+  for (const group of groups) {
+    const members = group.members;
+    rows.push([
+      group.product,
+      members.reduce((sum, row) => sum + row.volumeOz, 0),
+      sumKnown(members, 'estimatedGrossProfit'),
+    ]);
+  }
+  const csv = '\uFEFF' + rows.map(row => row.map(csvCell).join(',')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `daily-sales-profit-${startDate}-to-${endDate}.csv`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function mountTapPerformance(root, getCosts) {
@@ -16,11 +68,12 @@ export function mountTapPerformance(root, getCosts) {
   const yesterday = new Date(`${day(new Date())}T12:00:00Z`); yesterday.setUTCDate(yesterday.getUTCDate() - 1);
   const end = day(yesterday), first = new Date(yesterday); first.setUTCDate(first.getUTCDate() - 6);
   let reports = [], missingDays = [], running = false, stop = false;
-  root.innerHTML = `<header class="tap-performance-heading"><div><p class="eyebrow">Daily reporting</p><h2>Sales &amp; profit</h2></div></header>
+  let sortColumn = 'product', sortDirection = 'asc';
+  root.innerHTML = `<header class="tap-performance-heading"><div><h2>Daily Sales &amp; Profit</h2></div></header>
     <form class="tap-performance-filters">
       <label>From<input name="start" type="date" value="${day(first)}" max="${end}" required></label>
       <label>Through<input name="end" type="date" value="${end}" max="${end}" required></label>
-      <label>Tap<select name="tap"><option value="all">All taps</option></select></label>
+      <label>Wall<select name="tap"><option value="all">All taps</option><option value="patio">Patio wall</option><option value="main">Main wall</option><option value="karaoke">Karaoke wall</option></select></label>
       <button class="primary-button" type="submit">Show results</button>
       <button class="ghost-button" type="button" data-stop hidden>Stop after this day</button>
     </form>
@@ -32,28 +85,70 @@ export function mountTapPerformance(root, getCosts) {
   const say = text => { status.textContent = text; status.hidden = !text; };
   function render() {
     const selected = input('tap').value;
-    const all = reports.flatMap(report => report.rows.map(row => ({ ...row, day: report.day, coverage: report.coverage })));
-    const taps = [...new Set(all.map(r => r.tapNumber || r.suggestedTapNumber).filter(Boolean))].sort((a, b) => a - b);
-    input('tap').innerHTML = `<option value="all">All taps</option>${taps.map(t => `<option value="${t}">Tap ${t}</option>`).join('')}<option value="unknown">Unassigned</option>`;
-    input('tap').value = selected === 'all' || selected === 'unknown' || taps.includes(Number(selected)) ? selected : 'all';
-    const filtered = all.filter(r => input('tap').value === 'all' || (input('tap').value === 'unknown' ? !(r.tapNumber || r.suggestedTapNumber) : Number(input('tap').value) === (r.tapNumber || r.suggestedTapNumber)));
+    const costs = getCosts() || [];
+    const all = reports.flatMap(report => report.rows.map(row => ({ ...fillDailyReportCost(row, costs), day: report.day, coverage: report.coverage })));
+    const filtered = all.filter(row => selected === 'all' || reportWall(row) === selected);
     const groups = new Map();
     for (const row of filtered) {
-      const date = row.day;
-      const displayTapNumber = row.tapNumber || null;
       const productIdentity = String(row.product || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
-      // Group the same displayed tap/product once, but retain every member's
-      // assignment evidence and cost snapshot. A display merge is not verification.
-      const key = JSON.stringify([date, displayTapNumber, row.plu, productIdentity]);
-      const group = groups.get(key) || { ...row, day: date, displayTapNumber, members: [] };
+      // Total each named product across the selected dates and wall, retaining
+      // each underlying row's cost and sales evidence for the profit calculation.
+      const key = productIdentity;
+      const group = groups.get(key) || { ...row, members: [] };
       group.members.push(row); groups.set(key, group);
     }
     const partial = reports.filter(r => r.coverage !== 'matching-overlapping-reads').length;
+    const columns = [
+      ['product', 'Product'], ['volumeOz', 'Ounces'], ['estimatedGrossProfit', 'Est. gross profit'],
+    ];
+    const sortValue = group => sortColumn === 'day' || sortColumn === 'product'
+      ? group[sortColumn]
+      : sortColumn === 'volumeOz'
+        ? group.members.reduce((sum, row) => sum + row.volumeOz, 0)
+        : sumKnown(group.members, sortColumn);
+    const orderedGroups = [...groups.values()].sort((a, b) => {
+      const left = sortValue(a), right = sortValue(b);
+      // Missing figures stay at the bottom in either direction.
+      if (left == null && right != null) return 1;
+      if (right == null && left != null) return -1;
+      const comparison = left == null && right == null ? 0
+        : typeof left === 'number' ? left - right
+          : String(left).localeCompare(String(right), 'en', { numeric: true, sensitivity: 'base' });
+      return comparison * (sortDirection === 'asc' ? 1 : -1) || a.product.localeCompare(b.product);
+    });
+    const columnHeaders = columns.map(([key, label]) => {
+      const active = sortColumn === key;
+      const nextDirection = active ? (sortDirection === 'asc' ? 'desc' : 'asc') : key === 'product' ? 'asc' : 'desc';
+      return `<th scope="col" aria-sort="${active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}"><button type="button" class="tap-performance-sort" data-sort="${key}" aria-label="Sort ${label} ${nextDirection === 'asc' ? 'ascending' : 'descending'}">${label} <span aria-hidden="true">${active ? (sortDirection === 'asc' ? '&#8593;' : '&#8595;') : '&#8597;'}</span></button></th>`;
+    }).join('');
+    const missingCosts = [...new Set(filtered.filter(row => !Number.isFinite(row.estimatedCost)).map(row => row.product))];
+    const missingRevenue = filtered.some(row => !Number.isFinite(row.revenue));
+    const profit = sumKnown(filtered, 'estimatedGrossProfit');
+    const profitLabel = profit !== null ? dollars(profit) : missingCosts.length ? 'Pricing needed' : missingRevenue ? 'Sales verification needed' : 'No pours';
+    const costNote = missingCosts.length
+      ? `<p class="table-note">Pricing needed for: ${missingCosts.map(escape).join(', ')}. These costs are not treated as zero.</p>` : '';
+    const estimateNote = filtered.some(row => row.currentCostEstimate)
+      ? '<p class="table-note">Current product costs estimate missing historical costs; saved historical costs are preserved.</p>' : '';
     root.querySelector('[data-results]').innerHTML = `<p class="table-note">${reports.length} saved days · ${missingDays.length} missing days · ${partial} unverified or partial days. Totals below cover captured records only.</p>
-      <div class="tap-performance-totals"><article><span>Captured ounces</span><strong>${amount(filtered.reduce((s, r) => s + r.volumeOz, 0))}</strong></article><article><span>PMB recorded sales</span><strong>${dollars(sumKnown(filtered, 'revenue'))}</strong></article><article><span>Estimated gross profit</span><strong>${dollars(sumKnown(filtered, 'estimatedGrossProfit'))}</strong></article></div>
-      <div class="inventory-table-wrap" tabindex="0" role="region" aria-label="Tap sales and profit details"><table class="inventory-table"><thead><tr><th>Day</th><th>Tap</th><th>Product</th><th>Ounces</th><th>PMB sales</th><th>Est. cost</th><th>Est. gross profit</th></tr></thead><tbody>
-      ${[...groups.values()].sort((a, b) => a.day.localeCompare(b.day) || (a.displayTapNumber || 9999) - (b.displayTapNumber || 9999)).map(renderPerformanceGroup).join('') || `<tr><td colspan="7">No captured pours for this selection. Missing data is not zero usage.</td></tr>`}
+      <div class="tap-performance-totals"><article><span>Captured ounces</span><strong>${amount(filtered.reduce((s, r) => s + r.volumeOz, 0))}</strong></article><article><span>PMB recorded sales</span><strong>${dollars(sumKnown(filtered, 'revenue'))}</strong></article><article><span>Estimated gross profit</span><strong>${profitLabel}</strong></article></div>
+      ${costNote}${estimateNote}
+      <p class="table-note">${escape(formatReportDay(input('start').value))} to ${escape(formatReportDay(input('end').value))}</p>
+      <button type="button" class="ghost-button" data-export-report${filtered.length ? '' : ' disabled'}>Export CSV</button>
+      <div class="inventory-table-wrap" tabindex="0" role="region" aria-label="Tap sales and profit details"><table class="inventory-table"><thead><tr>${columnHeaders}</tr></thead><tbody>
+      ${orderedGroups.map(renderPerformanceGroup).join('') || `<tr><td colspan="3">No captured pours for this selection. Missing data is not zero usage.</td></tr>`}
       </tbody></table></div>`;
+    root.querySelector('[data-export-report]').addEventListener('click', () => {
+      exportPerformanceCsv(orderedGroups, input('start').value, input('end').value);
+    });
+    root.querySelectorAll('[data-sort]').forEach(button => button.addEventListener('click', () => {
+      const column = button.dataset.sort;
+      sortDirection = sortColumn === column ? (sortDirection === 'asc' ? 'desc' : 'asc') : column === 'product' ? 'asc' : 'desc';
+      sortColumn = column;
+      const scrollLeft = root.querySelector('.inventory-table-wrap').scrollLeft;
+      render();
+      root.querySelector('.inventory-table-wrap').scrollLeft = scrollLeft;
+      root.querySelector(`[data-sort="${column}"]`).focus({ preventScroll: true });
+    }));
   }
   async function request(url, options = {}) {
     const response = await fetch(url, { cache: 'no-store', ...options, signal: AbortSignal.timeout(100000) });

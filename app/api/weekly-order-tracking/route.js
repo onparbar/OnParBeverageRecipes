@@ -7,11 +7,11 @@ import {
 } from "../../../lib/weekly-order-tracking.mjs";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 import {
-  applyInventoryContributionPlan,
   assertInventoryContributionPlan,
   planReceiptInventoryContributions,
 } from "../../../lib/inventory-contributions.mjs";
 import { executeInventoryBackedOperation } from "../../../lib/inventory-backed-operation.mjs";
+import { recoverPendingInventoryUpdates } from "../../../lib/keg-par-agent-shared-store.mjs";
 import { applyBeerReceiptCounts } from "../../../lib/beer-receipt-counts.mjs";
 import { archiveWeeklyOrderPlacement } from "../../../lib/weekly-order-snapshot.mjs";
 
@@ -138,6 +138,7 @@ export async function POST(request) {
       }, {
         expectedRevision: state.revision,
         role,
+        inventoryPlan,
       });
     };
     let saved;
@@ -155,7 +156,7 @@ export async function POST(request) {
         plan: inventoryPlan,
         assertPlan: assertInventoryContributionPlan,
         persist,
-        applyInventory: (plan) => applyInventoryContributionPlan(plan, role),
+        applyInventory: () => recoverPendingInventoryUpdates(),
         recordActivity: (savedState) => recordDashboardActivity({
           area: "Orders",
           action: "received vendor delivery",

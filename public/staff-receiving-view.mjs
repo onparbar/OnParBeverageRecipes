@@ -96,7 +96,6 @@ export function renderStaffReceiving({ root, tracking, saveReceipts }) {
   top.append(title);
   root.append(top);
   if (vendor.deliveryNote) root.append(element("p", "receiving-note", vendor.deliveryNote));
-  root.append(element("p", "receiving-help", "Receipts save immediately. Short deliveries stay open."));
 
   async function save(lines) {
     if (saving) return;
@@ -148,22 +147,29 @@ export function renderStaffReceiving({ root, tracking, saveReceipts }) {
   }
   function itemCard(item, parent) {
     const key = `${currentWeek}:${item.id}`;
-    const card = element("article", `receiving-item${complete(item) ? " is-received" : ""}`);
+    const card = element("article", `receiving-item receiving-item--compact${complete(item) ? " is-received" : ""}`);
     const info = element("div", "receiving-item-info");
     info.append(element("h4", "", item.name));
     const units = Number(item.inventoryUnitsPerReceiptUnit) || 1;
-    info.append(element("p", "receiving-quantity", `${quantity(item)}${units > 1 ? ` / ${Number(item.quantity) * units} individual units` : ""}`));
     const destination = kegDestination(item);
-    if (destination) info.append(element("p", "receiving-destination", destination));
+    const coolers = [...new Set((item.kegDestinations || []).map((entry) => clean(entry.cooler)).filter(Boolean))];
+    const detail = coolers.length === 1
+      ? `${quantity(item)} / ${coolers[0]}`
+      : destination && /\bkegs?\b/i.test(destination)
+        ? destination
+        : `${quantity(item)}${destination ? ` / ${destination}` : ""}`;
+    const metadata = element("p", "receiving-item-meta", `${detail}${units > 1 ? ` / ${Number(item.quantity) * units} individual units` : ""}`);
+    if (destination) metadata.title = destination;
+    info.append(metadata);
     if (item.status !== "pending") {
       info.append(element("p", "receiving-saved", `${Number(item.receivedQuantity) || 0} of ${Number(item.quantity)} received${item.handledBy ? ` / ${item.handledBy}` : ""}${item.reason ? ` / ${item.reason}` : ""}`));
     }
     card.append(info);
     const actions = element("div", "receiving-item-actions");
-    if (!complete(item)) actions.append(button(item.status === "pending" ? "Received as ordered" : "All remaining arrived", () => { void save([fullReceipt(item)]); }));
+    if (!complete(item)) actions.append(button(item.status === "pending" ? "Received" : "Receive remaining", () => { void save([fullReceipt(item)]); }));
     const exception = element("details", "receiving-exception");
     exception.open = Boolean(drafts[key]);
-    exception.append(element("summary", "", complete(item) ? "Correct this receipt" : "Something's different"));
+    exception.append(element("summary", "", complete(item) ? "Edit receipt" : "Report a difference"));
     const form = element("form", "receiving-exception-form");
     const reasonLabel = element("label", "", "What happened?");
     const reason = element("select");

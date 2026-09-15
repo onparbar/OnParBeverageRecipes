@@ -21,6 +21,20 @@
 .receiving-history { border-top: 1px solid #d4dfd8; padding-top: 10px; }
 .receiving-history > .receiving-item, .receiving-history > button { margin-top: 10px; }
 .receiving-item.is-received { background: #f2f6f1; }
+.staff-recipe-shell[data-staff-dashboard] .receiving-item.receiving-item--compact {
+  grid-template-columns: minmax(0, 1fr) minmax(145px, auto);
+  align-items: start;
+  gap: 12px 18px;
+  padding: 16px 18px;
+}
+.receiving-item--compact .receiving-item-info { gap: 4px; }
+.receiving-item--compact .receiving-item-meta { color: var(--muted); font-size: .95rem; line-height: 1.5; }
+.receiving-item--compact .receiving-item-actions { gap: 2px; }
+.receiving-item--compact .receiving-exception > summary { font-size: .85rem; font-weight: 500; padding: 10px 0; }
+.receiving-item--compact:has(.receiving-exception[open]) { grid-template-columns: minmax(0, 1fr) !important; }
+@media (max-width: 420px) {
+  .staff-recipe-shell[data-staff-dashboard] .receiving-item.receiving-item--compact { grid-template-columns: minmax(0, 1fr); }
+}
 .staff-receiving-name { display: grid; gap: 7px; max-width: 350px; margin: 12px 0 18px; }
 .staff-receiving-name input { min-height: 48px; font-size: 16px; }
 .staff-receiving-voice { margin-top: 24px; border-top: 1px solid #d4dfd8; padding-top: 14px; }

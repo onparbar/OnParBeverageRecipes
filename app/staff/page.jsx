@@ -1,11 +1,15 @@
 import Script from "next/script";
+import { cookies } from "next/headers";
+import { DASHBOARD_SESSION_COOKIE, getDashboardSessionRole } from "../../lib/dashboard-auth.mjs";
 
 export const metadata = {
   title: "Weekly Plan | On Par Staff",
   description: "Weekly cocktail prep checklist and recipes for On Par staff.",
 };
 
-export default function StaffRecipePage() {
+export default async function StaffRecipePage() {
+  const cookieStore = await cookies();
+  const role = await getDashboardSessionRole(cookieStore.get(DASHBOARD_SESSION_COOKIE)?.value || "");
   return (
     <div className="shell staff-recipe-shell" data-staff-dashboard="true">
       <link rel="stylesheet" href="/smart-receiving.css" />
@@ -32,6 +36,9 @@ export default function StaffRecipePage() {
           </div>
         </div>
         <div className="topbar-actions">
+          {role === "owner" && (
+            <a className="logout-link" href="/">Go back to admin view</a>
+          )}
           <a className="logout-link" href="/api/logout">Log out</a>
         </div>
       </header>

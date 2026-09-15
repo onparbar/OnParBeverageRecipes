@@ -12,4 +12,55 @@
 .tap-performance .table-note { display: block; }
 .tap-performance-notes { margin-top: 22px; }
 .tap-performance [data-status] { overflow-wrap: anywhere; }
+#tap-performance .inventory-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  isolation: isolate;
+}
+#tap-performance .inventory-table {
+  width: 100%;
+  min-width: 620px;
+  table-layout: fixed;
+}
+#tap-performance .inventory-table :is(th, td) {
+  position: static !important;
+  box-sizing: border-box;
+  padding: 14px 20px;
+  vertical-align: top;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+#tap-performance .inventory-table :is(th, td):first-child {
+  width: 45%;
+  min-width: 240px;
+  text-align: left;
+}
+#tap-performance .inventory-table :is(th, td):nth-child(2) {
+  width: 22%;
+  min-width: 130px;
+  text-align: right;
+}
+#tap-performance .inventory-table td:nth-child(n+2) {
+  font-variant-numeric: tabular-nums;
+}
+#tap-performance .tap-performance-sort {
+  display: inline-flex;
+  align-items: center;
+  justify-content: inherit;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+#tap-performance .tap-performance-sort span { flex-shrink: 0; }
+#tap-performance .tap-performance-sort:focus-visible { outline: 2px solid var(--juniper); outline-offset: 4px; }
 @media(max-width:600px) { .tap-performance-totals { grid-template-columns: 1fr; } .tap-performance-heading { align-items: start; } .tap-performance-filters button { flex: 1 1 160px; } }

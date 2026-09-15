@@ -300,9 +300,8 @@ export default function DashboardPage() {
           <section className="pricing-advisor" aria-labelledby="pricing-advisor-title">
             <div className="pricing-advisor__header">
               <div>
-                <h2 id="pricing-advisor-title">82% Price Suggestions</h2>
+                <h2 id="pricing-advisor-title">Pricing Suggestions</h2>
               </div>
-              <button className="ghost-button" id="pricing-advisor-toggle" type="button" aria-expanded="false">Show all taps</button>
             </div>
             <div className="pricing-advisor__summary" id="pricing-advisor-summary" aria-live="polite"></div>
             <div className="pricing-table-wrap">
@@ -313,7 +312,7 @@ export default function DashboardPage() {
                     <th>Product</th>
                     <th>Current</th>
                     <th>Current gross margin</th>
-                    <th>82% suggested price</th>
+                    <th>Suggested price</th>
                     <th>Change</th>
                     <th>Status</th>
                     <th>Owner approval</th>

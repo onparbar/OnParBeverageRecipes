@@ -4632,10 +4632,12 @@ function renderShotPricing(visibleTapRows = []) {
       </label>
     `).join("");
 
-    const editor = document.createElement("div");
+    const editor = document.createElement("details");
     editor.className = "shot-pricing-editor";
+    editor.open = running || Boolean(message) || Boolean(draft?.open);
     editor.dataset.shotPricingKey = row.key;
     editor.innerHTML = `
+      <summary>Edit single / double prices</summary>
       <div class="shot-pricing-fields">${editors}</div>
       <p class="shot-pricing-editor__status" role="status">${escapeHtml(row.canEdit ? "" : row.blockers.map((blocker) => /socket hang up|econnreset|econnrefused|fetch failed|failed to fetch|timed? ?out|etimedout/i.test(blocker)
         ? "The PMB connection was interrupted. You can enter both prices now; your entries stay here during a recheck. Saving is paused until PMB verification succeeds."
@@ -4650,10 +4652,13 @@ function renderShotPricing(visibleTapRows = []) {
       shotPricingDrafts.set(row.key, {
         identity: draftIdentity,
         values: Array.from(editor.querySelectorAll("[data-shot-price-input]"), (input) => input.value),
+        open: editor.open,
       });
     };
     editor.addEventListener("input", rememberDraft);
-    chargeCell.replaceChildren(editor);
+    editor.addEventListener("toggle", rememberDraft);
+    chargeCell.innerHTML = renderPortionList(row.portions.slice(0, 2));
+    chargeCell.append(editor);
   });
   bindShotPricingControls();
 }
@@ -5226,15 +5231,9 @@ function renderRecipeTapPricingRow(livePrice, recipe) {
       ${sourceLabel ? `<span class="table-note">${escapeHtml(sourceLabel)}</span>` : ""}
     </td>
     <td data-pricing-cell="cost">${money(pricing.costPerOz)}</td>
-    <td><input type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" value="${escapeHtml(override ?? "")}" placeholder="${formatNumber(livePrice?.chargePerOz || recipe.defaultChargePerOz)}" aria-label="Charge per ounce for ${escapeHtml(recipe.title)}"></td>
+    <td>${chargePerOz ? `${money(chargePerOz)} / oz` : "-"}</td>
     <td data-pricing-cell="margin">${formatNumber(pricing.margin)}%</td>
   `;
-
-  const chargeInput = row.querySelector("input");
-  chargeInput.addEventListener("input", () => {
-    setChargeOverride(recipe.id, chargeInput.value);
-    updateRecipeTapPricingRow(row, recipe, livePrice);
-  });
 
   return row;
 }
@@ -5253,7 +5252,7 @@ function renderKegTapPricingRow(livePrice, kegItem) {
       <span class="table-note">${escapeHtml(locationLabel)}</span>
     </td>
     <td>${costPerOz ? money(costPerOz) : "-"}</td>
-    <td>${chargePerOz ? money(chargePerOz) : "-"}</td>
+    <td>${chargePerOz ? `${money(chargePerOz)} / oz` : "-"}</td>
     <td>${chargePerOz && costPerOz ? `${formatNumber(margin)}%` : "-"}</td>
   `;
   return row;
@@ -5325,7 +5324,7 @@ function renderPortionMarginList(portions, costPerOz) {
     const servingOz = getPortionServingOz(portion);
     const profit = price - (costPerOz * servingOz);
     const margin = price ? (profit / price) * 100 : 0;
-    return `<span><b>${escapeHtml(portion.name)}</b> ${formatNumber(margin)}%</span>`;
+    return `<span><b>${escapeHtml(portion.name)}</b> ${formatNumber(margin)}% / ${money(profit)} gross profit</span>`;
   }).join("")}</div>`;
 }
 
@@ -6844,8 +6843,9 @@ function renderDashboardOverview() {
 
     <section class="thirty-second-briefing" aria-labelledby="thirty-second-briefing-title" aria-busy="${briefingLoading}">
       <header>
-        <h2 id="thirty-second-briefing-title">${briefingAllWell ? 'All is Well <span aria-hidden="true">&#10084;&#65039;</span>' : "Beverage Brief"}</h2>
+        <h2 id="thirty-second-briefing-title"${briefingAllWell ? ' style="width: 100%; text-align: center;"' : ""}>${briefingAllWell ? '<span aria-hidden="true">&#127775;</span> All is Well <span aria-hidden="true">&#127775;</span>' : "Beverage Brief"}</h2>
       </header>
+      ${briefingAllWell ? '<p style="margin: 6px 0 0; text-align: center; font-size: .85rem; color: var(--muted);">No current issues</p>' : ""}
         <div class="thirty-second-briefing__lines"${briefingAllWell ? " hidden" : ""}>
           ${briefingLoading ? '<p class="sync-status" role="status">Checking the latest information...</p>' : supplierPriceAlerts}
           ${(briefingLoading ? [] : currentBriefingIssues).map((item) => {

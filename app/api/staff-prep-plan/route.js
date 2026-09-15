@@ -9,11 +9,11 @@ import {
   buildStaffPrepPlan,
 } from "../../../lib/staff-prep-plan.mjs";
 import {
-  applyInventoryContributionPlan,
   assertInventoryContributionPlan,
   planPrepInventoryContributions,
 } from "../../../lib/inventory-contributions.mjs";
 import { executeInventoryBackedOperation } from "../../../lib/inventory-backed-operation.mjs";
+import { recoverPendingInventoryUpdates } from "../../../lib/keg-par-agent-shared-store.mjs";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 
 export const runtime = "nodejs";
@@ -165,7 +165,7 @@ export async function POST(request) {
       plan: inventoryPlan,
       assertPlan: assertInventoryContributionPlan,
       persist: async () => {
-        if (!stateChanged) return state;
+        if (!stateChanged && !inventoryPlan.sources.length) return state;
         const nextRevision = Number(state.revision) + 1;
         return writeParAgentState({
           ...state,
@@ -176,9 +176,10 @@ export async function POST(request) {
         }, {
           expectedRevision: state.revision,
           role,
+          inventoryPlan,
         });
       },
-      applyInventory: (plan) => applyInventoryContributionPlan(plan, role),
+      applyInventory: () => recoverPendingInventoryUpdates(),
       recordActivity: (savedState) => recordDashboardActivity({
         area: "Inventory",
         action: "updated staff prep checklist",

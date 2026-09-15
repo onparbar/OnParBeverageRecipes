@@ -89,6 +89,7 @@ test("cocktail prep deducts only tracked on-hand ingredients using the requested
   const catalog = [
     { id: "titos", name: "Tito's", baseline: 4 },
     { id: "titos-1-75l", name: "Tito's 1.75L", baseline: 10 },
+    { id: "strawberry-lemonade", name: "Strawberry Lemonade", baseline: 12 },
   ];
   const recipe = {
     ingredients: [
@@ -101,7 +102,15 @@ test("cocktail prep deducts only tracked on-hand ingredients using the requested
   assert.deepEqual(buildRecipeInventoryContributions(recipe, catalog, {
     batchSizeOz: 1379,
     quantity: 1,
-  }), [{ id: "titos-1-75l", quantity: -6, baseline: 10 }]);
+  }), [{ id: "titos-1-75l", quantity: -6, baseline: 10 }, { id: "strawberry-lemonade", quantity: -8, baseline: 12 }]);
+});
+
+test("counted ingredients require a match and usable package quantity", () => {
+  const recipe = { title: "Test cocktail", ingredients: [{ name: "Test juice", oz: 10 }] };
+  assert.throws(() => buildRecipeInventoryContributions(recipe, []), error => error.code === "INVENTORY_IDENTITY_REVIEW_REQUIRED");
+  assert.throws(() => buildRecipeInventoryContributions(recipe, [{ id: "test-juice", name: "Test juice" }]), error => error.code === "INVENTORY_PACKAGE_REVIEW_REQUIRED");
+  assert.deepEqual(buildRecipeInventoryContributions(recipe, [{ id: "test-juice", name: "Test juice", notCounted: true }]), []);
+  assert.deepEqual(buildRecipeInventoryContributions({ ingredients: [{ name: "Water", oz: 10 }, { name: "Sour Mix", oz: 10 }] }, []), []);
 });
 
 test("inventory contribution retries do not subtract twice", () => {
@@ -198,7 +207,7 @@ test("activity retries detect an existing matching record", async () => {
 
 test("pending receiving lines require an explicit user choice", async () => {
   const source = await readFile(new URL("../public/staff-receiving-view.mjs", import.meta.url), "utf8");
-  assert.match(source, /Received as ordered/);
+  assert.match(source, /item\.status === "pending" \? "Received" : "Receive remaining"/);
   assert.match(source, /item\.status === "pending"\s*\? ""/);
   assert.match(source, /window\.confirm\(`Confirm these/);
   assert.match(source, /if \(!count\.value\.trim\(\)/);
