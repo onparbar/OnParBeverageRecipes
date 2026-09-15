@@ -66,3 +66,11 @@ test('poured history verifies its date range and uses only the product-volume ex
   assert.equal(calls[0][5],calls[2][5]);
   for(const query of ['view=poured&start=2026-02-30&end=2026-03-31','view=poured&start=2024-01-01&end=2026-01-01','view=poured&start=2026-01-01&end=2026-02-01&unit=customers','view=catalog&start=2026-01-01']) assert.throws(()=>parseReportHistoryRequest(new URLSearchParams(query)),{status:422});
 });
+
+test('historical tables include the complete monthly header and only product aggregates', async () => {
+  const input=parseReportHistoryRequest(new URLSearchParams('view=history'));
+  const result=await readPmbReportHistory(input,{config:{},readPage:async()=>({status:200,raw:'<table id="dtb_att"><tr><td>private card</td></tr></table><table id="dtb_ppbvm"><tr><th>Product/Month</th><th>2025-09</th><th>2026-09</th></tr><tr><td>House Margarita 2</td><td>100oz</td><td></td></tr></table>'})});
+  assert.deepEqual(result.tables[0].rows[0],['Product/Month','2025-09','2026-09']);
+  assert.equal(result.tables[0].rows[1][0],'House Margarita 2');
+  assert.ok(!JSON.stringify(result).includes('private card'));
+});
