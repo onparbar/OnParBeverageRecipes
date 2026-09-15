@@ -9,22 +9,18 @@ jobs:
     timeout-minutes: 3
     environment: production
     steps:
-      - name: Read sanitized startup errors only
+      - name: Read production storage readiness without changing data
         shell: bash
         run: |
           /opt/homebrew/opt/node@22/bin/node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          try { process.loadEnvFile('/Users/onpar/OnParBeverageRecipes-service/.env.local'); } catch {}
-          const secrets = Object.values(process.env).filter(v => v.length > 6).sort((a,b)=>b.length-a.length);
-          for (const name of ['onpar-dashboard-error.log','onpar-dashboard-out.log']) {
-            const file = '/Users/onpar/.pm2/logs/'+name;
-            if (!fs.existsSync(file)) continue;
-            const stat = fs.statSync(file), fd = fs.openSync(file,'r');
-            const buf=Buffer.alloc(Math.min(stat.size,50000));
-            fs.readSync(fd,buf,0,buf.length,Math.max(0,stat.size-buf.length)); fs.closeSync(fd);
-            let text=buf.toString().split('\n').slice(-100).join('\n');
-            for (const secret of secrets) text=text.split(secret).join('[redacted]');
-            text=text.replace(/https?:\/\/[^\s"'<>]+/g,'[url]').replace(/(?:Bearer\s+|eyJ)[\w.\-]+/g,'[token]');
-            console.log(name+'\n'+text);
-          }
+          process.loadEnvFile('/Users/onpar/OnParBeverageRecipes-service/.env.local');
+          const { buildDashboardHealth } = await import('/Users/onpar/OnParBeverageRecipes-release-bb97e6cf8f79e61a9345d8036665f2eae1701bf9/lib/dashboard-health.mjs');
+          const fetchImpl = async (url, options) => {
+            const response = await fetch(url, options);
+            const table = new URL(url).pathname.split('/').pop();
+            console.log(JSON.stringify({resource: table, httpStatus: response.status}));
+            return response;
+          };
+          const health = await buildDashboardHealth({storage: true, fetchImpl});
+          console.log(JSON.stringify({ok: health.ok, readiness: health.readiness, storage: health.reachability.supabase}));
           NODE
