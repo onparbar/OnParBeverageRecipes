@@ -8,6 +8,7 @@ import {
 } from "../../../lib/weekly-usage-shared-store.mjs";
 import { DASHBOARD_SESSION_COOKIE, getDashboardSessionRole } from "../../../lib/dashboard-auth.mjs";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
+import { captureProductNamesBestEffort } from '../../../lib/pmb-product-names.mjs';
 
 export const runtime = "nodejs";
 
@@ -51,6 +52,9 @@ export async function GET(request) {
   try {
     await requireOwner(request);
     const state = await readSharedWeeklyUsageState();
+    if (state.initialized) {
+      void captureProductNamesBestEffort(state.data.activeItems, { source: 'weekly-usage-forward' });
+    }
     return jsonResponse(await recoverWeeklyUsageState(state, async (week) => {
       const url = new URL(request.url);
       url.pathname = "/api/pmb-weekly-usage";
@@ -100,6 +104,7 @@ export async function POST(request) {
       summary: String(body.action || "") === "initialize" ? "Imported the initial shared Weekly Usage reports." : "Updated shared Weekly Usage reports.",
     }).catch(() => {});
 
+    void captureProductNamesBestEffort(state.data.activeItems, { source: 'weekly-usage-forward' });
     return jsonResponse(state);
   } catch (error) {
     return errorResponse(error);
