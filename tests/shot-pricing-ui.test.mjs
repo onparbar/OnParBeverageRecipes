@@ -33,8 +33,10 @@ test("shot price drafts remain editable during verification but saving stays gat
   assert.match(editor, /draft\?\.values\[index\]/);
   assert.match(editor, /draft\.identity !== draftIdentity/);
   assert.match(editor, /editor\.addEventListener\("input", rememberDraft\)/);
-  assert.doesNotMatch(editor, /editor\.addEventListener\("toggle", rememberDraft\)/);
-  assert.match(editor, /chargeCell\.replaceChildren\(editor\)/);
+  assert.match(editor, /editor\.addEventListener\("toggle", rememberDraft\)/);
+  assert.match(editor, /editor\.open = running \|\| Boolean\(message\) \|\| Boolean\(draft\?\.open\)/);
+  assert.match(editor, /chargeCell\.innerHTML = renderPortionList/);
+  assert.match(editor, /chargeCell\.append\(editor\)/);
 });
 
 test("the portion endpoint authenticates first and remains fail-closed until the PMB form is verified", () => {

@@ -218,7 +218,7 @@ test("Tap Pricing displays only PMB-verified current wall products", () => {
   assert.match(dashboardSource, /if \(!liveTapPriceItems\.length\) return \[\];/);
   assert.match(dashboardSource, /const pricedTapCount = kegWallItems\.filter/);
   assert.match(dashboardSource, /\^coming soon!\?\$/i);
-  assert.match(pageSource, /82% Price Suggestions/);
+  assert.match(pageSource, /Pricing Suggestions/);
   assert.match(dashboardSource, /Save price to PMB/);
 });
 

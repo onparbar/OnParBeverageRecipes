@@ -84,7 +84,7 @@ test("bulk action does nothing when every unchecked item now has a draft", () =>
 test("one-tap receiving saves receipt units once and blocks repeat clicks while saving", async () => {
   const h = harness({ paused: true }); action(h.root, "Proof").fire("click");
   assert.match(h.root.textContent, /2 cases \/ 24 individual units/);
-  const receive = action(h.root, "Received as ordered");
+  const receive = action(h.root, "Received");
   receive.fire("click"); receive.fire("click");
   assert.equal(h.calls.length, 1);
   assert.equal(h.calls[0][0].receivedQuantity, 2);

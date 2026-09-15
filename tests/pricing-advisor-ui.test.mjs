@@ -9,7 +9,7 @@ test("pricing advisor exposes a confirmed Owner-only PMB update flow", async () 
     readFile("app/globals.css", "utf8"),
   ]);
 
-  assert.match(page, /82% Price Suggestions/);
+  assert.match(page, /Pricing Suggestions/);
   assert.match(page, /<th>Owner approval<\/th>/);
   assert.doesNotMatch(page, /cannot publish a live change/);
   assert.match(dashboard, /data-pmb-price-update/);
@@ -32,14 +32,16 @@ test("pricing advisor exposes a confirmed Owner-only PMB update flow", async () 
   assert.match(styles, /\.pricing-advisor-action \.mini-button \{[\s\S]*white-space: normal;/);
 });
 
-test("tap price advisors retain editors and liquor prices stay directly editable", async () => {
+test("tap price advisors retain editors and liquor prices use expandable editors", async () => {
   const dashboard = await readFile("public/dashboard.js", "utf8");
   const renderStart = dashboard.indexOf("function renderPricing()");
   const renderEnd = dashboard.indexOf("function bindShotPricingControls", renderStart);
   const renderers = dashboard.slice(renderStart, renderEnd);
   assert.equal(renderers.split("advisorButton.replaceWith(editor)").length - 1, 1);
   assert.match(renderers, /else row\.children\[3\]\?\.append\(editor\)/);
-  assert.match(renderers, /chargeCell\.replaceChildren\(editor\)/);
+  assert.match(renderers, /chargeCell\.innerHTML = renderPortionList/);
+  assert.match(renderers, /chargeCell\.append\(editor\)/);
+  assert.match(renderers, /<summary>Edit single \/ double prices<\/summary>/);
   const advisor = dashboard.slice(dashboard.indexOf("function renderPricingAdvisor("), dashboard.indexOf("function buildPricingAdvisorInput("));
   const editorMarkup = advisor.slice(advisor.indexOf("pricingAdvisorTable.innerHTML ="));
   assert.doesNotMatch(editorMarkup, /scrollIntoView|addEventListener\("click"/);
