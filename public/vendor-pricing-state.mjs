@@ -20,6 +20,16 @@ export function observePackagePrice(previous = {}, next = {}, { name, kind = "in
   return result;
 }
 
+export function supplierSetupIssues(mapping, { packageOz, packageCost } = {}) {
+  const issues = [];
+  if (!mapping?.vendor || !mapping?.orderingSystem) issues.push("Select the ordering supplier.");
+  if (!(Number(packageOz ?? mapping?.bottleOz) > 0)) issues.push("Confirm the package size.");
+  if (!(Number(packageCost) > 0)) issues.push("Confirm the package cost.");
+  if (mapping?.vendor !== "Bonbright" && !String(mapping?.orderingSku || "").trim()) issues.push(`Confirm the ${mapping?.orderingSystem || "supplier"} item code; a pricing-source SKU is not automatically an ordering code.`);
+  if (mapping?.matchStatus !== "matched") issues.push("Supplier price matching is pending.");
+  return issues;
+}
+
 export function createSupplierMapping({ name, vendor, bottleOz, kind = "ingredient", orderingSku = "" }) {
   const distributors = {
     Heidelberg: ["Heidelberg"], Bonbright: ["Bonbright"],

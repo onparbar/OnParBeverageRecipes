@@ -109,7 +109,7 @@ test("uses Monday as the snapshot week and replaces that week's prior save", asy
   assert.deepEqual(state.current.onHandOverrides, {});
 });
 
-test("saving Monday inventory preserves the snapshot and clears current counts only", async () => {
+test("saving Monday inventory preserves the snapshot and running counts", async () => {
   await useTemporaryState();
   await hydrateInventoryState({
     onHandOverrides: { vodka: "3", gin: "2" },
@@ -130,7 +130,7 @@ test("saving Monday inventory preserves the snapshot and clears current counts o
     { id: "vodka", onHandDisplay: "3" },
     { id: "gin", onHandDisplay: "2" },
   ]);
-  assert.deepEqual(state.current.onHandOverrides, {});
+  assert.deepEqual(state.current.onHandOverrides, { vodka: "3", gin: "2" });
   assert.deepEqual(state.current.parOverrides, { vodka: "5", gin: "4" });
 });
 

@@ -162,11 +162,16 @@ test("unverified activation readback fails and an uncertain save is never retrie
     list: async () => [product], open: async () => ({ html: form() }),
     save: async () => { writes += 1; },
   } });
-  await assert.rejects(activateQueuedPmbProducts(base), (error) => error.code === "PMB_ACTIVATION_READBACK_FAILED");
+  const unverified = await activateQueuedPmbProducts(base);
+  assert.equal(unverified.verified, false);
+  assert.equal(unverified.issues[0].code, "PMB_ACTIVATION_READBACK_FAILED");
+  assert.equal(unverified.issues[0].saveUnconfirmed, true);
   assert.equal(writes, 1);
   writes = 0;
   base.client.save = async () => { writes += 1; throw new Error("connection interrupted"); };
-  await assert.rejects(activateQueuedPmbProducts(base), /connection interrupted/);
+  const uncertain = await activateQueuedPmbProducts(base);
+  assert.equal(uncertain.verified, false);
+  assert.equal(uncertain.issues[0].saveUnconfirmed, true);
   assert.equal(writes, 1);
   assert.throws(() => inspectPmbActivationForm(form({ name: "Different product" }), product));
 });

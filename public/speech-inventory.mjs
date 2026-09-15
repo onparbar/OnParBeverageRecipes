@@ -33,6 +33,7 @@ export function normalizeSpeechInventoryText(value) {
     .replace(/\bto\s+(?=makers\s+mark\b)/g, "two ")
     .replace(/\b(?:course|cores)\b/g, "coors")
     .replace(/\bmiller\s+lights?\b/g, "miller lite")
+    .replace(/\b(?:bush|busch)\s+(?:lite|lights?)\b/g, "busch light")
     .replace(/\bpaps?\s+blue\s+ribbon\b/g, "pabst blue ribbon")
     .replace(/\b(?:scentsy|sensei|cincinnati)\s+light\b/g, "cincy light")
     .replace(/\b(?:yingling|yueng\s+ling)\b/g, "yuengling")
@@ -84,6 +85,10 @@ export function parseSpokenInventoryNumber(value) {
   return Number(`${current}${decimal ? `.${decimal}` : ""}`);
 }
 
+function beerBrand(value) {
+  return normalizeSpeechInventoryText(value).match(/\b(miller|busch|coors|budweiser|bud|michelob)\b/)?.[1] || "";
+}
+
 function catalogAliases(item) {
   const normalizedName = normalizeSpeechInventoryText(item.name);
   const suppliedAliases = [item.name, ...(item.aliases || [])]
@@ -93,6 +98,8 @@ function catalogAliases(item) {
     .map((alias) => alias.replace(/\s+[123]$/, "").trim())
     .filter(Boolean);
   const spokenAliases = [];
+  if (normalizedName.includes("miller lite")) spokenAliases.push("miller");
+  if (normalizedName.includes("busch light")) spokenAliases.push("busch", "bush", "bush light");
   if (normalizedName.includes("michelob ultra")) {
     spokenAliases.push("mic ultra", "mick ultra", "mich ultra", "mitch ultra", "mc ultra", "m c ultra", "mcultra");
   }
@@ -133,7 +140,9 @@ function catalogAliases(item) {
   if (normalizedName.includes("angry orchard")) spokenAliases.push("apple", "apple cider");
   if (normalizedName.includes("sour monkey")) spokenAliases.push("sour mix");
   return [...new Set([...suppliedAliases, ...tapSuffixlessAliases, ...spokenAliases]
-    .filter(Boolean))]
+    .filter(Boolean)
+    .filter((alias) => !beerBrand(normalizedName) || !beerBrand(alias)
+      || beerBrand(normalizedName) === beerBrand(alias)))]
     .sort((left, right) => right.length - left.length);
 }
 
@@ -442,7 +451,9 @@ function matchProduct(productText, unit, catalog) {
   const requestedWall = product.match(/\b(main|patio|karaoke)(?: wall)?\b/)?.[1] || "";
   const withoutWall = product.replace(/\b(main|patio|karaoke)(?: wall)?\b/g, " ").replace(/\s+/g, " ").trim();
   const target = unit === "keg" || unit === "oz" ? "keg" : unit === "bottle" || unit === "case" ? "inventory" : "";
+  const requestedBrand = beerBrand(withoutWall);
   const candidates = catalog.flatMap((item) => {
+    if (requestedBrand && beerBrand(item.name) !== requestedBrand) return [];
     if (target && item.target !== target) return [];
     if (requestedWall && item.target === "keg" && normalizeSpeechInventoryText(item.wall) !== requestedWall) return [];
     const canonicalName = normalizeSpeechInventoryText(item.name).replace(/\s+[123]$/, "").trim();
@@ -456,6 +467,7 @@ function matchProduct(productText, unit, catalog) {
   }).sort((left, right) => right.score - left.score || left.item.name.localeCompare(right.item.name));
   if (!candidates.length) {
     const fuzzyCandidates = catalog.flatMap((item) => {
+      if (requestedBrand && beerBrand(item.name) !== requestedBrand) return [];
       if (target && item.target !== target) return [];
       if (requestedWall && item.target === "keg" && normalizeSpeechInventoryText(item.wall) !== requestedWall) return [];
       const similarity = Math.max(...item.aliases.map((alias) => speechAliasSimilarity(withoutWall, alias)), 0);
@@ -498,6 +510,9 @@ function resolveContextualAmbiguities(proposals, catalog, sharedWall) {
   proposals.forEach((proposal, proposalIndex) => {
     if (proposal.status !== "ambiguous" || proposal.candidateIds.length < 2) return;
     const candidates = proposal.candidateIds.map((id) => itemsById.get(id)).filter(Boolean);
+    // Location can resolve which wall, but must not choose between different products.
+    const productNames = new Set(candidates.map((item) => normalizeSpeechInventoryText(item.name).replace(/\s+[123]$/, "").trim()));
+    if (productNames.size > 1) return;
     const scored = candidates.map((candidate) => {
       let score = 0;
       let evidence = 0;
@@ -631,6 +646,7 @@ export function parseInventoryTranscript(transcript, sourceItems = []) {
 
 export function buildSpeechInventoryChanges(proposals = []) {
   return (Array.isArray(proposals) ? proposals : []).flatMap((proposal) => {
+    if (proposal?.quantity == null || String(proposal.quantity).trim() === "") return [];
     const quantity = Number(proposal?.quantity);
     if (proposal?.status !== "matched" || !proposal.matchedId || !Number.isFinite(quantity) || quantity < 0) return [];
     return [{ id: proposal.matchedId, target: proposal.target === "keg" ? "keg" : "inventory", value: String(quantity) }];

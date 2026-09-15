@@ -171,3 +171,13 @@ test("later duplicate mentions replace rather than duplicate a field update", ()
     { id: "fireball", target: "inventory", value: "5" },
   ]);
 });
+
+
+test("Miller and Busch remain separate despite brand aliases and speech variants", () => {
+  const catalog = [
+    { id: "miller", name: "Miller Lite 1", aliases: ["Busch Light"], target: "keg", wall: "Main", unit: "kegs" },
+    { id: "busch", name: "Busch Light 1", aliases: ["Miller Lite"], target: "keg", wall: "Main", unit: "kegs" },
+  ];
+  for (const transcript of ["three Miller Lite two Busch Light", "three miller two bush light", "Miller Lite three Busch Light two"])
+    assert.deepEqual(parseInventoryTranscript(transcript, catalog).proposals.map(p => [p.matchedId, p.quantity]), [["miller", 3], ["busch", 2]], transcript);
+});

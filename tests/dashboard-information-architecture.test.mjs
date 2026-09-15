@@ -223,7 +223,8 @@ test("Tap Pricing displays only PMB-verified current wall products", () => {
 });
 
 test("owner login automatically attempts PMB and defers mapped vendor price refreshes", () => {
-  assert.match(dashboardSource, /void runOwnerLoginSync\(\)/);
+  assert.match(dashboardSource, /await runOwnerLoginSync\(\)/);
+  assert.match(dashboardSource, /dashboardBriefingInitialLoadPending/);
   assert.match(dashboardSource, /acquireOwnerLoginSyncLock\(\)/);
   assert.match(dashboardSource, /releaseOwnerLoginSyncLock\(lockToken\)/);
   assert.match(dashboardSource, /runKegLevelSync\(\)/);
@@ -326,7 +327,7 @@ test("voice inventory starts directly and offers phone keyboard dictation", () =
   assert.doesNotMatch(dashboardSource, /inventorySpeechMicrophoneAuthorized/);
   assert.match(dashboardSource, /function startInventorySpeechRecognition\(\)/);
   assert.doesNotMatch(dashboardSource, /async function startInventorySpeechRecognition/);
-  assert.match(dashboardSource, /Use keyboard dictation/);
+  assert.match(dashboardSource, /Finish Count \/ Review/);
   assert.match(dashboardSource, /transcriptInput\?\.focus\(\)/);
   assert.match(dashboardSource, /event\.stopPropagation\(\)/);
   assert.match(dashboardSource, /function cleanInventorySpeechRecognitionText/);
@@ -335,8 +336,8 @@ test("voice inventory starts directly and offers phone keyboard dictation", () =
 
 test("Weekly Plan hides recommendations from a previous operating week", () => {
   assert.match(dashboardSource, /const currentWeekPlanAvailable = planLocked/);
-  assert.match(dashboardSource, /This week's plan has not been generated/);
-  assert.match(dashboardSource, /The previous plan is saved in Weekly Snapshots/);
+  assert.match(dashboardSource, /Cooler Count/);
+  assert.match(dashboardSource, /Submit inventory after counting to save this week's plan/);
 });
 
 test("inventory item names are draggable without separate buttons and retire Bubbly", () => {
@@ -367,7 +368,7 @@ test("Weekly Plan previews live needs and locks from the current Monday inventor
   assert.doesNotMatch(dashboardSource, /id="save-inventory-snapshot"/);
   assert.match(dashboardSource, /kegPlanSnapshot: mondaySnapshot\.kegPlanSnapshot/);
   assert.match(dashboardSource, /tapInputs: \(parAgentState\.recommendations\.items \|\| \[\]\)\.map/);
-  assert.match(dashboardSource, /Keg on-hand counts remain visible until the next Monday 7 a\.m\. Eastern reset/);
+  assert.match(dashboardSource, /Live on-hand counts continue tracking; the saved count record stays unchanged/);
   const lockStart = dashboardSource.indexOf("async function runWeeklyPlanUpdate()");
   const lockEnd = dashboardSource.indexOf("async function initializeSharedKegLevelsFromServiceComputer", lockStart);
   const lockSource = dashboardSource.slice(lockStart, lockEnd);

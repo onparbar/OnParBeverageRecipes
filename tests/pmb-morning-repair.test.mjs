@@ -91,7 +91,7 @@ test("sends one repair, waits three minutes, verifies fresh readings, and persis
   const status = await readPmbMorningRepairStatus({ ...h.options, now: h.clock.value });
   assert.equal(status.lastRun.status, "verified");
   assert.equal(status.missedToday, true);
-  assert.deepEqual(status.missedSlots, ["07:00"]);
+  assert.deepEqual(status.missedSlots, ["07:00", "00:40"]);
 });
 
 test("independent runners and a restarted process cannot send twice on the same date", async (t) => {
@@ -250,7 +250,8 @@ test("Monday early and daily slots each run once, including across process resta
   assert.equal(h.calls.repairs, 2);
   const status = await readPmbMorningRepairStatus({ ...h.options, now: h.clock.value });
   assert.equal(status.todayRuns.length, 2);
-  assert.equal(status.missedToday, false);
+  assert.equal(status.missedToday, true);
+  assert.deepEqual(status.missedSlots, ["00:40"]);
   assert.equal(status.lastRun.slotId, "daily");
 });
 
@@ -278,5 +279,24 @@ test("Monday incomplete readings stop at 7:50 without consuming the daily repair
   assert.equal(h.calls.reads, 47);
   h.clock.value = new Date("2026-09-07T14:00:05Z");
   assert.equal((await h.run()).status, "verified");
+  assert.equal(h.calls.repairs, 2);
+});
+
+
+test("nightly repair is only admitted at 12:40am Eastern in summer and winter", () => {
+  for (const instant of ["2026-09-15T04:40:00Z", "2026-09-15T04:40:59Z", "2026-01-12T05:40:00Z", "2026-03-08T05:40:00Z", "2026-11-01T04:40:00Z"])
+    assert.equal(isPmbRepairWindow(new Date(instant)), true, instant);
+  for (const instant of ["2026-09-15T04:39:59Z", "2026-09-15T04:41:00Z", "2026-01-12T04:40:00Z"])
+    assert.equal(isPmbRepairWindow(new Date(instant)), false, instant);
+});
+
+test("nightly repair runs once across restarts and does not consume the morning slot", async (t) => {
+  const h = await harness(t);
+  h.clock.value = new Date("2026-09-15T04:40:05Z");
+  assert.equal((await h.run()).slotId, "nightly");
+  h.clock.value = new Date("2026-09-15T04:40:30Z");
+  assert.equal((await createPmbMorningRepairRunner(h.options)()).alreadyClaimed, true);
+  h.clock.value = new Date("2026-09-15T14:00:05Z");
+  assert.equal((await h.run()).slotId, "daily");
   assert.equal(h.calls.repairs, 2);
 });

@@ -209,7 +209,10 @@ chrome.runtime.onMessage.addListener((message, sender) => {
       .get(RESULT_KEY)
       .then((stored) => {
         const result = stored[RESULT_KEY];
-        const preference = result?.vendor === "ohlq" ? result.deliveryPreference : null;
+        const fresh = Date.now() - Date.parse(result?.completedAt);
+        const preference = result?.vendor === "ohlq" && result.status === "ready"
+          && Number.isFinite(fresh) && fresh >= 0 && fresh < 30 * 60 * 1000
+          ? result.deliveryPreference : null;
         const date = typeof preference?.date === "string" ? preference.date : "";
         const time = preference?.time === "09:00" ? preference.time : "";
         return {

@@ -222,6 +222,7 @@ async function finish(state, status = "ready", message = "Cart ready for your re
   try {
     const response = await chrome.runtime.sendMessage({ type: "VENDOR_CART_FINISHED", result });
     if (!response?.ok) throw new Error("The final cart status could not be saved.");
+    if (status === "ready") globalThis.onParStartCheckoutReview?.(state);
   } catch {
     renderOverlay(
       state,

@@ -293,6 +293,7 @@ function buildProducts(items, options, quality) {
       tapNumbers: new Set(),
       walls: new Set(),
       membersByKey: new Map(),
+      sourceProducts: new Map(),
       unavailableTimes: new Set(),
     };
     if (options.isBottomEligible(item)) product.bottomEligible = true;
@@ -304,6 +305,11 @@ function buildProducts(items, options, quality) {
     if (wall) product.walls.add(wall);
 
     const memberKey = getMemberKey(item, index);
+    product.sourceProducts.set(`${item?.tapNumber}:${item?.plu}:${item?.name}`, {
+      tapNumber: item?.tapNumber,
+      plu: item?.plu,
+      name: item?.name,
+    });
     const memberSamples = product.membersByKey.get(memberKey) || new Map();
     const itemHistory = getItemHistoryByWeek(item, index, options, quality);
     itemHistory.samplesByTime.forEach((sample, time) => {
@@ -345,6 +351,7 @@ function buildProducts(items, options, quality) {
       tapNumbers: [...product.tapNumbers].sort((a, b) => a - b),
       walls: [...product.walls].sort(compareText),
       valuesByTime: productValuesByTime,
+      sourceProducts: [...product.sourceProducts.values()],
       unavailableTimes: new Set(product.unavailableTimes),
     };
   });
@@ -450,6 +457,7 @@ function buildWindow(products, periods, { metric, topLimit, bottomLimit }) {
       wall: product.wall,
       bottomEligible: product.bottomEligible,
       tapNumbers: product.tapNumbers,
+      sourceProducts: product.sourceProducts,
       walls: product.walls,
       metric,
       averageWeeklyValue: round(metric === "margin" ? totalValue / totalRevenue * 100 : totalValue / samples.length),

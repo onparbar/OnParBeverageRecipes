@@ -52,10 +52,12 @@ function slug(value) {
 function isSameComingSoonProduct(left, right) {
   if (clean(left.id) === clean(right.id)) return true;
   if (clean(left.kind).toLowerCase() !== clean(right.kind).toLowerCase()) return false;
+  // Separate wall copies and reused PLUs must not collapse into one queue item.
+  if (!slug(left.name) || slug(left.name) !== slug(right.name)) return false;
   const leftPlu = Number(left.plu) || 0;
   const rightPlu = Number(right.plu) || 0;
   if (leftPlu > 0 && rightPlu > 0) return leftPlu === rightPlu;
-  return Boolean(slug(left.name)) && slug(left.name) === slug(right.name);
+  return true;
 }
 
 export function consolidateComingSoonItems(items = []) {

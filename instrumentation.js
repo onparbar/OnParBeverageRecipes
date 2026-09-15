@@ -1,4 +1,8 @@
 export async function register() {
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { startDashboardBackupRuntime } = await import("./lib/dashboard-backup-runtime.mjs");
+    startDashboardBackupRuntime();
+  }
   // The PM2 launch helper supplies the scheduler switch only to the running
   // on-site service. Builds, previews, and local development remain passive.
   if (

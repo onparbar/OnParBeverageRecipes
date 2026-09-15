@@ -1,4 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+@import "./tap-pricing-layout.css";
+@import "./performance-layout.css";
+@import "./weekly-snapshot-layout.css";
 
 :root {
   --ink: #18211f;
@@ -1255,10 +1258,23 @@ h1 {
 .monday-run__header {
   justify-content: space-between;
   gap: 16px;
+  flex-wrap: wrap;
 }
 
 .monday-run__header > div {
   gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.monday-run__header > .monday-run__header-actions {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+.monday-run__header .monday-run__week {
+  white-space: nowrap;
+  background: rgba(31, 95, 84, 0.08);
 }
 
 .monday-run__header h2 {
@@ -1371,9 +1387,47 @@ h1 {
 }
 
 .monday-run--compact {
+  position: relative;
   gap: 10px;
   padding: 15px 18px;
   box-shadow: none;
+}
+
+.monday-run__title-week {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.monday-run--compact .monday-run__card-link {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  transform: none;
+}
+
+.monday-run--compact .monday-run__card-link:hover {
+  background: rgba(31, 95, 84, 0.035);
+}
+
+.monday-run--compact .monday-run__card-link:focus-visible {
+  outline: 3px solid var(--juniper);
+  outline-offset: 3px;
+}
+
+.monday-run--compact .monday-run__start-action {
+  position: relative;
+  z-index: 2;
 }
 
 .monday-run--compact .monday-run__header h2 {
@@ -5848,6 +5902,29 @@ td {
 
 #inventory-panel .inventory-toolbar > details[open] > summary {
   justify-content: flex-start;
+}
+
+#inventory-panel .inventory-toolbar > #custom-inventory-editor:not([open]) {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: fit-content;
+  max-width: 100%;
+}
+
+#inventory-panel .inventory-toolbar > #custom-inventory-editor:not([open]) > summary {
+  min-height: 44px;
+  padding: 8px 22px;
+  font-size: 0.875rem;
+}
+
+#inventory-panel .inventory-submit-actions {
+  display: flex;
+  justify-content: center;
+  padding: 20px;
+}
+
+#inventory-panel .inventory-submit-actions > .primary-button {
+  width: min(220px, 100%);
 }
 
 #inventory-panel .inventory-toolbar .custom-inventory-form,
@@ -12848,6 +12925,78 @@ details.custom-inventory-editor[open] > summary {
   .keg-wall-filter__count { font-size: 12px; }
 }
 
+/* A centered, compact filter area for drink rankings. */
+#onpar-insights .onpar-rankings-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+  background: var(--paper-strong);
+}
+#onpar-insights .onpar-rankings-heading {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  padding: 28px 20px;
+  text-align: center;
+  background: linear-gradient(120deg, #eee6cf, #f8f4e8 52%, #e9eee4);
+  border-bottom: 1px solid #ddd5be;
+}
+#onpar-insights .onpar-rankings-header .onpar-insights__controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 18px;
+  width: 100%;
+  max-width: 840px;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 24px;
+}
+#onpar-insights .onpar-rankings-header .select-field {
+  min-width: 0;
+  width: 100%;
+  grid-column: auto;
+  gap: 6px;
+  text-align: center;
+}
+#onpar-insights .onpar-rankings-header select {
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  padding: 10px 28px 10px 12px;
+  border-radius: 12px;
+  font-size: 15px;
+  background-color: #fffdf7;
+}
+#onpar-insights .onpar-rankings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 46px;
+  margin: 0;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--ink);
+}
+#onpar-insights .onpar-rankings-toggle input {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin: 0;
+  accent-color: #2b695b;
+}
+@media (max-width: 720px) {
+  #onpar-insights .onpar-rankings-header .onpar-insights__controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px 12px;
+    padding: 20px 16px;
+  }
+}
+
 /* Product details stay quiet until hovered, tapped, or opened by keyboard. */
 .tap-product-detail { max-width: 100%; border: 0; background: transparent; }
 .tap-product-detail > summary {
@@ -12918,4 +13067,17 @@ details.custom-inventory-editor[open] > summary {
   border-radius: 9px;
   font-size: 12px;
   font-weight: 400;
+}
+
+/* Keep weekly usage metadata in the background, without a separate summary card. */
+#weekly-usage-summary {
+  display: none !important;
+}
+
+#weekly-usage-panel :has(> #weekly-usage-summary) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#weekly-usage-summary ~ * {
+  grid-column: 1 / -1;
 }

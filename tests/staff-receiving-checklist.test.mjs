@@ -58,7 +58,7 @@ function harness({ fail = false, paused = false } = {}) {
 test("bulk receive excludes a difference typed after the delivery first rendered", async () => {
   const h = harness();
   action(h.root, "Proof").fire("click");
-  const bulk = action(h.root, "Everything unchecked");
+  const bulk = action(h.root, "Receive all unchecked items");
   const count = all(h.root, (node) => node.tag === "input")[0];
   count.value = "1";
   count.fire("input");
@@ -73,7 +73,7 @@ test("bulk receive excludes a difference typed after the delivery first rendered
 
 test("bulk action does nothing when every unchecked item now has a draft", () => {
   const h = harness(); action(h.root, "Proof").fire("click");
-  const bulk = action(h.root, "Everything unchecked");
+  const bulk = action(h.root, "Receive all unchecked items");
   for (const input of all(h.root, (node) => node.tag === "input")) { input.value = "0"; input.fire("input"); }
   bulk.fire("click");
   assert.equal(h.calls.length, 0);
@@ -89,7 +89,7 @@ test("one-tap receiving saves receipt units once and blocks repeat clicks while 
   assert.equal(h.calls.length, 1);
   assert.equal(h.calls[0][0].receivedQuantity, 2);
   h.release(); await settle();
-  assert.match(h.root.textContent, /Saved\. Inventory/);
+  assert.match(h.root.textContent, /Receipt saved\./);
   assert.match(h.root.textContent, /Received items \(1\)/);
 });
 
@@ -99,7 +99,7 @@ test("failed discrepancy saves keep the entered quantity and do not claim succes
   all(h.root, (node) => node.tag === "form")[0].fire("submit"); await settle();
   assert.equal(h.calls[0][0].status, "partial");
   assert.match(h.root.textContent, /Connection interrupted/);
-  assert.doesNotMatch(h.root.textContent, /Saved\. Inventory/);
+  assert.doesNotMatch(h.root.textContent, /Receipt saved\./);
   assert.equal(all(h.root, (node) => node.tag === "input")[0].value, "1");
   assert.ok([...h.storage.values()].some((value) => value.includes('"quantity":"1"')));
 });
@@ -111,8 +111,15 @@ test("unplaced orders stay out of the actionable delivery picker", () => {
 });
 
 test("employee accounts can load the receiving module and stylesheet read-only", () => {
-  for (const pathname of ["/staff-receiving-view.mjs", "/staff-receiving.css"]) {
+  for (const pathname of ["/staff-receiving-view.mjs", "/staff-receiving.css", "/staff-simple.css", "/beer-delivery-destinations.mjs"]) {
     assert.equal(isEmployeeAllowedDashboardRequest({ pathname, method: "GET" }), true);
+    assert.equal(isEmployeeAllowedDashboardRequest({ pathname, method: "POST" }), false);
+  }
+});
+
+test("staff asset access does not grant inventory, pricing, or owner dashboard access", () => {
+  for (const pathname of ["/api/inventory-state", "/api/tap-pricing", "/dashboard.js", "/api/pmb-daily-usage"]) {
+    assert.equal(isEmployeeAllowedDashboardRequest({ pathname, method: "GET" }), false);
     assert.equal(isEmployeeAllowedDashboardRequest({ pathname, method: "POST" }), false);
   }
 });

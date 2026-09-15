@@ -46,7 +46,11 @@ function compareOptions(left, right) {
 export function resolveKegOnDeckOption(options = [], selection = null) {
   const selectedId = getSelectionId(selection);
   if (!selectedId) return null;
-  return options.find((option) => clean(option?.id) === selectedId) || null;
+  const exact = options.find((option) => clean(option?.id) === selectedId);
+  if (exact) return exact;
+  if (!selection || typeof selection !== "object") return null;
+  const matches = options.filter((option) => isKegOnDeckProductInstalled(selection, option));
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function normalizeKegOnDeckOverrides({
@@ -80,15 +84,18 @@ export function isKegOnDeckProductInstalled(onDeckProduct, currentProduct) {
 
   const onDeckPlu = positiveNumber(onDeckProduct.plu);
   const currentPlu = positiveNumber(currentProduct.plu);
-  if (onDeckPlu && currentPlu && onDeckPlu === currentPlu) return true;
+  if (onDeckPlu && currentPlu && onDeckPlu !== currentPlu) return false;
 
-  const onDeckName = normalizeProductIdentityName(
-    onDeckProduct.name || onDeckProduct.brand || onDeckProduct.tapProduct,
-  );
-  const currentName = normalizeProductIdentityName(
-    currentProduct.name || currentProduct.brand || currentProduct.tapProduct,
-  );
-  return Boolean(onDeckName && currentName && onDeckName === currentName);
+  const queuedName = clean(onDeckProduct.name || onDeckProduct.brand || onDeckProduct.tapProduct);
+  const installedName = clean(currentProduct.name || currentProduct.brand || currentProduct.tapProduct);
+  const queuedWall = queuedName.match(/\s+([123])$/)?.[1];
+  if (queuedWall && installedName.match(/\s+([123])$/)?.[1] !== queuedWall) return false;
+
+  // A reused PLU alone does not prove that the queued product was connected.
+  const currentName = normalizeProductIdentityName(installedName);
+  return Boolean(currentName) && [queuedName, onDeckProduct.pmbProductName]
+    .filter(Boolean)
+    .some((name) => normalizeProductIdentityName(name) === currentName);
 }
 
 export function buildKegOnDeckOptions({
@@ -106,6 +113,9 @@ export function buildKegOnDeckOptions({
   );
 
   STATIC_KEG_ON_DECK_RECIPE_IDS.forEach((recipeId) => {
+    // Legacy recipes are recovery options for existing selections, not a
+    // second queue that keeps offering products already connected to taps.
+    if (resolvedSelectedId !== `recipe:${recipeId}`) return;
     const recipe = recipesById.get(recipeId);
     const name = clean(recipe?.title) || clean(STATIC_KEG_ON_DECK_RECIPE_TITLES[recipeId]);
     if (!name) return;
@@ -133,5 +143,58 @@ export function buildKegOnDeckOptions({
     });
   });
 
+  if (resolvedSelectedId && !optionsById.has(resolvedSelectedId)
+    && selected && typeof selected === "object" && clean(selected.name)) {
+    const canonical = resolveKegOnDeckOption([...optionsById.values()], selected);
+    if (!canonical) {
+      optionsById.set(resolvedSelectedId, { ...selected, id: resolvedSelectedId, name: clean(selected.name) });
+    }
+  }
+
   return [...optionsById.values()].sort(compareOptions);
+}
+
+export function buildLinkedComingSoonItems({
+  comingSoonItems = [],
+  onDeckOverrides = {},
+  recipes = [],
+  currentProducts = [],
+  taps = [],
+} = {}) {
+  const products = new Map(comingSoonItems
+    .filter((item) => clean(item?.id) && clean(item?.name))
+    .map((item) => [clean(item.id), { ...item }]));
+  const waiting = new Map();
+  const installed = new Set();
+
+  for (const [tapKey, selected] of Object.entries(onDeckOverrides || {})) {
+    const option = resolveKegOnDeckOption(buildKegOnDeckOptions({
+      comingSoonItems: [...products.values()], recipes, selected,
+    }), selected);
+    if (!option) continue;
+    if (!products.has(option.id)) products.set(option.id, { ...option });
+
+    const tap = taps.find((item) => clean(item.key) === tapKey);
+    const tapNumber = positiveNumber(tap?.tapNumber);
+    const current = tapNumber
+      ? currentProducts.find((item) => positiveNumber(item.tapNumber) === tapNumber)
+      : null;
+    if (current && isKegOnDeckProductInstalled(option, current)) {
+      installed.add(option.id);
+      continue;
+    }
+    const assignments = waiting.get(option.id) || [];
+    assignments.push({ tapKey, tapNumber, wall: clean(tap?.wall) });
+    waiting.set(option.id, assignments);
+  }
+
+  return [...products.values()].flatMap((item) => {
+    const onDeckAssignments = waiting.get(item.id) || [];
+    // A copy waiting on its assigned tap must remain visible even if the same
+    // drink is already pouring elsewhere. This projection never alters history.
+    if (onDeckAssignments.length) return [{ ...item, onDeckAssignments }];
+    if (clean(item.replacedAt) || installed.has(item.id)
+      || currentProducts.some((current) => isKegOnDeckProductInstalled(item, current))) return [];
+    return [{ ...item, onDeckAssignments }];
+  }).sort(compareOptions);
 }

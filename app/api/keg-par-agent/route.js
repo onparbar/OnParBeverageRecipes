@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import {
   publishWeeklyPlanSnapshot,
   readParAgentState,
-  recallWeeklyPlanSnapshot,
   runParAgentUpdate,
   syncParAgentState,
 } from "../../../lib/par-agent.mjs";
@@ -104,18 +103,7 @@ export async function POST(request) {
     }
 
     if (action === "recall-weekly-plan") {
-      const state = await recallWeeklyPlanSnapshot({
-        expectedRevision: body.expectedRevision,
-        role,
-      });
-      recordDashboardActivity({
-        area: "Weekly Plan",
-        action: "recalled Monday plan",
-        role,
-        revision: state.revision,
-        summary: "Returned the locked order and prep plan to owner review; the Monday snapshot remains saved.",
-      }).catch(() => {});
-      return jsonResponse(state);
+      return jsonResponse({ error: "Plan recall has been removed. Current inventory and placed orders are preserved.", code: "PLAN_RECALL_DISABLED" }, 410);
     }
 
     const state = await syncParAgentState(patch, {

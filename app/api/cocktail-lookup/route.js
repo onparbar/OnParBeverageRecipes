@@ -8,6 +8,16 @@ const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 const IMAGE_SOURCE_MAX_BYTES = 15 * 1024 * 1024;
 const REMOTE_TEXT_MAX_BYTES = 2 * 1024 * 1024;
 const SAFE_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif", "image/gif", "image/apng"];
+const COCKTAIL_PHOTO_SOURCES = ["liquor.com", "imbibemagazine.com", "foodandwine.com", "diffordsguide.com", "seriouseats.com", "thespruceeats.com"];
+
+function isCocktailPhotoSource(url) {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return COCKTAIL_PHOTO_SOURCES.some((source) => hostname === source || hostname.endsWith(`.${source}`));
+  } catch {
+    return false;
+  }
+}
 
 function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -140,12 +150,14 @@ async function normalizeImage(rawImageUrl, baseUrl, { plainBottle = false } = {}
 
   try {
     const input = await fetchImageBuffer(imageUrl);
+    if (!plainBottle) {
+      const metadata = await sharp(input, { animated: false, limitInputPixels: 40_000_000 }).metadata();
+      if (!metadata.width || !metadata.height || metadata.width < 480 || metadata.height < 360) return null;
+    }
     for (const quality of [86, 78, 70, 62, 54]) {
       const output = await sharp(input, { animated: false, limitInputPixels: 40_000_000 })
-        .resize(IMAGE_WIDTH, IMAGE_HEIGHT, plainBottle
-          ? { fit: "contain", position: "center", background: "#f3efe7" }
-          : { fit: "cover", position: "center" })
-        .flatten({ background: plainBottle ? "#f3efe7" : "#ffffff" })
+        .resize(IMAGE_WIDTH, IMAGE_HEIGHT, { fit: "contain", position: "center", background: "#f3efe7" })
+        .flatten({ background: "#f3efe7" })
         .withMetadata({ density: 72 })
         .jpeg({ quality, progressive: true })
         .toBuffer();
@@ -225,8 +237,10 @@ function scoreItem(item, query, kind = "cocktail") {
 
 async function buildItem(result, query, kind) {
   try {
+    if (kind === "cocktail" && !isCocktailPhotoSource(result.url)) return null;
     const html = await fetchText(result.url);
     const rawImage = getMeta(html, ["og:image", "twitter:image", "image"]);
+    if (kind === "cocktail" && /(?:^|[\/_-])(?:logo|favicon|sprite|icon|banner|collage)(?:[\/_.-]|$)/i.test(rawImage)) return null;
     const image = rawImage ? await normalizeImage(rawImage, result.url, { plainBottle: kind === "liquor" }) : null;
     if (!image) return null;
 
@@ -260,9 +274,10 @@ export async function GET(request) {
       return NextResponse.json({ error: "Cocktail name is too long." }, { status: 400 });
     }
 
+    const cocktailSources = `(${COCKTAIL_PHOTO_SOURCES.map((source) => `site:${source}`).join(" OR ")})`;
     const searchTerms = kind === "liquor"
       ? `${query} exact liquor bottle official product image white background -cocktail -recipe`
-      : `${query} cocktail image recipe`;
+      : `${query} cocktail glass photography ${cocktailSources} -collage -illustration -logo`;
     const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(searchTerms)}`;
     const searchHtml = await fetchText(searchUrl);
     const results = extractDuckDuckGoResults(searchHtml);

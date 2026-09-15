@@ -170,6 +170,10 @@ async function finish(state, status = "ready", message = "Cart ready for your re
   try {
     const response = await chrome.runtime.sendMessage({ type: "VENDOR_CART_FINISHED", result });
     if (!response?.ok) throw new Error("The final cart status could not be saved.");
+    if (status === "ready") {
+      document.getElementById(OVERLAY_ID)?.remove();
+      globalThis.onParStartCheckoutReview?.(state);
+    }
   } catch {
     renderOverlay(
       state,
@@ -766,22 +770,20 @@ function findOhlqDateChoice(isoDate) {
   )].find(
     (element) => clean(element.getAttribute("aria-label")).toLowerCase() === targetLabel,
   );
-  if (labelled) return labelled;
-
-  const targetDay = String(Number(isoDate.slice(8, 10)));
-  const dayChoices = [...document.querySelectorAll(".ngb-dp-day")].filter((element) => (
-    visible(element)
-    && element.getAttribute("aria-disabled") !== "true"
-    && clean(element.textContent) === targetDay
-  ));
-  return dayChoices.length === 1 ? dayChoices[0] : null;
+  return labelled && visible(labelled)
+    && !labelled.closest('[aria-disabled="true"], [disabled], .disabled') ? labelled : null;
 }
 
 async function selectOhlqDeliveryDate(isoDate) {
-  const input = findOhlqDeliveryDateInput();
+  let input = findOhlqDeliveryDateInput();
+  const deadline = Date.now() + 15000;
+  while (!input && Date.now() < deadline) {
+    await delay(250);
+    input = findOhlqDeliveryDateInput();
+  }
   if (!input) throw new Error("OHLQ's delivery-date control could not be found.");
   input.click();
-  await delay(250);
+  await delay(600);
 
   let choice = findOhlqDateChoice(isoDate);
   if (!choice) {
@@ -816,7 +818,10 @@ async function selectOhlqDeliveryDate(isoDate) {
     : choice.querySelector("button, [role='button']") || choice;
   clickable.click();
   await delay(350);
-  if (!clean(input.value)) {
+  const value = clean(input.value);
+  const parts = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const selectedDate = parts ? `${parts[3]}-${parts[1].padStart(2, "0")}-${parts[2].padStart(2, "0")}` : value;
+  if (selectedDate !== isoDate) {
     throw new Error("OHLQ did not accept the plan week's Thursday as the delivery date.");
   }
 }
@@ -854,6 +859,7 @@ async function selectOhlqDeliveryTime() {
 }
 
 let ohlqDeliveryFillRunning = false;
+let ohlqDeliveryFilledFor = "";
 async function fillOhlqCheckoutDelivery() {
   if (ohlqDeliveryFillRunning) return;
   ohlqDeliveryFillRunning = true;
@@ -862,9 +868,11 @@ async function fillOhlqCheckoutDelivery() {
       type: "GET_OHLQ_DELIVERY_PREFERENCE",
     });
     const preference = response?.ok ? response.preference : null;
-    if (!preference) return;
+    if (!preference) throw new Error("A current approved OHLQ delivery preference is needed; choose delivery manually.");
+    if (ohlqDeliveryFilledFor === preference.date) return;
     await selectOhlqDeliveryDate(preference.date);
     await selectOhlqDeliveryTime();
+    ohlqDeliveryFilledFor = preference.date;
     renderOhlqDeliveryNotice(
       `Delivery set for ${ohlqDateLabel(preference.date)} at 9:00 AM. Review the cart and submit it manually.`,
     );
@@ -872,6 +880,7 @@ async function fillOhlqCheckoutDelivery() {
     ohlqDeliveryFillRunning = false;
   }
 }
+globalThis.onParFillOhlqDelivery = fillOhlqCheckoutDelivery;
 
 function proofCartCounts(state) {
   const pageText = clean(document.body?.innerText);

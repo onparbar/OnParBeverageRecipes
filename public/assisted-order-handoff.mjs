@@ -355,7 +355,7 @@ export function createAuthoritativeAssistedOrderHandoff(
     preview: handoff.blockers.length > 0,
     actionsEnabled: rehearsal
       ? handoff.blockers.length === 0
-      : ["reviewed", "opened_vendor"].includes(status),
+      : handoff.blockers.length === 0 && status !== "manually_completed",
     rehearsal,
     operatingWeekReference: cleanText(draft.generatedAt) || null,
     proofFee: draft.proofFee || null,

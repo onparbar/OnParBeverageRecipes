@@ -13,6 +13,7 @@ import {
 } from "../../../lib/inventory-contributions.mjs";
 import { executeInventoryBackedOperation } from "../../../lib/inventory-backed-operation.mjs";
 import { applyBeerReceiptCounts } from "../../../lib/beer-receipt-counts.mjs";
+import { archiveWeeklyOrderPlacement } from "../../../lib/weekly-order-snapshot.mjs";
 
 export const runtime = "nodejs";
 
@@ -140,6 +141,12 @@ export async function POST(request) {
       });
     };
     let saved;
+    let snapshotOrder = null;
+    if (body.action === "set-ordered") {
+      // Archive first. A failed archive must never make the Order step complete.
+      // Retrying the same placement preserves its original archived details.
+      snapshotOrder = await archiveWeeklyOrderPlacement(updatedRecommendations, body.vendorId, role);
+    }
     let inventoryUpdate = null;
     if (inventoryPlan) {
       const trackedVendor = priorTracking?.vendors?.find((vendor) => vendor.id === receiptVendorId);
@@ -195,7 +202,7 @@ export async function POST(request) {
         revision: saved.revision,
         summary: `${trackedVendor} ${action} for Weekly Plan ${priorTracking.generatedAt}; real submission remains manual.`,
         dedupe: body.action !== "set-ordered",
-      });
+      }).catch(() => { console.error("Weekly order saved; activity logging unavailable."); });
     }
     return jsonResponse({
       available: true,
@@ -203,6 +210,7 @@ export async function POST(request) {
       stateRevision: saved.revision,
       ...buildWeeklyOrderTracking(saved.recommendations),
       inventoryUpdate,
+      snapshotOrder,
     });
   } catch (error) {
     return errorResponse(error);

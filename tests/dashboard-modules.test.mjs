@@ -113,73 +113,35 @@ test("finish-week views preserve shared checklist controls and escaped labels", 
   assert.match(panel, /Saving\.\.\./);
 });
 
-test("Monday Run model preserves the five Monday operational steps and next-action rules", () => {
-  const run = buildMondayRunModel({
-    kegFeed: { status: "online" },
-    pricingFeed: { status: "online" },
-    weeklyUsageCaptured: true,
-    inventorySharedInitialized: true,
-    inventoryCountedThisWeek: true,
-    planActionable: true,
-    tapSheets: [{ isCurrent: false }, { isCurrent: true }],
-  });
-  assert.equal(run.steps.length, 5);
-  assert.equal(run.completedCount, 2);
-  assert.equal(run.nextStep.id, "plan");
-  assert.equal(run.steps.find((step) => step.id === "print").status, "1 left");
-
-  const locked = buildMondayRunModel({
-    planLocked: true,
-    inventorySharedInitialized: true,
-    inventoryCountedThisWeek: true,
-    weeklyOrderTrackingAvailable: true,
-    vendorOrders: [{ ordered: true }],
-    orderLineCount: 3,
-    tapSheets: [{ isCurrent: true }],
-  });
+test("Monday Run has three steps and only completes when all orders are placed", () => {
+  const run = buildMondayRunModel({ coolerCountComplete: true, inventorySharedInitialized: true, inventoryCountedThisWeek: true });
+  assert.deepEqual(run.steps.map((step) => step.id), ["cooler", "inventory", "orders"]);
+  assert.equal(run.completedCount, 1);
+  assert.equal(run.nextStep.id, "inventory");
+  const locked = buildMondayRunModel({ planLocked: true, inventorySaveError: "live count retry", kegCountSaveError: "live count retry", weeklyOrderTrackingAvailable: true, vendorOrders: [{ ordered: true }], orderLineCount: 3, now: new Date("2026-09-14T15:00:00Z") });
   assert.equal(locked.complete, true);
-  assert.equal(locked.steps.find((step) => step.id === "orders").status, "Placed");
-
-  const lockedInProgress = buildMondayRunModel({
-    planLocked: true,
-    inventorySharedInitialized: true,
-    inventoryCountedThisWeek: true,
-    weeklyOrderTrackingAvailable: true,
-    vendorOrders: [{ ordered: false }],
-    orderLineCount: 1,
-    tapSheets: [{ isCurrent: false }],
-  });
-  const lockedHtml = renderMondayRun(lockedInProgress);
-  assert.match(lockedHtml, /<button type="button" disabled aria-disabled="true">\s*<span>1<\/span>/);
-  assert.doesNotMatch(lockedHtml, /Refresh PMB &amp; capture usage/);
-  assert.match(lockedHtml, /<button type="button" id="recall-weekly-plan">\s*<span>2<\/span>\s*<strong>Unlock plan<\/strong>/);
-  assert.match(renderMondayRun(lockedInProgress, { unlocking: true }), /id="recall-weekly-plan" disabled aria-disabled="true"/);
-  assert.doesNotMatch(renderMondayRun(locked), /Review this week|View all 5 steps|>Review<\/button>/);
-  assert.match(lockedHtml, /data-monday-run-step="orders" data-dashboard-target="weekly-plan"/);
-
-  const snapshotOnly = buildMondayRunModel({
-    mondaySnapshotSaved: true,
-    planLocked: false,
-  });
-  assert.equal(snapshotOnly.steps.find((step) => step.id === "plan").complete, false);
-  assert.equal(snapshotOnly.steps.find((step) => step.id === "plan").status, "Ready to save & lock");
-  assert.doesNotMatch(renderMondayRun(snapshotOnly), /Snapshot saved/);
+  assert.equal(locked.steps[2].status, "All placed");
+  assert.match(renderMondayRun(locked), />Complete</);
+  assert.match(renderMondayRun(locked), /Sep 14 - 20/);
+  assert.doesNotMatch(renderMondayRun(locked), /monday-run-steps|Save needs retry|>Continue</);
+  assert.doesNotMatch(renderMondayRunCompact(locked), /Next:/);
+  const pending = buildMondayRunModel({ planLocked: true, weeklyOrderTrackingAvailable: true, vendorOrders: [{ ordered: false }], orderLineCount: 1 });
+  assert.equal(pending.complete, false);
+  assert.equal(pending.nextStep.id, "orders");
+  assert.match(renderMondayRun(pending), /data-monday-run-step="orders" data-dashboard-target="weekly-plan"/);
+  const snapshotOnly = buildMondayRunModel({ mondaySnapshotSaved: true, inventorySharedInitialized: true });
+  assert.equal(snapshotOnly.steps[0].complete, true);
+  assert.equal(snapshotOnly.steps[1].complete, false);
+  assert.equal(snapshotOnly.steps[1].status, "Submit to finish saving");
 });
 
-test("Monday Run renderers keep actionable data attributes and compact next-step text", () => {
-  const run = buildMondayRunModel({
-    kegFeed: { status: "online" },
-    pricingFeed: { status: "online" },
-    weeklyUsageCaptured: true,
-    inventorySharedInitialized: true,
-    inventoryCountedThisWeek: true,
-    tapSheets: [{ isCurrent: true }],
-  });
+test("Monday Run renderers route verified cooler counts to inventory", () => {
+  const run = buildMondayRunModel({ coolerCountComplete: true, inventorySharedInitialized: true, inventoryCountedThisWeek: true });
   const full = renderMondayRun(run);
   const compact = renderMondayRunCompact(run);
-  assert.match(full, /data-monday-run-step="plan"/);
+  assert.match(full, /data-monday-run-step="inventory"/);
   assert.match(full, /aria-current="step"/);
-  assert.match(full, /Step 2 of 4/);
-  assert.match(compact, /Step 2 of 4/);
-  assert.match(compact, /Next:<\/span> <strong>Save &amp; lock plan/);
+  assert.match(full, /Step 2 of 3/);
+  assert.match(compact, /Step 2 of 3/);
+  assert.match(compact, /Next:<\/span> <strong>Inventory/);
 });

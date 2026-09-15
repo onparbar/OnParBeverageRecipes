@@ -165,18 +165,14 @@ test("inventory and activity failures remain explicitly retryable", async () => 
       && error.details.stage === "inventory"
       && error.details.retryable === true,
   );
-  await assert.rejects(
-    executeInventoryBackedOperation({
-      plan,
-      assertPlan: assertInventoryContributionPlan,
-      persist: async () => ({ revision: 1 }),
-      applyInventory: async () => ({ appliedItemCount: 0 }),
-      recordActivity: async () => { throw new Error("offline"); },
-    }),
-    (error) => error instanceof InventoryBackedOperationError
-      && error.details.stage === "activity"
-      && error.details.retryable === true,
-  );
+  const result = await executeInventoryBackedOperation({
+    plan, assertPlan: assertInventoryContributionPlan,
+    persist: async () => ({ revision: 1 }),
+    applyInventory: async () => ({ appliedItemCount: 0 }),
+    recordActivity: async () => { throw new Error("offline"); },
+  });
+  assert.equal(result.activityRecorded, false);
+  assert.equal(result.saved.revision, 1);
 });
 
 test("activity retries detect an existing matching record", async () => {

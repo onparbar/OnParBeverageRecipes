@@ -8,6 +8,7 @@ import {
 import { getCocktailPrepDisplayName } from "./weekly-action-plan.mjs";
 import { kegDestination } from "./keg-destination.mjs";
 import { renderInlinePrepCompletion } from "./finish-week-view.mjs";
+import { renderWeeklyPrepAdder } from "./weekly-prep-add.mjs";
 
 export function getWeeklyPlanTapContext(item, unit, { compact = false } = {}) {
   const taps = item.tapNumbers.length
@@ -65,12 +66,12 @@ export function renderWeeklyPlanTapRows(items, {
 }
 
 export function renderWeeklyPlanCocktailRows(items) {
-  if (!items.length) return '<p class="weekly-plan-empty">None this week.</p>';
+  if (!items.length) return `<p class="weekly-plan-empty">None this week.</p>${renderWeeklyPrepAdder()}`;
   const orderedItems = [...items].sort((a, b) => (
     toNumber(a.tapNumbers?.[0]) - toNumber(b.tapNumbers?.[0])
     || clean(a.name).localeCompare(clean(b.name))
   ));
-  return `<div class="weekly-plan-list weekly-plan-label-list">${orderedItems.map((item) => {
+  return `${renderWeeklyPrepAdder()}<div class="weekly-plan-list weekly-plan-label-list">${orderedItems.map((item) => {
     const wall = clean(item.walls?.[0]);
     const details = [
       kegDestination({ ...item, wall }, { cocktail: true }),
@@ -83,6 +84,7 @@ export function renderWeeklyPlanCocktailRows(items) {
           <span>${escapeHtml(details)}</span>
         </div>
         ${item.completionItem ? renderInlinePrepCompletion(item.completionItem, "cocktail", { saving: item.completionSaving }) : `<b>${escapeHtml(item.quantityLabel || `${formatNumber(item.quantity)} label${item.quantity === 1 ? "" : "s"}`)}</b>`}
+        <button type="button" class="mini-button dashboard-owner-only" data-prep-subtract="${escapeHtml(item.prepAdditionId ? `cocktail-addition:${item.prepAdditionId}` : `cocktail:${encodeURIComponent(clean(item.name).toLowerCase())}`)}" aria-label="Subtract one planned keg of ${escapeHtml(item.name)}" title="Subtract one keg"${item.completionItem?.completed ? " disabled" : ""}>&times;</button>
       </div>
     `;
   }).join("")}</div>`;

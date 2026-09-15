@@ -1,3 +1,4 @@
+import { readPmbProductCatalog, savePmbProductCatalog } from "../../../lib/pmb-product-catalog.mjs";
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import http from "node:http";
@@ -6,6 +7,7 @@ import { requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
 import { fetchRemoteBuffer } from "../../../lib/safe-remote-fetch.mjs";
 
 export const runtime = "nodejs";
+let productWriteInProgress = false;
 
 const PRODUCT_IMAGE_WIDTH = 676;
 const PRODUCT_IMAGE_HEIGHT = 540;
@@ -648,12 +650,15 @@ function buildManagementProductForm(product, imageFile = null, { mode = "add" } 
   return fields;
 }
 
-async function createProductViaManagementUi(config, token, product, imageFile = null, { matchByPluOnly = false } = {}) {
+async function createProductViaManagementUi(config, token, product, imageFile = null, { matchByPluOnly = false, createOnly = false } = {}) {
   const before = await getProductList(config, token);
   const existing = (before.productlist || []).find((item) => (
     Number(item.plu) === Number(product.plu) ||
     (!matchByPluOnly && normalizeName(item.name) === normalizeName(product.name))
   ));
+  if (existing && createOnly) {
+    throw Object.assign(new Error("That product name or PLU already exists. No existing product was changed."), { status: 409 });
+  }
   if (existing) {
     return updateProductViaManagementUi(config, token, { ...product, plu: Number(existing.plu || product.plu) }, imageFile, existing);
   }
@@ -685,7 +690,7 @@ async function createProductViaManagementUi(config, token, product, imageFile = 
   }
 
   const after = await getProductList(config, token);
-  const saved = (after.productlist || []).find((item) => Number(item.plu) === Number(product.plu));
+  const saved = (after.productlist || []).find((item) => Number(item.plu) === Number(product.plu) && normalizeName(item.name) === normalizeName(product.name));
   if (!saved) {
     return {
       ok: false,
@@ -698,6 +703,7 @@ async function createProductViaManagementUi(config, token, product, imageFile = 
   return {
     ok: true,
     product: saved,
+    catalog: after.productlist,
     path: "/pages/products",
     response: "Saved via TTG Product Database form.",
     imageUploaded: Boolean(imageFile),
@@ -777,14 +783,23 @@ async function trySendConfigUpdate(config, token) {
 }
 
 export async function GET(request) {
-  const cloneImageFor = clean(new URL(request.url).searchParams.get("cloneImageFor"));
+  const params = new URL(request.url).searchParams;
+  const cloneImageFor = clean(params.get("cloneImageFor"));
+  const cloneImagePlu = Number(params.get("cloneImagePlu"));
   try {
-    if (cloneImageFor) await requireDashboardRequestRole(request, { owner: true });
+    if (params.get("catalog") === "1") {
+      await requireDashboardRequestRole(request, { owner: true });
+      return NextResponse.json({ ok: true, ...(await readPmbProductCatalog({ refresh: params.get("refresh") === "1" })) }, { headers: { "Cache-Control": "private, no-store", Vary: "Cookie" } });
+    }
+    if (cloneImageFor || cloneImagePlu) await requireDashboardRequestRole(request, { owner: true });
     const config = getConfig();
     const token = await getAuthtoken(config);
     const products = await getProductList(config, token);
-    if (cloneImageFor) {
-      const sourceProduct = getCloneSourceProduct(products.productlist, cloneImageFor);
+    if (cloneImageFor || cloneImagePlu) {
+      const sourceProduct = cloneImagePlu
+        ? products.productlist.find(item => Number(item.plu) === cloneImagePlu)
+        : getCloneSourceProduct(products.productlist, cloneImageFor);
+      if (!sourceProduct) throw new Error("The selected PMB product no longer exists.");
       const imageUrl = getCloneImageUrl(sourceProduct, config.baseUrl);
       const imageBuffer = await readImageSourceBuffer(imageUrl, {
         trustedBaseUrl: config.baseUrl,
@@ -841,17 +856,37 @@ export async function GET(request) {
 
 export async function POST(request) {
   const attempts = [];
+  let claimedWrite = false;
 
   try {
     await requireDashboardRequestRole(request, { owner: true });
+    if (request.headers.get("sec-fetch-site") === "cross-site") return NextResponse.json({ error: "Open the dashboard to create a product." }, { status: 403 });
     const input = await request.json();
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw Object.assign(new Error("Invalid product request."), { status: 400 });
+    if (productWriteInProgress) throw Object.assign(new Error("Another product is saving. Please try again shortly."), { status: 409 });
+    productWriteInProgress = true; claimedWrite = true;
+    const duplicate = input.duplicateSourcePlu != null;
+    if (duplicate && (!Number.isSafeInteger(input.duplicateSourcePlu) || input.duplicateSourcePlu <= 0 || !["Main", "Karaoke"].includes(input.destinationWall))) throw Object.assign(new Error("Choose a source product and destination wall."), { status: 400 });
     const config = getConfig();
     const token = await getAuthtoken(config);
-    const plu = toNumber(input.plu) || await getNextPlu(config, token);
-    const cloneSourceName = clean(input.cloneSourceName);
-    const sourceProduct = cloneSourceName
-      ? getCloneSourceProduct((await getProductList(config, token)).productlist, cloneSourceName)
-      : null;
+    const plu = duplicate ? await getNextPlu(config, token) : toNumber(input.plu) || await getNextPlu(config, token);
+    let cloneSourceName = clean(input.cloneSourceName);
+    let sourceProduct = null;
+    if (duplicate) {
+      const catalog = (await getProductList(config, token)).productlist;
+      const matches = catalog.filter(item => Number(item.plu) === input.duplicateSourcePlu);
+      if (matches.length !== 1) throw Object.assign(new Error("The source product is unavailable or ambiguous. Refresh the catalog."), { status: 409 });
+      sourceProduct = matches[0]; cloneSourceName = clean(sourceProduct.name);
+      if (!clean(input.name) || clean(input.name).length > 160) throw Object.assign(new Error("A new product name is required (up to 160 characters)."), { status: 400 });
+      if (catalog.some(item => normalizeName(item.name) === normalizeName(input.name))) throw Object.assign(new Error("That product already exists. No existing product was changed."), { status: 409 });
+      input.productKind = Number(sourceProduct.product_type) === 1 ? "beer" : "cocktail";
+      input.pricePerOz = Number(sourceProduct.price_per_unit) / 100;
+      input.servingOz = Number(sourceProduct.units_per_serving) / 100;
+      input.abvPercent = Number(sourceProduct.abv) / 100;
+      input.cloneSourceName = cloneSourceName;
+    } else if (cloneSourceName) {
+      sourceProduct = getCloneSourceProduct((await getProductList(config, token)).productlist, cloneSourceName);
+    }
     const product = sourceProduct
       ? buildClonedProduct(input, plu, sourceProduct)
       : buildProduct(input, plu);
@@ -863,7 +898,8 @@ export async function POST(request) {
       throw new Error(`PMB did not provide the ${cloneSourceName} image, so the duplicate was not created.`);
     }
     const uiWrite = await createProductViaManagementUi(config, token, product, imageFile, {
-      matchByPluOnly: input.matchByPluOnly === true,
+      matchByPluOnly: duplicate ? false : input.matchByPluOnly === true,
+      createOnly: duplicate,
     });
 
     attempts.push({
@@ -873,10 +909,15 @@ export async function POST(request) {
     });
 
     if (uiWrite.ok) {
-      const shouldSendConfigUpdate = input.sendConfigUpdate === true;
+      let catalogBackupWarning = "";
+      try { await savePmbProductCatalog(uiWrite.catalog || (await getProductList(config, token)).productlist); }
+      catch { catalogBackupWarning = "Product saved in PMB. Its catalog backup needs a retry."; }
+      const shouldSendConfigUpdate = !duplicate && input.sendConfigUpdate === true;
       const configUpdatePath = shouldSendConfigUpdate ? await trySendConfigUpdate(config, token) : "";
       return NextResponse.json({
         ok: true,
+        catalogBackupWarning,
+        destinationWall: duplicate ? input.destinationWall : undefined,
         message: uiWrite.updatedExisting
           ? `${uiWrite.product.name} was updated in Pour My Beer.`
           : `${uiWrite.product.name} was sent to Pour My Beer.`,
@@ -899,7 +940,7 @@ export async function POST(request) {
     );
   } catch (error) {
     const message = error.message || "Could not send product to Pour My Beer.";
-    const status = error instanceof SyntaxError || /required|must be|invalid/i.test(message) ? 400 : 502;
+    const status = error.status || (error instanceof SyntaxError || /required|must be|invalid/i.test(message) ? 400 : 502);
     return NextResponse.json(
       {
         error: message,
@@ -907,5 +948,7 @@ export async function POST(request) {
       },
       { status },
     );
+  } finally {
+    if (claimedWrite) productWriteInProgress = false;
   }
 }

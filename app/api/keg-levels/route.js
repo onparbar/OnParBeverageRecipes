@@ -6,6 +6,7 @@ import {
 import { getTapConfigRows, getKegTappedOnRows } from "../../../lib/pmb-tap-config.mjs";
 import {
   buildVerifiedKegSlotMap,
+  buildVerifiedPmbProductMap,
   PmbKegSafetyError,
   requireSuccessfulKegLevelResponse,
 } from "../../../lib/pmb-keg-safety.mjs";
@@ -167,19 +168,21 @@ export async function GET() {
     const unreachableTaps = [];
     for (const slot of verifiedSlots) {
       try {
-        const response = await postJson(
-          config.baseUrl,
-          "/api/getkeglevels",
-          { device_id: slot.deviceId, line_num: slot.lineNum },
-          token,
-        );
+        let levelJson;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            const response = await postJson(config.baseUrl, "/api/getkeglevels",
+              { device_id: slot.deviceId, line_num: slot.lineNum }, token);
+            levelJson = requireSuccessfulKegLevelResponse(response, slot, { requireKegSize: false });
+            break;
+          } catch (error) {
+            if (attempt === 1) throw error;
+          }
+        }
         // The dashboard can safely display a verified percentage even when a
         // controller has not been configured with keg-size metadata. Keg writes
         // keep the helper's stricter default and still require the complete
         // response before calculating or sending an adjustment.
-        const levelJson = requireSuccessfulKegLevelResponse(response, slot, {
-          requireKegSize: false,
-        });
 
         const rawPercentText = String(levelJson.fill_level_perc ?? "").trim();
         const rawPercent = rawPercentText === "" ? Number.NaN : Number(rawPercentText);
@@ -243,11 +246,7 @@ export async function GET() {
       levels.sort((a, b) => a.lineNum - b.lineNum);
     });
 
-    const productByPlu = new Map(
-      products.json.productlist
-        .map((product) => [Number(product.plu || 0), product])
-        .filter(([plu]) => plu),
-    );
+    const productByPlu = buildVerifiedPmbProductMap(products.json.productlist);
     let items = verifiedSlots.map((slot) => {
       const product = productByPlu.get(slot.plu) || {};
       const level = levelBySlot.get(`${slot.deviceId}:${slot.lineNum}`) || {};

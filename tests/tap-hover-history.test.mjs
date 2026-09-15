@@ -22,6 +22,7 @@ const base = {
   formatUpdatedAt: (date) => date,
   clean: (value) => String(value || "").trim(),
   getTapNewBadge: () => null,
+  renderProductNewBadge: load("renderProductNewBadge", { escapeHtml }),
 };
 const renderProduct = load("renderTapChangeControls", base);
 const monthsAgo = (months) => { const date = new Date(); date.setMonth(date.getMonth() - months); return date.toISOString(); };

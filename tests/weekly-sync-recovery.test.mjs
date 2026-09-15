@@ -31,17 +31,14 @@ test("keg recovery keeps individual taps separate and treats an On Deck product 
 
 const readyPmb = { kegFeed: { status: "online" }, pricingFeed: { status: "online" }, weeklyUsageCaptured: true };
 
-test("Step 1 distinguishes repair, stale readings, saving, and a report that is not captured", () => {
+test("Cooler step reflects count saving while locked snapshots ignore live retry state", () => {
   const status = (extra) => buildMondayRunModel({ ...readyPmb, ...extra }).steps[0];
-  assert.match(status({ kegFeed: { status: "stale" } }).status, /fresh reading/);
-  assert.match(status({ kegFeed: { status: "partial", capturedCount: 58, expectedCount: 102 } }).status, /58 of 102/);
-  assert.match(status({ weeklyUsageCaptured: false }).status, /Capture last week's usage/);
-  assert.match(status({ weeklyUsageSavePending: true }).status, /Saving weekly usage/);
-  assert.equal(status({ weeklyUsageSavePending: true }).complete, false);
-  assert.match(status({ weeklyUsageSaveError: "conflict", pmbRefreshPending: true }).status, /save issue/);
-  assert.match(status({ kegCountSaveError: "conflict" }).status, /save recovery/);
-  assert.match(status({ tapRepairRefreshPending: true }).status, /Tap repair sent/);
-  assert.equal(status({ planLocked: true, weeklyUsageSaveError: "conflict" }).complete, true);
+  assert.equal(status({ kegFeed: { status: "stale" } }).status, "Count coolers");
+  assert.equal(status({ coolerCountSaving: true }).complete, false);
+  assert.match(status({ coolerCountSaving: true }).status, /Saving/);
+  assert.match(status({ kegCountSaveError: "conflict" }).status, /retry/);
+  assert.equal(status({ coolerCountComplete: true }).complete, true);
+  assert.equal(status({ planLocked: true, kegCountSaveError: "conflict", coolerCountSaving: true }).complete, true);
 });
 
 test("inventory must have a count from this operating week, without making blank quantities mandatory", () => {
@@ -51,15 +48,16 @@ test("inventory must have a count from this operating week, without making blank
   const priorCountedAt = state.current.countedAt;
   state = applyInventoryStateAction(state, "update-field", { id: "lime", field: "par", value: "8" }, "owner", monday);
   assert.equal(state.current.countedAt, priorCountedAt);
-  const model = () => buildMondayRunModel({ ...readyPmb, inventorySharedInitialized: true,
+  const model = () => buildMondayRunModel({ ...readyPmb, coolerCountComplete: true, inventorySharedInitialized: true,
     inventoryCountedThisWeek: isRecommendationForOperatingWeek(state.current.countedAt, monday) });
-  assert.equal(model().steps[1].status, "Count needed");
+  assert.equal(model().steps[1].status, "Count inventory");
   state = applyInventoryStateAction(state, "update-field", { id: "lime", field: "onHand", value: "0" }, "owner", monday);
-  assert.equal(model().steps[1].complete, true);
+  assert.equal(model().steps[1].complete, false);
+  assert.equal(model().steps[1].status, "Ready to submit");
   assert.equal(normalizeInventoryState(state).current.countedAt, monday.toISOString());
   state = applyInventoryStateAction(state, "batch-update-fields", { source: "clear-on-hand", changes: [{ id: "lime", field: "onHand", value: "" }] }, "owner", monday);
   assert.equal(model().steps[1].complete, false);
-  assert.equal(buildMondayRunModel({ planLocked: true }).steps[1].complete, false);
+  assert.equal(buildMondayRunModel({ planLocked: true }).steps[1].complete, true);
 });
 
 test("a count queued last week does not become this week's count merely because its retry succeeds today", () => {

@@ -58,22 +58,48 @@ export function bindVendorOrderController({
   setWeeklyOrderTrackingMessage,
   renderWeeklyPlan,
   saveVendorOrderDraftAction,
-  confirmDashboardAction,
   saveWeeklyOrderPlaced,
   getReviewAndApproveOrderPolicy,
 } = {}) {
   if (typeof documentRef?.querySelectorAll !== "function") return false;
 
   const setMessage = (message) => setWeeklyOrderTrackingMessage?.(message);
+  const prepareHandoff = async (view) => {
+    if (view.order.rehearsal) return;
+    const response = await fetch("/api/weekly-order-tracking", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "review-and-approve",
+        generatedAt: view.order.operatingWeekReference,
+        vendor: view.order.vendor,
+        expectedDraftId: view.order.id,
+        confirmed: true,
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "The order is not ready to open.");
+  };
 
   documentRef.querySelectorAll("[data-assisted-order-copy]").forEach((button) => {
     button.addEventListener("click", async () => {
       const view = getDraftView?.(button.dataset.assistedOrderCopy);
       if (!view?.order.actionsEnabled) return;
       if (!view.order.rehearsal && !confirmLateVendorOrder?.(view)) return;
-      await copyAssistedOrderText?.(view.copyText);
-      if (view.order.rehearsal) button.textContent = "Copied";
-      else await saveVendorHandoffEvent?.(view, "copied");
+      if (button.disabled) return;
+      button.disabled = true;
+      try {
+        await prepareHandoff(view);
+        await copyAssistedOrderText?.(view.copyText);
+        if (view.order.rehearsal) button.textContent = "Copied";
+        else await saveVendorHandoffEvent?.(view, "copied");
+      } catch (error) {
+        setMessage(error.message);
+        renderWeeklyPlan?.();
+      } finally {
+        button.disabled = false;
+      }
     });
   });
 
@@ -81,6 +107,7 @@ export function bindVendorOrderController({
     button.addEventListener("click", async () => {
       const view = getDraftView?.(button.dataset.assistedOrderOpen);
       if (!view?.order.actionsEnabled) return;
+      if (button.disabled) return;
       if (!view.order.rehearsal && !confirmLateVendorOrder?.(view)) return;
       if (canBuildVendorCart?.(view.order.vendorKey)) {
         const vendorLabel = getVendorCartLabel?.(view.order) || view.order.vendor;
@@ -88,6 +115,7 @@ export function bindVendorOrderController({
         button.disabled = true;
         button.textContent = view.order.rehearsal ? `Filling ${vendorLabel} rehearsal...` : `Opening ${vendorLabel}...`;
         try {
+          await prepareHandoff(view);
           await sendVendorCartRequest?.(view);
           button.textContent = view.order.rehearsal ? `${vendorLabel} rehearsal ready` : `Sent to ${vendorLabel}`;
           if (!view.order.rehearsal) await saveVendorHandoffEvent?.(view, "opened_vendor");
@@ -99,8 +127,18 @@ export function bindVendorOrderController({
         return;
       }
       if (!view.vendorPath) return;
-      openVendorPath?.(view);
-      await saveVendorHandoffEvent?.(view, "opened_vendor");
+      if (button.disabled) return;
+      button.disabled = true;
+      try {
+        await prepareHandoff(view);
+        openVendorPath?.(view);
+        await saveVendorHandoffEvent?.(view, "opened_vendor");
+      } catch (error) {
+        setMessage(error.message);
+        renderWeeklyPlan?.();
+      } finally {
+        button.disabled = false;
+      }
     });
   });
 
@@ -155,6 +193,7 @@ export function bindVendorOrderController({
   syncAdjustmentProducts();
 
   adjustmentPanel?.querySelector("[data-order-adjustment-save]")?.addEventListener("click", async () => {
+    if (adjustmentAction?.value === "add-prep") return;
     const option = adjustmentProduct?.selectedOptions?.[0];
     const adjustedBy = resolveActor(adjustmentManager?.value);
     const reason = clean(adjustmentReason?.value);
@@ -194,21 +233,26 @@ export function bindVendorOrderController({
 
   documentRef.querySelectorAll("[data-weekly-order-place]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const vendor = clean(button.dataset.weeklyOrderVendor);
       const orderedBy = resolveActor(button.dataset.weeklyOrderedBy);
       if (!button.dataset.weeklyOrderVendorId || !orderedBy) return;
-      if (!confirmDashboardAction?.(
-        `Mark the ${vendor} order as placed?`,
-        ["This confirms the reviewed order was submitted outside the dashboard."],
-      )) return;
       button.disabled = true;
-      await saveWeeklyOrderPlaced?.(button.dataset.weeklyOrderVendorId, true, orderedBy);
+      await saveWeeklyOrderPlaced?.(button.dataset.weeklyOrderVendorId, true, orderedBy, button.dataset.weeklyOrderDraftId);
     });
   });
 
   documentRef.querySelectorAll("[data-vendor-order-draft]").forEach((form) => {
     const vendor = form.dataset.vendorOrderDraft;
     const managerInput = form.querySelector("[data-order-draft-manager]");
+    // The approval click itself confirms the visible order. Retire the legacy
+    // checkbox rather than asking the manager to confirm the same order twice.
+    const legacyConfirmation = form.querySelector("[data-order-draft-confirm]");
+    if (legacyConfirmation) {
+      legacyConfirmation.required = false;
+      legacyConfirmation.checked = true;
+      const label = legacyConfirmation.closest("label");
+      if (label) label.hidden = true;
+      else legacyConfirmation.hidden = true;
+    }
     const reopenButton = form.querySelector("[data-order-draft-reopen]");
     reopenButton?.addEventListener("click", async () => {
       const adjustedBy = resolveActor(reopenButton.dataset.orderDraftActor);
@@ -285,18 +329,12 @@ export function bindVendorOrderController({
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const approvedBy = resolveActor(managerInput?.value);
-      const confirmed = Boolean(form.querySelector("[data-order-draft-confirm]")?.checked);
       if (!approvedBy) {
         managerInput?.setCustomValidity("Enter the approving manager.");
         managerInput?.reportValidity();
         return;
       }
       managerInput?.setCustomValidity("");
-      if (!confirmed) {
-        setMessage("Confirm the vendor, total, and line count before approval.");
-        renderWeeklyPlan?.();
-        return;
-      }
       await saveVendorOrderDraftAction?.({
         action: "review-and-approve",
         vendor,

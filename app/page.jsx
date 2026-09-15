@@ -353,6 +353,9 @@ export default function DashboardPage() {
             <aside className="keg-summary" id="keg-summary"></aside>
             <div className="keg-walls" id="keg-walls"></div>
           </div>
+          <div className="inventory-submit-actions">
+            <button className="primary-button" id="cooler-count-continue" type="button">Continue to Inventory</button>
+          </div>
         </section>
 
         <section className="panel" id="weekly-plan-panel" role="tabpanel" aria-label="Weekly Plan">
@@ -373,6 +376,7 @@ export default function DashboardPage() {
 
         <section className="panel" id="add-panel" aria-labelledby="add-tab">
           <div className="add-workspace">
+          <details id="product-duplicate" className="weekly-plan-phase dashboard-owner-only"></details>
           <details className="weekly-plan-phase">
             <summary>Supplier &amp; pricing links</summary>
             <form id="supplier-mapping-form" className="recipe-form">
@@ -467,7 +471,7 @@ export default function DashboardPage() {
               </label>
               <div className="image-picker" data-picker="recipe">
                 <div className="image-picker__preview">
-                  <img id="new-recipe-image-preview" alt="Recipe default" />
+                  <img id="new-recipe-image-preview" src="/on-par-logo-white.png" alt="On Par Entertainment" style={{ objectFit: "contain", padding: "2rem", background: "#28665c", boxSizing: "border-box" }} />
                 </div>
                 <div className="image-picker__controls">
                   <span>Default picture</span>
@@ -518,7 +522,7 @@ export default function DashboardPage() {
                 <h2>Beer details</h2>
               </div>
               <div className="form-actions">
-                <button className="primary-button" id="pmb-product-submit" type="submit">Save beer to queue</button>
+                <button className="primary-button" id="pmb-product-submit" type="submit">Save beer</button>
               </div>
             </div>
 
@@ -577,10 +581,10 @@ export default function DashboardPage() {
               </label>
               <div className="image-picker pmb-product-image" data-picker="pmb-product">
                 <div className="image-picker__preview">
-                  <img id="pmb-product-image-preview" alt="Beer product default" />
+                  <img id="pmb-product-image-preview" src="/on-par-logo-white.png" alt="On Par Entertainment" style={{ objectFit: "contain", padding: "2rem", background: "#28665c", boxSizing: "border-box" }} />
                 </div>
                 <div className="image-picker__controls">
-                  <span>676x540 preview</span>
+                  <span>Image preview</span>
                   <input id="pmb-product-image" type="hidden" />
                   <div className="image-picker__actions">
                     <button className="ghost-button" id="shuffle-pmb-product-image" type="button">Shuffle image</button>
@@ -605,7 +609,7 @@ export default function DashboardPage() {
                 <h2>Liquor details</h2>
               </div>
               <div className="form-actions">
-                <button className="primary-button" id="liquor-product-submit" type="submit">Save liquor to queue</button>
+                <button className="primary-button" id="liquor-product-submit" type="submit">Save liquor</button>
               </div>
             </div>
 
@@ -653,7 +657,7 @@ export default function DashboardPage() {
             <div className="pmb-product-status" id="liquor-product-status"></div>
           </form>
 
-          <section className="pmb-publish-queue dashboard-owner-only" aria-labelledby="pmb-publish-queue-title">
+          <section className="pmb-publish-queue" hidden aria-hidden="true" style={{ display: "none" }} aria-labelledby="pmb-publish-queue-title">
             <div className="pmb-publish-queue__header">
               <div>
                 <h2 id="pmb-publish-queue-title">Pour My Beer publishing queue</h2>
@@ -787,6 +791,13 @@ export default function DashboardPage() {
                     </thead>
                     <tbody id="inventory-table"></tbody>
                   </table>
+                </div>
+                <div className="inventory-submit-actions">
+                  <label id="inventory-snapshot-reason-field" hidden>
+                    <span>Reason for submitting after Monday</span>
+                    <input id="inventory-snapshot-reason" type="text" maxLength="240" autoComplete="off" />
+                  </label>
+                  <button className="primary-button" id="inventory-submit-count" type="button" aria-label="Submit all inventory counts" disabled>Submit inventory</button>
                 </div>
 
               </section>

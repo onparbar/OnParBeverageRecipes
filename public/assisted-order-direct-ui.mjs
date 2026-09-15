@@ -27,7 +27,7 @@ export function buildAssistedOrderView(draft, saved = {}, options = {}) {
     : null;
   const lateOrderWarning = (draft?.warnings || [])
     .find((item) => item?.code === "ORDER_CUTOFF_PASSED")?.message || "";
-  let note = "Approve the draft first.";
+  let note = "";
   if (order.preview) note = order.blockers.length
     ? order.blockers.join(" ")
     : "Resolve the draft blockers first.";
@@ -35,16 +35,20 @@ export function buildAssistedOrderView(draft, saved = {}, options = {}) {
   else if (order.status === "manually_completed") note = "Marked completed.";
   else if (order.actionsEnabled && order.vendorKey === "bonbright") {
     note = getBonbrightTextWindowStatus(options.now).label;
-  } else if (order.actionsEnabled) note = "Sign in and verify the list.";
+  } else if (order.actionsEnabled) note = "Submit with the supplier, then mark placed here.";
 
   return {
     order,
     statusLabel: statusLabel(order),
     copyLabel: rehearsal
       ? "Copy rehearsal list"
-      : order.vendorKey === "bonbright" ? "Copy TJ message" : "Copy order list",
+      : order.vendorKey === "bonbright"
+        ? saved.approvedAt ? "Copy TJ message" : "Approve & copy TJ message"
+        : "Copy order list",
     copyText: formatVendorHandoff(order),
-    vendorActionLabel: rehearsal ? rehearsalVendorActionLabel : vendorAction?.label || null,
+    vendorActionLabel: rehearsal ? rehearsalVendorActionLabel : vendorAction
+      ? `${saved.approvedAt ? "Open" : "Approve & open"} ${order.vendorKey === "heidelberg" ? "BEES" : order.vendorKey === "ohlq" ? "OHLQ" : "Proof"}`
+      : null,
     vendorPath: vendorAction && order.actionsEnabled && !rehearsal
       ? `/api/vendor-handoff?vendor=${encodeURIComponent(vendorAction.vendor)}`
       : null,

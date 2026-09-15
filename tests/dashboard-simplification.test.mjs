@@ -66,7 +66,13 @@ test("weekly snapshots display saved levels and counts without replacing missing
   assert.match(html, /50%/);
   assert.match(html, /<td>0<\/td>/);
   assert.match(html, /<td>7<\/td>/);
-  assert.match(html, /\$70\.00/);
+  assert.doesNotMatch(html, /\$70\.00|Unit cost|Stock value|Total value|Total stock \(kegs\)/i);
+  assert.equal(snapshot.items[0].unitCost, 10);
+  assert.equal(snapshot.items[0].totalValue, 70);
+  assert.equal(snapshot.kegPlanSnapshot.tapInputs[0].currentStockKegs, 0.5);
+  assert.equal((html.match(/data-snapshot-section=/g) || []).length, 2);
+  assert.doesNotMatch(html, /data-snapshot-section="[^"]+" open/);
+  assert.match(renderSavedWeeklySnapshot(snapshot, { ...helpers, openSections: ["kegs"] }), /data-snapshot-section="counts" open/);
   snapshot.kegPlanSnapshot.tapInputs[0].inventoryStateMissing = true;
   assert.match(renderSavedWeeklySnapshot(snapshot, helpers), /Not recorded/);
   assert.match(renderSavedWeeklySnapshot({}, helpers), /Keg levels and on-hand kegs were not recorded/);

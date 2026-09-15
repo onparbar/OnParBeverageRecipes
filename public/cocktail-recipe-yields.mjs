@@ -162,6 +162,16 @@ const recipeYieldByName = new Map(
   )),
 );
 
+const recipeSourceTitleByName = new Map(
+  COCKTAIL_RECIPE_YIELDS.flatMap(({ sourceTitle, aliases }) => (
+    [sourceTitle, ...aliases].map((name) => [normalizeCocktailRecipeName(name), sourceTitle])
+  )),
+);
+
+export function getCocktailRecipeSourceTitle(value) {
+  return recipeSourceTitleByName.get(normalizeCocktailRecipeName(value)) || "";
+}
+
 export function getCocktailRecipeYieldOz(value) {
   const candidates = value && typeof value === "object"
     ? [

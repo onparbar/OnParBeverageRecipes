@@ -63,11 +63,21 @@ test("cached, unavailable, future, and unknown-product readings do not reduce co
   assert.equal(observe(seeded(), observation("09/15/2026 08:45:00")).onHandOverrides["main-21"], "3");
 });
 
-test("liquor and cocktail taps do not use beer cooler deductions", () => {
-  for (const extra of [{ isLiquorTap: true }, { actionType: "make" }, { wall: "Patio" }]) {
+test("liquor and unsupported walls do not use keg cooler deductions", () => {
+  for (const extra of [{ isLiquorTap: true }, { wall: "Patio" }]) {
     const data = seeded();
     Object.assign(data.recommendations.items[0], extra);
     assert.equal(observe(data, observation("09/14/2026 08:45:00")).onHandOverrides["main-21"], "3");
+  }
+});
+
+test("cocktail and no-order recommendations still consume one connected keg", () => {
+  for (const actionType of ["make", "none"]) {
+    const data = seeded();
+    data.recommendations.items[0].actionType = actionType;
+    const next = observe(data, observation("09/14/2026 08:45:00"));
+    assert.equal(next.onHandOverrides["main-21"], "2");
+    assert.equal(observe(next, observation("09/14/2026 08:45:00")).onHandOverrides["main-21"], "2");
   }
 });
 

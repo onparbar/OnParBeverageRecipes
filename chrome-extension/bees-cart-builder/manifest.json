@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "On Par Vendor Cart Builder",
-  "version": "1.2.11",
+  "version": "1.2.12",
   "description": "Builds review-only BEES, Proof, and OHLQ carts from approved On Par orders.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -27,12 +27,12 @@
     },
     {
       "matches": ["https://mybeesapp.com/*"],
-      "js": ["bees-cart.js"],
+      "js": ["checkout-review.js", "bees-cart.js"],
       "run_at": "document_idle"
     },
     {
       "matches": ["https://*.sgproof.com/*", "https://*.ohlq.com/*"],
-      "js": ["vendor-cart.js"],
+      "js": ["checkout-review.js", "vendor-cart.js"],
       "run_at": "document_idle"
     }
   ]
