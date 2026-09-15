@@ -52,3 +52,16 @@ test('product search only submits the observed name filter and includes inactive
   assert.deepEqual([...new URLSearchParams(call[3].toString())], [['fd_plu',''], ['fd_name','Strawberry'], ['fd_descr',''], ['submit_apply_filter','Apply']]);
   assert.throws(() => parseReportHistoryRequest(new URLSearchParams('view=products&plus=4&name=Strawberry')), {status:422});
 });
+
+test('poured history verifies its date range and uses only the product-volume export', async () => {
+  const input=parseReportHistoryRequest(new URLSearchParams('view=poured&start=2026-01-01&end=2026-03-31&unit=w'));
+  const calls=[];
+  const form=(a,b)=>`<input name="fd_reporting_date_start" value="${a}"><input name="fd_reporting_date_end" value="${b}">`;
+  const result=await readPmbReportHistory(input,{config:{},readPage:async (...args)=>{
+    calls.push(args); return {status:200, raw:calls.length===1?form('2026-09-07','2026-09-15'):calls.length===2?form('2026-01-01','2026-03-31'):'Product;Oz\nHouse Margarita 2;100'};
+  }});
+  assert.equal(result.periodVerified,true);
+  assert.equal(calls[2][2],'/pages/reporting/export?exp_what=tppb_v&exp_tu=w');
+  assert.equal(calls[0][5],calls[2][5]);
+  for(const query of ['view=poured&start=2026-02-30&end=2026-03-31','view=poured&start=2024-01-01&end=2026-01-01','view=poured&start=2026-01-01&end=2026-02-01&unit=customers','view=catalog&start=2026-01-01']) assert.throws(()=>parseReportHistoryRequest(new URLSearchParams(query)),{status:422});
+});
