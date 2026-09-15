@@ -9,18 +9,31 @@ jobs:
     timeout-minutes: 3
     environment: production
     steps:
-      - name: Read production storage readiness without changing data
+      - name: Isolated release HTTP diagnostic with automation disabled
         shell: bash
         run: |
           /opt/homebrew/opt/node@22/bin/node --input-type=module <<'NODE'
+          import { spawn } from 'node:child_process';
           process.loadEnvFile('/Users/onpar/OnParBeverageRecipes-service/.env.local');
-          const { buildDashboardHealth } = await import('/Users/onpar/OnParBeverageRecipes-release-bb97e6cf8f79e61a9345d8036665f2eae1701bf9/lib/dashboard-health.mjs');
-          const fetchImpl = async (url, options) => {
-            const response = await fetch(url, options);
-            const table = new URL(url).pathname.split('/').pop();
-            console.log(JSON.stringify({resource: table, httpStatus: response.status}));
-            return response;
-          };
-          const health = await buildDashboardHealth({storage: true, fetchImpl});
-          console.log(JSON.stringify({ok: health.ok, readiness: health.readiness, storage: health.reachability.supabase}));
+          const cwd='/Users/onpar/OnParBeverageRecipes-release-bb97e6cf8f79e61a9345d8036665f2eae1701bf9';
+          const child=spawn(process.execPath,[cwd+'/node_modules/next/dist/bin/next','start','-H','127.0.0.1','-p','3199'],{cwd,env:{...process.env,NODE_ENV:'production',ONPAR_DEPLOYMENT_TARGET:'on-site',ONPAR_PMB_REPAIR_SCHEDULER:'0',ONPAR_DASHBOARD_BACKUP_ENABLED:'false'}});
+          let logs='';
+          child.stdout.on('data',x=>{logs=(logs+x).slice(-12000)});
+          child.stderr.on('data',x=>{logs=(logs+x).slice(-12000)});
+          try {
+            await new Promise(r=>setTimeout(r,5000));
+            for(const endpoint of ['/api/version','/api/health?storage=1']) {
+              try {
+                const res=await fetch('http://127.0.0.1:3199'+endpoint,{redirect:'manual',signal:AbortSignal.timeout(15000)});
+                console.log(JSON.stringify({endpoint,httpStatus:res.status}));
+                const body=await res.json().catch(()=>null);
+                if(body) console.log(JSON.stringify({ok:body.ok,status:body.status,readiness:body.readiness,storage:body.reachability?.supabase,commit:body.commit}));
+              } catch { console.log(JSON.stringify({endpoint,error:'request failed'})); }
+            }
+          } finally {
+            child.kill('SIGTERM');
+            for(const secret of Object.values(process.env).filter(v=>v.length>6).sort((a,b)=>b.length-a.length)) logs=logs.split(secret).join('[redacted]');
+            logs=logs.replace(/https?:\/\/[^\s"'<>]+/g,'[url]').replace(/(?:Bearer\s+|eyJ)[\w.\-]+/g,'[token]');
+            console.log(logs);
+          }
           NODE
