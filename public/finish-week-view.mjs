@@ -73,15 +73,23 @@ export function renderFinishWeekDeliveries(weeklyOrderTracking = {}, { showVendo
       ${showVendor ? `<h4>${escapeHtml(vendor.vendor)}</h4>` : ""}
       ${(vendor.items || []).map((item) => {
         const reviewed = clean(item.status) !== "pending";
+        // This 24-unit order case is delivered as two physical 12-pack boxes.
+        // Display conversion only: receipt quantities and stock math stay unchanged.
+        const splitCase = /^non[ -]?alcoholic beer$/i.test(clean(item.name))
+          && /^cases?$/i.test(clean(item.unit))
+          && (item.packSize == null || Number(item.packSize) === 24);
+        const quantityLabel = (quantity) => splitCase
+          ? `${formatNumber(Number(quantity || 0) * 2)} ${Number(quantity || 0) * 2 === 1 ? "case" : "cases"} of 12`
+          : `${formatNumber(quantity)} ${clean(item.unit) || "items"}`;
         const result = reviewed
           ? item.status === "received"
-            ? `${formatNumber(item.receivedQuantity ?? item.quantity)} received`
-            : `${formatNumber(item.receivedQuantity)} of ${formatNumber(item.quantity)} received${item.status === "not-received" ? " (not received)" : " (partial)"}`
-          : `${formatNumber(item.quantity)} ${clean(item.unit) || "items"} to receive`;
+            ? `${splitCase ? quantityLabel(item.receivedQuantity ?? item.quantity) : formatNumber(item.receivedQuantity ?? item.quantity)} received`
+            : `${splitCase ? quantityLabel(item.receivedQuantity) : formatNumber(item.receivedQuantity)} of ${splitCase ? quantityLabel(item.quantity) : formatNumber(item.quantity)} received${item.status === "not-received" ? " (not received)" : " (partial)"}`
+          : `${quantityLabel(item.quantity)} to receive`;
         return `
           <div class="weekly-plan-item">
             <div><strong>${escapeHtml(item.name)}</strong>${kegDestination(item) ? `<span>${escapeHtml(kegDestination(item))}</span>` : ""}</div>
-            ${reviewed ? `<div><b>${escapeHtml(result)}</b>${item.status !== "received" ? '<a href="/staff">Update delivery in Staff View</a>' : ""}</div>` : `<label class="weekly-plan-inline-check"><input type="checkbox" data-finish-delivery-item="${escapeHtml(item.id)}" data-vendor-id="${escapeHtml(vendor.id)}" data-quantity="${escapeHtml(String(item.quantity || 0))}" data-completed="false" aria-label="Receive ${formatNumber(item.quantity)} ${escapeHtml(clean(item.unit) || "items")} of ${escapeHtml(item.name)}"${saving ? " disabled" : ""}><span>${escapeHtml(result)}</span></label>`}
+            ${reviewed ? `<div><b>${escapeHtml(result)}</b>${item.status !== "received" ? '<a href="/staff">Update delivery in Staff View</a>' : ""}</div>` : `<label class="weekly-plan-inline-check"><input type="checkbox" data-finish-delivery-item="${escapeHtml(item.id)}" data-vendor-id="${escapeHtml(vendor.id)}" data-quantity="${escapeHtml(String(item.quantity || 0))}" data-completed="false" aria-label="Receive ${escapeHtml(quantityLabel(item.quantity))} of ${escapeHtml(item.name)}"${saving ? " disabled" : ""}><span>${escapeHtml(result)}</span></label>`}
           </div>
         `;
       }).join("")}

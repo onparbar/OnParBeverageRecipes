@@ -1,0 +1,31 @@
+[data-order-adjustment-panel] [data-order-adjustment-only][hidden],
+[data-order-adjustment-panel] [data-prep-adjustment-only][hidden] {
+  display: none !important;
+}
+
+[data-prep-adjustment-status] {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--ink-soft, #61736d);
+  font-size: 0.875rem;
+}
+
+[data-prep-adjustment-status]:empty {
+  display: none;
+}
+
+[data-prep-adjustment-status][data-error="true"] {
+  color: var(--danger, #b64e38);
+}
+
+@media print {
+  [data-order-adjustment-panel] {
+    display: none !important;
+  }
+}
+[data-prep-tap-fields][hidden] { display: none; }
+.prep-tap-adder { margin-bottom: 16px; }
+[data-prep-tap-fields] { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+[data-prep-tap-select] { flex: 1; min-width: 180px; }
+[data-prep-tap-status]:empty { display: none; }
+[data-prep-subtract] { flex: 0 0 auto; padding: 4px 9px; font-size: 18px; }

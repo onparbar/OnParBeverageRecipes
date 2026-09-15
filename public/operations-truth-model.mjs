@@ -146,10 +146,11 @@ export function classifyPmbLevelState({
 }
 
 const WORKFLOW_LABELS = {
+  cooler: ["Cooler Count", "Count the main and karaoke coolers"],
   pmb: ["Refresh PMB", "Load current usage, prices, and keg levels"],
-  inventory: ["Count inventory", "Finish current cabinet and cooler counts"],
+  inventory: ["Inventory", "Submit counts to save the weekly snapshot"],
   plan: ["Save & lock plan", "Review the live needs and lock this week"],
-  orders: ["Place orders", "Submit the approved vendor orders"],
+  orders: ["Order", "Place each vendor order and mark it placed"],
   deliveries: ["Receive deliveries", "Verify delivered, short, and rejected items"],
   prep: ["Finish prep", "Complete cocktail batches and liquor keg fills"],
   "tap-sheets": ["Print tap sheets", "Print the current wall sheets"],
@@ -158,6 +159,7 @@ const WORKFLOW_LABELS = {
 
 function normalizeWorkflowStepId(value) {
   const id = clean(value).toLowerCase();
+  if (/cooler/.test(id)) return "cooler";
   if (/pmb|usage/.test(id)) return "pmb";
   if (/inventory|count/.test(id)) return "inventory";
   if (/lock|plan/.test(id)) return "plan";

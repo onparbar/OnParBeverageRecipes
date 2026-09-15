@@ -1,3 +1,5 @@
+import { bindWeeklyPrepAdder } from "./weekly-prep-add.mjs";
+
 export const WEEKLY_PLAN_REHEARSAL_MESSAGES = Object.freeze({
   active: "Rehearsal uses the latest locked Weekly Plan and never submits orders.",
   inactive: "Live Weekly Plan restored.",
@@ -73,5 +75,9 @@ export function bindWeeklyPlanController({
   });
 
   bindOrderTrackingEvents?.();
+  bindWeeklyPrepAdder(root, {
+    documentRef,
+    onReturnToPlan: () => openMondayRunStep?.("plan", "weekly-plan"),
+  });
   return true;
 }

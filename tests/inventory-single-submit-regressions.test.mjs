@@ -25,6 +25,14 @@ function makeHarness(overrides = {}) {
   const scope = {
     inventorySharedInitialized: true,
     inventoryCountSubmitting: false,
+    weeklyPlanUpdating: false, parAgentRunning: false, parAgentState: {},
+    getCurrentWeeklyPlanSnapshot: () => null,
+    openMondayRunStep: () => {},
+    document: { querySelector: () => null },
+    isEasternMonday: () => true,
+    inventoryHistory: [], getCurrentMondayInventorySnapshot: () => null,
+    runWeeklyPlanUpdate: async () => true, weeklyPlanRefreshMessage: "",
+    renderDashboardOverview: () => {},
     inventorySubmitCountButton: { disabled: false, textContent: "Submit inventory" },
     inventorySharedMessage: "",
     inventoryItems: [
@@ -67,7 +75,7 @@ test("inventory has one submit control below the table and no section submit con
   assert.doesNotMatch(source, /Ordering hold:/);
 });
 
-test("one atomic submission keeps all entered counts and zeros only uncounted managed items", async () => {
+test("one atomic submission verifies all running counts without zeroing older counts", async () => {
   const harness = makeHarness();
   await harness.submit();
   assert.equal(harness.writes.length, 1);
@@ -75,16 +83,16 @@ test("one atomic submission keeps all entered counts and zeros only uncounted ma
   assert.equal(action.action, "batch-update-fields");
   assert.equal(action.source, "section-count");
   assert.deepEqual(Object.fromEntries(action.changes.map(({ id, value }) => [id, value])), {
-    vodka: "3", lime: "5", "na-beer": "45", gin: "0", garnish: "0",
+    vodka: "3", lime: "5", "na-beer": "45", gin: "4", garnish: "2",
   });
   assert.ok(action.changes.every(({ field }) => field === "onHand"));
-  assert.equal(harness.confirmations.length, 1);
-  assert.match(harness.confirmations[0][2], /Uncounted items will be recorded as zero/);
+  assert.equal(harness.confirmations.length, 0);
   assert.equal(harness.scope.inventoryCountSubmitting, false);
 });
 
-test("a cancelled confirmation does not submit any inventory changes", async () => {
-  const harness = makeHarness({ confirmDashboardAction: () => false });
+test("an unknown count blocks submission without replacing it with zero", async () => {
+  const harness = makeHarness();
+  harness.scope.inventoryItems[1].onHandDisplay = "";
   await harness.submit();
   assert.equal(harness.writes.length, 0);
   assert.equal(harness.scope.inventoryItems[0].onHandDisplay, "3");
@@ -145,4 +153,28 @@ test("empty inventory does not send an empty submission", async () => {
   await harness.submit();
   assert.equal(harness.writes.length, 0);
   assert.equal(harness.scope.inventoryCountSubmitting, false);
+});
+
+
+test("a locked plan routes to orders without re-saving inventory", async () => {
+  const routes = [];
+  const h = makeHarness({ getCurrentWeeklyPlanSnapshot: () => ({ generatedAt: stamp }), openMondayRunStep: (...args) => routes.push(args) });
+  await h.submit();
+  assert.equal(h.writes.length, 0);
+  assert.deepEqual(routes, [["orders", "weekly-plan"]]);
+});
+
+test("a snapshot failure keeps verified counts and permits a snapshot-only retry", async () => {
+  let publications = 0;
+  const h = makeHarness({ runWeeklyPlanUpdate: async () => { publications++; return false; } });
+  await h.submit();
+  assert.equal(h.writes.length, 1);
+  assert.match(h.scope.inventorySharedMessage, /snapshot needs a retry/);
+  assert.equal(h.scope.inventoryItems[1].onHandDisplay, "4");
+  h.scope.getCurrentMondayInventorySnapshot = () => ({ savedAt: stamp });
+  h.scope.runWeeklyPlanUpdate = async () => { publications++; return true; };
+  await h.submit();
+  assert.equal(h.writes.length, 1);
+  assert.equal(publications, 2);
+  assert.match(h.scope.inventorySharedMessage, /saved to the weekly snapshot/);
 });

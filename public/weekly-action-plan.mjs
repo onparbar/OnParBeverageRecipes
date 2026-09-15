@@ -83,10 +83,13 @@ function aggregateTapActions(
     const name = normalizeName(item.orderProductName || item.name, item);
     const quantity = number(item[quantityField]);
     if (!name || quantity <= 0) return;
-    const key = name.toLowerCase();
+    const key = category === "cocktails" && item.prepAdditionId
+      ? `${name.toLowerCase()}:${clean(item.prepAdditionId)}`
+      : name.toLowerCase();
     const existing = grouped.get(key) || {
       category,
       name,
+      ...(item.prepAdditionId ? { prepAdditionId: clean(item.prepAdditionId) } : {}),
       internalIds: [],
       vendorSkus: [],
       vendorProductNames: [],
@@ -407,6 +410,20 @@ export function isRecommendationForOperatingWeek(generatedAt, now = new Date()) 
   return generatedWeek > 0 && currentWeek > 0 && generatedWeek === currentWeek;
 }
 
+export function formatOperatingWeekLabel(now = new Date()) {
+  const startTime = getMondayWeekStartTime(now);
+  if (!startTime) return "";
+  const start = new Date(startTime);
+  const end = new Date(startTime);
+  end.setUTCDate(end.getUTCDate() + 6);
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC", month: "short", day: "numeric",
+  });
+  const endLabel = start.getUTCMonth() === end.getUTCMonth()
+    ? String(end.getUTCDate()) : formatter.format(end);
+  return `${formatter.format(start)} - ${endLabel}`;
+}
+
 export function isWeeklyPlanLockedForOrderingWeek(generatedAt, now = new Date()) {
   return isRecommendationForOperatingWeek(generatedAt, now);
 }
@@ -541,7 +558,7 @@ export function buildWeeklyActionPlan({ inventoryItems = [], recommendations = [
     (name, item) => getCocktailPrepLabelName(name, item.wall),
   ).map((item) => ({
     ...item,
-    batchSizeOz: getCocktailRecipeYieldOz(item.name),
+    batchSizeOz: getPlannedCocktailBatchSize(item, recommendations),
   })).sort((a, b) => (
     number(a.tapNumbers?.[0]) - number(b.tapNumbers?.[0])
     || a.name.localeCompare(b.name)
@@ -819,4 +836,11 @@ export function groupWeeklyPlanOrdersByVendor(plan = {}) {
       estimatedCost: items.reduce((total, item) => total + number(item.estimatedCost), 0),
       hasCompletePricing: items.every((item) => item.hasKnownPrice !== false),
     }));
+}
+
+function getPlannedCocktailBatchSize(item, recommendations) {
+  const addition = item.prepAdditionId && (Array.isArray(recommendations) ? recommendations : [])
+    .find((entry) => entry.prepAdditionId === item.prepAdditionId);
+  const explicitSize = Number(addition?.batchSizeOz);
+  return Number.isFinite(explicitSize) && explicitSize > 0 ? explicitSize : getCocktailRecipeYieldOz(item.name);
 }

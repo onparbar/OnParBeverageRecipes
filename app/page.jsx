@@ -353,6 +353,9 @@ export default function DashboardPage() {
             <aside className="keg-summary" id="keg-summary"></aside>
             <div className="keg-walls" id="keg-walls"></div>
           </div>
+          <div className="inventory-submit-actions">
+            <button className="primary-button" id="cooler-count-continue" type="button">Continue to Inventory</button>
+          </div>
         </section>
 
         <section className="panel" id="weekly-plan-panel" role="tabpanel" aria-label="Weekly Plan">
@@ -518,7 +521,7 @@ export default function DashboardPage() {
                 <h2>Beer details</h2>
               </div>
               <div className="form-actions">
-                <button className="primary-button" id="pmb-product-submit" type="submit">Save beer to queue</button>
+                <button className="primary-button" id="pmb-product-submit" type="submit">Save beer</button>
               </div>
             </div>
 
@@ -605,7 +608,7 @@ export default function DashboardPage() {
                 <h2>Liquor details</h2>
               </div>
               <div className="form-actions">
-                <button className="primary-button" id="liquor-product-submit" type="submit">Save liquor to queue</button>
+                <button className="primary-button" id="liquor-product-submit" type="submit">Save liquor</button>
               </div>
             </div>
 
@@ -789,6 +792,10 @@ export default function DashboardPage() {
                   </table>
                 </div>
                 <div className="inventory-submit-actions">
+                  <label id="inventory-snapshot-reason-field" hidden>
+                    <span>Reason for submitting after Monday</span>
+                    <input id="inventory-snapshot-reason" type="text" maxLength="240" autoComplete="off" />
+                  </label>
                   <button className="primary-button" id="inventory-submit-count" type="button" aria-label="Submit all inventory counts" disabled>Submit inventory</button>
                 </div>
 

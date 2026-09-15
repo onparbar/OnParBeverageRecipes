@@ -1,3 +1,4 @@
+import { completeCoolerCount, hasCompletedCoolerCount } from "./weekly-run-progress.mjs";
 import { observePackagePrice, createSupplierMapping } from "./vendor-pricing-state.mjs";
 import { isUsableWeeklyUsageEntry } from "./weekly-usage-evidence.mjs";
 import { MINIMUM_KEG_CUSHION, getEightWeekPeakUsage } from "./keg-demand-policy.mjs";
@@ -6038,7 +6039,7 @@ async function saveWeeklyPlanFinishWeek(event) {
   }
 }
 
-async function saveWeeklyOrderPlaced(vendorId, ordered, orderedBy) {
+async function saveWeeklyOrderPlaced(vendorId, ordered, orderedBy, expectedDraftId) {
   weeklyOrderTrackingMessage = "Saving order status...";
   try {
     const response = await fetch("/api/weekly-order-tracking", {
@@ -6047,6 +6048,7 @@ async function saveWeeklyOrderPlaced(vendorId, ordered, orderedBy) {
       headers: { Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "set-ordered",
+        expectedDraftId,
         generatedAt: weeklyOrderTracking.generatedAt,
         vendorId,
         ordered,
@@ -6143,7 +6145,9 @@ function renderWeeklyPlanCocktailRows(items) {
     ...getWeeklyPlanProductViewItem(item),
     batchSizeOz: item.batchSizeOz,
     quantityLabel: `${formatNumber(item.quantity)} label${item.quantity === 1 ? "" : "s"}`,
-    completionItem: completionAvailable ? dashboardStaffPrepPlan.items.find((entry) => clean(entry.name).toLowerCase() === clean(item.name).toLowerCase()) : null,
+    completionItem: completionAvailable ? dashboardStaffPrepPlan.items.find((entry) => item.prepAdditionId
+      ? entry.prepAdditionId === item.prepAdditionId
+      : !entry.prepAdditionId && clean(entry.name).toLowerCase() === clean(item.name).toLowerCase()) : null,
     completionSaving: dashboardFinishWeekSaving,
   }));
   return renderWeeklyPlanCocktailRowsView(viewItems);
@@ -6533,19 +6537,21 @@ function formatMissingCostMessage(items) {
 }
 
 function getMondayRunModel(plan, freshness) {
+  // Weekly completion comes from the persisted plan, not later live-stock edits.
+  // Keep live outboxes/errors intact for recovery outside this locked workflow.
+  const planLocked = hasPublishedWeeklyPlanRecommendations();
   const kegFeed = getPmbKegLevelOverviewFeed();
   const pricingFeed = getPmbPricingOverviewFeed();
-  const inventoryMissingCount = getWeeklyPlanMissingInventoryCount();
-  const inventorySaving = inventorySharedSaving
+  const inventoryMissingCount = planLocked ? 0 : getWeeklyPlanMissingInventoryCount();
+  const inventorySaving = !planLocked && (inventorySharedSaving
     || inventoryFieldSyncPendingCount > 0
     || inventoryFieldSyncTimers.size > 0
     || Object.keys(inventoryFieldOutbox).length > 0
-    || inventoryActionOutbox.length > 0;
+    || inventoryActionOutbox.length > 0);
   const mondaySnapshotSaved = Boolean(getCurrentMondayInventorySnapshot(inventoryHistory, new Date()));
-  const countSections = getInventoryCountSections(inventoryItems, inventoryCountedItemsAt);
+  const countSections = planLocked ? [] : getInventoryCountSections(inventoryItems, inventoryCountedItemsAt);
   const inventoryMissingSections = countSections.filter((section) => !section.complete).map((section) => section.name);
-  const inventoryCountedThisWeek = countSections.length > 0 && inventoryMissingSections.length === 0;
-  const planLocked = hasPublishedWeeklyPlanRecommendations();
+  const inventoryCountedThisWeek = planLocked || (countSections.length > 0 && inventoryMissingSections.length === 0);
   const weeklyUsageCaptured = freshness.latestCompletedUsageSaved === true && !weeklyUsageSharedSaveError;
   const pmbRefreshPending = unifiedPmbRefreshRunning
     || kegFeed.status === "loading"
@@ -6555,17 +6561,30 @@ function getMondayRunModel(plan, freshness) {
     || weeklyUsageSharedPendingWrites
     || Boolean(weeklyUsageSharedSaveTimer);
   const vendorOrders = Array.isArray(weeklyOrderTracking.vendors) ? weeklyOrderTracking.vendors : [];
-  const orderLineCount = toNumber(plan?.summary?.orderLineCount);
+  const orderModel = getVendorOrderDraftModel(plan, freshness);
+  const orderLineCount = orderModel.drafts.reduce((total, draft) => total + toNumber(draft.lineCount), 0);
+  const coolerButton = document.getElementById("cooler-count-continue");
+  if (coolerButton) {
+    coolerButton.hidden = planLocked;
+    coolerButton.disabled = !parAgentState?.initialized || Boolean(parAgentStateOutbox);
+  }
+  const reasonField = document.getElementById("inventory-snapshot-reason-field");
+  if (reasonField) reasonField.hidden = isEasternMonday() || planLocked;
+  if (inventorySubmitCountButton && !inventoryCountSubmitting) {
+    inventorySubmitCountButton.textContent = planLocked ? "View weekly plan" : "Submit inventory";
+  }
   const tapSheets = buildTapWallPrintSheets();
   return buildMondayRunModelView({
+    coolerCountComplete: planLocked || hasCompletedCoolerCount(),
+    coolerCountSaving: !planLocked && Boolean(parAgentStateOutbox),
     kegFeed,
     pricingFeed,
     inventoryMissingCount,
     inventoryCountedThisWeek,
     inventoryMissingSections,
-    inventorySaving,
+    inventorySaving: !planLocked && (inventorySaving || inventoryCountSubmitting || weeklyPlanUpdating),
     inventorySharedInitialized,
-    inventorySharedSaveError,
+    inventorySharedSaveError: planLocked ? "" : inventorySharedSaveError,
     mondaySnapshotSaved,
     planLocked,
     weeklyUsageCaptured,
@@ -6579,6 +6598,9 @@ function getMondayRunModel(plan, freshness) {
     vendorOrders,
     weeklyOrderTrackingAvailable: weeklyOrderTracking.available,
     orderLineCount,
+    expectedVendorCount: orderModel.drafts.length,
+    orderingBlocked: orderModel.drafts.some((draft) => draft.blockers.length > 0)
+      || (plan.review?.heldRecommendations?.length || 0) > 0,
     tapSheets,
     planActionable: ["ready", "review"].includes(freshness.readiness?.status),
   });
@@ -6635,6 +6657,15 @@ function openMondayRunStep(stepId, target) {
     }
   });
 }
+
+document.addEventListener("click", (event) => {
+  const button = event.target?.closest?.("#cooler-count-continue");
+  if (!button || button.disabled || parAgentStateOutbox) return;
+  completeCoolerCount();
+  switchTab("inventory");
+  renderWeeklyPlan();
+  renderDashboardOverview();
+});
 
 function formatComingSoonFollowUpTime(value) {
   const date = new Date(value);
@@ -8113,11 +8144,11 @@ function getVendorOrderDraftModel(plan, freshness) {
 
 function renderVendorOrderAdjustments() {
   if (orderRehearsalMode) return "";
+  const canAddPrep = Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date()));
   const trackedVendors = weeklyOrderTracking.vendors || [];
-  if (trackedVendors.length && trackedVendors.every((vendor) => vendor.ordered === true)) return "";
   const placedVendors = new Set(trackedVendors.filter((vendor) => vendor.ordered === true).map((vendor) => vendor.vendor));
   const catalog = weeklyOrderTracking.adjustmentCatalog.filter((item) => item.orderable && !placedVendors.has(item.vendor));
-  if (!catalog.length) return "";
+  if (!catalog.length && !canAddPrep) return "";
   const editableAdjustments = weeklyOrderTracking.adjustments.filter((item) => !placedVendors.has(item.vendor));
   const savedByCatalogId = new Map(weeklyOrderTracking.adjustments.map((item) => [item.catalogId, item]));
   const vendors = [...new Set(catalog.map((item) => item.vendor))].sort((left, right) => left.localeCompare(right));
@@ -8125,18 +8156,22 @@ function renderVendorOrderAdjustments() {
     <details class="vendor-order-adjustments" data-order-adjustment-panel>
       <summary>Adjust order</summary>
       <div class="vendor-order-adjustments__fields">
-        <label><span>Change</span><select data-order-adjustment-action><option value="add">Add something</option><option value="remove">Remove something</option></select></label>
-        <label><span>Vendor</span><select data-order-adjustment-vendor-filter><option value="">All vendors</option>${vendors.map((vendor) => `<option value="${escapeHtml(vendor)}">${escapeHtml(vendor)}</option>`).join("")}</select></label>
-        <label><span>Product</span><select data-order-adjustment-product>${catalog.map((item) => {
+        <label><span>Change</span><select data-order-adjustment-action><option value="add"${catalog.length ? "" : " disabled"}>Add something</option><option value="remove"${catalog.length ? "" : " disabled"}>Remove something</option><option value="add-prep"${canAddPrep ? "" : " disabled"}${!catalog.length && canAddPrep ? " selected" : ""}>Add cocktail to prep</option></select></label>
+        <label data-order-adjustment-only><span>Vendor</span><select data-order-adjustment-vendor-filter><option value="">All vendors</option>${vendors.map((vendor) => `<option value="${escapeHtml(vendor)}">${escapeHtml(vendor)}</option>`).join("")}</select></label>
+        <label data-order-adjustment-only><span>Product</span><select data-order-adjustment-product>${catalog.map((item) => {
           const saved = savedByCatalogId.get(item.catalogId);
           const currentQuantity = saved?.quantity ?? item.currentPlanQuantity ?? 0;
           const defaultQuantity = currentQuantity > 0 ? currentQuantity : 1;
           return `<option value="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}" data-order-adjustment-current-quantity="${formatNumber(currentQuantity)}" data-order-adjustment-default-quantity="${formatNumber(defaultQuantity)}" data-order-adjustment-default-reason="${escapeHtml(saved?.reason || "")}" data-order-adjustment-quantity-unit="${escapeHtml(item.quantityUnit)}">${escapeHtml(`${item.vendor} · ${item.name}`)}</option>`;
         }).join("")}</select></label>
-        <label data-order-adjustment-quantity-field><span>Order quantity</span><div class="vendor-order-adjustments__quantity"><input type="number" min="1" max="999" step="1" inputmode="numeric" data-order-adjustment-quantity-input><small data-order-adjustment-unit-label></small></div></label>
-        <label><span>Reason</span><input type="text" maxlength="240" data-order-adjustment-reason-input placeholder="St. Patrick's Day"></label>
-        <label><span>Manager</span><input type="text" maxlength="80" autocomplete="name" data-order-adjustment-manager placeholder="Manager name"></label>
+        <label data-order-adjustment-only data-order-adjustment-quantity-field><span>Order quantity</span><div class="vendor-order-adjustments__quantity"><input type="number" min="1" max="999" step="1" inputmode="numeric" data-order-adjustment-quantity-input><small data-order-adjustment-unit-label></small></div></label>
+        <label data-order-adjustment-only><span>Reason</span><input type="text" maxlength="240" data-order-adjustment-reason-input placeholder="St. Patrick's Day"></label>
+        <label data-order-adjustment-only><span>Manager</span><input type="text" maxlength="80" autocomplete="name" data-order-adjustment-manager placeholder="Manager name"></label>
+        <label data-prep-adjustment-only hidden><span>Cocktail</span><select data-prep-adjustment-product aria-label="Cocktail to prep"><option value="">Choose cocktail</option></select></label>
+        <label data-prep-adjustment-only hidden><span>Cooler</span><select data-prep-adjustment-cooler><option value="Main">Main cooler</option><option value="Karaoke">Karaoke cooler</option></select></label>
+        <label data-prep-adjustment-only hidden><span>Kegs</span><input type="number" min="1" max="20" step="1" inputmode="numeric" value="1" data-prep-adjustment-quantity></label>
         <button class="primary-button" type="button" data-order-adjustment-save>Save changes</button>
+        <p data-prep-adjustment-only data-prep-adjustment-status role="status" aria-live="polite" hidden></p>
       </div>
       ${editableAdjustments.length ? `<div class="vendor-order-adjustments__saved">${editableAdjustments.map((item) => `<div><span><strong>${escapeHtml(item.name)}</strong> · ${item.quantity === 0 ? "Removed this week" : `${formatNumber(item.quantity)} ${escapeHtml(item.quantityUnit)}`}</span><small>${escapeHtml(item.reason)} · ${escapeHtml(item.adjustedBy)}</small><button class="mini-button" type="button" data-order-adjustment-remove="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}">Undo</button></div>`).join("")}</div>` : ""}
     </details>
@@ -8204,63 +8239,46 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
   const savedDrafts = orderRehearsalMode ? model.savedDrafts : weeklyOrderTracking.drafts;
   const savedById = new Map((savedDrafts || []).map((draft) => [draft.id, draft]));
   const vendorsByName = new Map((orderRehearsalMode ? [] : weeklyOrderTracking.vendors || []).map((vendor) => [vendor.vendor, vendor]));
-  const defaultManager = clean((savedDrafts || []).find((draft) => draft.approvedBy || draft.createdBy)?.approvedBy
-    || (savedDrafts || []).find((draft) => draft.approvedBy || draft.createdBy)?.createdBy);
-  if (!model.drafts.length) return weeklyOrderTracking.adjustments.length ? renderVendorOrderAdjustments() : "";
+  if (!model.drafts.length) return renderVendorOrderAdjustments();
   const allOrdersPlaced = !orderRehearsalMode && model.drafts.every((draft) => vendorsByName.get(draft.vendor)?.ordered === true);
   return `
-    <section class="vendor-order-drafts${orderRehearsalMode ? " vendor-order-drafts--rehearsal" : ""}" aria-labelledby="vendor-order-drafts-title">
+    <section class="vendor-order-drafts" aria-labelledby="vendor-order-drafts-title">
       <header class="vendor-order-drafts__header">
-        <div><p class="eyebrow">${orderRehearsalMode ? "Rehearsal" : "This week"}</p><h2 id="vendor-order-drafts-title">${orderRehearsalMode ? "Order Rehearsal" : allOrdersPlaced ? "Placed Orders" : "Place Orders"}</h2></div>
+        <div><h2 id="vendor-order-drafts-title">${allOrdersPlaced ? "Placed orders" : "Order"}</h2></div>
         <div><strong>${formatNumber(model.drafts.reduce((total, draft) => total + draft.lineCount, 0))} items</strong><span>${money(model.weeklyTotal)}</span></div>
       </header>
       ${weeklyOrderTrackingMessage ? `<p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage)}</p>` : ""}
-      ${allOrdersPlaced ? "" : renderVendorOrderAdjustments()}
+      ${renderVendorOrderAdjustments()}
       <div class="vendor-order-drafts__grid">
         ${model.drafts.map((draft) => {
           const saved = savedById.get(draft.id) || {};
-          const approved = Boolean(saved.approvedAt);
           const vendor = vendorsByName.get(draft.vendor);
-          const workflow = getVendorWorkflowState(draft, saved, vendor);
-          const manager = clean(saved.approvedBy || saved.createdBy || defaultManager);
           const placed = !orderRehearsalMode && vendor?.ordered === true;
-          const removableLineCount = approved
-            ? 0
-            : draft.lines.filter((line) => findDraftLineAdjustmentCatalogItem(line, draft.vendor)).length;
+          const workflow = getVendorWorkflowState(draft, saved, vendor);
+          const manager = clean(globalThis.onParDashboardIdentity?.name || dashboardFinishWeekActor || saved.approvedBy || saved.createdBy);
           return `
-            <form class="vendor-order-draft-card vendor-order-draft-card--${approved ? "approved" : draft.status}${placed ? " vendor-order-draft-card--placed" : ""}" data-vendor-order-draft="${escapeHtml(draft.vendor)}" data-vendor-order-draft-id="${escapeHtml(draft.id)}" data-vendor-order-draft-status="${escapeHtml(saved.status || draft.status)}">
-              <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(draft.lineCount)} item${draft.lineCount === 1 ? "" : "s"} · ${money(draft.estimatedTotal)}</p></div><span>${escapeHtml(workflow.label)}</span></header>
-              ${approved && !orderRehearsalMode && !vendor?.ordered ? `<div class="vendor-order-draft-actions"><button class="mini-button" type="button" data-order-draft-reopen data-order-draft-actor="${escapeHtml(manager)}">Reopen draft</button><small>Edit this draft and approve it again. This does not change an existing vendor cart.</small></div>` : ""}
-              ${placed ? '<div class="vendor-order-draft-lines vendor-order-draft-lines--inline">' : `<details class="vendor-order-draft-lines"${!approved || draft.blockers.length ? " open" : ""}><summary>${approved ? "View order" : "Order items"}</summary>`}
-                ${!orderRehearsalMode && vendor?.ordered ? renderFinishWeekDeliveries({ available: true, vendors: [vendor] }, { showVendor: false, saving: dashboardFinishWeekSaving }) : draft.lines.map((line) => {
-                  const catalogItem = approved ? null : findDraftLineAdjustmentCatalogItem(line, draft.vendor);
-                  const lineDetails = `${line.vendor === "Bonbright" ? "Text order" : line.vendorSku ? `SKU ${line.vendorSku}` : "SKU needed"} · ${line.requestedCases ? `${formatNumber(line.requestedCases)} case${line.requestedCases === 1 ? "" : "s"} / ` : ""}${formatNumber(line.requestedUnits)} unit${line.requestedUnits === 1 ? "" : "s"} · ${line.extendedCost ? money(line.extendedCost) : "Price needed"}`;
-                  const copy = `<span class="vendor-order-draft-line__copy"><strong>${escapeHtml(line.productName)}</strong><span>${escapeHtml(lineDetails)}</span></span>`;
-                  return `<div class="vendor-order-draft-line">${catalogItem ? `<label class="vendor-order-draft-line__select"><input type="checkbox" data-order-draft-remove-line value="${escapeHtml(catalogItem.catalogId)}" aria-label="Remove ${escapeHtml(line.productName)} from this order">${copy}</label>` : copy}<small>${escapeHtml(line.reason)}</small></div>`;
+            <section class="vendor-order-draft-card vendor-order-draft-card--${placed ? "approved vendor-order-draft-card--placed" : draft.status}">
+              <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(draft.lineCount)} items · ${money(draft.estimatedTotal)}</p></div><span title="${escapeHtml(workflow.label)}">${placed ? "Placed" : draft.blockers.length ? "Needs attention" : "Ready"}</span></header>
+              <div class="vendor-order-draft-lines vendor-order-draft-lines--inline">
+                ${placed ? renderFinishWeekDeliveries({ available: true, vendors: [vendor] }, { showVendor: false, saving: dashboardFinishWeekSaving }) : draft.lines.map((line) => {
+                  const coolerNames = [...new Set((line.kegDestinations || []).map((destination) => {
+                    const name = typeof destination === "string" ? destination : destination.cooler || destination.coolerName || destination.wall;
+                    return name === "Main" ? "Main cooler" : name === "Karaoke" ? "Karaoke cooler" : clean(name);
+                  }).filter(Boolean))];
+                  const amount = line.requestedCases > 0
+                    ? `${formatNumber(line.requestedCases)} case${line.requestedCases === 1 ? "" : "s"}`
+                    : `${formatNumber(line.requestedUnits)} ${line.lineType === "Beer keg" ? "keg" : line.lineType === "Liquor tap bottle" ? "bottle" : "unit"}${line.requestedUnits === 1 ? "" : "s"}`;
+                  return `<div class="vendor-order-draft-line"><span class="vendor-order-draft-line__copy"><strong>${escapeHtml(line.productName || line.name)}</strong><span>${escapeHtml([amount, ...coolerNames].join(" · "))}</span></span><b>${line.extendedCost ? money(line.extendedCost) : "Price needed"}</b></div>`;
                 }).join("")}
-              ${placed ? "</div>" : "</details>"}
-              ${draft.blockers.length ? `<div class="vendor-order-draft-issues vendor-order-draft-issues--blocked"><strong>Approval blockers</strong>${draft.blockers.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
-              ${!approved && draft.warnings.length ? `<div class="vendor-order-draft-issues"><strong>Review</strong>${draft.warnings.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
-              ${!approved ? `
-                ${!orderRehearsalMode ? '<div class="vendor-order-draft-actions"><button class="mini-button" type="button" data-order-draft-edit-quantities>Change quantities</button></div>' : ""}
-                ${removableLineCount ? `<div class="vendor-order-draft-bulk"><label><input type="checkbox" data-order-draft-select-all><span>Select all</span></label><button class="mini-button" type="button" data-order-draft-remove-selected disabled>Remove selected</button></div>` : ""}
-                <div class="vendor-order-draft-fields"><label><span>Reviewed by</span><input type="text" maxlength="80" autocomplete="name" data-order-draft-manager value="${escapeHtml(manager)}" placeholder="Manager name"></label></div>
-                <label class="vendor-order-draft-confirm"><input type="checkbox" data-order-draft-confirm><span>Confirm ${escapeHtml(draft.vendor)} · ${money(draft.estimatedTotal)} · ${formatNumber(draft.lineCount)} items</span></label>
-                <div class="vendor-order-draft-actions"><button class="primary-button" type="submit"${draft.blockers.length ? " disabled" : ""}>Review &amp; approve</button></div>
-              ` : ""}
-              ${approved && !placed ? renderAssistedOrderPanel(draft, saved) : ""}
-              ${approved && !orderRehearsalMode && !vendor?.ordered ? `
-                <div class="vendor-order-place">
-                  <button class="primary-button" type="button" data-weekly-order-place data-weekly-order-vendor-id="${escapeHtml(vendor?.id || "")}" data-weekly-ordered-by="${escapeHtml(manager)}" data-weekly-order-vendor="${escapeHtml(draft.vendor)}"${!vendor?.id || !workflow.handedOff ? " disabled" : ""}>Mark order placed</button>
-                  ${workflow.handedOff ? "" : "<small>Use the order action above first.</small>"}
-                </div>
-              ` : ""}
-            </form>
-          `;
+              </div>
+              ${!placed && draft.blockers.length ? `<div class="vendor-order-draft-issues vendor-order-draft-issues--blocked"><strong>Needs attention</strong>${draft.blockers.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
+              ${!placed && draft.warnings.length ? `<div class="vendor-order-draft-issues">${draft.warnings.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")}</div>` : ""}
+              ${!placed ? renderAssistedOrderPanel(draft, saved) : ""}
+              ${!orderRehearsalMode && !placed ? `<div class="vendor-order-place"><button class="primary-button" type="button" data-weekly-order-place data-weekly-order-vendor-id="${escapeHtml(vendor?.id || "")}" data-weekly-order-draft-id="${escapeHtml(draft.id)}" data-weekly-ordered-by="${escapeHtml(manager)}" data-weekly-order-vendor="${escapeHtml(draft.vendor)}"${!vendor?.id || draft.blockers.length ? " disabled" : ""}>Mark as placed</button></div>` : ""}
+            </section>`;
         }).join("")}
       </div>
-    </section>
-  `;
+    </section>`;
 }
 
 function bindOwnerWeeklyOrderTrackingEvents() {
@@ -8510,7 +8528,9 @@ function renderWeeklyPlan() {
         <input id="weekly-plan-late-reason" type="text" autocomplete="off" value="${escapeHtml(weeklyPlanOutsideMondayReason)}" placeholder="Why is this snapshot late?">
       </label>
     ` : ""}
-    ${planLocked ? "" : `<button class="primary-button" id="run-weekly-plan-agent" type="button"${parAgentRunning || weeklyPlanUpdating || (requiresLateSnapshotReason && !clean(weeklyPlanOutsideMondayReason)) ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Saving & locking..." : "Save & Lock Plan"}</button>`}
+    ${planLocked
+      ? (weeklyOrderTracking.vendors || []).some((vendor) => vendor.ordered) ? "" : '<details class="weekly-plan-tools"><summary>Plan options</summary><button class="ghost-button" id="recall-weekly-plan" type="button">Reopen counts</button></details>'
+      : `<button class="primary-button" type="button" data-monday-run-step="inventory" data-dashboard-target="inventory"${parAgentRunning || weeklyPlanUpdating ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Saving snapshot..." : "Count inventory"}</button>`}
   `;
   const liveWeeklyPlanBody = `
     <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(getWeeklyPlanManagerMessage(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : "")))}</p>
@@ -8538,7 +8558,7 @@ function renderWeeklyPlan() {
         ${renderWeeklyPlanFinishWeek(planLocked, Boolean(orderStep?.complete), "prep")}
       </details>
     </div>
-    ` : `<section class="weekly-plan-empty" role="status"><h2>This week's plan has not been generated</h2><p>The previous plan is saved in Weekly Snapshots. Use Save &amp; Lock Plan after the current PMB usage and counts are ready.</p></section>`}
+    ` : `<section class="weekly-plan-empty" role="status"><h2>Start with Cooler Count</h2><p>Submit inventory after counting to save this week's plan.</p></section>`}
   `;
   let weeklyPlanBody = liveWeeklyPlanBody;
   if (orderRehearsalMode) {
@@ -12793,7 +12813,7 @@ async function runKegParAgentAttempt() {
 }
 
 async function runWeeklyPlanUpdate() {
-  if (weeklyPlanUpdating || parAgentRunning) return;
+  if (weeklyPlanUpdating || parAgentRunning) return false;
   if (getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date())) {
     weeklyPlanRefreshMessage = "This Monday order is locked through Sunday for Thursday delivery. Live keg levels can still refresh without changing the published plan.";
     renderWeeklyPlan();
@@ -12838,13 +12858,14 @@ async function runWeeklyPlanUpdate() {
     lockedSuccessfully = true;
   } catch (error) {
     parAgentError = error.message || "Weekly Plan update failed.";
-    weeklyPlanRefreshMessage = `Save & Lock Plan did not finish: ${parAgentError} Press Save & Lock Plan to retry.`;
+    weeklyPlanRefreshMessage = `Snapshot save did not finish: ${parAgentError} Submit inventory again to retry.`;
   } finally {
     weeklyPlanUpdating = false;
     inventorySharedSaving = inventoryFieldSyncPendingCount > 0 || inventoryFieldSyncTimers.size > 0;
     renderWeeklyPlan();
     if (lockedSuccessfully) openMondayRunStep("orders", "weekly-plan");
   }
+  return lockedSuccessfully;
 }
 
 async function initializeSharedKegLevelsFromServiceComputer() {
@@ -14654,7 +14675,7 @@ function renderInventorySpeechAssistant() {
           </label>
           <label class="speech-review-card__field">
             <span>Count</span>
-            <input class="inventory-input speech-quantity-input" type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" autocomplete="off" data-1p-ignore="true" data-lpignore="true" value="${Number.isFinite(Number(proposal.quantity)) ? escapeHtml(String(proposal.quantity)) : ""}" aria-label="Proposed quantity for ${escapeHtml(selected?.name || proposal.phrase)}">
+            <input class="inventory-input speech-quantity-input" type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]*" autocomplete="off" data-1p-ignore="true" data-lpignore="true" value="${proposal.quantity != null && Number.isFinite(Number(proposal.quantity)) ? escapeHtml(String(proposal.quantity)) : ""}" aria-label="Proposed quantity for ${escapeHtml(selected?.name || proposal.phrase)}">
           </label>
           <div class="speech-review-card__field speech-review-card__location">
             <span>Location</span>
@@ -14686,8 +14707,7 @@ function renderInventorySpeechAssistant() {
           <textarea class="inventory-speech-transcript" aria-label="Spoken inventory transcript" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" placeholder="${kegOnly ? "Main wall: one Guinness, two Modelo, add another Angry Orchard" : inventorySpeechInventoryScope === "mixer" ? "Two sour mix, one pomegranate, three lime juice" : "Three Tito's, two Kahlua, one Crown Apple"}">${escapeHtml(inventorySpeechTranscript)}</textarea>
         </label>
         <div class="inventory-speech__actions">
-          <button class="ghost-button inventory-speech-listen" type="button">${inventorySpeechListening ? "Finish count" : SpeechRecognition ? "Start count" : "Use keyboard dictation"}</button>
-          <button class="primary-button inventory-speech-review" type="button">Review</button>
+          <button class="primary-button inventory-speech-listen" type="button"${inventorySpeechReviewAfterStop ? " disabled" : ""}>${inventorySpeechReviewAfterStop ? "Finishing count..." : inventorySpeechListening || inventorySpeechTranscript.trim() || inventorySpeechKeyboardCounting ? "Finish Count / Review" : "Start count"}</button>
           <button class="ghost-button inventory-speech-clear" type="button">Clear</button>
           ${kegOnly ? '<button class="ghost-button keg-clear-on-hand-button" id="clear-keg-on-hand" type="button">Clear all on hand</button>' : `<button class="ghost-button inventory-clear-on-hand-button" id="clear-inventory-on-hand" type="button"${inventorySharedSaving ? " disabled" : ""}>Clear all on hand</button>`}
         </div>
@@ -14736,19 +14756,25 @@ function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
     event.stopPropagation();
     inventorySpeechTranscript = transcriptInput.value;
     inventorySpeechProposals = [];
+    const countButton = assistant.querySelector(".inventory-speech-listen");
+    if (countButton) countButton.textContent = inventorySpeechTranscript.trim() || inventorySpeechListening || inventorySpeechKeyboardCounting ? "Finish Count / Review" : "Start count";
     assistant.querySelector(".inventory-speech-apply")?.setAttribute("disabled", "");
   });
   assistant.querySelector(".inventory-speech-listen")?.addEventListener("click", () => {
-    if (inventorySpeechListening) stopInventorySpeechRecognition();
+    if (inventorySpeechRecognition) stopInventorySpeechRecognition({ review: reviewTranscript });
+    else if (inventorySpeechTranscript.trim() || inventorySpeechKeyboardCounting) reviewTranscript();
     else if (window.SpeechRecognition || window.webkitSpeechRecognition) startInventorySpeechRecognition();
     else {
+      inventorySpeechKeyboardCounting = true;
+      assistant.querySelector(".inventory-speech-listen").textContent = "Finish Count / Review";
       transcriptInput?.focus();
       const status = assistant.querySelector(".sync-status");
-      if (status) status.textContent = "Use your phone keyboard's microphone, if available, to dictate here. Then tap Review. Nothing is applied automatically.";
+      if (status) status.textContent = "Type or use keyboard dictation, then tap Finish Count / Review.";
     }
   });
-  assistant.querySelector(".inventory-speech-review")?.addEventListener("click", () => {
-    inventorySpeechTranscript = transcriptInput?.value || inventorySpeechTranscript;
+  function reviewTranscript() {
+    if (transcriptInput?.isConnected) inventorySpeechTranscript = transcriptInput.value;
+    inventorySpeechKeyboardCounting = false;
     const parsed = parseInventoryTranscript(inventorySpeechTranscript, sourceItems);
     inventorySpeechProposals = parsed.proposals;
     const reviewItems = parsed.proposals.filter(speechProposalNeedsReview);
@@ -14757,7 +14783,7 @@ function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
       ? `${assistant.id === "keg-speech-assistant" ? "Keg counts recognized" : `${parsed.proposals.length} count${parsed.proposals.length === 1 ? "" : "s"} found`}${needsReview ? ` · Review: ${reviewItems.map((proposal) => `“${proposal.phrase}”`).join("; ")}` : " · Ready to apply"}.`
       : "No inventory counts were recognized.";
     renderInventorySpeechAssistant();
-  });
+  }
   assistant.querySelector(".inventory-speech-clear")?.addEventListener("click", () => {
     stopInventorySpeechRecognition();
     inventorySpeechTranscript = "";
@@ -14788,7 +14814,7 @@ function bindInventorySpeechEvents(catalog, sourceItems, assistant) {
       renderInventorySpeechAssistant();
     });
     row.querySelector(".speech-quantity-input")?.addEventListener("input", (event) => {
-      const value = Number(event.currentTarget.value);
+      const value = event.currentTarget.value.trim() === "" ? NaN : Number(event.currentTarget.value);
       proposal.quantity = Number.isFinite(value) && value >= 0 ? value : null;
       const totals = assistant.querySelector("[data-keg-speech-totals]");
       if (totals) totals.textContent = getKegSpeechCountSummary(sourceItems);
@@ -14807,43 +14833,42 @@ function cleanInventorySpeechRecognitionText(value) {
     .trim();
 }
 
+let inventorySpeechReviewAfterStop = null;
+let inventorySpeechKeyboardCounting = false;
+
 function startInventorySpeechRecognition() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition || inventorySpeechListening) return;
-
-  // Start directly from the tap gesture; recognition requests its own permission.
+  if (!SpeechRecognition || inventorySpeechRecognition) return;
   inventorySpeechListening = true;
-  inventorySpeechRecognition = new SpeechRecognition();
-  inventorySpeechRecognition.lang = "en-US";
-  inventorySpeechRecognition.continuous = true;
-  inventorySpeechRecognition.interimResults = true;
-  let committedTranscript = inventorySpeechTranscript.trim();
-  inventorySpeechRecognition.onstart = () => {
+  inventorySpeechKeyboardCounting = false;
+  const recognition = new SpeechRecognition();
+  inventorySpeechRecognition = recognition;
+  recognition.lang = "en-US";
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  const startingTranscript = inventorySpeechTranscript.trim();
+  recognition.onstart = () => {
+    if (inventorySpeechRecognition !== recognition) return;
     inventorySpeechMessage = "Listening...";
     renderInventorySpeechAssistant();
   };
-  inventorySpeechRecognition.onresult = (event) => {
+  recognition.onresult = (event) => {
+    if (inventorySpeechRecognition !== recognition) return;
     inventorySpeechProposals = [];
-    const additions = [];
-    const interim = [];
-    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+    const phrases = [];
+    // Results are cumulative for this session. Rebuild rather than append repeats.
+    for (let index = 0; index < event.results.length; index += 1) {
       const words = cleanInventorySpeechRecognitionText(event.results[index][0].transcript);
-      if (!words) continue;
-      if (event.results[index].isFinal) additions.push(words);
-      else interim.push(words);
-    }
-    if (additions.length) {
-      committedTranscript = cleanInventorySpeechRecognitionText(
-        [committedTranscript, ...additions].filter(Boolean).join(", "),
-      );
+      if (words) phrases.push(words);
     }
     inventorySpeechTranscript = cleanInventorySpeechRecognitionText(
-      [committedTranscript, interim.join(" ")].filter(Boolean).join(interim.length ? " " : ""),
+      [startingTranscript, ...phrases].filter(Boolean).join(", "),
     );
-    inventorySpeechMessage = "Listening...";
+    inventorySpeechMessage = inventorySpeechReviewAfterStop ? "Finishing count..." : "Listening...";
     renderInventorySpeechAssistant();
   };
-  inventorySpeechRecognition.onerror = (event) => {
+  recognition.onerror = (event) => {
+    if (inventorySpeechRecognition !== recognition) return;
     inventorySpeechMessage = {
       "not-allowed": "Microphone permission was not granted.",
       "service-not-allowed": "Voice input is not available in this browser.",
@@ -14853,32 +14878,46 @@ function startInventorySpeechRecognition() {
     }[event.error] || "Voice input stopped. You can continue in the text box.";
     renderInventorySpeechAssistant();
   };
-  inventorySpeechRecognition.onend = () => {
-    const endedWhileListening = inventorySpeechListening;
+  recognition.onend = () => {
+    if (inventorySpeechRecognition !== recognition) return;
     inventorySpeechListening = false;
     inventorySpeechRecognition = null;
-    if (endedWhileListening && inventorySpeechMessage === "Listening...") {
+    const review = inventorySpeechReviewAfterStop;
+    inventorySpeechReviewAfterStop = null;
+    if (review) { review(); return; }
+    if (inventorySpeechMessage === "Listening...") {
       inventorySpeechMessage = inventorySpeechTranscript.trim()
-        ? "Count kept. Tap Start count to continue, or Review when finished."
+        ? "Count kept. Tap Finish Count / Review when ready."
         : "I didn't hear anything. Try again, or type the count below.";
     }
     renderInventorySpeechAssistant();
   };
   inventorySpeechMessage = "Starting microphone...";
   renderInventorySpeechAssistant();
-  try {
-    inventorySpeechRecognition.start();
-  } catch {
+  try { recognition.start(); }
+  catch {
     inventorySpeechListening = false;
     inventorySpeechRecognition = null;
-    inventorySpeechMessage = "Voice input could not start. Check microphone access, or type the count and press Review.";
+    inventorySpeechMessage = "Voice input could not start. Type or use keyboard dictation, then tap Finish Count / Review.";
     renderInventorySpeechAssistant();
   }
 }
 
-function stopInventorySpeechRecognition() {
-  inventorySpeechRecognition?.stop();
+function stopInventorySpeechRecognition({ review = null } = {}) {
+  const recognition = inventorySpeechRecognition;
   inventorySpeechListening = false;
+  inventorySpeechKeyboardCounting = false;
+  inventorySpeechReviewAfterStop = review;
+  if (recognition && review) {
+    inventorySpeechMessage = "Finishing count...";
+    renderInventorySpeechAssistant();
+    try { recognition.stop(); return; } catch { /* Review the retained transcript. */ }
+  }
+  // Discard callbacks from an old session after Clear or a cooler change.
+  inventorySpeechRecognition = null;
+  inventorySpeechReviewAfterStop = null;
+  if (recognition) { try { recognition.abort(); } catch { /* Already stopped. */ } }
+  if (review) { review(); return; }
   inventorySpeechMessage = inventorySpeechTranscript.trim() ? "Ready to review." : "Count stopped.";
   renderInventorySpeechAssistant();
 }
@@ -14904,41 +14943,58 @@ function buildCompletedInventorySectionChanges(group, submittedChanges) {
 }
 
 async function submitInventoryCount() {
-  if (inventoryCountSubmitting || !inventorySharedInitialized) return;
+  if (inventoryCountSubmitting || weeklyPlanUpdating || parAgentRunning || !inventorySharedInitialized) return;
+  if (getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date())) {
+    openMondayRunStep("orders", "weekly-plan");
+    return;
+  }
+  const reasonInput = document.querySelector("#inventory-snapshot-reason");
+  if (!isEasternMonday()) {
+    weeklyPlanOutsideMondayReason = clean(reasonInput?.value || weeklyPlanOutsideMondayReason);
+    if (!weeklyPlanOutsideMondayReason) {
+      const reasonField = document.querySelector("#inventory-snapshot-reason-field");
+      if (reasonField) reasonField.hidden = false;
+      inventorySharedMessage = "Enter a reason for submitting after Monday.";
+      reasonInput?.focus();
+      renderInventory();
+      return;
+    }
+  }
   inventoryCountSubmitting = true;
   if (inventorySubmitCountButton) {
     inventorySubmitCountButton.disabled = true;
-    inventorySubmitCountButton.textContent = "Submitting...";
+    inventorySubmitCountButton.textContent = "Saving snapshot...";
   }
   try {
-    if (!(await flushPendingInventorySyncs())) {
-      throw new Error("The entered counts have not finished saving. They are preserved for retry.");
+    const retryingSavedSnapshot = Boolean(getCurrentMondayInventorySnapshot(inventoryHistory, new Date()))
+      && !clean(parAgentState?.recommendations?.weeklyPlanRecalledAt);
+    if (!retryingSavedSnapshot) {
+      if (!(await flushPendingInventorySyncs())) {
+        throw new Error("The entered counts have not finished saving. They are preserved for retry.");
+      }
+      const changes = inventoryItems
+        .filter((item) => getUncountedInventoryAmount(item) === null)
+        .map((item) => ({ id: item.id, value: clean(item.onHandDisplay) }));
+      if (!changes.length) return;
+      if (changes.some((change) => change.value === "" || !Number.isFinite(Number(change.value)) || Number(change.value) < 0)) {
+        throw new Error("Enter a valid on-hand count for each counted item before submitting. Existing counts are preserved.");
+      }
+      const saved = await runSharedInventoryAction({
+        action: "batch-update-fields", source: "section-count",
+        changes: changes.map((change) => ({ id: change.id, field: "onHand", value: change.value })),
+      }, { successMessage: "Counts saved. Saving weekly snapshot...", rebuild: true });
+      if (!saved) throw new Error("The inventory count could not be saved. It is preserved for retry.");
     }
-    const entered = inventoryItems.filter((item) => getUncountedInventoryAmount(item) === null
-      && isRecommendationForOperatingWeek(inventoryCountedItemsAt[item.id], new Date()))
-      .map((item) => ({ id: item.id, target: "inventory", value: clean(item.onHandDisplay) || "0" }));
-    const changes = ["Liquor Cabinet", "Mixer Cabinet", "Other"].reduce(
-      (pending, group) => buildCompletedInventorySectionChanges(group, pending),
-      entered,
-    );
-    if (!changes.length) return;
-    if (!confirmDashboardAction(
-      "Submit inventory count?",
-      ["Liquor Cabinet, Mixer Cabinet, and Other will be submitted together."],
-      "Counts entered this week will be kept. Uncounted items will be recorded as zero.",
-    )) return;
-    const saved = await runSharedInventoryAction({
-      action: "batch-update-fields",
-      source: "section-count",
-      changes: changes.map((change) => ({ id: change.id, field: "onHand", value: change.value })),
-    }, { successMessage: "Inventory count received.", rebuild: true });
-    if (!saved) throw new Error("The inventory count could not be saved. It is preserved for retry.");
+    const published = await runWeeklyPlanUpdate();
+    if (!published) throw new Error(weeklyPlanRefreshMessage || "Counts are saved, but the weekly snapshot needs a retry. Submit inventory again.");
+    inventorySharedMessage = "Cooler and inventory counts saved to the weekly snapshot.";
   } catch (error) {
     inventorySharedMessage = error.message;
   } finally {
     inventoryCountSubmitting = false;
     renderInventory();
     renderWeeklyPlan();
+    renderDashboardOverview();
   }
 }
 
@@ -14963,9 +15019,7 @@ async function applyReviewedInventorySpeechChanges() {
     return;
   }
   const submittedCabinet = inventorySpeechInventoryScope === "mixer" ? "Mixer Cabinet" : "Liquor Cabinet";
-  if (inventoryChanges.length) {
-    inventoryChanges = buildCompletedInventorySectionChanges(submittedCabinet, inventoryChanges);
-  }
+
   if (!confirmDashboardAction(
     `Apply ${changes.length} reviewed count${changes.length === 1 ? "" : "s"}?`,
     [
@@ -14973,7 +15027,7 @@ async function applyReviewedInventorySpeechChanges() {
       `${kegChanges.length} Keg Levels field${kegChanges.length === 1 ? "" : "s"}.`,
     ],
     inventoryChanges.length
-      ? `${submittedCabinet} will be submitted. Unmentioned items in that section count as zero. Other items not counted this week become zero once both cabinets are submitted.`
+      ? `${submittedCabinet} will be submitted. Only reviewed items will be updated. Other counts stay unchanged.`
       : "Only the reviewed on-hand values will change.",
   )) return;
   inventorySpeechApplying = true;
@@ -15014,7 +15068,7 @@ async function applyReviewedInventorySpeechChanges() {
     inventorySpeechTranscript = "";
     inventorySpeechProposals = [];
     inventorySpeechMessage = inventoryChanges.length
-      ? `${submittedCabinet} count received. Unmentioned items are zero.`
+      ? `${submittedCabinet} count received. Reviewed counts saved.`
       : `${changes.length} reviewed count${changes.length === 1 ? "" : "s"} applied.`;
   } catch (error) {
     inventorySpeechMessage = `${error.message} The reviewed list is still here for retry.`;
@@ -15053,25 +15107,11 @@ function renderInventoryStockTable(groupedItems) {
     };
   }
   const groups = new Map(groupedItems);
-  const countProgress = new Map(getInventoryCountSections(inventoryItems, inventoryCountedItemsAt)
-    .map((section) => [section.name, section]));
   ["Liquor Cabinet", "Mixer Cabinet", "Other"].forEach((groupName) => {
     if (selectedGroup !== "all" && selectedGroup !== groupName) return;
     const items = groups.get(groupName) || [];
-    const progress = countProgress.get(groupName);
-    if (selectedGroup === "all" || progress) {
-      const heading = createInventoryGroupRow(selectedGroup === "all" ? groupName : "", 2);
-      if (progress) {
-        const status = document.createElement("span");
-        status.className = "table-note";
-        status.textContent = progress.complete ? "Count received this week"
-          : `${progress.total - progress.missing.length} of ${progress.total} counted this week`;
-        heading.firstElementChild.append(status);
-      }
-      inventoryTable.append(heading);
-    }
-    items.filter((item) => clean(item.name).toLowerCase() !== "cold brew")
-      .forEach((item) => inventoryTable.append(createInventoryRow(item, "stock")));
+    if (selectedGroup === "all") inventoryTable.append(createInventoryGroupRow(groupName, 2));
+    items.forEach((item) => inventoryTable.append(createInventoryRow(item, "stock")));
   });
 }
 
@@ -16513,14 +16553,14 @@ async function addPmbProduct(event) {
   const targetMargin = getBeerTargetMargin();
   const pricePerOz = getGeneratedBeerChargePerOz(kegCost, targetMargin, kegOz);
   if (!name || kegCost <= 0 || kegOz <= 0 || pricePerOz <= 0 || abvPercent <= 0 || abvPercent > 100) {
-    setPmbProductStatus("Add a beer name, positive keg cost, correct keg size, and a verified ABV from Untappd before saving it to the queue.", "error");
+    setPmbProductStatus("Add a beer name, positive keg cost, correct keg size, and a verified ABV from Untappd before saving to PMB.", "error");
     return;
   }
 
   pmbProductSaving = true;
   if (pmbProductSubmitButton) pmbProductSubmitButton.textContent = "Saving...";
   if (pmbProductSubmitButton) pmbProductSubmitButton.disabled = true;
-  setPmbProductStatus("Preparing the beer for the Pour My Beer queue...", "loading");
+  setPmbProductStatus("Saving to Pour My Beer...", "loading");
 
   try {
     if (!clean(pmbProductNotesInput?.value) || !clean(pmbProductImageInput?.value)) {
@@ -16556,9 +16596,10 @@ async function addPmbProduct(event) {
     savePmbPublishQueue();
     addComingSoonItemFromPmbProduct(payload);
 
+    const published = await publishPmbQueueItem(queued.item.id, { automatic: true });
     setPmbProductStatus(
-      `${name} was ${queued.replaced ? "updated" : "saved"} for PMB review.`,
-      "success",
+      published ? `${name} was saved to Pour My Beer.` : `${name} was saved locally, but PMB publishing needs retry. ${pmbQueueConnectionMessage}`,
+      published ? "success" : "error",
     );
     cancelUntappdProductSearch("beer");
     pmbProductForm.reset();
@@ -16572,7 +16613,7 @@ async function addPmbProduct(event) {
     );
   } finally {
     pmbProductSaving = false;
-    if (pmbProductSubmitButton) pmbProductSubmitButton.textContent = "Save beer to queue";
+    if (pmbProductSubmitButton) pmbProductSubmitButton.textContent = "Save beer";
     if (pmbProductSubmitButton) pmbProductSubmitButton.disabled = false;
   }
 }
@@ -16634,9 +16675,10 @@ async function addLiquorProduct(event) {
     comingSoonItems = mergeRequiredComingSoonItems(comingSoonItems, pmbPublishQueue);
     saveComingSoonItems();
 
+    const published = await publishPmbQueueItem(queued.item.id, { automatic: true });
     setLiquorProductStatus(
-      `${name} was ${queued.replaced ? "updated" : "saved"} for PMB review.`,
-      "success",
+      published ? `${name} was saved to Pour My Beer.` : `${name} was saved locally, but PMB publishing needs retry. ${pmbQueueConnectionMessage}`,
+      published ? "success" : "error",
     );
     cancelUntappdProductSearch("liquor");
     liquorProductForm.reset();
@@ -16649,7 +16691,7 @@ async function addLiquorProduct(event) {
     );
   } finally {
     liquorProductSaving = false;
-    if (liquorProductSubmitButton) liquorProductSubmitButton.textContent = "Save liquor to queue";
+    if (liquorProductSubmitButton) liquorProductSubmitButton.textContent = "Save liquor";
     if (liquorProductSubmitButton) liquorProductSubmitButton.disabled = false;
   }
 }
@@ -16800,16 +16842,19 @@ function handlePmbPublishQueueAction(event) {
   }
 }
 
-async function publishPmbQueueItem(id) {
-  if (activePmbQueuePublishId) return;
+async function publishPmbQueueItem(id, { automatic = false } = {}) {
+  if (activePmbQueuePublishId) {
+    pmbQueueConnectionMessage = "Another product is still publishing. This product remains saved for retry.";
+    return false;
+  }
   const item = pmbPublishQueue.find((entry) => entry.id === id);
   if (!item || item.status === "published") return;
 
-  const connected = await checkPmbQueueConnection();
-  if (!connected) return;
+  const connected = automatic || await checkPmbQueueConnection();
+  if (!connected) return false;
 
   const payload = item.payload || {};
-  if (!confirmDashboardAction(
+  if (!automatic && !confirmDashboardAction(
     `Publish “${item.name}” to Pour My Beer now?`,
     [
       item.kind === "liquor" ? "Type: Straight liquor tap" : "Type: Beer keg",
@@ -16869,6 +16914,7 @@ async function publishPmbQueueItem(id) {
     ingredients = buildIngredientCatalog(getActiveRecipes());
     render();
     runTapPricingSync();
+    return true;
   } catch (error) {
     const message = getPmbConnectionErrorMessage(
       error,
@@ -16882,6 +16928,7 @@ async function publishPmbQueueItem(id) {
     }
     pmbQueueConnectionMessage = message;
     renderPmbPublishQueue();
+    return false;
   } finally {
     activePmbQueuePublishId = "";
     renderPmbPublishQueue();

@@ -16,7 +16,7 @@ export function mountTapPerformance(root, getCosts) {
   const yesterday = new Date(`${day(new Date())}T12:00:00Z`); yesterday.setUTCDate(yesterday.getUTCDate() - 1);
   const end = day(yesterday), first = new Date(yesterday); first.setUTCDate(first.getUTCDate() - 6);
   let reports = [], missingDays = [], running = false, stop = false;
-  root.innerHTML = `<header class="tap-performance-heading"><div><p class="eyebrow">01 / Daily reporting</p><h2>Sales &amp; profit</h2></div><span class="table-note">Eastern time</span></header>
+  root.innerHTML = `<header class="tap-performance-heading"><div><p class="eyebrow">01 / Daily reporting</p><h2>Sales &amp; profit</h2></div></header>
     <form class="tap-performance-filters">
       <label>From<input name="start" type="date" value="${day(first)}" max="${end}" required></label>
       <label>Through<input name="end" type="date" value="${end}" max="${end}" required></label>

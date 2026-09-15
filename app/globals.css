@@ -1258,10 +1258,23 @@ h1 {
 .monday-run__header {
   justify-content: space-between;
   gap: 16px;
+  flex-wrap: wrap;
 }
 
 .monday-run__header > div {
   gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.monday-run__header > .monday-run__header-actions {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+.monday-run__header .monday-run__week {
+  white-space: nowrap;
+  background: rgba(31, 95, 84, 0.08);
 }
 
 .monday-run__header h2 {

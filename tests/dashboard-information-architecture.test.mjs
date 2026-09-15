@@ -327,7 +327,7 @@ test("voice inventory starts directly and offers phone keyboard dictation", () =
   assert.doesNotMatch(dashboardSource, /inventorySpeechMicrophoneAuthorized/);
   assert.match(dashboardSource, /function startInventorySpeechRecognition\(\)/);
   assert.doesNotMatch(dashboardSource, /async function startInventorySpeechRecognition/);
-  assert.match(dashboardSource, /Use keyboard dictation/);
+  assert.match(dashboardSource, /Finish Count \/ Review/);
   assert.match(dashboardSource, /transcriptInput\?\.focus\(\)/);
   assert.match(dashboardSource, /event\.stopPropagation\(\)/);
   assert.match(dashboardSource, /function cleanInventorySpeechRecognitionText/);
@@ -336,8 +336,8 @@ test("voice inventory starts directly and offers phone keyboard dictation", () =
 
 test("Weekly Plan hides recommendations from a previous operating week", () => {
   assert.match(dashboardSource, /const currentWeekPlanAvailable = planLocked/);
-  assert.match(dashboardSource, /This week's plan has not been generated/);
-  assert.match(dashboardSource, /The previous plan is saved in Weekly Snapshots/);
+  assert.match(dashboardSource, /Cooler Count/);
+  assert.match(dashboardSource, /Submit inventory after counting to save this week's plan/);
 });
 
 test("inventory item names are draggable without separate buttons and retire Bubbly", () => {
