@@ -42,3 +42,13 @@ test('report endpoint requires owner authorization before controller access and 
   assert.doesNotMatch(source, /export async function (POST|PUT|PATCH|DELETE)/);
   assert.match(source, /private, no-store/);
 });
+
+test('product search only submits the observed name filter and includes inactive entries', async () => {
+  const input = parseReportHistoryRequest(new URLSearchParams('view=catalog&name=Strawberry'));
+  let call;
+  await readPmbReportHistory(input, {config: {}, readPage: async (...args) => { call = args; return {status:200, raw:''}; }});
+  assert.equal(call[1], 'POST');
+  assert.equal(call[2], '/pages/products');
+  assert.deepEqual([...new URLSearchParams(call[3].toString())], [['fd_plu',''], ['fd_name','Strawberry'], ['fd_descr',''], ['submit_apply_filter','Apply']]);
+  assert.throws(() => parseReportHistoryRequest(new URLSearchParams('view=products&plus=4&name=Strawberry')), {status:422});
+});
