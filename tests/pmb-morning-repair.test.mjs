@@ -162,35 +162,36 @@ test("missing taps cause read-only retries, never another repair", async (t) => 
   const h = await harness(t);
   const run = createPmbMorningRepairRunner({ ...h.options, refresh: async () => {
     h.calls.reads += 1;
-    return refreshed(h.clock.value.toISOString(), { missing: true });
+    return refreshed(h.clock.value.toISOString(), { missing: h.calls.reads < 60 });
   } });
   const result = await run();
-  assert.equal(result.status, "unverified");
-  assert.deepEqual(result.verification.missingTaps, [73]);
+  assert.equal(result.status, "verified");
+  assert.deepEqual(result.verification.missingTaps, []);
   assert.equal(h.calls.repairs, 1);
-  assert.equal(h.calls.reads, 47);
-  assert.deepEqual(h.calls.waits, [180_000, ...Array(47).fill(60_000)]);
+  assert.equal(h.calls.reads, 60);
+  assert.deepEqual(h.calls.waits, [180_000, ...Array(59).fill(60_000)]);
 });
 
-test("verification timeouts stop additional reads because existing readers may still be running", async (t) => {
+test("verification timeouts continue read-only retries until verified", async (t) => {
   const h = await harness(t);
   const result = await createPmbMorningRepairRunner({ ...h.options, refresh: async () => {
     h.calls.reads += 1;
-    return { levels: { timedOut: true, error: "Timed out" } };
+    return h.calls.reads < 3 ? { levels: { timedOut: true, error: "Timed out" } }
+      : refreshed(h.clock.value.toISOString());
   } })();
-  assert.equal(result.status, "needs-attention");
-  assert.equal(h.calls.reads, 1);
-  assert.match(result.message, /unresolved/);
+  assert.equal(result.status, "verified");
+  assert.equal(h.calls.reads, 3);
+  assert.equal(h.calls.repairs, 1);
 });
 
-test("a delayed or sleeping worker does not start verification after its pre-opening window", async (t) => {
+test("a delayed worker still verifies after the old pre-opening cutoff", async (t) => {
   const h = await harness(t);
   const result = await createPmbMorningRepairRunner({ ...h.options, wait: async () => {
     h.clock.value = new Date("2026-09-07T15:02:00Z");
   } })();
-  assert.equal(result.status, "unverified");
+  assert.equal(result.status, "verified");
   assert.equal(h.calls.repairs, 1);
-  assert.equal(h.calls.reads, 0);
+  assert.equal(h.calls.reads, 1);
 });
 
 test("old backup responses, duplicate taps, and incomplete pricing do not count as restored", () => {
@@ -215,13 +216,12 @@ test("activity storage failure does not repeat the repair or erase durable succe
   assert.equal(h.calls.repairs, 1);
 });
 
-test("status explains an interrupted attempt after opening while retaining its daily claim", async (t) => {
+test("status retains pending verification after opening without repeating the repair", async (t) => {
   const h = await harness(t);
   await writeFile(path.join(h.directory, "2026-09-07.json"), JSON.stringify({ date: "2026-09-07", status: "repair-sent", message: "Waiting three minutes" }));
   h.clock.value = new Date("2026-09-07T15:00:00Z");
   const status = await readPmbMorningRepairStatus({ ...h.options, now: h.clock.value });
-  assert.equal(status.lastRun.status, "unverified");
-  assert.match(status.lastRun.message, /claim is retained/);
+  assert.equal(status.lastRun.status, "repair-sent");
   h.clock.value = new Date(summerMorning);
   assert.equal((await h.run()).alreadyClaimed, true);
   assert.equal(h.calls.repairs, 0);
@@ -268,15 +268,15 @@ test("a sleeping Monday repair cannot dispatch in the separate 10am slot", async
   assert.equal((await h.run()).status, "verified");
 });
 
-test("Monday incomplete readings stop at 7:50 without consuming the daily repair", async (t) => {
+test("Monday readings retry beyond 7:50 without consuming the daily repair", async (t) => {
   const h = await harness(t);
   h.clock.value = new Date("2026-09-07T11:00:05Z");
   const result = await createPmbMorningRepairRunner({ ...h.options, refresh: async () => {
     h.calls.reads += 1;
-    return refreshed(h.clock.value.toISOString(), { missing: true });
+    return refreshed(h.clock.value.toISOString(), { missing: h.calls.reads < 60 });
   } })();
-  assert.equal(result.status, "unverified");
-  assert.equal(h.calls.reads, 47);
+  assert.equal(result.status, "verified");
+  assert.equal(h.calls.reads, 60);
   h.clock.value = new Date("2026-09-07T14:00:05Z");
   assert.equal((await h.run()).status, "verified");
   assert.equal(h.calls.repairs, 2);
@@ -299,4 +299,32 @@ test("nightly repair runs once across restarts and does not consume the morning 
   h.clock.value = new Date("2026-09-15T14:00:05Z");
   assert.equal((await h.run()).slotId, "daily");
   assert.equal(h.calls.repairs, 2);
+});
+
+test("a restarted worker verifies a confirmed overnight repair on a later date without another write", async (t) => {
+  const h = await harness(t);
+  const record = { date: "2026-09-06", slotId: "nightly", scheduledTime: "00:40",
+    status: "unverified", repairStatus: "confirmed", sentAt: "2026-09-06T04:40:10Z",
+    startedAt: "2026-09-06T04:40:05Z", verificationAttempts: 12 };
+  await writeFile(path.join(h.directory, "2026-09-06-nightly.json"), JSON.stringify(record));
+  const result = await h.run(record);
+  assert.equal(result.status, "verified");
+  assert.equal(result.verificationAttempts, 13);
+  assert.equal(h.calls.repairs, 0);
+  assert.equal(h.calls.reads, 1);
+  assert.equal((await h.run(record)).skipped, true);
+});
+
+test("an explicit scheduler pause stops retries and leaves verification resumable", async (t) => {
+  const h = await harness(t);
+  const result = await createPmbMorningRepairRunner({ ...h.options, refresh: async () => {
+    h.options.env.PMB_MORNING_REPAIR_ENABLED = "false";
+    return refreshed(h.clock.value.toISOString(), { missing: true });
+  } })();
+  assert.equal(result.status, "unverified");
+  assert.match(result.message, /paused/);
+  assert.equal(h.calls.repairs, 1);
+  h.options.env.PMB_MORNING_REPAIR_ENABLED = "true";
+  assert.equal((await h.run(result)).status, "verified");
+  assert.equal(h.calls.repairs, 1);
 });
