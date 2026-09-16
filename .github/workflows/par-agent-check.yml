@@ -3,37 +3,26 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: onpar-production-deploy
+  cancel-in-progress: false
 jobs:
-  diagnose:
+  repair:
     runs-on: [self-hosted, onpar-production]
     timeout-minutes: 3
     environment: production
     steps:
-      - name: Isolated release HTTP diagnostic with automation disabled
+      - name: Install the deployed guarded scheduler definition without running the agent
         shell: bash
         run: |
-          /opt/homebrew/opt/node@22/bin/node --input-type=module <<'NODE'
-          import { spawn } from 'node:child_process';
-          process.loadEnvFile('/Users/onpar/OnParBeverageRecipes-service/.env.local');
-          const cwd='/Users/onpar/OnParBeverageRecipes-release-bb97e6cf8f79e61a9345d8036665f2eae1701bf9';
-          const child=spawn(process.execPath,[cwd+'/node_modules/next/dist/bin/next','start','-H','127.0.0.1','-p','3199'],{cwd,env:{...process.env,NODE_ENV:'production',ONPAR_DEPLOYMENT_TARGET:'on-site',ONPAR_PMB_REPAIR_SCHEDULER:'0',ONPAR_DASHBOARD_BACKUP_ENABLED:'false'}});
-          let logs='';
-          child.stdout.on('data',x=>{logs=(logs+x).slice(-12000)});
-          child.stderr.on('data',x=>{logs=(logs+x).slice(-12000)});
-          try {
-            await new Promise(r=>setTimeout(r,5000));
-            for(const endpoint of ['/api/version','/api/health?storage=1']) {
-              try {
-                const res=await fetch('http://127.0.0.1:3199'+endpoint,{redirect:'manual',signal:AbortSignal.timeout(15000)});
-                console.log(JSON.stringify({endpoint,httpStatus:res.status}));
-                const body=await res.json().catch(()=>null);
-                if(body) console.log(JSON.stringify({ok:body.ok,status:body.status,readiness:body.readiness,storage:body.reachability?.supabase,commit:body.commit}));
-              } catch { console.log(JSON.stringify({endpoint,error:'request failed'})); }
-            }
-          } finally {
-            child.kill('SIGTERM');
-            for(const secret of Object.values(process.env).filter(v=>v.length>6).sort((a,b)=>b.length-a.length)) logs=logs.split(secret).join('[redacted]');
-            logs=logs.replace(/https?:\/\/[^\s"'<>]+/g,'[url]').replace(/(?:Bearer\s+|eyJ)[\w.\-]+/g,'[token]');
-            console.log(logs);
-          }
-          NODE
+          set -Eeuo pipefail
+          helper=/Users/onpar/OnParBeverageRecipes-service/current/scripts/install-par-agent-daemon.sh
+          if [ "$(id -un)" != onpar ] || [ ! -f "$helper" ]; then
+            echo 'Expected on-site installer is unavailable.' >&2
+            exit 1
+          fi
+          if ! sudo -n -l /bin/bash "$helper" >/dev/null 2>&1; then
+            echo 'SCHEDULER_REPAIR_REQUIRES_MAC_ADMIN_APPROVAL. No scheduler or order data changed.' >&2
+            exit 1
+          fi
+          sudo -n /bin/bash "$helper"
