@@ -5476,10 +5476,12 @@ function renderInventory() {
 
 function getWeeklyPlanInventoryItems({ live = false } = {}) {
   const mondaySnapshot = getCurrentMondayInventorySnapshot(inventoryHistory, new Date());
-  const sourceItems = (mondaySnapshot?.items || (live ? getInventorySnapshotItems() : []))
+  const sourceItems = (live ? getInventorySnapshotItems() : mondaySnapshot?.items || [])
     .map(applyInventoryCountPolicy);
   const frozenKegPlan = getCurrentMondayKegPlanSnapshot();
-  const recommendationItems = Array.isArray(frozenKegPlan?.items)
+  const recommendationItems = live && liveParRecommendations?.items
+    ? liveParRecommendations.items
+    : Array.isArray(frozenKegPlan?.items)
     ? frozenKegPlan.items
     : live && isRecommendationForOperatingWeek(parAgentState?.recommendations?.generatedAt, new Date()) && Array.isArray(parAgentState?.recommendations?.items)
       ? parAgentState.recommendations.items
@@ -5561,7 +5563,9 @@ function getCurrentMondayKegPlanSnapshot(now = new Date()) {
 
 function getWeeklyPlanRecommendations({ live = false } = {}) {
   const frozenKegPlan = getCurrentMondayKegPlanSnapshot();
-  const sourceItems = Array.isArray(frozenKegPlan?.items)
+  const sourceItems = live && liveParRecommendations?.items
+    ? liveParRecommendations.items
+    : Array.isArray(frozenKegPlan?.items)
     ? frozenKegPlan.items
     : live && isRecommendationForOperatingWeek(parAgentState?.recommendations?.generatedAt, new Date()) && Array.isArray(parAgentState?.recommendations?.items)
       ? parAgentState.recommendations.items
@@ -6670,11 +6674,19 @@ document.addEventListener("click", (event) => {
 });
 
 let tapRepairBriefing = { items: [], unavailable: false };
+let liveParRecommendations = null;
 let tapRepairBriefingLoading = false;
 
 async function refreshTapRepairBriefing() {
   if (tapRepairBriefingLoading) return;
   tapRepairBriefingLoading = true;
+  try {
+    const liveResponse = await fetch("/api/live-par", { cache: "no-store", signal: AbortSignal.timeout(10000) });
+    const liveResult = liveResponse.ok ? await liveResponse.json() : null;
+    liveParRecommendations = liveResult?.status === "ready" ? liveResult.recommendations : null;
+  } catch {
+    liveParRecommendations = null;
+  }
   try {
     const response = await fetch("/api/pmb-repair-queue", { cache: "no-store", signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error("Repair status unavailable");

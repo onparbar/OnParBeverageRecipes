@@ -4,6 +4,8 @@ export async function register() {
     startDashboardBackupRuntime();
     const { startInventoryRecoveryRuntime } = await import("./lib/inventory-recovery-runtime.mjs");
     startInventoryRecoveryRuntime();
+    const { startLiveParRuntime } = await import("./lib/live-par-runtime.mjs");
+    await startLiveParRuntime();
   }
   // The PM2 launch helper supplies the scheduler switch only to the running
   // on-site service. Builds, previews, and local development remain passive.

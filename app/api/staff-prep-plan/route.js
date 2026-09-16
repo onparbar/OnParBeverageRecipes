@@ -15,6 +15,7 @@ import {
 import { executeInventoryBackedOperation } from "../../../lib/inventory-backed-operation.mjs";
 import { recoverPendingInventoryUpdates } from "../../../lib/keg-par-agent-shared-store.mjs";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
+import { applyPrepKegCounts } from "../../../lib/prep-keg-counts.mjs";
 
 export const runtime = "nodejs";
 
@@ -158,6 +159,7 @@ export async function POST(request) {
         .flatMap((entry) => Array.isArray(entry.plan?.unmatched) ? entry.plan.unmatched : []),
     };
     const stateChanged = changes.some((change) => change.stateChanged);
+    const prepState = applyPrepKegCounts(state, updatedRecommendations, changes);
     const actor = sharedPreparedBy || String(updates[0]?.preparedBy || role).replace(/\s+/g, " ").trim().slice(0, 80);
     const completedChanges = changes.filter((change) => change.stateChanged && change.update.completed).length;
     const reopenedChanges = changes.filter((change) => change.stateChanged && !change.update.completed).length;
@@ -168,9 +170,9 @@ export async function POST(request) {
         if (!stateChanged && !inventoryPlan.sources.length) return state;
         const nextRevision = Number(state.revision) + 1;
         return writeParAgentState({
-          ...state,
+          ...prepState,
           recommendations: {
-            ...updatedRecommendations,
+            ...prepState.recommendations,
             publishedStateRevision: nextRevision,
           },
         }, {
