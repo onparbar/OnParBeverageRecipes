@@ -49,15 +49,26 @@ const liquor = {
   portions: [{ name: "Single", price: 10, servingOz: 1.5 }, { name: "Double", price: 13.5, servingOz: 3 }],
 };
 
-test("one liquor tap counts once and reviews both single and double margins", () => {
+test("liquor portions above eight dollars gross profit hold even below 82 percent margin", () => {
   const advisor = buildPricingAdvisor([liquor], { now });
   assert.equal(advisor.summary.total, 1);
-  assert.equal(advisor.summary.priceChangeCount, 1);
+  assert.equal(advisor.summary.priceChangeCount, 0);
   assert.equal(advisor.rows[0].portions[0].action, "hold");
   assert.equal(advisor.rows[0].portions[0].recommendedPricePerOz, 10);
-  assert.equal(advisor.rows[0].portions[1].recommendedPricePerOz, 16.67);
+  assert.equal(advisor.rows[0].portions[1].recommendedPricePerOz, 13.5);
   assert.equal(advisor.rows[0].publishEligible, false);
   assert.equal(getPmbPriceUpdateEligibility(liquor, { now }).eligible, false);
+});
+
+test("both liquor portions below eight dollars gross profit receive suggestions", () => {
+  const row = buildPricingAdvisor([{ ...liquor, portions: [
+    { name: "Single", price: 9, servingOz: 1.5 },
+    { name: "Double", price: 10, servingOz: 3 },
+  ] }], { now }).rows[0];
+  assert.equal(row.portions[0].action, "increase");
+  assert.equal(row.portions[0].recommendedPricePerOz, 9.5);
+  assert.equal(row.portions[1].action, "increase");
+  assert.equal(row.portions[1].recommendedPricePerOz, 11);
 });
 
 test("cost dates alone no longer trigger warnings but missing costs remain blocked", () => {

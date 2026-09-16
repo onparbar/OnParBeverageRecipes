@@ -111,10 +111,14 @@ function activationOptions(extra = {}) {
     readDashboard: async () => ({ initialized: true, data: { products: { comingSoonItems: [{ id: "beer:test", name: product.name, plu: 500 }] } } }),
     readKegs: async () => ({ initialized: true, data: { onDeckOverrides: { "main-21": { name: product.name, plu: 500, onHand: "2" } } } }),
     ...extra,
+    client: {
+      taps: async () => [{ tapNumber: 79, deviceId: 123, lineNum: 1, plu: 500, product: product.name }],
+      ...extra.client,
+    },
   };
 }
 
-test("activation deduplicates both lists and changes only the Active field", async () => {
+test("activation deduplicates assigned taps and both queued lists and changes only Active", async () => {
   let active = false;
   let writes = 0;
   const result = await activateQueuedPmbProducts(activationOptions({ client: {
@@ -136,6 +140,20 @@ test("activation deduplicates both lists and changes only the Active field", asy
   assert.equal(result.checked, 1);
   assert.equal(result.activated.length, 1);
   assert.equal(result.verified, true);
+});
+
+test("a changed assignment prevents scheduled product activation", async () => {
+  let reads = 0;
+  const result = await activateQueuedPmbProducts(activationOptions({ client: {
+    taps: async () => [{ tapNumber: 79, deviceId: 123, lineNum: 1,
+      plu: ++reads === 1 ? 500 : 501, product: product.name }],
+    list: async () => [product],
+    open: async () => ({ html: form() }),
+    save: async (_entries, _cookies, guard) => { await guard(); assert.fail("Changed assignment was written"); },
+  } }));
+  assert.equal(result.verified, false);
+  assert.equal(result.issues[0].code, "PMB_ACTIVATION_ASSIGNMENT_CHANGED");
+  assert.equal(result.activated.length, 0);
 });
 
 test("already active products are verified without a write", async () => {

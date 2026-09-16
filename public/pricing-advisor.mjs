@@ -2,6 +2,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const PRICING_ADVISOR_DEFAULTS = Object.freeze({
   targetMarginPercent: 82,
+  liquorMinimumGrossProfit: 8,
   priceIncrement: 0.01,
   sellableYieldPercent: 100,
   maxCostAgeDays: 35,
@@ -178,7 +179,10 @@ export function evaluatePricingRecommendation(input = {}, options = {}) {
   const normalizedKind = clean(input.kind).toLowerCase();
   const costPerOz = positiveNumber(input.costPerOz);
   const currentPricePerOz = positiveNumber(input.currentPricePerOz);
-  const minimumPricePerOz = calculateTargetPricePerOz({
+  const liquorProfitTarget = normalizedKind === "liquor" ? positiveNumber(settings.liquorMinimumGrossProfit) : 0;
+  const minimumPricePerOz = liquorProfitTarget
+    ? (costPerOz > 0 ? Math.ceil((costPerOz + liquorProfitTarget) * 100 - 1e-9) / 100 : 0)
+    : calculateTargetPricePerOz({
     costPerOz,
     targetMarginPercent: settings.targetMarginPercent,
     priceIncrement: settings.priceIncrement,
@@ -214,7 +218,9 @@ export function evaluatePricingRecommendation(input = {}, options = {}) {
   let action = "review";
   if (minimumPricePerOz && !currentPricePerOz) {
     action = "set";
-  } else if (minimumPricePerOz && currentMarginPercent + 1e-9 < minimumMargin) {
+  } else if (minimumPricePerOz && (liquorProfitTarget
+    ? currentPricePerOz - costPerOz + 1e-9 < liquorProfitTarget
+    : currentMarginPercent + 1e-9 < minimumMargin)) {
     action = "increase";
   } else if (minimumPricePerOz && currentPricePerOz) {
     action = "hold";

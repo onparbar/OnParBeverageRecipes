@@ -13031,13 +13031,16 @@ details.custom-inventory-editor[open] > summary {
 
 .tap-product-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 .tap-new-detail {
   position: relative;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
 }
 .tap-new-detail > summary {
   text-decoration: none;
@@ -13056,12 +13059,15 @@ details.custom-inventory-editor[open] > summary {
   white-space: nowrap;
 }
 .tap-new-detail .tap-product-detail__body {
-  position: absolute;
+  position: static;
   z-index: 20;
   top: 100%;
   right: 0;
   width: max-content;
-  max-width: min(220px, 70vw);
+  max-width: 100%;
+  box-sizing: border-box;
+  white-space: normal;
+  overflow-wrap: anywhere;
   margin: 6px 0 0;
   padding: 9px 12px;
   border-radius: 9px;

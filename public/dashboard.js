@@ -3374,8 +3374,10 @@ function bindEvents() {
   window.addEventListener("focus", () => {
     void refreshSharedWeeklyUsageForDisplay();
   });
+  void refreshTapRepairBriefing();
   window.setInterval(() => {
     if (document.visibilityState !== "visible") return;
+    void refreshTapRepairBriefing();
     void refreshDashboardStaffPrepPlan();
     void refreshSharedWeeklyUsageForDisplay();
   }, 30_000);
@@ -4605,7 +4607,7 @@ function renderShotPricing(visibleTapRows = []) {
     const suggestedPrices = new Map((recommendations.get(row.key)?.portions || []).map((portion) => [
       clean(portion.portionName).toLowerCase(),
       portion.costPerOz > 0 && portion.servingOz > 0 && portion.recommendedPricePerOz > 0
-        ? `Suggested (82% margin target): ${money(portion.recommendedPricePerOz)}`
+        ? `Suggested ($8 minimum gross profit): ${money(portion.recommendedPricePerOz)}`
         : "Suggestion needs a mapped cost and serving size.",
     ]));
     const draftIdentity = JSON.stringify(row.portions.map(({ itemId, name }) => [itemId, name]));
@@ -4715,7 +4717,7 @@ async function submitPmbPortionPriceUpdate(updateKey) {
   if (!confirmDashboardAction(
     `Update both shot prices for ${row.name}?`,
     [...changes, `PMB PLU: ${row.plu}`, ...assignmentDetails],
-    "This manual liquor price change is separate from the 82% advisor. Both PMB portions will be re-verified before and after saving.",
+    "Liquor suggestions target at least $8 gross profit per Single or Double. Both PMB portions will be re-verified before and after saving.",
   )) return;
 
   activePmbPortionPriceUpdateKey = key;
@@ -4826,7 +4828,7 @@ function renderPricingAdvisor(visibleTapRows = []) {
   }
   pricingAdvisorSummary.innerHTML = `
     <div><strong>${formatNumber(advisor.summary.priceChangeCount)}</strong><span>Price suggestions</span></div>
-    ${advisor.summary.onTargetCount ? `<div><strong>${formatNumber(advisor.summary.onTargetCount)}</strong><span>At or above 82%</span></div>` : ""}
+    ${advisor.summary.onTargetCount ? `<div><strong>${formatNumber(advisor.summary.onTargetCount)}</strong><span>At or above target</span></div>` : ""}
     ${advisor.summary.reviewCount || pricingAdvisorReviewOnly ? `<button type="button" class="pricing-advisor-review-filter" data-pricing-review-filter aria-pressed="${pricingAdvisorReviewOnly}" aria-controls="pricing-advisor-table"><strong>${formatNumber(advisor.summary.reviewCount)}</strong><span>Need review</span><small>${pricingAdvisorReviewOnly ? "Showing review items" : "View review items"}</small></button>` : ""}
     ${advisor.summary.blockedCount ? `<div><strong>${formatNumber(advisor.summary.blockedCount)}</strong><span>Missing data</span></div>` : ""}
   `;
@@ -6667,6 +6669,26 @@ document.addEventListener("click", (event) => {
   renderDashboardOverview();
 });
 
+let tapRepairBriefing = { items: [], unavailable: false };
+let tapRepairBriefingLoading = false;
+
+async function refreshTapRepairBriefing() {
+  if (tapRepairBriefingLoading) return;
+  tapRepairBriefingLoading = true;
+  try {
+    const response = await fetch("/api/pmb-repair-queue", { cache: "no-store", signal: AbortSignal.timeout(10000) });
+    if (!response.ok) throw new Error("Repair status unavailable");
+    const result = await response.json();
+    if (!Array.isArray(result.items)) throw new Error("Invalid repair status");
+    tapRepairBriefing = { ...result, unavailable: Boolean(result.statusUnavailable) };
+  } catch {
+    tapRepairBriefing = { ...tapRepairBriefing, unavailable: true };
+  } finally {
+    tapRepairBriefingLoading = false;
+    renderDashboardOverview();
+  }
+}
+
 function formatComingSoonFollowUpTime(value) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
@@ -6831,6 +6853,25 @@ function renderDashboardOverview() {
       const bullets = (item.bullets || []).filter((bullet) => !/^\d+ (?:cocktails? left to be made|liquor refills? left to complete)$/i.test(clean(bullet)));
       return bullets.length ? [{ ...item, text: "Delivery needs attention", tone: "warning", bullets }] : [];
     });
+    const repairTime = tapRepairBriefing.nextRunAt ? new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+    }).format(new Date(tapRepairBriefing.nextRunAt)) : "";
+    for (const repair of tapRepairBriefing.items) {
+      currentBriefingIssues.push({
+        text: `Tap ${repair.tapNumber} - ${repair.name}`,
+        tone: "ready",
+        informational: true,
+        detail: repair.state === "awaiting-verification"
+          ? "Automatic fix sent; waiting for repair confirmation."
+          : repair.state === "paused"
+            ? "Automatic fix pending; scheduled repairs are paused."
+            : `Automatic fix queued${repairTime ? ` for ${repairTime} Eastern` : " for the next approved repair window"}. No action needed.${repair.fresh ? "" : " Saved status; live assignment will be checked before repair."}`,
+      });
+    }
+    if (tapRepairBriefing.unavailable) currentBriefingIssues.push({
+      text: "Automatic tap repairs", tone: "ready", informational: true,
+      detail: "Repair status could not be checked. Retrying automatically; completion is not yet confirmed.",
+    });
     const supplierPriceAlerts = briefingLoading ? "" : renderSupplierPriceAlerts();
     const briefingAllWell = !briefingLoading && !currentBriefingIssues.length && !supplierPriceAlerts.trim();
 
@@ -6858,6 +6899,9 @@ function renderDashboardOverview() {
                 </span>
               ` : ""}
             `;
+            if (item.informational) {
+              return `<div class="thirty-second-briefing__line thirty-second-briefing__line--ready" role="status">${content}</div>`;
+            }
             if (item.actionLabel) {
               return `
                 <div class="thirty-second-briefing__line thirty-second-briefing__line--reviewable thirty-second-briefing__line--${escapeHtml(item.tone)}">
