@@ -8357,8 +8357,8 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
           const manager = clean(globalThis.onParDashboardIdentity?.name || dashboardFinishWeekActor || saved.approvedBy || saved.createdBy);
           return `
             <section class="vendor-order-draft-card vendor-order-draft-card--${placed ? "approved vendor-order-draft-card--placed" : draft.status}">
-              <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(draft.lineCount)} items · ${money(draft.estimatedTotal)}</p></div><span title="${escapeHtml(workflow.label)}">${placed ? "Placed" : draft.blockers.length ? "Needs attention" : "Ready"}</span></header>
-              ${placed ? '<details><summary>View order and receive delivery</summary>' : ""}
+              <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(draft.lineCount)} items · ${money(draft.estimatedTotal)}</p></div><span title="${escapeHtml(workflow.label)}">${placed ? escapeHtml(workflow.label) : draft.blockers.length ? "Needs attention" : "Ready"}</span></header>
+              ${placed ? `<details><summary>${workflow.label === "Received" ? "View received order" : "View order and receive delivery"}</summary>` : ""}
               <div class="vendor-order-draft-lines vendor-order-draft-lines--inline">
                 ${placed ? renderFinishWeekDeliveries({ available: true, vendors: [vendor] }, { showVendor: false, saving: dashboardFinishWeekSaving }) : draft.lines.map((line) => {
                   const coolerNames = [...new Set((line.kegDestinations || []).map((destination) => {
