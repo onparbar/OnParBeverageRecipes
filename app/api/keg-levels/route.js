@@ -13,6 +13,7 @@ import {
 import { findExactLastKnownKegLevel } from "../../../public/keg-level-fallback.mjs";
 import { attachTapProductHistory, recordTapProductObservations, sameTapProduct } from "../../../lib/pmb-tap-product-history.mjs";
 import { observeSharedKegChanges } from "../../../lib/keg-par-agent-shared-store.mjs";
+import { createPmbCheckHistory } from "../../../lib/pmb-check-history.mjs";
 
 function parseJsonLoose(text) {
   try {
@@ -127,10 +128,13 @@ function normalizeProductName(name) {
     .trim();
 }
 
-export async function GET() {
+export async function GET(request) {
+  const check = createPmbCheckHistory(request);
+  await check.start();
   try {
     const config = getConfig();
     const token = await getAuthtoken(config);
+    check.stage("configuration");
     const observedAt = new Date().toISOString();
     const cookieJar = new Map();
 
@@ -162,6 +166,8 @@ export async function GET() {
     }
 
     const verifiedSlots = [...buildVerifiedKegSlotMap(tapConfigRows).values()];
+    check.expect(verifiedSlots);
+    check.stage("controller-readings");
     const lastCompleteSnapshot = await readPmbLevelSnapshot().catch(() => null);
 
     const levelBySlot = new Map();
@@ -170,12 +176,15 @@ export async function GET() {
       try {
         let levelJson;
         for (let attempt = 0; attempt < 2; attempt += 1) {
+          const attemptStartedAt = new Date().toISOString();
           try {
             const response = await postJson(config.baseUrl, "/api/getkeglevels",
               { device_id: slot.deviceId, line_num: slot.lineNum }, token);
             levelJson = requireSuccessfulKegLevelResponse(response, slot, { requireKegSize: false });
+            check.attempt(slot, attempt + 1, attemptStartedAt);
             break;
           } catch (error) {
+            check.attempt(slot, attempt + 1, attemptStartedAt, error);
             if (attempt === 1) throw error;
           }
         }
@@ -311,6 +320,7 @@ export async function GET() {
       }
     }
 
+    await check.finish({ items });
     return NextResponse.json({
       ...snapshot,
       stale: false,
@@ -324,6 +334,7 @@ export async function GET() {
       coolerEstimate,
     });
   } catch (error) {
+    await check.finish({ error });
     try {
       const snapshot = await readPmbLevelSnapshot();
       if (snapshot) {
