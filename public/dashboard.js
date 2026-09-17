@@ -8247,11 +8247,10 @@ function getVendorOrderDraftModel(plan, freshness) {
 
 function renderVendorOrderAdjustments() {
   if (orderRehearsalMode) return "";
-  const canAddPrep = Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date()));
   const trackedVendors = weeklyOrderTracking.vendors || [];
   const placedVendors = new Set(trackedVendors.filter((vendor) => vendor.ordered === true).map((vendor) => vendor.vendor));
   const catalog = weeklyOrderTracking.adjustmentCatalog.filter((item) => item.orderable && !placedVendors.has(item.vendor));
-  if (!catalog.length && !canAddPrep) return "";
+  if (!catalog.length) return "";
   const editableAdjustments = weeklyOrderTracking.adjustments.filter((item) => !placedVendors.has(item.vendor));
   const savedByCatalogId = new Map(weeklyOrderTracking.adjustments.map((item) => [item.catalogId, item]));
   const vendors = [...new Set(catalog.map((item) => item.vendor))].sort((left, right) => left.localeCompare(right));
@@ -8259,7 +8258,7 @@ function renderVendorOrderAdjustments() {
     <details class="vendor-order-adjustments" data-order-adjustment-panel>
       <summary>Adjust order</summary>
       <div class="vendor-order-adjustments__fields">
-        <label><span>Change</span><select data-order-adjustment-action><option value="add"${catalog.length ? "" : " disabled"}>Add something</option><option value="remove"${catalog.length ? "" : " disabled"}>Remove something</option><option value="add-prep"${canAddPrep ? "" : " disabled"}${!catalog.length && canAddPrep ? " selected" : ""}>Add cocktail to prep</option></select></label>
+        <label><span>Change</span><select data-order-adjustment-action><option value="add">Add something</option><option value="remove">Remove something</option></select></label>
         <label data-order-adjustment-only><span>Vendor</span><select data-order-adjustment-vendor-filter><option value="">All vendors</option>${vendors.map((vendor) => `<option value="${escapeHtml(vendor)}">${escapeHtml(vendor)}</option>`).join("")}</select></label>
         <label data-order-adjustment-only><span>Product</span><select data-order-adjustment-product>${catalog.map((item) => {
           const saved = savedByCatalogId.get(item.catalogId);
@@ -8270,11 +8269,7 @@ function renderVendorOrderAdjustments() {
         <label data-order-adjustment-only data-order-adjustment-quantity-field><span>Order quantity</span><div class="vendor-order-adjustments__quantity"><input type="number" min="1" max="999" step="1" inputmode="numeric" data-order-adjustment-quantity-input><small data-order-adjustment-unit-label></small></div></label>
         <label data-order-adjustment-only><span>Reason</span><input type="text" maxlength="240" data-order-adjustment-reason-input placeholder="St. Patrick's Day"></label>
         <label data-order-adjustment-only><span>Manager</span><input type="text" maxlength="80" autocomplete="name" data-order-adjustment-manager placeholder="Manager name"></label>
-        <label data-prep-adjustment-only hidden><span>Cocktail</span><select data-prep-adjustment-product aria-label="Cocktail to prep"><option value="">Choose cocktail</option></select></label>
-        <label data-prep-adjustment-only hidden><span>Cooler</span><select data-prep-adjustment-cooler><option value="Main">Main cooler</option><option value="Karaoke">Karaoke cooler</option></select></label>
-        <label data-prep-adjustment-only hidden><span>Kegs</span><input type="number" min="1" max="20" step="1" inputmode="numeric" value="1" data-prep-adjustment-quantity></label>
         <button class="primary-button" type="button" data-order-adjustment-save>Save changes</button>
-        <p data-prep-adjustment-only data-prep-adjustment-status role="status" aria-live="polite" hidden></p>
       </div>
       ${editableAdjustments.length ? `<div class="vendor-order-adjustments__saved">${editableAdjustments.map((item) => `<div><span><strong>${escapeHtml(item.name)}</strong> · ${item.quantity === 0 ? "Removed this week" : `${formatNumber(item.quantity)} ${escapeHtml(item.quantityUnit)}`}</span><small>${escapeHtml(item.reason)} · ${escapeHtml(item.adjustedBy)}</small><button class="mini-button" type="button" data-order-adjustment-remove="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}">Undo</button></div>`).join("")}</div>` : ""}
     </details>

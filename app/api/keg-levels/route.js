@@ -14,6 +14,7 @@ import { findExactLastKnownKegLevel } from "../../../public/keg-level-fallback.m
 import { attachTapProductHistory, recordTapProductObservations, sameTapProduct } from "../../../lib/pmb-tap-product-history.mjs";
 import { observeSharedKegChanges } from "../../../lib/keg-par-agent-shared-store.mjs";
 import { createPmbCheckHistory } from "../../../lib/pmb-check-history.mjs";
+import { getKegWallItems } from "../../../lib/par-agent.mjs";
 
 function parseJsonLoose(text) {
   try {
@@ -301,7 +302,17 @@ export async function GET(request) {
       items = attachTapProductHistory(items, [], { unavailable: true });
     }
 
-    const coolerEstimate = await observeSharedKegChanges(items, observedAt).catch(() => ({
+    const inventoryTaps = await getKegWallItems().catch(() => []);
+    const inventoryObservations = items.map((item) => {
+      const matches = inventoryTaps.filter((tap) => Number(tap.tapNumber) === Number(item.tapNumber));
+      const tap = matches.length === 1 ? matches[0] : null;
+      const number = Number(item.tapNumber);
+      const liquor = (number >= 1 && number <= 20) || (number >= 83 && number <= 92);
+      return { ...item, ...(tap ? { inventoryReference: { key: tap.key, wall: tap.wall,
+        name: item.name, plu: item.plu, isLiquorTap: liquor,
+        isKegTap: !liquor && String(tap.type).toLowerCase() !== "shots" } } : {}) };
+    });
+    const coolerEstimate = await observeSharedKegChanges(inventoryObservations, observedAt).catch(() => ({
       available: false, changed: false,
     }));
     const snapshot = {
