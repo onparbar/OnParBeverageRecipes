@@ -1,90 +1,39 @@
-name: Deploy on-site
-
+name: Recover dashboard current release
 on:
-  workflow_run:
-    workflows:
-      - Quality checks
-    types:
-      - completed
   workflow_dispatch:
-    inputs:
-      commit:
-        description: Exact reviewed commit SHA to deploy
-        required: true
-        type: string
-
 permissions:
   contents: read
-
 concurrency:
   group: onpar-production-deploy
   cancel-in-progress: false
-
 jobs:
-  deploy:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
-    runs-on:
-      - self-hosted
-      - onpar-production
-    timeout-minutes: 60
+  recover:
+    runs-on: [self-hosted, onpar-production]
+    timeout-minutes: 5
     environment: production
     steps:
-      - name: Deploy the checked release through PM2
+      - name: Inspect and recover current dashboard
         shell: bash
-        env:
-          REQUESTED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.event.workflow_run.head_sha }}
         run: |
           set -Eeuo pipefail
-
-          source_repo="/Users/onpar/OnParBeverageRecipes-source"
-          service_dir="/Users/onpar/OnParBeverageRecipes-service"
-          if [ "$(id -un)" != "onpar" ]; then
-            echo "The production runner must run as onpar." >&2
-            exit 1
+          [ "$(id -un)" = onpar ]
+          export PATH="/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:$PATH"
+          service_dir=/Users/onpar/OnParBeverageRecipes-service
+          source "$service_dir/.deploy/pm2-release-common.sh"
+          pm2_bin="$(onpar_pm2_find_binary)"
+          node_bin="$(onpar_pm2_select_node22 /Users/onpar/OnParBeverageRecipes-source "$service_dir")"
+          "$pm2_bin" list
+          onpar_pm2_app_info "$pm2_bin" "$node_bin" onpar-dashboard
+          uptime
+          df -h "$service_dir"
+          if ! curl -fsS --max-time 15 http://127.0.0.1:3000/api/version; then
+            echo "Dashboard is unresponsive; restarting the existing PM2 app."
+            RUNNER_TRACKING_ID="" "$pm2_bin" restart onpar-dashboard
           fi
-          if [ ! -d "${source_repo}/.git" ]; then
-            echo "The clean production source checkout is missing at ${source_repo}." >&2
-            exit 1
-          fi
-          if [ ! -d "${service_dir}" ] || [ -d "${service_dir}/.git" ]; then
-            echo "The persistent production runtime is invalid at ${service_dir}." >&2
-            exit 1
-          fi
-
-          git -C "${source_repo}" fetch --prune origin main
-          target_ref="${REQUESTED_SHA:-}"
-          if [ -z "${target_ref}" ]; then
-            echo "An exact reviewed commit is required for production deployment." >&2
-            exit 1
-          fi
-          target_sha="$(git -C "${source_repo}" rev-parse --verify "${target_ref}^{commit}")"
-          if ! git -C "${source_repo}" merge-base --is-ancestor "${target_sha}" origin/main; then
-            echo "Refusing to deploy ${target_sha}; it is not part of origin/main." >&2
-            exit 1
-          fi
-
-          bootstrap_dir="$(mktemp -d /tmp/onpar-pm2-deploy.XXXXXX)"
-          cleanup() {
-            case "${bootstrap_dir}" in
-              /tmp/onpar-pm2-deploy.*) rm -rf -- "${bootstrap_dir}" ;;
-              *) echo "Refusing to remove unexpected bootstrap path ${bootstrap_dir}." >&2 ;;
-            esac
-          }
-          trap cleanup EXIT
-          git -C "${source_repo}" archive "${target_sha}" -- \
-            scripts/deploy-on-site-pm2.sh \
-            scripts/pm2-release-common.sh \
-            scripts/rollback-on-site-pm2.sh \
-            scripts/run-par-agent.sh \
-            scripts/smoke-on-site.sh \
-            | tar -x -C "${bootstrap_dir}"
-          chmod 700 "${bootstrap_dir}"/scripts/*.sh
-
-          ONPAR_SOURCE_REPO="${source_repo}" \
-          ONPAR_SERVICE_DIR="${service_dir}" \
-          ONPAR_RELEASE_PARENT="/Users/onpar" \
-          ONPAR_PM2_APP_NAME="onpar-dashboard" \
-          ONPAR_DEPLOY_HELPER_DIR="${bootstrap_dir}/scripts" \
-            "${bootstrap_dir}/scripts/deploy-on-site-pm2.sh" "${target_sha}"
+          for attempt in {1..12}; do
+            if curl -fsS --max-time 5 http://127.0.0.1:3000/api/version; then break; fi
+            sleep 3
+          done
+          curl -fsS --max-time 15 http://127.0.0.1:3000/api/version
+          curl -fsS --max-time 15 'http://127.0.0.1:3000/api/health?storage=1'
+          curl -fsS --max-time 20 -o /dev/null -w 'Public login HTTP %{http_code}\n' https://onparbev.com/login
