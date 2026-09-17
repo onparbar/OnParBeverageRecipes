@@ -6577,7 +6577,8 @@ function getMondayRunModel(plan, freshness) {
   const reasonField = document.getElementById("inventory-snapshot-reason-field");
   if (reasonField) reasonField.hidden = isEasternMonday() || planLocked;
   if (inventorySubmitCountButton && !inventoryCountSubmitting) {
-    inventorySubmitCountButton.textContent = planLocked ? "View weekly plan" : "Submit inventory";
+    inventorySubmitCountButton.hidden = planLocked;
+    inventorySubmitCountButton.textContent = "Submit inventory";
   }
   const tapSheets = buildTapWallPrintSheets();
   return buildMondayRunModelView({
