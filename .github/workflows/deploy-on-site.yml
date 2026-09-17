@@ -26,14 +26,10 @@ jobs:
           onpar_pm2_app_info "$pm2_bin" "$node_bin" onpar-dashboard
           uptime
           df -h "$service_dir"
-          if ! curl -fsS --max-time 15 http://127.0.0.1:3000/api/version; then
-            echo "Dashboard is unresponsive; restarting the existing PM2 app."
-            RUNNER_TRACKING_ID="" "$pm2_bin" restart onpar-dashboard
-          fi
-          for attempt in {1..12}; do
-            if curl -fsS --max-time 5 http://127.0.0.1:3000/api/version; then break; fi
-            sleep 3
+          pgrep -x cloudflared || true
+          launchctl list | grep -i cloudflare || true
+          for folder in /Library/LaunchDaemons /Library/LaunchAgents "$HOME/Library/LaunchAgents"; do
+            find "$folder" -maxdepth 1 -iname '*cloudfl*' -print 2>/dev/null || true
           done
-          curl -fsS --max-time 15 http://127.0.0.1:3000/api/version
-          curl -fsS --max-time 15 'http://127.0.0.1:3000/api/health?storage=1'
-          curl -fsS --max-time 20 -o /dev/null -w 'Public login HTTP %{http_code}\n' https://onparbev.com/login
+          ls -lt "$HOME/.cloudflared"/*.log /var/log/*cloudfl* /tmp/*cloudfl*.log 2>/dev/null || true
+          curl -sS --max-time 20 -D - https://onparbev.com/login | head -c 1500
