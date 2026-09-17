@@ -26,10 +26,10 @@ jobs:
           onpar_pm2_app_info "$pm2_bin" "$node_bin" onpar-dashboard
           uptime
           df -h "$service_dir"
-          pgrep -x cloudflared || true
-          launchctl list | grep -i cloudflare || true
-          for folder in /Library/LaunchDaemons /Library/LaunchAgents "$HOME/Library/LaunchAgents"; do
-            find "$folder" -maxdepth 1 -iname '*cloudfl*' -print 2>/dev/null || true
+          echo "Restarting the existing Cloudflare tunnel service after error 1033."
+          sudo -n launchctl kickstart -k system/com.cloudflare.cloudflared
+          for attempt in {1..12}; do
+            if curl -fsS --max-time 10 -o /dev/null -w 'Public login HTTP %{http_code}\n' https://onparbev.com/login; then exit 0; fi
+            sleep 3
           done
-          ls -lt "$HOME/.cloudflared"/*.log /var/log/*cloudfl* /tmp/*cloudfl*.log 2>/dev/null || true
-          curl -sS --max-time 20 -D - https://onparbev.com/login | head -c 1500
+          exit 1
