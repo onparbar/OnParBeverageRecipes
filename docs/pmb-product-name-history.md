@@ -1,6 +1,6 @@
-# Product-name collection from September 15, 2026
+# Forward-only product-name collection
 
-The owner chose forward collection only. Existing reports, historical labels,
+The owner chose forward collection only and approved the release on September 17, 2026. Automatic collection begins when that release is deployed. Existing reports, historical labels,
 prices, amounts, and tap assignments must remain unchanged.
 
 When an owner reads or successfully saves Weekly Usage, the server observes only
