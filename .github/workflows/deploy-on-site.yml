@@ -28,5 +28,22 @@ jobs:
           const inventory=await readSharedInventoryState();
           const snapshot=inventory.snapshots.find(s=>s.kegPlanSnapshot?.generatedAt===tracking.generatedAt);
           if(!snapshot)throw Error('No matching historical snapshot');
-          console.log(JSON.stringify({planRevision:state.revision,inventoryRevision:inventory.revision,generatedAt:tracking.generatedAt,weekOf:snapshot.weekOf,snapshotOrders:snapshot.orders||[],vendors:tracking.vendors.map(v=>({id:v.id,vendor:v.vendor,ordered:v.ordered,orderedBy:v.orderedBy,orderedAt:v.orderedAt,items:v.items.map(i=>({name:i.name,status:i.status,quantity:i.orderedQuantity}))}))}));
+          if(snapshot.weekOf!=='2026-09-14'||tracking.vendors.length!==3||tracking.vendors.some(v=>!v.ordered))throw Error('Order scope changed');
+          const {writeFile}=await import('node:fs/promises');
+          await writeFile('/Users/onpar/OnParBeverageRecipes-service/data/inventory-before-order-archive-20260917.json',JSON.stringify(inventory),{mode:0o600,flag:'wx'});
+          const {archiveWeeklyOrderPlacement}=await import(process.cwd()+'/lib/weekly-order-snapshot.mjs');
+          for(const vendor of tracking.vendors)await archiveWeeklyOrderPlacement(state.recommendations,vendor.id,'owner');
+          const after=await readSharedInventoryState();
+          const archived=after.snapshots.find(s=>s.id===snapshot.id);
+          if(archived.orders.length!==3)throw Error('Missing archived order');
+          for(const vendor of tracking.vendors){
+            const order=archived.orders.find(o=>o.vendorId===vendor.id);
+            if(!order?.ordered||order.orderedAt!==vendor.orderedAt||order.orderedBy!==vendor.orderedBy||!order.lines.length)throw Error('Placement mismatch');
+          }
+          const stripOrders=snapshots=>snapshots.map(({orders,...s})=>s);
+          if(JSON.stringify(stripOrders(inventory.snapshots))!==JSON.stringify(stripOrders(after.snapshots)))throw Error('Saved count details changed');
+          for(const key of Object.keys(inventory.current).filter(k=>!['updatedAt','updatedByRole'].includes(k)))if(JSON.stringify(inventory.current[key])!==JSON.stringify(after.current[key]))throw Error('Live inventory changed: '+key);
+          const finalPlan=await readParAgentState();
+          if(JSON.stringify(state.recommendations)!==JSON.stringify(finalPlan.recommendations))throw Error('Weekly plan changed');
+          console.log(JSON.stringify({verified:true,weekOf:archived.weekOf,orders:archived.orders.map(o=>({vendor:o.vendor,orderedAt:o.orderedAt,lines:o.lines.length})),inventoryUnchanged:true,weeklyPlanUnchanged:true}));
           NODE
