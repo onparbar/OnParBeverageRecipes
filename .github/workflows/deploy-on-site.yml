@@ -28,10 +28,31 @@ jobs:
           df -h "$service_dir"
           cd "$service_dir/current"
           node --env-file=.env.local --input-type=module <<'NODE'
-          const {readSharedInventoryState}=await import(process.cwd()+'/lib/inventory-shared-store.mjs');
+          const {readSharedInventoryState,mutateSharedInventoryState}=await import(process.cwd()+'/lib/inventory-shared-store.mjs');
           const s=await readSharedInventoryState();
           const snap=s.snapshots.find(x=>x.weekOf==='2026-09-14');
           if(!snap)throw Error('Snapshot missing');
           const items=snap.items.filter(x=>['Liquor Cabinet','Mixer Cabinet'].includes(x.group));
-          console.log(JSON.stringify({revision:s.revision,savedAt:snap.savedAt,items:items.map(x=>({id:x.id,name:x.name,saved:x.onHandDisplay,current:s.current.onHandOverrides[x.id],countedAt:s.current.countedItemsAt?.[x.id]})),contributions:s.current.inventoryContributions}));
+          if(items.length!==33)throw Error('Unexpected cabinet item count');
+          for(const item of items){
+            const current=s.current.onHandOverrides[item.id];
+            if(current!==undefined && current!=='' && current!=='0' && current!==item.onHandDisplay)throw Error('Newer count found for '+item.id);
+            if(!Number.isFinite(Number(item.onHandDisplay)))throw Error('Invalid saved quantity');
+          }
+          const {writeFile}=await import('node:fs/promises');
+          const backup='/Users/onpar/OnParBeverageRecipes-service/data/inventory-before-cabinet-restore-20260917.json';
+          await writeFile(backup,JSON.stringify(s),{mode:0o600,flag:'wx'});
+          const restored=await mutateSharedInventoryState('batch-update-fields',{
+            source:'snapshot-cabinet-recovery',countedAt:snap.savedAt,
+            changes:items.map(x=>({id:x.id,field:'onHand',value:x.onHandDisplay}))
+          },'owner',{expectedRevision:s.revision});
+          const verified=await readSharedInventoryState();
+          for(const item of items)if(verified.current.onHandOverrides[item.id]!==item.onHandDisplay)throw Error('Readback mismatch '+item.id);
+          const ids=new Set(items.map(x=>x.id));
+          for(const [id,value] of Object.entries(s.current.onHandOverrides))if(!ids.has(id)&&verified.current.onHandOverrides[id]!==value)throw Error('Other count changed '+id);
+          if(JSON.stringify(s.snapshots)!==JSON.stringify(verified.snapshots))throw Error('Snapshots changed');
+          if(JSON.stringify(s.current.inventoryContributions)!==JSON.stringify(verified.current.inventoryContributions))throw Error('Stock receipts changed');
+          const {recordDashboardActivity}=await import(process.cwd()+'/lib/dashboard-activity-log.mjs');
+          await recordDashboardActivity({area:'Inventory',action:'restored cabinet snapshot counts',role:'owner',revision:restored.revision,summary:'Restored 33 liquor and mixer cabinet balances from September 14 snapshot at owner request. Other stock and delivery receipts preserved.'});
+          console.log(JSON.stringify({verified:true,revision:verified.revision,restoredItems:items.length,liquorUnits:items.filter(x=>x.group==='Liquor Cabinet').reduce((n,x)=>n+Number(x.onHandDisplay),0),mixerUnits:items.filter(x=>x.group==='Mixer Cabinet').reduce((n,x)=>n+Number(x.onHandDisplay),0),snapshotDate:snap.savedAt,otherCountsPreserved:true,stockReceiptsPreserved:true,backup}));
           NODE
