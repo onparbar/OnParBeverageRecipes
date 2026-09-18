@@ -5,8 +5,10 @@ order from `https://onparbev.com`, opens the existing signed-in vendor session,
 and fills the cart using exact product or SKU matches.
 
 It never reads or stores a password, cookies, or credentials. Order details are
-kept only in Chrome session storage and are removed when the cart-building run
-finishes. Ambiguous or missing products are left for review. The extension has
+kept in extension-private Chrome local storage. The pending order is removed
+when the run finishes; its last result remains until replaced or cleaned up.
+On background-worker startup, records older than 12 hours are removed (this
+is not an exact 12-hour deletion timer). Ambiguous or missing products are left for review. The extension has
 no checkout, submit-order, or payment code.
 
 ## One-time Chrome setup

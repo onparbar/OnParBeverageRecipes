@@ -1,8 +1,13 @@
 import { isUsableWeeklyUsageEntry } from "./weekly-usage-evidence.mjs";
 import { getTapAssignmentUsageStart } from "./confirmed-tap-starts.mjs";
+import { isPmbUsageEntry, getPmbWeeklyUsageRange } from "./pmb-weekly-usage-policy.mjs";
 
 const PERFORMANCE_CATEGORIES = new Set(["all", "beer", "cocktail", "liquor"]);
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+function shiftWeek(startTime, direction) {
+  const date = new Date(startTime);
+  date.setDate(date.getDate() + direction * 7);
+  return date.getTime();
+}
 
 function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -32,17 +37,10 @@ function getLabelStartTime(label) {
   return date.getTime();
 }
 
-function isPmbUsageEntry(entry) {
-  if (!entry || typeof entry !== "object") return false;
-  const source = clean(entry.source).toLowerCase();
-  if (source) return source === "pmb";
-  return Object.prototype.hasOwnProperty.call(entry, "volumeOz");
-}
-
 function getTimedPmbHistory(item) {
   const history = [];
   (Array.isArray(item?.history) ? item.history : []).forEach((entry) => {
-    if (!isPmbUsageEntry(entry)) return;
+    if (!isPmbUsageEntry(entry) || !getPmbWeeklyUsageRange(entry.label)) return;
     const startTime = getLabelStartTime(entry.label);
     if (startTime) history.push({ entry, startTime });
   });
@@ -199,7 +197,7 @@ export function buildWeeklyUsagePerformance(
     .sort((a, b) => b[0] - a[0])
     .map(([startTime, label]) => ({ startTime, label }));
   const latestPeriod = periods[0] || null;
-  const expectedPreviousStartTime = latestPeriod ? latestPeriod.startTime - WEEK_MS : 0;
+  const expectedPreviousStartTime = latestPeriod ? shiftWeek(latestPeriod.startTime, -1) : 0;
   const previousPeriod = periods.find((period) => period.startTime === expectedPreviousStartTime) || null;
   const eligibleItems = preparedItems.filter(({ item }) => (
     normalizedCategory === "all" || getWeeklyUsagePerformanceCategory(item) === normalizedCategory
@@ -208,13 +206,13 @@ export function buildWeeklyUsagePerformance(
     // A product introduced after the reporting week has no usage to capture
     // for that week. Do not count it as missing or create a historical zero.
     return !startDate || !latestPeriod
-      || new Date(`${startDate}T00:00:00`).getTime() < latestPeriod.startTime + WEEK_MS;
+      || new Date(`${startDate}T00:00:00`).getTime() < shiftWeek(latestPeriod.startTime, 1);
   });
 
   const tapRows = eligibleItems.map(({ item, history }) => {
     const startDate = getTapAssignmentUsageStart(getCurrentAssignment(item) || item);
     const previousExpected = !startDate || !previousPeriod
-      || new Date(`${startDate}T00:00:00`).getTime() < previousPeriod.startTime + WEEK_MS;
+      || new Date(`${startDate}T00:00:00`).getTime() < shiftWeek(previousPeriod.startTime, 1);
     const currentEntry = latestPeriod
       ? history.find((record) => record.startTime === latestPeriod.startTime)?.entry || null
       : null;

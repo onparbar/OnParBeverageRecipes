@@ -637,3 +637,130 @@ curl -I 'https://onparbev.com/dashboard.js?v=check'
 - Weekly Plan inventory orders are calculated from the saved snapshot for the current Monday, not later live counts or keg levels. Locking a plan is blocked until that Monday snapshot exists.
 - A successful Monday snapshot preserves the saved count and pars, then clears only the current on-hand fields. Restoring the snapshot repopulates those fields so a corrected snapshot can be saved again.
 - Verification passed: `421` automated tests, zero-warning lint, optimized production build, and a local production-browser check confirming no Bubbly section, one Korbel row, hidden reorder arrows, and row-scoped par editing.
+
+## Dashboard Audit - 2026-09-06
+
+- Completed the requested review of the live owner dashboard, administrator-access Staff View, local source, integration wiring, and usability. Findings, per-area scores, evidence, and a prioritized improvement plan are in `docs/dashboard-audit-2026-09-06.md`.
+- Overall editorial assessment: 6.8/10. Highest-priority findings include partial Karaoke PMB coverage, ambiguous zero/uncounted inventory, mixed KPI scopes, overlapping historical report intervals, disconnected search/vendor controls, and incomplete receipt/prep inventory reconciliation.
+- Validation passed: 673 tests, zero-warning lint, optimized build. Available shell was Node 26.3.0; production Node 22 validation remains a release prerequisite. Phone viewport override did not apply, so mobile findings remain provisional pending device verification.
+- Audit only: no implementation or deployment performed; existing user changes in `public/dashboard.js` and `tests/dashboard-information-architecture.test.mjs` preserved. No orders, PMB writes, counts, or staff checkoffs were submitted. Normal live navigation can trigger built-in refreshes.
+
+## Chrome Web Store Setup - 2026-09-15
+
+- User requested hands-on Google developer setup for the cart builder extension. Followed the existing private-distribution plan.
+- Prepared and archive-verified `release-artifacts/On-Par-Vendor-Cart-Builder-1.2.11.zip` with only nine manifest/runtime/icon files; kept 1.2.3 archive intact.
+- Updated release guide and README to match actual local-storage retention. Added `docs/vendor-cart-builder-privacy-policy.md` as an unpublished draft.
+- Validation: 27 focused cart tests passed, all four JavaScript syntax checks passed, and edited tracked documentation passed diff whitespace checks. No extension runtime changes, vendor transactions, deployment, or upload performed.
+- Assistance required: developer console redirects samantha@onparbar.com to Google passkey re-verification. Kept Chrome tab 107953086 open for user sign-in. Account registration/payment status cannot yet be verified. Store imagery, hosted privacy policy, reviewer access, and private distribution remain pending.
+- Lesson: background.js uses chrome.storage.local, removes pending state on completion, and cleans records older than 12 hours on worker startup; do not describe this as session-only storage or an exact 12-hour deletion timer.
+
+### Chrome developer registration follow-up — 2026-09-15
+
+- Google confirmed registration complete after user sign-in. Dashboard welcome completed; now blocked at mandatory trader/non-trader declaration. Asked for confirmation to declare trader because this is an On Par business tool; no declaration submitted yet.
+- Created and visually checked `release-artifacts/store-assets/promo-440x280.png` with editable SVG source.
+- Production build and lint passed. Initial concurrent lint collided with generated build files; reran after build and it passed. Full suite: 1,060 passed / 20 failed; focused extension suite: 27 passed. No unrelated fixes attempted.
+- Developer tab 107953086 retained for the declaration and subsequent upload.
+
+## Karaoke historical PMB report access — 2026-09-15
+
+- User authorized adding read-only named-report access through the existing Cloudflare dashboard connection, then analyzing former Strawberry Margarita 2, House Margarita 2, and Whiskey Sour 2 performance. Vodka Cran and Espresso Martini remain accepted proposed additions.
+- Production is commit b00a07db203bbc66c7a996f2e944d8392d5bcb5d; local workspace has substantial unrelated changes. Isolated production checkout: /tmp/onpar-karaoke-report-20260915. Do not deploy this workspace wholesale.
+- Cloudflare routes onparbev.com to the dashboard only. Existing weekly reports retain unnamed retired product IDs. Existing PMB product-management code can open an exact product record read-only; never call save or activation for this analysis.
+- Implementing owner-only fixed-route report/catalog inspection and exact-PLU name lookup. Test fixed paths, role boundary, no write handlers, and reject mismatched product identities. Capture actual controller report schema before adding report filters; do not invent backend report fields.
+- Pending: production-runtime checks, isolated release, read-back through Cloudflare, named historical product comparison, updated recommendation.
+
+### PMB history connection discovery — 2026-09-15
+
+- The on-site dashboard is the supported bridge through Cloudflare. Owner login to `https://onparbev.com` then GET `/api/pmb-report-history` uses the existing PMB credentials privately on the service Mac.
+- Isolated release checkout: `/tmp/onpar-karaoke-report-20260915`; only the new route, helper, and tests were released. Latest scoped commit at this point: `882b187`. Original unrelated workspace changes were not deployed.
+- GET `?view=history` reads the observed product aggregate tables `dtb_ppbvm` (monthly poured ounces), `dtb_ppbvw` (weekly), `dtb_ppbvd` (daily), and `dtb_ppbmm` (monthly money). Use each table's own header dates. No customer/card report rows are returned.
+- GET `?view=catalog&name=Margarita` reads PMB's actual name filter, omitting the active-only checkbox. Product IDs can be checked using `?view=products&plus=75698`; exact matching returned PLU is mandatory.
+- Important PMB trap: `/pages/reporting/export?exp_what=tppb_v&exp_tu=w` returned only ten recent weeks and `exp_tu=m` only six recent months, despite reporting date fields accepting older dates. The HTML monthly table has 13 header months, September 2025–September 2026. Do not equate accepted date fields with export coverage.
+- Controller HTML dates are `DD.MM.YYYY`. Read-only report filter POST uses `fd_reporting_date_start`, `fd_reporting_date_end`, `fd_update_reporting`; product search uses `fd_name`, `fd_plu`, `fd_descr`, `submit_apply_filter`. Never send product save, activation, or import fields during analysis.
+- Connection errors occur on consecutive management requests; the history helper uses Connection: close and bounded retries. A failed ID lookup does not prove absence from history.
+
+- Final readback: monthly Poured Oz table has 221 product rows, 101 unnamed historical PLUs, and Sept 2025–Sept 2026 header months. Former three Karaoke cocktail names are not retained. Unknown-unit `??` values must not be assumed ounces. Updated recommendation/source saved under output/. August current cocktail identities totaled 3,546.6 oz vs liquor 336.9 oz; modeled current-price contribution $6,782 vs $1,978. Five-liquor target retained; Vodka Cran/Espresso agreed, House/Whiskey Sour/Strawberry provisional trial choices.
+
+### Forward-only product names — September 15, 2026
+
+- Latest user instruction: start gathering from today; avoid introducing errors. Historical backfill/relabeling is out of the active scope.
+- Before that steering arrived, 750 separate evidence rows for 119 verified PLUs had been appended to Supabase pmb_data_backup and readback verified. Existing reports, values, and assignments were not changed. 101 old unnamed PLUs remain unidentified.
+- Final implementation: best-effort background capture of active Weekly Usage names on authorized reads/successful saves; no scanning archived items, report relabeling, or reporting dependency on the name store. Storage errors are caught and retried on later observations; concurrent/unchanged calls are skipped.
+- Prepared commit f38038b in /tmp/onpar-karaoke-report-20260915, rebased on bb97e6c. All 1,096 tests, lint, and build passed. Matching scoped files copied to the main workspace without overwriting other work.
+- Automatic approval review rejected an earlier broad integration; scope was reduced. It then blocked publishing the final narrow commit to main for lack of explicit release approval. An asynchronous approval question is pending. Do not push until the user answers it. Verified remote is https://github.com/onparbar/OnParBeverageRecipes.git with ADMIN permission.
+
+### Forward name collection released — September 17, 2026
+
+- User explicitly approved release (“ye”). Rebased the isolated change onto current main a3dcdb0; 1,113 tests, lint, and build passed.
+- Released da3a4e835c7f0d4ef0533c36bbc55a159d7e8ed1 through existing Quality checks / Deploy on-site.
+- Live readback: /api/weekly-usage-state returned HTTP 200, revision remained 103, and the full existing report data hash was unchanged.
+- Supabase verified 102 of 102 current product names under evidenceSource weekly-usage-forward, all observed September 17, 2026. No names missing.
+- No old report relabeling or retrospective recovery. Capture remains best-effort/non-blocking, with failed writes retried on future observations. Prior release approval blocker is resolved.
+
+### Cabinet balances and snapshot order archive repair — September 17, 2026
+
+- Restored only 33 Liquor Cabinet / Mixer Cabinet balances from September 14 snapshot through the deployed shared inventory mutation function. Verified 198 liquor units / 203 mixer units, preserving Other inventory and existing delivery receipts. Backup on service Mac: data/inventory-before-cabinet-restore-20260917.json.
+- Released display-only commit 6976982365a9ecbec0e42aef254c8c75281709be. Bonbright and Heidelberg now show Received; OHLQ shows Awaiting delivery. All 1,118 tests, lint, build, CI and deployment passed; verified live.
+- September 14 snapshot had no archived orders although all three placement records existed. Repaired with deployed archiveWeeklyOrderPlacement using the matching plan generatedAt 2026-09-14T20:36:33.772Z. Original vendor placement times and 4/3/2 order lines retained. Verified unchanged weekly recommendations and live inventory; no weekly plan rerun or duplicate receipt. Backup: data/inventory-before-order-archive-20260917.json on service Mac.
+
+- Released 4c6b2dcf3433fbd18750f8e912fe32dddb8ccb61: Inventory footer no longer becomes a View weekly plan button after publishing; it hides instead. Submit inventory remains for a not-yet-published weekly plan. Full local checks, CI, and deployment passed.
+
+### Weekly Plan tab heading — September 17, 2026
+
+- Removed the redundant Weekly plan heading from the tab, preserving rehearsal labeling and plan actions. Omit the header container when there are no actions to avoid empty space.
+- Verification: JavaScript syntax check and 48 relevant dashboard/Weekly Plan tests passed. Local change only.
+
+### Estimated profit dollars and accuracy audit — September 17, 2026
+
+- Restored category dollar amounts beside the percentages in Sales mix by estimated profit. Clarified that percentages are category shares of gross profit and liquor uses an estimated portion mix.
+- Fixed multiweek mix calculation: resolve each usable week's rate before summing contributions, preserving duplicate/conflict handling and physical-wall grouping. Previously the first selected entry's rate was applied to all selected ounces.
+- Read-only audit of shared Weekly Usage revision 105 found 12 liquor taps with older saved rates overwritten by the latest rate in the Aug 3–Sep 13 view, overstating these contributions by $96.577339. This isolates a saved-rate discrepancy, not a complete verification against actual receipts or historical costs.
+- September 12 commit 2050ca6 changed the double serving calculation from 3 oz to 2 oz, another possible cause of increased estimates. Asked the user to confirm actual double serving size; no portion settings changed in this task.
+- Full 1,120 tests, zero-warning lint, production build check, and rendered dollar/percentage check passed. Local changes only; no deployment or operational record changes.
+
+### Different fresh-login Weekly Usage warnings — September 17, 2026
+
+- User reports All is Well in her login but a new-product Weekly Usage warning in her boss's fresh login (confirmed fresh page, not an already-open tab).
+- Read-only audit: shared Weekly Usage revision 105 contains usable Sept 7–13 readings for all 102 active taps. PsycHOPathy, Whiskey Smash, and Triple Jam have positive readings. No missing-current-week data found.
+- Verified production identity 4c6b2dcf3433fbd18750f8e912fe32dddb8ccb61; retrieved that exact source via GitHub. Deployed dashboard-overview and weekly-usage-performance modules match local files. Both shared-report-only and live-assignment-history replay produce no weekly-usage alerts. 54 relevant tests pass.
+- Fresh login normally loads shared state before exposing the briefing. A browser's unresolved Weekly Usage recovery outbox can intentionally retain an older local report, and an unavailable shared read can also differ between devices. Neither cause was confirmed on the boss's device. Do not claim a reproduced defect or suppress genuine missing data. Exact warning text/screenshot is needed to identify which path he saw. No application code or shared records changed for this audit.
+
+- Follow-up clarified the warning as approximately 99/102 taps having data. Reproduced that exact warning in a local in-memory simulation by removing only the current readings for taps 42, 70, and 79. The actual shared report yields 102/102 and no warning. This identifies the missing readings represented by that result, but does not establish why the boss's fresh session lacked them. No saved data was removed or changed.
+
+### Fresh-login stale Weekly Usage recovery fixed locally — September 17, 2026
+
+- Continued investigation at user's request. Reproduced two defects with failing executable tests of the actual refresh function: an initial shared read failure made every later refresh return early because initialized was false; a non-conflict pending outbox made all display refreshes return early, with no retry after the login attempt.
+- Removed the initialization prerequisite for read-only retries and routed all idle pending outboxes through the existing revision-checked recovery queue. Kept employee/session guards and in-flight edit/revision protection. Added a final shared report recheck after owner login sync before initial briefing completion.
+- Added seven regression tests, including a 99/102 to 102/102 coverage replay, failed-read retry, network-failed outbox retry, edit-during-read protection, retry after repeated outage, active-save/employee exclusion, and deduplication of simultaneous reads.
+- Full 1,127 tests, zero-warning lint, build:check, and git diff whitespace check passed. These defects can cause device-specific stale reports but the exact trigger on the boss's device remains unconfirmed. No production records changed; fixes remain local pending release alongside the prior header/profit changes.
+- User confirmed doubles have always been 2 oz; keep the 2 oz estimate. Old 3 oz calculation was incorrect, not an actual serving-size change.
+
+### Dashboard deep bug audit — September 17, 2026
+
+- User requested a dashboard-wide bug deep dive. Reviewed startup/shared recovery, usage/pricing calculations, inventory mutations, prep API/client feedback, staff resilience, dates, and authorization coverage; walked main owner screens and staff Home/Cocktails/Liquor/Deliveries read-only using the existing admin session.
+- Seven additional fixes: remove search's invalid-reading fallback; correct inventory-reality usage helper arguments and PMB case; clear count timestamps for individual/mixed blank edits; use calendar week shifts across DST; expose liquor inventory review as a visible warning on both staff prep panels; clone deduplicated staff Responses; invalidate fallback snapshots before/after writes including uncertain saves and prevent stale in-flight reads repopulating them.
+- Added tests/dashboard-audit-regressions.test.mjs (5 tests) and tests/staff-read-recovery-regressions.test.mjs (5 tests). Full 1,137 tests, zero-warning lint, production build check, and whitespace check passed.
+- Open HIGH, reproduced in memory: inventory starts at1, prep contribution-2 clamps to0, undo returns2 instead of1. Needs reversible adjustment/shortfall design with partial corrections, receipts, and recounts; not fixed or repaired in production. lib/inventory-store.mjs:680.
+- Open MEDIUM, reproduced: all-time ranking accepts historical Aug25–Nov2 as one week and overlapping Nov25–Dec1/Dec1–7 without conflicts. Parser ignores interval end. No historical records changed.
+- Live Weekly Run Complete measures count/snapshot/order placement, while staff can still have prep/deliveries remaining; label ambiguity, not proven save failure. Name-only draft claim from older audit is now prevented by recipe-setup validation, so do not repeat that obsolete finding.
+- Report: docs/dashboard-audit-2026-09-17.md. All fixes remain local, alongside prior heading/profit/99-of-102 recovery fixes; not committed or deployed. No intentional live mutations. Boss's exact device failure remains unconfirmed.
+
+### Weekly snapshot totals and syrup — September 17, 2026
+
+- Added visible total beverage inventory dollars and next week's simple syrup gallons above saved counts.
+- Future snapshots persist syrup ounces/gallons and calculation completeness. Older snapshots estimate from the saved cocktail plan and current recipes with an explicit estimate label; On Deck product substitutions use the planned product's recipe.
+- Verified 18 focused tests, scoped zero-warning lint, whitespace checks, and frozen-value/zero/missing/incomplete syrup behavior. Local changes only; not deployed.
+
+### Both remaining audit bugs fixed locally — September 17, 2026
+
+- User authorized fixing inventory undo and historical intervals; then explicitly chose PMB-only usage and removal of CSV-derived history from reporting.
+- Inventory now persists current.contributionShortfalls (positive shortage amounts), computes contribution deltas against the signed balance, and clamps only the display. Corrections/undo and consumed-receipt reversal conserve stock through retries and JSON/shared-store round trips. Physical counts clear shortage baselines; deletion/restore clear their applicable metadata. Contribution balanceVersion distinguishes new verified accounting from old records. Legacy negative credits require a newer count instead of guessing lost shortages; a retry does not upgrade old evidence. Recount errors survive checklist recovery and shortage warnings propagate through the durable queue.
+- PMB policy: public/pmb-weekly-usage-policy.mjs validates exact Monday–Sunday periods and PMB provenance (legacy unlabelled exact-volume PMB captures retained; explicit CSV rejected). Common usability validation protects client/server demand and analytics. Shared/outbox/local histories are filtered; old averages recomputed. Removed usage-history CSV loading/import functions, preserving unrelated CSV setup/recipe/changeover data. All-time wording now says All saved PMB weeks.
+- Read-only replay of /tmp/onpar-profit-usage.json, revision105: 5,722 entries total, 2,641 non-PMB excluded, all3,081 PMB retained with valid date ranges; Sept7–13 coverage remains102/102. No live database cleanup or record rewrite performed.
+- Regression coverage: inventory-shortfall-regressions (10 tests), pmb-only-usage-regressions (4), plus durable recovery test extensions. Updated calculation fixtures to explicitly represent PMB records with complete week labels; legacy CSV ranking test now verifies exclusion.
+- Final checks: all1,151 tests pass, lint zero warnings, build:check pass, git diff --check pass. Report updated docs/dashboard-audit-2026-09-17.md. Fixes local only, no commit/deploy. Concurrent unrelated snapshot/syrup changes appeared in shared workspace and were preserved.
+
+### Combined production release — September 17, 2026
+
+- User approved deploying all pending changes. Combined application changes, tests, documentation, and prepared extension assets onto current production commit 4c6b2dc in an isolated release checkout; preserved newer production fixes. Generated output exports remain local.
+- Combined release validation: 1,151 tests passed, lint passed, production build passed; read-only shared storage readiness passed. Tap Pricing continues using 2 oz doubles.

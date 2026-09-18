@@ -12,7 +12,7 @@ import {
   assertInventoryContributionPlan,
   planPrepInventoryContributions,
 } from "../../../lib/inventory-contributions.mjs";
-import { executeInventoryBackedOperation } from "../../../lib/inventory-backed-operation.mjs";
+import { executeInventoryBackedOperation, withInventoryReviewWarning } from "../../../lib/inventory-backed-operation.mjs";
 import { recoverPendingInventoryUpdates } from "../../../lib/keg-par-agent-shared-store.mjs";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 import { applyPrepKegCounts } from "../../../lib/prep-keg-counts.mjs";
@@ -196,11 +196,7 @@ export async function POST(request) {
     return jsonResponse({
       available: true,
       message: `${updates.length} checklist item${updates.length === 1 ? "" : "s"} saved.`,
-      inventoryUpdate: {
-        ...inventoryUpdate,
-        reviewRequired: liquorInventoryReview.length > 0,
-        reviewItems: liquorInventoryReview.map((item) => ({ id: item.id, name: item.name })),
-      },
+      inventoryUpdate: withInventoryReviewWarning(inventoryUpdate, liquorInventoryReview),
       ...buildStaffPrepPlan(saved.recommendations),
     });
   } catch (error) {

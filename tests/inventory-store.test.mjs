@@ -95,6 +95,7 @@ test("uses Monday as the snapshot week and replaces that week's prior save", asy
     backupKegValue: 300,
     currentLineValue: 500,
     totalBeverageInventoryValue: 600,
+    simpleSyrupNeed: { totalOz: 320, gallons: 2.5, complete: true },
     pmbUpdatedAt: "2026-07-24T12:00:00.000Z",
     liveTapCount: 102,
     tapCount: 102,

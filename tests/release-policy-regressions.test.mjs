@@ -41,7 +41,7 @@ test("uncertain zeros stay stored but do not become usage or affect averages", (
   assert.equal(isUsableWeeklyUsageEntry({ ...uncertain, zeroUsageVerified: true, hasValue: false }), false);
   assert.equal(isUsableWeeklyUsageEntry({ ...uncertain, value: 0, volumeOz: 0.01 }), true);
   const rankings = buildWeeklyUsageSellerRankings([{ name: "Beer 1", tapNumber: 21, history: [
-    uncertain, { label: "8/24/26 - 8/30/26", volumeOz: 100 },
+    uncertain, { source: "PMB", label: "8/24/26 - 8/30/26", volumeOz: 100 },
   ] }]);
   assert.equal(rankings.recent.top[0].averageWeeklyOz, 100);
   assert.equal(rankings.recent.top[0].sampleWeekCount, 1);
@@ -50,27 +50,27 @@ test("uncertain zeros stay stored but do not become usage or affect averages", (
 
 test("eight-week demand uses the peak plus 25%, excludes missing and out-of-window readings", () => {
   const item = { displayUnit: "kegs", history: [
-    { label, value: 0.5, volumeOz: 992 },
-    { label: "7/13/26", value: 1.2 },
-    { label: "7/6/26", value: 20 },
-    { label: "9/7/26", value: 30 },
-    { label: "8/17/26", value: 40, hasValue: false },
-    { label: "8/10/26", value: 0 },
-    { label: "8/3/26", value: null },
+    { source: "PMB", label, value: 0.5, volumeOz: 992 },
+    { source: "PMB", label: "7/13/26 - 7/19/26", value: 1.2 },
+    { source: "PMB", label: "7/6/26 - 7/12/26", value: 20 },
+    { source: "PMB", label: "9/7/26 - 9/13/26", value: 30 },
+    { source: "PMB", label: "8/17/26 - 8/23/26", value: 40, hasValue: false },
+    { source: "PMB", label: "8/10/26 - 8/16/26", value: 0 },
+    { source: "PMB", label: "8/3/26 - 8/9/26", value: null },
   ] };
   const result = getEightWeekPeakUsage(item, now, 1984);
   assert.equal(result.sampleWeeks, 2);
   assert.equal(result.peak, 1.2);
   assert.equal(result.targetStock, 1.5);
   assert.equal(getEightWeekPeakUsage({ history: [] }, now, 1984).targetStock, null);
-  const ounceUsage = getEightWeekPeakUsage({ displayUnit: "oz", history: [{ label, value: 2400 }] }, now, 2000);
+  const ounceUsage = getEightWeekPeakUsage({ displayUnit: "oz", history: [{ source: "PMB", label, value: 2400 }] }, now, 2000);
   assert.equal(ounceUsage.targetStock, 1.5);
 });
 
 test("beer and cocktail planners use the same target as the dashboard without double-counting forecasts", () => {
   for (const [tapNumber, type] of [[21, "Lager"], [50, "Cocktail"]]) {
     const tap = { tapNumber, type, wall: "Main", key: "tap", plu: 100, name: "Test product 1" };
-    const usage = { displayUnit: "kegs", history: [{ label, value: 1.2 }, { label: "8/24/26", value: 0.5 }] };
+    const usage = { displayUnit: "kegs", history: [{ source: "PMB", label, value: 1.2 }, { source: "PMB", label: "8/24/26 - 8/30/26", value: 0.5 }] };
     const result = buildRawRecommendation(tap, { fillLevelPercent: 30, rawKegSize: 1984 }, [],
       { onHandOverrides: { tap: 1 }, onDeckOverrides: {} }, {}, usage, { now });
     assert.equal(result.targetStockKegs, 1.5);
@@ -80,7 +80,7 @@ test("beer and cocktail planners use the same target as the dashboard without do
     assert.equal(result.usageExpectedWeeks, 8);
     assert.equal(result.preThursdayForecastKegs, 0);
     assert.throws(() => buildRawRecommendation(tap, { fillLevelPercent: 30 }, [], {}, {},
-      { displayUnit: "kegs", history: [{ label: "9/1/25", value: 10 }] }, { now }), /No recorded usage/);
+      { displayUnit: "kegs", history: [{ source: "PMB", label: "9/1/25 - 9/7/25", value: 10 }] }, { now }), /No recorded usage/);
   }
 });
 

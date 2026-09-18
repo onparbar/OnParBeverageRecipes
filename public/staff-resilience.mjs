@@ -71,6 +71,12 @@ export function createResilientStaffFetch({
   }
   const snapshots = new Map();
   const inFlight = new Map();
+  let mutationRevision = 0;
+  const invalidateSnapshots = () => {
+    mutationRevision += 1;
+    snapshots.clear();
+    inFlight.clear();
+  };
 
   return function resilientStaffFetch(input, init = {}) {
     const url = requestUrl(input, baseUrl);
@@ -78,9 +84,19 @@ export function createResilientStaffFetch({
       && url
       && url.origin === new URL(baseUrl).origin
       && STAFF_READ_PATHS.has(url.pathname);
-    if (!isProtectedRead) return fetcher(input, init);
+    if (!isProtectedRead) {
+      if (url?.origin === new URL(baseUrl).origin && STAFF_READ_PATHS.has(url.pathname)
+        && requestMethod(input, init) === "POST") {
+        // A failed response can follow a persisted write. Also discard reads
+        // begun during the save, whose snapshot may precede that write.
+        invalidateSnapshots();
+        return Promise.resolve().then(() => fetcher(input, init)).finally(invalidateSnapshots);
+      }
+      return fetcher(input, init);
+    }
     const key = url.pathname + url.search;
-    if (inFlight.has(key)) return inFlight.get(key);
+    if (inFlight.has(key)) return inFlight.get(key).then((response) => response.clone());
+    const revisionAtStart = mutationRevision;
 
     const operation = (async () => {
       let lastError;
@@ -89,7 +105,8 @@ export function createResilientStaffFetch({
         try {
           const response = await fetchWithDeadline(fetcher, input, init, timeoutMs);
           if (response.ok) {
-            snapshots.set(key, await responseSnapshot(response));
+            const snapshot = await responseSnapshot(response);
+            if (revisionAtStart === mutationRevision) snapshots.set(key, snapshot);
             return response;
           }
           if (response.status < 500) return response;
@@ -107,9 +124,11 @@ export function createResilientStaffFetch({
         status: 503,
         headers: { "content-type": "application/json", "cache-control": "private, no-store, max-age=0" },
       });
-    })().finally(() => inFlight.delete(key));
+    })().finally(() => {
+      if (inFlight.get(key) === operation) inFlight.delete(key);
+    });
     inFlight.set(key, operation);
-    return operation;
+    return operation.then((response) => response.clone());
   };
 }
 

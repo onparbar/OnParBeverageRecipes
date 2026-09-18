@@ -12,8 +12,8 @@ Official references:
 
 ## Package
 
-- File: `release-artifacts/On-Par-Vendor-Cart-Builder-1.2.3.zip`
-- Manifest version: `1.2.3`
+- File: `release-artifacts/On-Par-Vendor-Cart-Builder-1.2.11.zip`
+- Manifest version: `1.2.11`
 - The ZIP root contains `manifest.json`; do not place the extension inside another folder before uploading.
 - Never add `.env` files, browser profiles, cookies, passwords, dashboard exports, vendor downloads, or order data to the ZIP.
 
@@ -77,7 +77,7 @@ Access is intentionally restricted to those supported sites.
 
 ### Data handled
 
-The extension handles approved order item names, product or SKU identifiers when available, package information, requested quantities, vendor names, and temporary cart-building results.
+The extension handles approved order item names, internal item identifiers, product or SKU identifiers when available, package information, requested quantities, vendor names, order/request identifiers, operating-week references, expected totals, and temporary cart-building results. It reads relevant product and cart content on supported vendor pages and may retain an OHLQ delivery date/time preference with the last result.
 
 ### Data not handled
 
@@ -87,9 +87,17 @@ The extension does not collect or store passwords, payment-card information, ban
 
 Order information is used only to prepare the manager-requested vendor cart. It is not sold, used for advertising, used for credit decisions, or shared with unrelated third parties. Temporary workflow state remains in Chrome's private extension storage on the authorized computer.
 
+The requested products and quantities are entered on the selected vendor's website. Cart-building results return to the On Par dashboard. The pending order is deleted when a run finishes. The last result remains until the next run replaces it or startup cleanup removes it. On background-worker startup, pending orders/results older than 12 hours are removed; this is not a guaranteed 12-hour deletion deadline. Removing the extension clears its local extension storage, but does not erase vendor carts or dashboard records.
+
+### Remote code
+
+No remotely hosted code. All extension JavaScript is bundled in the upload ZIP.
+
 ### Public privacy-policy URL
 
 Before submission, publish the final approved policy on an On Par-controlled public URL and enter that URL in the Web Store Privacy section. Do not claim the URL exists until it has been published and reviewed.
+
+Prepared policy text: `docs/vendor-cart-builder-privacy-policy.md`. This is a local draft, not a published URL.
 
 ## Reviewer instructions
 
@@ -106,9 +114,21 @@ If Chrome review requires credentials, create limited test credentials that cann
 ## Store assets still needed
 
 - Use `chrome-extension/bees-cart-builder/icons/icon-128.png` as the listing icon.
+- Prepared small promotional image: `release-artifacts/store-assets/promo-440x280.png` (440×280 RGB PNG; editable SVG alongside it).
 - Capture at least one clean screenshot of the approved order handoff and one of a review-only vendor result.
 - Remove account names, email addresses, order numbers, customer identifiers, and browser tabs unrelated to the extension from screenshots.
 - Use the exact image dimensions requested by the current Chrome Developer Dashboard.
+- Google's current image guide requires a 440×280 small promotional image and at least one screenshot at 1280×800 or 640×400. Reference: https://developer.chrome.com/docs/webstore/images
+
+## Setup progress — September 15, 2026
+
+- User completed Google sign-in and registration. Google displayed “Thank you, your registration is complete.”
+- Entered the dashboard and completed its welcome screen. Account setup currently requires a trader/non-trader declaration; awaiting the user's confirmation before making that legal-status declaration.
+- Prepared the current 1.2.11 package; kept the older 1.2.3 archive.
+- Passed all 27 focused cart-builder tests. No live vendor-cart changes or order submissions were performed for this setup.
+- Prepared and visually checked the 440×280 promotional image. Console upload, screenshots, hosted privacy policy, reviewer access, and private distribution still need completion.
+- Broader repository validation: 1,060 of 1,080 tests passed; 20 failures outside the focused cart-builder suite prevent claiming the full release gate passed. See `/tmp/onpar-cart-store-check.log`. No unrelated implementation changes were made as part of registration.
+- Production build and lint passed. Lint was rerun successfully after the build finished because the initial concurrent run encountered a changing generated file.
 
 ## Release and update procedure
 

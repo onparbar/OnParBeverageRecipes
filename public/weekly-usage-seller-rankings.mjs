@@ -2,19 +2,20 @@ import {
   getWeeklyUsageEntryPouredOz,
   getWeeklyUsagePerformanceCategory,
 } from "./weekly-usage-performance.mjs";
+import { getPmbWeeklyUsageRange } from "./pmb-weekly-usage-policy.mjs";
 
 const RANKING_CATEGORIES = new Set(["all", "beer", "cocktail", "liquor"]);
 const RANKING_METRICS = new Set(["volume", "profit", "margin"]);
 const RANKING_WALLS = new Set(["all", "patio", "main", "karaoke"]);
 
 export const WEEKLY_USAGE_SELLER_RANKING_DATA_BOUNDARY = Object.freeze({
-  source: "PMB + saved keg history",
+  source: "PMB",
   metric: "poured ounces",
   legacySalesIncluded: false,
   crossWallAggregation: false,
   requiresVerifiedWallAndCategory: true,
-  allTimeLabel: "All saved usage weeks",
-  allTimeDescription: "Exact PMB ounces are preferred; older keg history is converted using the product's full keg size.",
+  allTimeLabel: "All saved PMB weeks",
+  allTimeDescription: "PMB weekly readings only. CSV usage history is excluded.",
 });
 
 function clean(value) {
@@ -118,21 +119,7 @@ function getWallLabel(wall) {
 }
 
 function getWeekStartTime(label) {
-  const match = clean(label).match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-  if (!match) return 0;
-
-  const month = Number(match[1]);
-  const day = Number(match[2]);
-  const rawYear = Number(match[3]);
-  const year = rawYear < 100 ? 2000 + rawYear : rawYear;
-  const time = Date.UTC(year, month - 1, day);
-  const parsed = new Date(time);
-  if (
-    parsed.getUTCFullYear() !== year
-    || parsed.getUTCMonth() !== month - 1
-    || parsed.getUTCDate() !== day
-  ) return 0;
-  return time;
+  return getPmbWeeklyUsageRange(label)?.startTime || 0;
 }
 
 function getMemberKey(item, index) {
@@ -148,12 +135,6 @@ function getUnavailableItemKey(item, index) {
   return `${category}:${productKey}:${getMemberKey(item, index)}`;
 }
 
-function isPmbUsageEntry(entry) {
-  if (!entry || typeof entry !== "object") return false;
-  const source = clean(entry.source).toLowerCase();
-  if (source) return source === "pmb";
-  return Object.prototype.hasOwnProperty.call(entry, "volumeOz");
-}
 
 function getDistinctSample(samples) {
   if (!samples.length) return null;
@@ -528,7 +509,7 @@ function buildMetricMetadata(metric, quality) {
     requiresVerifiedPriceAndCost: true,
     calculation: metric === "margin"
       ? "Total projected gross profit divided by total projected sales, multiplied by 100; revenue-weighted across recorded weeks using verified rates."
-      : "Saved poured ounces × caller-verified gross profit per ounce, resolved per tap and week; older keg history uses keg-size conversions.",
+      : "Saved poured ounces × caller-verified gross profit per ounce, resolved per tap and week; PMB keg-unit readings use verified keg-size conversions.",
     historicalRatesInferred: false,
     unavailableItemCount: quality.unavailableProfitItems.size,
     unavailableSampleCount: quality.unavailableProfitSampleCount,
@@ -545,7 +526,7 @@ function buildMetricMetadata(metric, quality) {
 /**
  * Builds poured-usage or gross-profit rankings from saved Weekly Usage history.
  *
- * Exact PMB ounces are preferred. Older saved keg fractions are converted only
+ * Only PMB readings are included. PMB keg fractions are converted only
  * when the full keg size is known. Missing product weeks are not treated as zero;
  * each row reports the number of recorded weeks used in its average. Profit mode
  * requires a verified per-ounce profit rate supplied by the caller for each tap.

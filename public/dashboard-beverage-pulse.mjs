@@ -309,64 +309,68 @@ export function buildLastWeekProjectedSalesMix(
   let estimatedTapCount = 0;
 
   sourceItems.forEach((item) => {
-      const category = resolveCategory(item);
-      const itemWall = resolveWall(item);
-      const inSelectedWall = selectedWall === "all" || itemWall === selectedWall;
-      const entries = (Array.isArray(item?.history) ? item.history : [])
-        .filter((entry) => selectedWeekTimeSet.has(getWeekStartTime(entry?.label)));
-      const pouredValuesByWeek = new Map();
-      entries.forEach((entry) => {
-        const time = getWeekStartTime(entry?.label);
-        const value = getWeeklyUsageEntryPouredOz(item, entry, getFullOunces);
-        if (value === null) return;
-        const values = pouredValuesByWeek.get(time) || [];
-        values.push(value);
-        pouredValuesByWeek.set(time, values);
-      });
-      const pouredOz = [...pouredValuesByWeek.values()].reduce((total, values) => {
-        const distinctValues = [...new Set(values)];
-        return distinctValues.length === 1 && distinctValues[0] > 0
-          ? total + distinctValues[0]
-          : total;
-      }, 0);
-      if (!(pouredOz > 0)) return;
-
-      if (!CATEGORY_ORDER.includes(category)) return;
+    const category = resolveCategory(item);
+    if (!CATEGORY_ORDER.includes(category)) return;
+    const itemWall = resolveWall(item);
+    const inSelectedWall = selectedWall === "all" || itemWall === selectedWall;
+    const entriesByWeek = new Map();
+    (Array.isArray(item?.history) ? item.history : []).forEach((entry) => {
+      const time = getWeekStartTime(entry?.label);
+      if (!selectedWeekTimeSet.has(time)) return;
+      const pouredOz = getWeeklyUsageEntryPouredOz(item, entry, getFullOunces);
+      if (pouredOz === null) return;
+      const entries = entriesByWeek.get(time) || [];
+      entries.push({ entry, pouredOz });
+      entriesByWeek.set(time, entries);
+    });
+    let captured = false;
+    let priced = false;
+    let estimated = false;
+    let contribution = 0;
+    for (const [time, entries] of entriesByWeek) {
+      const distinctValues = [...new Set(entries.map(({ pouredOz }) => pouredOz))];
+      // Duplicate exports count once; conflicting readings remain excluded.
+      if (distinctValues.length !== 1 || !(distinctValues[0] > 0)) continue;
+      const pouredOz = distinctValues[0];
+      captured = true;
       const priceContext = {
         category,
         pouredOz,
-        weekLabel: latestWeekLabel,
-        weekStartTime: latestTime,
-        entry: entries[0] || null,
+        weekLabel: labelsByTime.get(time),
+        weekStartTime: time,
+        entry: entries[0].entry,
       };
-      let sellingPricePerOz = null;
-    if (isVolume) {
-      sellingPricePerOz = 1;
-    } else if (isProfit) {
-      try {
-        const result = getGrossProfitPerOz(item, priceContext);
-        if (result?.estimated === true) priceContext.estimated = true;
-        const value = result && typeof result === "object" ? result.grossProfitPerOz : result;
-        if (value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value))) {
-          sellingPricePerOz = Number(value);
+      let rate = null;
+      if (isVolume) {
+        rate = 1;
+      } else if (isProfit) {
+        try {
+          const result = getGrossProfitPerOz(item, priceContext);
+          if (result?.estimated === true) priceContext.estimated = true;
+          const value = result && typeof result === "object" ? result.grossProfitPerOz : result;
+          if (value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value))) {
+            rate = Number(value);
+          }
+        } catch {
+          // Missing or unverifiable costs stay unknown, never zero-cost profit.
         }
-      } catch {
-        // Missing or unverifiable costs stay unknown, never zero-cost profit.
+      } else {
+        rate = resolveSellingPricePerOz(getSellingPricePerOz, item, priceContext);
       }
-    } else {
-      sellingPricePerOz = resolveSellingPricePerOz(getSellingPricePerOz, item, priceContext);
+      if (!(isProfit ? rate !== null : rate > 0)) continue;
+      priced = true;
+      estimated ||= priceContext.estimated === true;
+      // Resolve each week's own saved price before adding periods together.
+      contribution += pouredOz * rate;
     }
-    const hasRate = isProfit ? sellingPricePerOz !== null : sellingPricePerOz > 0;
-      if (wallOrder.includes(itemWall) && hasRate) {
-        wallSales[itemWall] += pouredOz * sellingPricePerOz;
-      }
-      if (!inSelectedWall) return;
-      capturedTapCount += 1;
-      if (!hasRate) return;
-      pricedTapCount += 1;
-      if (priceContext.estimated === true) estimatedTapCount += 1;
-      categorySales[category] += pouredOz * sellingPricePerOz;
-    });
+    if (wallOrder.includes(itemWall)) wallSales[itemWall] += contribution;
+    if (!inSelectedWall || !captured) return;
+    capturedTapCount += 1;
+    if (!priced) return;
+    pricedTapCount += 1;
+    if (estimated) estimatedTapCount += 1;
+    categorySales[category] += contribution;
+  });
 
   const projectedSales = round(CATEGORY_ORDER.reduce((total, category) => total + categorySales[category], 0));
   const percentages = allocateWholePercentages(CATEGORY_ORDER.map((category) => Math.max(0, categorySales[category])));

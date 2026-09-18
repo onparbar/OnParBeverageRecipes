@@ -211,3 +211,38 @@ test("sales leaders exclude only taps without a current verified price", () => {
   assert.equal(leaders.sections.liquor.pricedTapCount, 1);
   assert.equal(leaders.sections.liquor.unpricedTapCount, 1);
 });
+
+test("multiweek profit uses each week's own saved rate, independent of history order", () => {
+  const history = [
+    { ...pmb(latestLabel, 10), sellingPricePerOz: 8 },
+    { ...pmb(priorLabel, 100), sellingPricePerOz: 5 },
+  ];
+  for (const ordered of [history, [...history].reverse()]) {
+    const mix = buildLastWeekProjectedSalesMix([
+      item({ id: "liquor", tapNumber: 83, history: ordered }),
+      item({ id: "beer", tapNumber: 73, history: [pmb(latestLabel, 100)] }),
+    ], {
+      wall: "karaoke", period: 2, metric: "profit",
+      getGrossProfitPerOz: (row, context) => row.id === "liquor" ? context.entry.sellingPricePerOz - 1 : 2,
+    });
+    // Liquor: 10 * (8 - 1) + 100 * (5 - 1) = 470, beer: 200.
+    assert.equal(mix.projectedProfit, 670);
+    assert.equal(mix.categories.find(row => row.category === "liquor").projectedSales, 470);
+    assert.equal(mix.categories.find(row => row.category === "liquor").sharePercent, 70);
+    assert.equal(mix.walls.find(row => row.wall === "karaoke").projectedSales, 670);
+    assert.equal(mix.pricedTapCount, 2);
+  }
+});
+
+test("multiweek sales prices each week and counts identical repeated exports once", () => {
+  const latest = { ...pmb(latestLabel, 10), sellingPricePerOz: 8 };
+  const mix = buildLastWeekProjectedSalesMix([
+    item({ id: "liquor", tapNumber: 83, history: [latest, { ...latest },
+      { ...pmb(priorLabel, 100), sellingPricePerOz: 5 }] }),
+  ], {
+    wall: "karaoke", period: 2,
+    getSellingPricePerOz: (_, context) => context.entry.sellingPricePerOz,
+  });
+  assert.equal(mix.projectedSales, 580);
+  assert.equal(mix.capturedTapCount, 1);
+});

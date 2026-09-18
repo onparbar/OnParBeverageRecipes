@@ -64,6 +64,16 @@ test('durable recovery survives failure and restart, preserves queue, and replay
     assert.equal(rows.keg_par_agent_shared_state.data.inventoryOutbox.pending.length, 0);
     await store().recoverInventory();
     assert.equal(rows.inventory_shared_state.data.current.onHandOverrides.juice, '7');
+    await save(plan(-12));
+    const shortage = await store().recoverInventory();
+    assert.match(shortage.warning, /exceed stock.*juice.*Recount/);
+    assert.equal(rows.inventory_shared_state.data.current.onHandOverrides.juice, '0');
+    assert.equal(rows.inventory_shared_state.data.current.contributionShortfalls.juice, 2);
+    await save(plan(0));
+    const undone = await store().recoverInventory();
+    assert.equal(undone.warning, undefined);
+    assert.equal(rows.inventory_shared_state.data.current.onHandOverrides.juice, '10');
+    assert.equal(rows.inventory_shared_state.data.current.contributionShortfalls.juice, undefined);
   } finally {
     globalThis.fetch = originalFetch;
     for (const [key, value] of Object.entries(previousEnv)) {

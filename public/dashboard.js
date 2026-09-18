@@ -2,7 +2,7 @@ import { mountProductDuplicator, pmbCatalogProductKind } from "./product-duplica
 import { validateRecipeSetup } from "./recipe-setup.mjs";
 import { completeCoolerCount, hasCompletedCoolerCount } from "./weekly-run-progress.mjs";
 import { observePackagePrice, createSupplierMapping, supplierSetupIssues } from "./vendor-pricing-state.mjs";
-import { isUsableWeeklyUsageEntry } from "./weekly-usage-evidence.mjs";
+import { isUsableWeeklyUsageEntry, retainPmbWeeklyUsageItems, retainPmbWeeklyUsageOverrides } from "./weekly-usage-evidence.mjs";
 import { MINIMUM_KEG_CUSHION, getEightWeekPeakUsage } from "./keg-demand-policy.mjs";
 import { applyInventoryCountPolicy, getUncountedInventoryAmount } from "./inventory-count-policy.mjs";
 import { getInventoryCountSections } from "./inventory-weekly-counts.mjs";
@@ -264,8 +264,6 @@ const NEW_COCKTAILS_CSV_PATH = "./data/new-cocktails.csv";
 const INVENTORY_CSV_PATH = "./data/inventory-2026-06-01.csv";
 const INVENTORY_BASELINE_DATE = "2026-06-01T12:00:00";
 const KEG_LEVELS_CSV_PATH = "./data/keg-levels-template.csv";
-const WEEKLY_USAGE_CSV_PATH = "./data/weekly-usage-history.csv";
-const WEEKLY_USAGE_EXTRA_CSV_PATH = "./data/weekly-usage-history-extra.csv";
 const WEEKLY_USAGE_CHANGEOVERS_CSV_PATH = "./data/weekly-usage-changeovers.csv";
 const STORAGE_KEY = "cocktail-dashboard-ingredient-prices";
 const CHARGE_STORAGE_KEY = "cocktail-dashboard-charge-prices";
@@ -1335,13 +1333,11 @@ async function init() {
     return;
   }
 
-  const [csv, newCocktailsCsv, inventoryCsv, kegLevelsCsv, weeklyUsageCsv, weeklyUsageExtraCsv, weeklyUsageChangeoversCsv] = await Promise.all([
+  const [csv, newCocktailsCsv, inventoryCsv, kegLevelsCsv, weeklyUsageChangeoversCsv] = await Promise.all([
     fetchCsv(CSV_PATH),
     fetchCsv(NEW_COCKTAILS_CSV_PATH),
     fetchCsv(INVENTORY_CSV_PATH),
     fetchOptionalCsv(KEG_LEVELS_CSV_PATH),
-    fetchOptionalCsv(WEEKLY_USAGE_CSV_PATH),
-    fetchOptionalCsv(WEEKLY_USAGE_EXTRA_CSV_PATH),
     fetchOptionalCsv(WEEKLY_USAGE_CHANGEOVERS_CSV_PATH),
   ]);
 
@@ -1359,10 +1355,8 @@ async function init() {
   inventoryItems = mergeCustomInventoryItems(parseInventory(inventorySourceRows));
   kegWallItems = kegLevelsCsv ? parseKegLevels(parseCsv(kegLevelsCsv)) : [];
   kegPricingItems = buildKegPricingCatalog(kegWallItems, getCurrentKegPricingTapItems());
-  weeklyUsageItems = weeklyUsageCsv ? parseWeeklyUsage(parseCsv(weeklyUsageCsv)) : [];
-  if (weeklyUsageExtraCsv) {
-    weeklyUsageItems = mergeWeeklyUsageExtraHistory(weeklyUsageItems, parseWeeklyUsageExtraHistory(parseCsv(weeklyUsageExtraCsv)));
-  }
+  // Tap setup supplies identities only. Usage comes from saved/live PMB reports.
+  weeklyUsageItems = kegWallItems.map(item => buildWeeklyUsageItemFromAssignment({ ...item, name: item.brand })).filter(Boolean);
   weeklyUsageChangeovers = weeklyUsageChangeoversCsv ? parseWeeklyUsageChangeovers(parseCsv(weeklyUsageChangeoversCsv)) : [];
   applyWeeklyUsageProductChangeovers();
   await loadSharedWeeklyUsageState();
@@ -1385,6 +1379,9 @@ async function init() {
   void hydrateComingSoonLiquorItemsFromUntappd();
   loadBeverageNews();
   await runOwnerLoginSync();
+  // Recheck shared data after login sync, including a failed initial read or
+  // changes completed by another manager while this device was loading.
+  await refreshSharedWeeklyUsageForDisplay();
 }
 
 async function runOwnerLoginSync() {
@@ -3630,13 +3627,7 @@ function bindDashboardDataSearchEvents() {
 }
 
 function getDashboardDataSearchEntryOunces(item, entry) {
-  const exactOunces = getWeeklyUsageEntryPouredOz(item, entry, getWeeklyUsageFullOunces);
-  if (exactOunces !== null) return exactOunces;
-  const value = Number(entry?.value);
-  if (!Number.isFinite(value) || value < 0) return null;
-  if (clean(item?.displayUnit).toLowerCase() === "oz") return value;
-  const fullOunces = getWeeklyUsageFullOunces(item);
-  return fullOunces > 0 ? value * fullOunces : null;
+  return getWeeklyUsageEntryPouredOz(item, entry, getWeeklyUsageFullOunces);
 }
 
 function getDashboardDataSearchPeriod(item, label, entries, sellingPricePerOz, expectedWeeks = entries.length, totalLabel = "Total for selected period") {
@@ -6171,6 +6162,7 @@ function getWeeklySimpleSyrupNeed(cocktails = []) {
 }
 
 function getInventorySnapshotSimpleSyrupNeed(snapshot) {
+  if (snapshot?.summary?.simpleSyrupNeed) return snapshot.summary.simpleSyrupNeed;
   const frozenPlanItems = snapshot?.kegPlanSnapshot?.items;
   if (!Array.isArray(frozenPlanItems)) return null;
 
@@ -6178,9 +6170,10 @@ function getInventorySnapshotSimpleSyrupNeed(snapshot) {
   const plannedCocktails = frozenPlanItems
     .filter((item) => item.actionType === "make" && toNumber(item.orderQty) > 0)
     .map((item) => {
-      const recipe = findRecipeForWallProduct(activeRecipes, item.name);
+      const name = item.orderProductName || item.name;
+      const recipe = findRecipeForWallProduct(activeRecipes, name);
       return {
-        name: item.name,
+        name,
         quantity: toNumber(item.orderQty),
         batchSizeOz: recipe ? getRecipeTotals(recipe).oz : 0,
       };
@@ -7458,7 +7451,7 @@ function renderOnParInsights() {
   const periodRankings = getSellerRankingPeriod(selectedPeriodRankings, sellerRankingListSize);
   const displayedListSize = periodRankings.listSize;
   const periodTitle = sellerRankingPeriod === "all-time"
-    ? "All saved usage weeks"
+    ? "All saved PMB weeks"
     : recentWeekLimit === 1
       ? "Latest saved week"
       : `Last ${recentWeekLimit} saved weeks`;
@@ -7663,12 +7656,13 @@ function renderDashboardCategoryMix(mix) {
           <div class="dashboard-pulse-mix-legend__${escapeHtml(row.category)}">
             <span aria-hidden="true"></span>
             <strong>${formatNumber(row.sharePercent)}%</strong>
-            <small>${escapeHtml(row.label)}</small>
+            <small>${escapeHtml(row.label)}${isProfit ? ` · ${money(row.projectedSales)}` : ""}</small>
           </div>
         `).join("")}
       </div>
       ${isProfit ? `
       <p class="dashboard-pulse-empty">
+        Percentages show each category's share of estimated gross profit for the selected period. Liquor uses average Single/Double pricing when the actual portion mix is unknown.
         ${mix.unpricedTapCount ? `${mix.unpricedTapCount} tap(s) excluded because neither product pricing nor a category estimate is available.` : ""}
         ${mix.hasLosses ? "Percentages show positive category contributions only; categories with a net loss have a 0% share." : ""}
       </p>` : ""}
@@ -8682,15 +8676,15 @@ function renderWeeklyPlan() {
     weeklyPlanDisclosureState.set(getWeeklyPlanDisclosureKey(details), details.open);
   });
   weeklyPlan.innerHTML = `
-    <header class="weekly-plan-header">
-      <div class="weekly-plan-header__heading">
-        ${orderRehearsalMode ? '<p class="eyebrow">Practice mode</p>' : ""}
-        <h2>${orderRehearsalMode ? "Rehearsal" : "Weekly plan"}</h2>
-      </div>
+    ${orderRehearsalMode || liveHeaderActions.trim() ? `<header class="weekly-plan-header">
+      ${orderRehearsalMode ? `<div class="weekly-plan-header__heading">
+        <p class="eyebrow">Practice mode</p>
+        <h2>Rehearsal</h2>
+      </div>` : ""}
       <div class="weekly-plan-actions">
         ${orderRehearsalMode ? demoToggle : liveHeaderActions}
       </div>
-    </header>
+    </header>` : ""}
     ${weeklyPlanBody}
   `;
 
@@ -8990,7 +8984,7 @@ function syncWeeklyUsageWithCurrentPmbTaps(rawTaps = []) {
     .filter((tap) => tap.tapNumber && tap.name)
     .sort((a, b) => a.tapNumber - b.tapNumber || a.name.localeCompare(b.name));
 
-  if (!assignments.length || !weeklyUsageItems.length) return { changed: 0, archived: 0 };
+  if (!assignments.length) return { changed: 0, archived: 0 };
 
   const sourceItems = [
     ...weeklyUsageItems.map((item) => ({ ...item, sourceBucket: "active" })),
@@ -9701,13 +9695,13 @@ function restoreWeeklyUsageFromOutbox() {
   if (!data || typeof data !== "object") return false;
   weeklyUsageApplyingSharedState = true;
   try {
-    weeklyUsageItems = Array.isArray(data.activeItems) ? cloneWeeklyUsageValue(data.activeItems) : weeklyUsageItems;
-    weeklyUsageArchivedItems = Array.isArray(data.archivedItems) ? cloneWeeklyUsageValue(data.archivedItems) : weeklyUsageArchivedItems;
+    weeklyUsageItems = Array.isArray(data.activeItems) ? retainPmbWeeklyUsageItems(cloneWeeklyUsageValue(data.activeItems)) : weeklyUsageItems;
+    weeklyUsageArchivedItems = Array.isArray(data.archivedItems) ? retainPmbWeeklyUsageItems(cloneWeeklyUsageValue(data.archivedItems)) : weeklyUsageArchivedItems;
     weeklyUsageCurrentOverrides = data.currentOverrides && typeof data.currentOverrides === "object"
       ? cloneWeeklyUsageValue(data.currentOverrides)
       : weeklyUsageCurrentOverrides;
     weeklyUsageHistoryOverrides = data.historyOverrides && typeof data.historyOverrides === "object"
-      ? cloneWeeklyUsageValue(data.historyOverrides)
+      ? retainPmbWeeklyUsageOverrides(cloneWeeklyUsageValue(data.historyOverrides))
       : weeklyUsageHistoryOverrides;
     weeklyUsageLastSyncAt = clean(data.lastSyncAt) || weeklyUsageLastSyncAt;
     saveWeeklyUsageCurrentOverrides();
@@ -9742,15 +9736,15 @@ function applySharedWeeklyUsageState(state) {
     weeklyUsageSharedRevision = Number(state.revision) || 0;
     weeklyUsageSharedInitialized = Boolean(state.initialized);
     weeklyUsageSharedProvisioned = true;
-    weeklyUsageItems = Array.isArray(data.activeItems) ? cloneWeeklyUsageValue(data.activeItems) : [];
+    weeklyUsageItems = Array.isArray(data.activeItems) ? retainPmbWeeklyUsageItems(cloneWeeklyUsageValue(data.activeItems)) : [];
     weeklyUsageArchivedItems = Array.isArray(data.archivedItems)
-      ? cloneWeeklyUsageValue(data.archivedItems)
+      ? retainPmbWeeklyUsageItems(cloneWeeklyUsageValue(data.archivedItems))
       : [];
     weeklyUsageCurrentOverrides = data.currentOverrides && typeof data.currentOverrides === "object"
       ? cloneWeeklyUsageValue(data.currentOverrides)
       : {};
     weeklyUsageHistoryOverrides = data.historyOverrides && typeof data.historyOverrides === "object"
-      ? cloneWeeklyUsageValue(data.historyOverrides)
+      ? retainPmbWeeklyUsageOverrides(cloneWeeklyUsageValue(data.historyOverrides))
       : {};
     weeklyUsageLastSyncAt = clean(data.lastSyncAt);
     saveWeeklyUsageCurrentOverrides();
@@ -9766,9 +9760,9 @@ let weeklyUsageDisplayRefreshPromise = null;
 
 function refreshSharedWeeklyUsageForDisplay() {
   if (weeklyUsageDisplayRefreshPromise) return weeklyUsageDisplayRefreshPromise;
-  // A saved report conflict needs a field-level rebase, not a permanent pause.
-  // The queue preserves unresolved measurements and uses revision-checked writes.
-  if (!isEmployeeDashboard && weeklyUsageSharedInitialized && weeklyUsageSharedOutbox?.conflict
+  // Retry both network failures and conflicts. Any pending report otherwise
+  // blocks reads indefinitely. The queue preserves edits with revision checks.
+  if (!isEmployeeDashboard && weeklyUsageSharedInitialized && weeklyUsageSharedOutbox
     && !weeklyUsageSharedSaving && !weeklyUsageSharedPendingWrites
     && weeklyUsageSharedSaveTimer === null && !weeklyUsageSyncLoading
     && !weeklyUsageApplyingSharedState && !unifiedPmbRefreshRunning) {
@@ -9784,7 +9778,7 @@ function refreshSharedWeeklyUsageForDisplay() {
     || weeklyUsageSyncLoading
     || weeklyUsageApplyingSharedState
     || unifiedPmbRefreshRunning;
-  if (isEmployeeDashboard || !weeklyUsageSharedInitialized || hasLocalWork()) {
+  if (isEmployeeDashboard || hasLocalWork()) {
     return Promise.resolve(false);
   }
 
@@ -9794,7 +9788,8 @@ function refreshSharedWeeklyUsageForDisplay() {
       const state = await requestSharedWeeklyUsage();
       // A read must never replace edits or another refresh that arrived in flight.
       if (hasLocalWork() || weeklyUsageSharedRevision !== revisionAtStart
-        || !state.initialized || !(Number(state.revision) > revisionAtStart)) return false;
+        || !state.initialized
+        || (weeklyUsageSharedInitialized && !(Number(state.revision) > revisionAtStart))) return false;
       applySharedWeeklyUsageState(state);
       weeklyUsageSharedSaveError = "";
       weeklyUsageSharedMessage = "Shared Weekly Usage is current.";
@@ -15995,14 +15990,14 @@ function recalculateInventoryItem(item) {
 function getInventoryRealityUsageItems() {
   return weeklyUsageItems.map((item) => {
     const latest = [...(item.history || [])]
-      .filter((entry) => Number.isFinite(getWeeklyUsageLabelTime(entry.label)))
+      .filter((entry) => getWeeklyUsageLabelTime(entry.label) > 0)
       .sort((left, right) => getWeeklyUsageLabelTime(right.label) - getWeeklyUsageLabelTime(left.label))[0];
-    const ounces = latest ? getWeeklyUsageEntryPouredOz(latest) : null;
+    const ounces = latest ? getWeeklyUsageEntryPouredOz(item, latest, getWeeklyUsageFullOunces) : null;
     return {
       name: item.name,
       ounces,
       label: latest?.label || "",
-      verified: latest?.source === "pmb" && Number.isFinite(ounces),
+      verified: clean(latest?.source).toLowerCase() === "pmb" && Number.isFinite(ounces),
     };
   });
 }
@@ -16262,6 +16257,7 @@ async function saveInventorySnapshotAttempt({ replaceExisting = false } = {}) {
     await failCapture(parAgentMessage || "keg and cocktail recommendations could not be calculated.", "RECOMMENDATIONS_NOT_READY");
     return false;
   }
+  summary.simpleSyrupNeed = getInventorySnapshotSimpleSyrupNeed({ kegPlanSnapshot });
 
   if (!await flushPendingInventorySyncs()) {
     await failCapture("Inventory changes are pending. Recover any blocked snapshot attempt from Inventory before saving again.", "INVENTORY_NOT_READY");
@@ -16420,7 +16416,8 @@ function renderInventoryHistory() {
       escapeHtml, formatNumber, money, formatUpdatedAt,
       openSections: [...openSectionKeys],
       dateLabel: formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot)),
-      valueSummary: snapshot.summary ? renderInventorySnapshotValueSummary(snapshot.summary) : "",
+      simpleSyrupNeed: formatInventorySnapshotSimpleSyrupNeed(snapshot),
+      simpleSyrupEstimated: !snapshot.summary?.simpleSyrupNeed && Array.isArray(snapshot.kegPlanSnapshot?.items),
     });
     content.querySelector(".inventory-history-restore")?.addEventListener("click", () => restoreInventorySnapshot(snapshot.id));
     content.querySelector(".inventory-history-delete").addEventListener("click", () => deleteInventorySnapshot(snapshot.id));
@@ -19488,68 +19485,6 @@ function parseKegLevels(rows) {
   return items.sort((a, b) => a.tapNumber - b.tapNumber);
 }
 
-function parseWeeklyUsage(rows) {
-  const headerRow = rows[0] || [];
-  const historyColumns = headerRow
-    .map((value, index) => ({ label: clean(value).replace(/\s+/g, " "), index }))
-    .filter((entry) => entry.index >= 6 && isWeeklyHistoryHeader(entry.label));
-
-  const parsedItems = rows
-    .slice(2)
-    .map((row) => {
-      const tapNumber = toNumber(row[1]);
-      const name = clean(row[2]);
-      if (!tapNumber || !name || /^do not erase/i.test(name)) return null;
-
-      const kegInfo = kegWallItems.find((item) => item.tapNumber === tapNumber);
-      const rawOz = toNumber(row[3]);
-      const currentEquivalentRaw = clean(row[4]);
-      const currentEquivalent = toNumber(row[4]);
-      const historicalFullKegOunces = toNumber(rawOz / currentEquivalent);
-      const averageRaw = clean(row[5]);
-      const average = toNumber(row[5]);
-      const displayUnit = getWeeklyUsageDisplayUnitForTap({
-        tapNumber,
-        type: kegInfo?.type,
-        name,
-      }, {
-        displayUnit: currentEquivalentRaw !== "" ? "kegs" : "oz",
-      });
-      const history = historyColumns
-        .map((column) => {
-          const rawValue = clean(row[column.index]);
-          return {
-            label: column.label,
-            value: toNumber(row[column.index]),
-            hasValue: rawValue !== "",
-          };
-        })
-        .filter((entry) => entry.hasValue);
-
-      return {
-        id: slugify(`${tapNumber}-${name}`),
-        tapNumber,
-        name,
-        wall: kegInfo?.wall || "",
-        type: kegInfo?.type || "",
-        rawOz,
-        currentEquivalent,
-        historicalFullKegOunces,
-        average: averageRaw !== "" ? average : calculateAverage(history.filter(isUsableWeeklyUsageEntry).map((entry) => entry.value)),
-        history: [...(weeklyUsageHistoryOverrides[slugify(`${tapNumber}-${name}`)] || []), ...history],
-        isLiquorShot: displayUnit === "oz",
-        displayUnit,
-        currentDisplayValue: currentEquivalentRaw !== "" ? currentEquivalent : rawOz,
-      };
-    })
-    .map((item) => item ? ({
-      ...item,
-      average: calculateAverage(item.history.filter(isUsableWeeklyUsageEntry).map((entry) => entry.value)),
-    }) : null)
-    .filter(Boolean);
-
-  return mergeWeeklyUsageDuplicates(parsedItems).sort((a, b) => a.tapNumber - b.tapNumber);
-}
 
 function parseWeeklyUsageChangeovers(rows) {
   const headerRow = (rows[0] || []).map((value) => normalizeWeeklyUsageColumnName(value));
@@ -19609,89 +19544,8 @@ function normalizeWeeklyUsageSplitWeek(value) {
   return "current";
 }
 
-function mergeWeeklyUsageDuplicates(items) {
-  const byId = new Map();
 
-  items.forEach((item) => {
-    const existing = byId.get(item.id);
-    if (!existing) {
-      byId.set(item.id, {
-        ...item,
-        history: mergeWeeklyUsageHistory(item.history),
-      });
-      return;
-    }
 
-    existing.rawOz = pickWeeklyUsageValue(existing.rawOz, item.rawOz);
-    existing.currentEquivalent = pickWeeklyUsageValue(existing.currentEquivalent, item.currentEquivalent);
-    existing.currentDisplayValue = pickWeeklyUsageValue(existing.currentDisplayValue, item.currentDisplayValue);
-    existing.historicalFullKegOunces = pickWeeklyUsageValue(
-      existing.historicalFullKegOunces,
-      item.historicalFullKegOunces,
-    );
-    existing.history = mergeWeeklyUsageHistory([...existing.history, ...item.history]);
-    existing.average = calculateAverage(existing.history.filter(isUsableWeeklyUsageEntry).map((entry) => entry.value));
-  });
-
-  return [...byId.values()].map((item) => ({
-    ...item,
-    average: calculateAverage(item.history.filter(isUsableWeeklyUsageEntry).map((entry) => entry.value)),
-  }));
-}
-
-function parseWeeklyUsageExtraHistory(rows) {
-  const headerRow = rows[0] || [];
-  const historyColumns = headerRow
-    .map((value, index) => ({ label: clean(value).replace(/\s+/g, " "), index }))
-    .filter((entry) => entry.index >= 4 && isWeeklyHistoryHeader(entry.label));
-
-  return rows
-    .slice(1)
-    .map((row) => {
-      const tapNumber = toNumber(row[1]);
-      const name = clean(row[2]);
-      if (!tapNumber || !name || /^do not erase/i.test(name)) return null;
-
-      const history = historyColumns
-        .map((column) => {
-          const rawValue = clean(row[column.index]);
-          if (!rawValue || rawValue.startsWith("#")) return null;
-          return {
-            label: column.label,
-            value: toNumber(rawValue),
-            hasValue: true,
-          };
-        })
-        .filter(Boolean);
-
-      return {
-        id: slugify(`${tapNumber}-${name}`),
-        tapNumber,
-        name,
-        nameKey: normalizeWeeklyUsageName(name),
-        history,
-      };
-    })
-    .filter(Boolean);
-}
-
-function mergeWeeklyUsageExtraHistory(items, extraRows) {
-  if (!extraRows.length) return items;
-
-  const byId = new Map(items.map((item) => [item.id, item]));
-  const byTap = new Map(items.map((item) => [String(item.tapNumber), item]));
-  const byName = new Map(items.map((item) => [normalizeWeeklyUsageName(item.name), item]));
-
-  extraRows.forEach((extra) => {
-    const item = byId.get(extra.id) || byTap.get(String(extra.tapNumber)) || byName.get(extra.nameKey);
-    if (!item) return;
-
-    item.history = mergeWeeklyUsageHistory([...extra.history, ...item.history]);
-    item.average = calculateAverage(item.history.filter(isUsableWeeklyUsageEntry).map((entry) => entry.value));
-  });
-
-  return items;
-}
 
 function normalizeWeeklyUsageName(value, { stripWallNumber = false } = {}) {
   return clean(value)
@@ -19710,13 +19564,6 @@ function normalizeWeeklyUsageName(value, { stripWallNumber = false } = {}) {
     .trim();
 }
 
-function pickWeeklyUsageValue(primary, fallback) {
-  const primaryNumber = toNumber(primary);
-  const fallbackNumber = toNumber(fallback);
-  if (Number.isFinite(primaryNumber) && primaryNumber > 0) return primaryNumber;
-  if (Number.isFinite(fallbackNumber) && fallbackNumber > 0) return fallbackNumber;
-  return Number.isFinite(primaryNumber) ? primaryNumber : fallbackNumber;
-}
 
 function mergeWeeklyUsageHistory(history) {
   const byLabel = new Map();
@@ -19742,13 +19589,6 @@ function getWeeklyUsageLabelTime(label) {
   return new Date(year, month - 1, day).getTime();
 }
 
-function isWeeklyHistoryHeader(label) {
-  const normalized = clean(label).toLowerCase();
-  return Boolean(normalized)
-    && normalized.includes("/")
-    && normalized.includes("-")
-    && !normalized.includes("avg");
-}
 
 function calculateAverage(values) {
   const numbers = values.filter((value) => Number.isFinite(value));
@@ -20594,7 +20434,7 @@ function saveWeeklyUsageCurrentOverrides() {
 
 function loadWeeklyUsageHistoryOverrides() {
   try {
-    return JSON.parse(localStorage.getItem(WEEKLY_USAGE_HISTORY_STORAGE_KEY) || "{}");
+    return retainPmbWeeklyUsageOverrides(JSON.parse(localStorage.getItem(WEEKLY_USAGE_HISTORY_STORAGE_KEY) || "{}"));
   } catch {
     return {};
   }
@@ -20607,7 +20447,7 @@ function saveWeeklyUsageHistoryOverrides() {
 
 function loadWeeklyUsageArchivedItems() {
   try {
-    return JSON.parse(localStorage.getItem(WEEKLY_USAGE_ARCHIVE_STORAGE_KEY) || "[]");
+    return retainPmbWeeklyUsageItems(JSON.parse(localStorage.getItem(WEEKLY_USAGE_ARCHIVE_STORAGE_KEY) || "[]"));
   } catch {
     return [];
   }

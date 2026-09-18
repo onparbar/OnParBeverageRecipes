@@ -1045,7 +1045,9 @@ async function saveStaffPrepBatch(event) {
     liquorStatusPanel.textContent = prepStatusPanel.textContent;
     if (result?.inventoryUpdate?.warning) {
       prepStatusPanel.textContent = result.inventoryUpdate.warning;
+      liquorStatusPanel.textContent = result.inventoryUpdate.warning;
       prepStatusPanel.dataset.state = "error";
+      liquorStatusPanel.dataset.state = "error";
     }
   } catch (error) {
     staffPrepBatchSaving = false;

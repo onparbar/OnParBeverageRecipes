@@ -42,7 +42,7 @@ test("builds top five and bottom three for the latest six recorded weeks and all
   const rankings = buildWeeklyUsageSellerRankings(items);
 
   assert.equal(rankings.recordedWeekCount, 7);
-  assert.equal(rankings.dataBoundary.allTimeLabel, "All saved usage weeks");
+  assert.equal(rankings.dataBoundary.allTimeLabel, "All saved PMB weeks");
   assert.equal(rankings.dataBoundary.legacySalesIncluded, false);
   assert.equal(rankings.dataBoundary.crossWallAggregation, false);
   assert.equal(rankings.dataBoundary.requiresVerifiedWallAndCategory, true);
@@ -415,7 +415,7 @@ test("profit uses converted saved keg history when the full keg size is known", 
   assert.equal(profit.metricMetadata.estimatedVolumeSampleCount, 1);
 });
 
-test("includes legacy keg fractions in all-time ounces without treating missing weeks as zero", () => {
+test("excludes CSV keg history from all-time rankings without diluting PMB averages", () => {
   const rankings = buildWeeklyUsageSellerRankings([
     item({
       id: "blended",
@@ -428,11 +428,11 @@ test("includes legacy keg fractions in all-time ounces without treating missing 
     getFullOunces: () => 1_984,
   });
 
-  assert.equal(rankings.recordedWeekCount, 2);
-  assert.equal(rankings.allTime.top[0].totalOz, 1_492);
-  assert.equal(rankings.allTime.top[0].averageWeeklyOz, 746);
+  assert.equal(rankings.recordedWeekCount, 1);
+  assert.equal(rankings.allTime.top[0].totalOz, 500);
+  assert.equal(rankings.allTime.top[0].averageWeeklyOz, 500);
   assert.equal(rankings.metricMetadata.exactVolumeSampleCount, 1);
-  assert.equal(rankings.metricMetadata.estimatedVolumeSampleCount, 1);
+  assert.equal(rankings.metricMetadata.estimatedVolumeSampleCount, 0);
 });
 
 test("keeps zero and negative gross-profit drinks eligible when their PMB volume is positive", () => {

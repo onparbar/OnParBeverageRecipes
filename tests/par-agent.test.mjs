@@ -16,7 +16,10 @@ function buildRawRecommendation(...args) {
   const dated = (entries) => entries.map((entry, index) => {
     const date = new Date("2026-09-07T00:00:00Z");
     date.setUTCDate(date.getUTCDate() - (index + 1) * 7);
-    return { ...entry, label: entry.label || `${date.getUTCMonth() + 1}/${date.getUTCDate()}/${date.getUTCFullYear()}` };
+    const start = entry.label || `${date.getUTCMonth() + 1}/${date.getUTCDate()}/${date.getUTCFullYear()}`;
+    const end = new Date(date);
+    end.setUTCDate(end.getUTCDate() + 6);
+    return { source: "PMB", ...entry, label: entry.label || `${start} - ${end.getUTCMonth() + 1}/${end.getUTCDate()}/${end.getUTCFullYear()}` };
   });
   args[2] = dated(args[2] || []);
   if (args[5]?.history) args[5] = { ...args[5], history: dated(args[5].history) };

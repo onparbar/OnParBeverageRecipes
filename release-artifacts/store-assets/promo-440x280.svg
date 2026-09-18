@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="280" viewBox="0 0 440 280">
+ <rect width="440" height="280" fill="#102d2a"/>
+ <circle cx="401" cy="37" r="115" fill="#19423c"/>
+ <circle cx="416" cy="47" r="78" fill="none" stroke="#39665a" stroke-width="1"/>
+ <rect x="28" y="26" width="81" height="24" rx="12" fill="#d8efac"/>
+ <text x="68.5" y="43" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#102d2a">ON PAR</text>
+ <text x="28" y="99" font-family="Arial,sans-serif" font-size="32" font-weight="700" fill="#fff">Vendor Cart</text>
+ <text x="28" y="136" font-family="Arial,sans-serif" font-size="32" font-weight="700" fill="#fff">Builder</text>
+ <text x="29" y="175" font-family="Arial,sans-serif" font-size="15" fill="#dae8df">Approved orders. Carts ready to review.</text>
+ <path d="M28 201h384" stroke="#39665a"/>
+ <text x="29" y="228" font-family="Arial,sans-serif" font-size="12" letter-spacing="1" fill="#d8efac">BEES  ·  PROOF  ·  OHLQ</text>
+ <text x="29" y="254" font-family="Arial,sans-serif" font-size="11" fill="#bdcec5">For authorized On Par managers</text>
+</svg>

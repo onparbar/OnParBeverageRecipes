@@ -9,9 +9,9 @@ const oldest = "7/20/26 - 7/26/26";
 
 test("plots tap history from oldest to newest and reports direction", () => {
   const trend = buildWeeklyUsageTrend([
-    { label: newest, value: 0.5 },
-    { label: middle, value: 0.25 },
-    { label: oldest, value: 0.1 },
+    { source: "PMB", label: newest, value: 0.5 },
+    { source: "PMB", label: middle, value: 0.25 },
+    { source: "PMB", label: oldest, value: 0.1 },
   ], [newest, middle, oldest]);
 
   assert.deepEqual(trend.points.map((point) => point.label), [oldest, middle, newest]);
@@ -25,9 +25,9 @@ test("plots tap history from oldest to newest and reports direction", () => {
 
 test("the direction arrow describes the latest week-to-week movement", () => {
   const trend = buildWeeklyUsageTrend([
-    { label: newest, value: 0.4 },
-    { label: middle, value: 0.6 },
-    { label: oldest, value: 0.1 },
+    { source: "PMB", label: newest, value: 0.4 },
+    { source: "PMB", label: middle, value: 0.6 },
+    { source: "PMB", label: oldest, value: 0.1 },
   ], [newest, middle, oldest]);
 
   assert.equal(trend.firstValue, 0.1);
@@ -39,8 +39,8 @@ test("the direction arrow describes the latest week-to-week movement", () => {
 
 test("a missing immediately previous week never becomes a false week-over-week direction", () => {
   const trend = buildWeeklyUsageTrend([
-    { label: newest, value: 0.4 },
-    { label: oldest, value: 0.2 },
+    { source: "PMB", label: newest, value: 0.4 },
+    { source: "PMB", label: oldest, value: 0.2 },
   ], [newest, middle, oldest]);
 
   assert.deepEqual(trend.points.map((point) => point.value), [0.2, null, 0.4]);
@@ -53,14 +53,14 @@ test("a missing immediately previous week never becomes a false week-over-week d
 
 test("keeps recorded zeroes and distinguishes flat or insufficient history", () => {
   const zero = buildWeeklyUsageTrend([
-    { label: newest, value: 0, zeroUsageVerified: true },
-    { label: middle, value: 0, zeroUsageVerified: true },
+    { source: "PMB", label: newest, value: 0, zeroUsageVerified: true },
+    { source: "PMB", label: middle, value: 0, zeroUsageVerified: true },
   ], [newest, middle]);
   assert.equal(zero.recordedCount, 2);
   assert.equal(zero.direction, "flat");
   assert.equal(zero.maximum, 0);
 
-  const one = buildWeeklyUsageTrend([{ label: newest, value: 1 }], [newest, middle]);
+  const one = buildWeeklyUsageTrend([{ source: "PMB", label: newest, value: 1 }], [newest, middle]);
   assert.equal(one.direction, "unavailable");
   assert.equal(one.missingCount, 1);
 });

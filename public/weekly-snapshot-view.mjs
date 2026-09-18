@@ -40,6 +40,11 @@ export function renderSavedWeeklySnapshot(snapshot, helpers) {
       </div></details>
     </header>
     ${lateReason ? `<p class="muted">Late capture: ${html(lateReason)}</p>` : ""}
+    <div class="inventory-history-value-summary">
+      <div class="inventory-history-value-summary__total"><span>Total beverage inventory</span><strong>${currency(snapshot.summary?.totalBeverageInventoryValue)}</strong></div>
+      <div><span>Simple syrup needed for next week</span><strong>${html(helpers.simpleSyrupNeed || "Not recorded")}</strong></div>
+      <p>For the saved cocktail prep plan.${helpers.simpleSyrupEstimated ? " Estimated using current recipes; the original syrup amount was not saved." : ""}</p>
+    </div>
     <details class="weekly-snapshot-section" data-snapshot-section="counts"${["counts", "kegs", "inventory"].some(key => openSections.has(key)) ? " open" : ""}>
       <summary><span>Saved counts</span><strong>${quantity(taps.length)} taps / ${quantity(items.length)} items</strong></summary>
       <div class="weekly-snapshot-section__body">
