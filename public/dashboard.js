@@ -4653,6 +4653,19 @@ function renderShotPricing(visibleTapRows = []) {
     chargeCell.innerHTML = renderPortionList(row.portions.slice(0, 2));
     chargeCell.append(editor);
   });
+  pricingAdvisorTable.querySelectorAll("[data-pricing-portion-tap]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const row = rows.find((item) => item.tapNumber === Number(button.dataset.pricingPortionTap));
+      const editor = [...shotPricingTable.querySelectorAll("[data-shot-pricing-key]")]
+        .find((item) => item.dataset.shotPricingKey === row?.key);
+      if (!editor) return;
+      const directory = editor.closest(".pricing-directory");
+      if (directory) directory.open = true;
+      editor.open = true;
+      editor.scrollIntoView({ block: "center", behavior: "smooth" });
+      editor.querySelector("input")?.focus({ preventScroll: true });
+    });
+  });
   bindShotPricingControls();
 }
 
