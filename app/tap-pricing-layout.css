@@ -449,3 +449,169 @@
     content: none;
   }
 }
+
+/* Pricing workspace: roomy comparison cards above the complete price directory. */
+#pricing-panel .pricing-workspace-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  padding: 22px 24px;
+  background: var(--paper-strong);
+}
+#pricing-panel .pricing-workspace-intro h2 {
+  margin: 0 0 6px;
+  font-size: clamp(1.6rem, 3vw, 2rem);
+  text-align: left;
+  color: var(--juniper);
+}
+#pricing-panel .pricing-workspace-intro p,
+#pricing-panel .pricing-section-description {
+  margin: 0;
+  color: var(--muted);
+  font-size: .85rem;
+  line-height: 1.5;
+}
+#pricing-panel .pricing-section-description { margin-top: 6px; }
+#pricing-panel .pricing-workspace-header .search-field {
+  flex: 0 1 340px;
+  min-width: 220px;
+}
+#pricing-panel .pricing-targets {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 2fr;
+  gap: 12px 24px;
+  padding: 4px 8px 8px;
+}
+#pricing-panel .pricing-targets p {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  margin: 0;
+  font-size: .78rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+#pricing-panel .pricing-targets strong { color: var(--juniper); }
+#pricing-panel > .pricing-advisor { padding: 24px !important; }
+#pricing-panel .pricing-advisor__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 0;
+  padding: 16px 0;
+  margin: 18px 0;
+}
+#pricing-panel .pricing-advisor__summary > * { flex: 1 1 130px; padding: 0 18px; }
+#pricing-panel .pricing-advisor__summary strong { font-size: 1.6rem; color: var(--juniper); }
+#pricing-panel .pricing-advisor__table { display: block; }
+#pricing-panel .pricing-advisor__table > thead {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+#pricing-panel #pricing-advisor-table {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  width: 100%;
+}
+#pricing-panel #pricing-advisor-table > tr {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px 18px;
+  width: 100%;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper-strong);
+  box-sizing: border-box;
+}
+#pricing-panel #pricing-advisor-table > tr:last-child { border-bottom: 1px solid var(--line); }
+#pricing-panel #pricing-advisor-table > tr > td {
+  display: block;
+  width: auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: .88rem;
+  overflow-wrap: normal;
+}
+#pricing-panel #pricing-advisor-table > tr > td:first-child {
+  grid-column: 1;
+  grid-row: 1;
+  width: 3.5rem;
+  color: var(--juniper);
+}
+#pricing-panel .pricing-advisor__tap strong { font-size: 1.25rem; }
+#pricing-panel .pricing-advisor__tap strong > span { display: block; font-size: .7rem; font-weight: 500; }
+#pricing-panel #pricing-advisor-table > tr > td:nth-child(2) {
+  grid-column: 1 / 4;
+  grid-row: 1;
+  padding-left: 4.5rem;
+  font-size: 1.05rem;
+}
+#pricing-panel #pricing-advisor-table > tr > td:nth-child(3) { grid-column: 1; grid-row: 2; }
+#pricing-panel #pricing-advisor-table > tr > td:nth-child(4) { grid-column: 2; grid-row: 2; }
+#pricing-panel #pricing-advisor-table > tr > td:nth-child(5) { grid-column: 3; grid-row: 2; color: var(--juniper); }
+#pricing-panel #pricing-advisor-table > tr > td:nth-child(6) { grid-column: 4; grid-row: 2; }
+#pricing-panel #pricing-advisor-table > tr > td:nth-child(7) { grid-column: 4; grid-row: 1; }
+#pricing-panel #pricing-advisor-table > tr > td:nth-child(8) {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+#pricing-panel #pricing-advisor-table > tr > td:nth-child(n + 3)::before {
+  display: block;
+  margin-bottom: 10px;
+  font-size: .7rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+#pricing-panel #pricing-advisor-table > tr > td:nth-child(3)::before { content: "Current price"; }
+#pricing-panel #pricing-advisor-table > tr > td:nth-child(4)::before { content: "Margin / gross profit"; }
+#pricing-panel #pricing-advisor-table > tr > td:nth-child(5)::before { content: "Suggested price"; }
+#pricing-panel #pricing-advisor-table > tr > td:nth-child(6)::before { content: "Price change"; }
+#pricing-panel #pricing-advisor-table > tr > td:nth-child(7)::before,
+#pricing-panel #pricing-advisor-table > tr > td:nth-child(8)::before { content: none; }
+#pricing-panel #pricing-advisor-table .portion-list > span {
+  grid-template-columns: 1fr;
+  gap: 2px;
+  padding-bottom: 6px;
+}
+#pricing-panel #pricing-advisor-table .portion-list b { color: var(--muted); font-weight: 500; }
+#pricing-panel #pricing-advisor-table > tr > td[colspan] {
+  grid-column: 1 / -1;
+  grid-row: auto;
+  width: auto;
+  padding: 16px;
+  text-align: center;
+}
+#pricing-panel #pricing-advisor-table > tr > td[colspan]::before { content: none; }
+#pricing-panel .pricing-directory > summary { padding: 20px 24px; }
+#pricing-panel .pricing-directory .pricing-table tbody > tr:hover { background: rgba(31, 95, 84, .035); }
+#pricing-panel .pricing-directory th:nth-child(2) { width: 26%; }
+#pricing-panel .pricing-directory th:nth-child(4) { width: 30%; }
+#pricing-panel .pricing-directory th:nth-child(5) { width: 25%; }
+#pricing-panel .shot-pricing-editor[open] { padding: 12px; border-radius: 8px; background: rgba(31, 95, 84, .04); }
+@media (min-width: 1500px) {
+  #pricing-panel #pricing-advisor-table { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  #pricing-panel .pricing-workspace-header { flex-direction: column; align-items: stretch; padding: 18px; }
+  #pricing-panel .pricing-workspace-header .search-field { flex: auto; min-width: 0; width: 100%; }
+  #pricing-panel .pricing-targets { grid-template-columns: 1fr; padding-inline: 4px; }
+  #pricing-panel > .pricing-advisor { padding: 16px !important; }
+  #pricing-panel #pricing-advisor-table > tr { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 16px; gap: 18px 12px; }
+  #pricing-panel #pricing-advisor-table > tr > td:nth-child(2) { grid-column: 1 / -1; }
+  #pricing-panel #pricing-advisor-table > tr > td:nth-child(7) { grid-column: 1 / -1; grid-row: 2; }
+  #pricing-panel #pricing-advisor-table > tr > td:nth-child(3) { grid-column: 1; grid-row: 3; }
+  #pricing-panel #pricing-advisor-table > tr > td:nth-child(4) { grid-column: 2; grid-row: 3; }
+  #pricing-panel #pricing-advisor-table > tr > td:nth-child(5) { grid-column: 1; grid-row: 4; }
+  #pricing-panel #pricing-advisor-table > tr > td:nth-child(6) { grid-column: 2; grid-row: 4; }
+  #pricing-panel #pricing-advisor-table > tr > td:nth-child(8) { grid-row: 5; }
+}

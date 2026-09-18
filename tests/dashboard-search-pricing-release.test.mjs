@@ -46,7 +46,7 @@ const now = new Date("2026-09-10T12:00:00Z");
 const liquor = {
   id: "liquor-1", kind: "Liquor", name: "Test liquor", tapPosition: 1,
   mappingVerified: true, costPerOz: 1, livePriceUpdatedAt: now.toISOString(),
-  portions: [{ name: "Single", price: 10, servingOz: 1.5 }, { name: "Double", price: 13.5, servingOz: 3 }],
+  portions: [{ name: "Single", price: 10, servingOz: 1.5 }, { name: "Double", price: 10, servingOz: 2 }],
 };
 
 test("liquor portions above eight dollars gross profit hold even below 82 percent margin", () => {
@@ -55,20 +55,38 @@ test("liquor portions above eight dollars gross profit hold even below 82 percen
   assert.equal(advisor.summary.priceChangeCount, 0);
   assert.equal(advisor.rows[0].portions[0].action, "hold");
   assert.equal(advisor.rows[0].portions[0].recommendedPricePerOz, 10);
-  assert.equal(advisor.rows[0].portions[1].recommendedPricePerOz, 13.5);
+  assert.equal(advisor.rows[0].portions[1].recommendedPricePerOz, 10);
   assert.equal(advisor.rows[0].publishEligible, false);
   assert.equal(getPmbPriceUpdateEligibility(liquor, { now }).eligible, false);
 });
 
-test("both liquor portions below eight dollars gross profit receive suggestions", () => {
+test("liquor warns only when both targets fail, independently for each portion", () => {
   const row = buildPricingAdvisor([{ ...liquor, portions: [
     { name: "Single", price: 9, servingOz: 1.5 },
-    { name: "Double", price: 10, servingOz: 3 },
+    { name: "Double", price: 9, servingOz: 2 },
   ] }], { now }).rows[0];
-  assert.equal(row.portions[0].action, "increase");
-  assert.equal(row.portions[0].recommendedPricePerOz, 9.5);
+  assert.equal(row.portions[0].action, "hold");
+  assert.equal(row.portions[0].recommendedPricePerOz, 9);
   assert.equal(row.portions[1].action, "increase");
-  assert.equal(row.portions[1].recommendedPricePerOz, 11);
+  assert.equal(row.portions[1].recommendedPricePerOz, 10);
+});
+
+test("liquor threshold boundaries and suggestions accept either target", () => {
+  for (const [cost, price, action, suggested] of [
+    [1.08, 6, "hold", 6], // Exactly 82%, less than $8 profit.
+    [2, 10, "hold", 10], // Below 82%, exactly $8 profit.
+    [1, 10, "hold", 10], // Both targets met.
+    [1.08, 5.99, "increase", 6], // Both fail; margin is reached first.
+    [2, 9.99, "increase", 10], // Both fail; dollar target is reached first.
+  ]) {
+    const advisor = buildPricingAdvisor([{ ...liquor, costPerOz: cost / 2,
+      portions: [{ name: "Double", servingOz: 2, price }],
+    }], { now });
+    const portion = advisor.rows[0].portions[0];
+    assert.equal(portion.action, action);
+    assert.equal(portion.recommendedPricePerOz, suggested);
+    assert.equal(advisor.summary.priceChangeCount, action === "increase" ? 1 : 0);
+  }
 });
 
 test("cost dates alone no longer trigger warnings but missing costs remain blocked", () => {

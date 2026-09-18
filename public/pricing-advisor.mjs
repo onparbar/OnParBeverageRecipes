@@ -180,14 +180,19 @@ export function evaluatePricingRecommendation(input = {}, options = {}) {
   const costPerOz = positiveNumber(input.costPerOz);
   const currentPricePerOz = positiveNumber(input.currentPricePerOz);
   const liquorProfitTarget = normalizedKind === "liquor" ? positiveNumber(settings.liquorMinimumGrossProfit) : 0;
-  const minimumPricePerOz = liquorProfitTarget
-    ? (costPerOz > 0 ? Math.ceil((costPerOz + liquorProfitTarget) * 100 - 1e-9) / 100 : 0)
-    : calculateTargetPricePerOz({
+  const marginTargetPrice = calculateTargetPricePerOz({
     costPerOz,
     targetMarginPercent: settings.targetMarginPercent,
     priceIncrement: settings.priceIncrement,
     sellableYieldPercent: settings.sellableYieldPercent,
   });
+  // Either target clears a liquor portion's warning; suggest the first one reached.
+  const minimumPricePerOz = liquorProfitTarget
+    ? (costPerOz > 0 ? Math.min(
+        marginTargetPrice || Infinity,
+        Math.ceil((costPerOz + liquorProfitTarget) * 100 - 1e-9) / 100,
+      ) : 0)
+    : marginTargetPrice;
   const currentMarginPercent = calculateGrossMarginPercent(costPerOz, currentPricePerOz);
   const issues = [];
 
@@ -219,7 +224,8 @@ export function evaluatePricingRecommendation(input = {}, options = {}) {
   if (minimumPricePerOz && !currentPricePerOz) {
     action = "set";
   } else if (minimumPricePerOz && (liquorProfitTarget
-    ? currentPricePerOz - costPerOz + 1e-9 < liquorProfitTarget
+    ? currentMarginPercent + 1e-9 < minimumMargin
+      && currentPricePerOz - costPerOz + 1e-9 < liquorProfitTarget
     : currentMarginPercent + 1e-9 < minimumMargin)) {
     action = "increase";
   } else if (minimumPricePerOz && currentPricePerOz) {

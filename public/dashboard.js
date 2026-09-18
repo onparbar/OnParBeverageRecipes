@@ -4598,7 +4598,7 @@ function renderShotPricing(visibleTapRows = []) {
     const suggestedPrices = new Map((recommendations.get(row.key)?.portions || []).map((portion) => [
       clean(portion.portionName).toLowerCase(),
       portion.costPerOz > 0 && portion.servingOz > 0 && portion.recommendedPricePerOz > 0
-        ? `Suggested ($8 minimum gross profit): ${money(portion.recommendedPricePerOz)}`
+        ? `Suggested (82% margin or $8 gross profit): ${money(portion.recommendedPricePerOz)}`
         : "Suggestion needs a mapped cost and serving size.",
     ]));
     const draftIdentity = JSON.stringify(row.portions.map(({ itemId, name }) => [itemId, name]));
@@ -4708,7 +4708,7 @@ async function submitPmbPortionPriceUpdate(updateKey) {
   if (!confirmDashboardAction(
     `Update both shot prices for ${row.name}?`,
     [...changes, `PMB PLU: ${row.plu}`, ...assignmentDetails],
-    "Liquor suggestions target at least $8 gross profit per Single or Double. Both PMB portions will be re-verified before and after saving.",
+    "Liquor price warnings apply only below both 82% margin and $8 gross profit per Single or Double. Both PMB portions will be re-verified before and after saving.",
   )) return;
 
   activePmbPortionPriceUpdateKey = key;

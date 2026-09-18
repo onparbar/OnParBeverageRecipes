@@ -290,17 +290,26 @@ export default function DashboardPage() {
         </section>
 
         <section className="panel" id="pricing-panel" role="tabpanel" aria-label="Tap Pricing">
-          <div className="toolbar">
+          <div className="toolbar pricing-workspace-header">
+            <div className="pricing-workspace-intro">
+              <h2>Tap Pricing</h2>
+              <p>Review opportunities, compare returns, and update your prices.</p>
+            </div>
             <label className="search-field">
               <span>Find tap or product</span>
-              <input id="pricing-search" type="search" placeholder="Search charge pricing..." />
+              <input id="pricing-search" type="search" placeholder="Product name or tap number" />
             </label>
+          </div>
+          <div className="pricing-targets" aria-label="Pricing targets">
+            <p><strong>Beer &amp; cocktails</strong><span>82% gross margin target</span></p>
+            <p><strong>Liquor</strong><span>Review only below both 82% margin and $8 profit per serving. Doubles are 2 oz.</span></p>
           </div>
 
           <section className="pricing-advisor" aria-labelledby="pricing-advisor-title">
             <div className="pricing-advisor__header">
               <div>
                 <h2 id="pricing-advisor-title">Pricing Suggestions</h2>
+                <p className="pricing-section-description">Current and suggested prices, side by side. Expand an editor when you’re ready.</p>
               </div>
             </div>
             <div className="pricing-advisor__summary" id="pricing-advisor-summary" aria-live="polite"></div>
