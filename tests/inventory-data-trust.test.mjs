@@ -102,7 +102,28 @@ test("cocktail prep deducts only tracked on-hand ingredients using the requested
   assert.deepEqual(buildRecipeInventoryContributions(recipe, catalog, {
     batchSizeOz: 1379,
     quantity: 1,
-  }), [{ id: "titos-1-75l", quantity: -6, baseline: 10 }, { id: "strawberry-lemonade", quantity: -8, baseline: 12 }]);
+  }), [{ id: "titos-1-75l", quantity: -6, baseline: 10 }]);
+});
+
+test("excluded prep juices need no inventory match and still contribute to batch scaling", () => {
+  for (const name of ["Strawberry lemonade", "Cranberry juice", "Cranberry"]) {
+    const recipe = { ingredients: [
+      { name: "Tito's", raw: "Tito's=6 bottles (1.75L)", oz: 355 },
+      { name, oz: 1024 },
+    ] };
+    assert.deepEqual(buildRecipeInventoryContributions(recipe, [
+      { id: "titos", name: "Tito's", baseline: 12 },
+    ], { batchSizeOz: 1379 / 2, quantity: 2 }), [
+      { id: "titos", quantity: -6, baseline: 12 },
+    ]);
+  }
+});
+
+test("the source recipe's pomegrante spelling maps to counted pomegranate schnapps", () => {
+  const recipe = { ingredients: [{ name: "Pomegrante Schnapps", raw: "Pomegrante Schnapps (1 Liter)=22 bottles", oz: 743.9 }] };
+  assert.deepEqual(buildRecipeInventoryContributions(recipe, [
+    { id: "pomegranate-schnapps", name: "Pomegranate Schnapps", baseline: 30 },
+  ]), [{ id: "pomegranate-schnapps", quantity: -22, baseline: 30 }]);
 });
 
 test("counted ingredients require a match and usable package quantity", () => {
