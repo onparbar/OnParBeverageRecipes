@@ -294,7 +294,9 @@ const EMPLOYEE_SHARED_RECIPE_CACHE_STORAGE_KEY = "cocktail-dashboard-employee-sh
 const OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY = "cocktail-dashboard-owner-login-sync-lock";
 const OWNER_LOGIN_SYNC_LOCK_MAX_AGE_MS = 2 * 60 * 1000;
 const ORDER_REHEARSAL_AVAILABLE = false;
-const DASHBOARD_STATE_REQUEST_TIMEOUT_MS = 6000;
+// Healthy remote reads can take about five seconds under load. Six seconds was
+// close enough to abort valid saved setup at the browser boundary.
+const DASHBOARD_STATE_REQUEST_TIMEOUT_MS = 12_000;
 const OPERATIONAL_SHARED_REQUEST_TIMEOUT_MS = 8000;
 const PAR_AGENT_RUN_REQUEST_TIMEOUT_MS = 30000;
 const WEEKLY_USAGE_CURRENT_STORAGE_KEY = "cocktail-dashboard-weekly-usage-current";

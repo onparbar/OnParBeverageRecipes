@@ -89,6 +89,11 @@ test("failed shared startup reads retry without reloading or publishing data", (
   assert.match(dashboardSource, /window\.addEventListener\("online", \(\) => \{ void retryFailedSharedReads\(\); \}\)/);
 });
 
+test("shared setup allows the healthy remote read to finish without restoring the old long startup", () => {
+  assert.match(dashboardSource, /const DASHBOARD_STATE_REQUEST_TIMEOUT_MS = 12_000/);
+  assert.doesNotMatch(dashboardSource, /const DASHBOARD_STATE_REQUEST_TIMEOUT_MS = 6_000/);
+});
+
 test("Performance keeps shot filters compatible and preserves the requested ranking size", () => {
   assert.match(dashboardSource, /function keepSellerRankingFiltersCompatible/);
   assert.match(dashboardSource, /sellerRankingCategory === "liquor" && sellerRankingWall === "main"/);
