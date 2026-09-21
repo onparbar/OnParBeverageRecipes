@@ -46,31 +46,31 @@ function draft(candidates, { cost = 300, extraItems = [], requirement = "require
   }).drafts[0];
 }
 
-test("Proof forecasts all eight Thursdays, including the next batch beyond week four", () => {
+test("Proof forecasts a full year so the next real need can satisfy its minimum", () => {
   const result = forecast();
-  assert.equal(PROOF_PREP_LOOK_AHEAD_WEEKS, 8);
+  assert.equal(PROOF_PREP_LOOK_AHEAD_WEEKS, 52);
   assert.equal(result.requirement, "not-required");
   const [candidate] = result.candidates;
-  assert.equal(candidate.forecastDemands.length, 8);
-  assert.deepEqual(candidate.forecastDemands.map(({ units }) => units), [0, 0, 0, 0, 0, 0, 12, 12]);
-  assert.equal(candidate.replacementNeedUnits, 12);
+  assert.equal(candidate.forecastDemands.length, 52);
+  assert.equal(candidate.forecastDemands.find(({ units }) => units > 0).week, 6);
+  assert.ok(candidate.replacementNeedUnits > 12);
 });
 
-test("saved order policy retains weeks five through eight and rejects later weeks", () => {
+test("saved order policy retains the full forecast horizon and rejects later weeks", () => {
   const [candidate] = forecast().candidates;
   const saved = normalizeVendorOrderPolicy({ proofMinimumCandidates: [{
-    ...candidate, forecastDemands: [...candidate.forecastDemands, { week: 8, units: 24 }],
+    ...candidate, forecastDemands: [...candidate.forecastDemands, { week: 52, units: 999 }],
   }] });
-  assert.equal(saved.proofMinimumCandidates[0].forecastDemands.length, 8);
-  assert.equal(saved.proofMinimumCandidates[0].forecastDemands.at(-1).week, 7);
-  assert.equal(saved.proofMinimumCandidates[0].forecastDemands.at(-1).units, 12);
+  assert.equal(saved.proofMinimumCandidates[0].forecastDemands.length, 52);
+  assert.equal(saved.proofMinimumCandidates[0].forecastDemands.at(-1).week, 51);
+  assert.notEqual(saved.proofMinimumCandidates[0].forecastDemands.at(-1).units, 999);
 });
 
-test("a later forecast never pads this week's Proof order or duplicates a future Monday", () => {
+test("a later genuine need tops up this week's Proof order to the minimum", () => {
   const result = draft(forecast().candidates);
-  assert.equal(result.lines.some((line) => line.id === "lime-juice"), false);
-  assert.equal(result.estimatedTotal, 300);
-  assert.equal(result.warnings.some((warning) => warning.code === "PROOF_DELIVERY_FEE"), true);
+  assert.equal(result.lines.find((line) => line.id === "lime-juice").requestedCases, 1);
+  assert.equal(result.estimatedTotal, 360);
+  assert.equal(result.warnings.some((warning) => warning.code === "PROOF_DELIVERY_FEE"), false);
 });
 
 test("nearer prep demand wins before a cheaper distant ingredient", () => {
@@ -90,17 +90,17 @@ test("existing ordered units are deducted before choosing a Proof top-up", () =>
     cost: 240,
     extraItems: [{ ...ingredient, onHand: 0, par: 12, orderUnits: 12, estimatedCost: 60, hasKnownPrice: true }],
   });
-  assert.equal(result.lines.find((line) => line.id === "lime-juice").requestedUnits, 12);
-  assert.equal(result.estimatedTotal, 300);
-  assert.equal(result.warnings.some((warning) => warning.code === "PROOF_MINIMUM_TOP_UP"), false);
+  assert.equal(result.lines.find((line) => line.id === "lime-juice").requestedUnits, 24);
+  assert.equal(result.estimatedTotal, 360);
+  assert.equal(result.warnings.some((warning) => warning.code === "PROOF_MINIMUM_TOP_UP"), true);
 });
 
 test("unrelated missing tap data does not discard justified ingredient candidates", () => {
   for (const missing of [{ currentStockKegs: null }, { name: "Unmapped Cocktail" }, { inventoryStateMissing: true }]) {
     const result = forecast({ tapInputs: [tap, { ...tap, key: "main:58", tapNumber: 58, ...missing }] });
     assert.equal(result.requirement, "unknown");
-    assert.equal(result.candidates[0].replacementNeedUnits, 12);
-    assert.equal(draft(result.candidates, { requirement: result.requirement }).estimatedTotal, 300);
+    assert.equal(result.candidates[0].replacementNeedUnits, 144);
+    assert.equal(draft(result.candidates, { requirement: result.requirement }).estimatedTotal, 360);
   }
 });
 
@@ -127,7 +127,7 @@ test("a verified saved count replaces a stale live field without treating missin
     savedInventoryItems: [{ id: ingredient.id, onHandDisplay: "2", hasCurrentCount: true }],
   });
   assert.equal(result.candidates[0].onHandUnits, 2);
-  assert.equal(result.candidates[0].replacementNeedUnits, 10);
+  assert.equal(result.candidates[0].replacementNeedUnits, 142);
   const stale = forecast({ savedInventoryItems: [{ id: ingredient.id, onHandDisplay: "2", hasCurrentCount: false }] });
   assert.deepEqual(stale.candidates, []);
   assert.equal(stale.requirement, "unknown");
@@ -142,13 +142,13 @@ test("refrigerated ingredients cannot become forecast minimum filler", () => {
 
 test("tap deduplication and separate wall stock remain intact", () => {
   const duplicate = forecast({ tapInputs: [tap, { ...tap }] });
-  assert.equal(duplicate.candidates[0].replacementNeedUnits, 12);
+  assert.equal(duplicate.candidates[0].replacementNeedUnits, 144);
   const separate = forecast({ tapInputs: [tap, { ...tap, key: "karaoke:95", tapNumber: 95, wall: "Karaoke", currentStockKegs: 8 }] });
-  assert.equal(separate.candidates[0].replacementNeedUnits, 12);
+  assert.equal(separate.candidates[0].replacementNeedUnits, 204);
 });
 
-test("the eight-week boundary does not justify purchases for a later ninth Thursday", () => {
-  const result = forecast({ tapInputs: [{ ...tap, currentStockKegs: 2 }] });
+test("the one-year boundary does not invent purchases beyond the forecast", () => {
+  const result = forecast({ tapInputs: [{ ...tap, currentStockKegs: 13.25 }] });
   assert.deepEqual(result.candidates, []);
   assert.equal(result.requirement, "not-required");
 });
@@ -158,8 +158,8 @@ test("minimum top-ups stop at the threshold and never add ineffective filler", (
   const alreadyMet = draft(candidates, { cost: 350 });
   assert.equal(alreadyMet.estimatedTotal, 350);
   assert.equal(alreadyMet.lineCount, 1);
-  const insufficient = draft(candidates, { cost: 250 });
-  assert.equal(insufficient.estimatedTotal, 250);
-  assert.equal(insufficient.lineCount, 1);
-  assert.ok(insufficient.warnings.some((warning) => warning.code === "PROOF_DELIVERY_FEE"));
+  const fartherNeeds = draft(candidates, { cost: 250 });
+  assert.equal(fartherNeeds.estimatedTotal, 370);
+  assert.equal(fartherNeeds.lines.find((line) => line.id === "lime-juice").requestedCases, 2);
+  assert.equal(fartherNeeds.warnings.some((warning) => warning.code === "PROOF_DELIVERY_FEE"), false);
 });

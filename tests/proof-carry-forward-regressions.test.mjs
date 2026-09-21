@@ -26,8 +26,10 @@ test("planned prep is consumed once and prevents a duplicate batch next Thursday
   const options = fixture();
   options.inventoryItems[0].onHandDisplay = "0";
   const result = buildProofPrepOrderContext(options);
-  assert.equal(result.candidates[0].projectedPrepUseOz, 120);
-  assert.deepEqual(result.candidates[0].forecastDemands.map(week => week.units), Array(8).fill(12));
+  assert.equal(result.candidates[0].projectedPrepUseOz, 720);
+  assert.equal(result.candidates[0].forecastDemands[0].units, 12);
+  assert.equal(result.candidates[0].forecastDemands[1].units, 12);
+  assert.equal(result.candidates[0].forecastDemands.at(-1).units, 72);
 });
 
 test("covered planned prep does not create a Proof purchasing requirement", () => {
@@ -54,7 +56,7 @@ test("duplicate tap observations do not double a planned batch", () => {
   const options = fixture();
   options.inventoryItems[0].onHandDisplay = "0";
   options.tapInputs.push({ ...options.tapInputs[0] });
-  assert.equal(buildProofPrepOrderContext(options).candidates[0].projectedPrepUseOz, 120);
+  assert.equal(buildProofPrepOrderContext(options).candidates[0].projectedPrepUseOz, 720);
 });
 
 test("an ambiguous cross-wall batch cannot claim complete coverage", () => {

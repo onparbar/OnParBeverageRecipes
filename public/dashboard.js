@@ -8294,7 +8294,7 @@ function renderWeeklyPlanReview(plan) {
 }
 
 function getCurrentVendorOrderPolicy(plan, snapshot = null) {
-  if (toNumber(snapshot?.orderPolicy?.version) >= 2) {
+  if (toNumber(snapshot?.orderPolicy?.version) >= 3) {
     return normalizeVendorOrderPolicy(snapshot.orderPolicy);
   }
   const savedInventoryItems = getWeeklyPlanInventoryItems();
@@ -8339,6 +8339,7 @@ function getCurrentVendorOrderPolicy(plan, snapshot = null) {
       };
     });
   return normalizeVendorOrderPolicy({
+    cutoffConfirmations: snapshot?.orderPolicy?.cutoffConfirmations,
     proofMinimum: 350,
     proofMinimumCandidates: proofPrep.candidates,
     proofPrepRequirement: proofPrep.requirement,

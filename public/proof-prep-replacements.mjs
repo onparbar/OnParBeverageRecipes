@@ -1,6 +1,6 @@
 import { carryForwardPlannedProofPrep } from "./proof-planned-prep.mjs";
 
-export const PROOF_PREP_LOOK_AHEAD_WEEKS = 8;
+export const PROOF_PREP_LOOK_AHEAD_WEEKS = 52;
 
 export function buildProofPrepOrderContext(options = {}) {
   if (!Array.isArray(options.tapInputs) || !options.tapInputs.length) {
@@ -186,8 +186,9 @@ export function buildProofPrepReplacementCandidates(options = {}) {
 }
 
 // Forecast production per tap. Only ingredient demand is combined, never keg stock.
-// Weeks 0-1 are the purchasing window. Later sessions justify shelf-stable
-// minimum top-ups, selected in the order their ingredients will be needed.
+// Forecast far enough ahead to identify the next genuine shelf-stable needs.
+// Proof minimum top-ups select these needs chronologically until the order
+// reaches the delivery minimum; they never add unrelated filler.
 function buildProofLookAheadContext(options) {
   const usage = new Map();
   const recipes = Array.isArray(options.recipes) ? options.recipes : [];

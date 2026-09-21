@@ -66,8 +66,8 @@ test("Proof looks beyond two weeks and subtracts inventory rather than old pars"
     inventoryItems: [{ ...cabinet[1], vendor: "Proof", vendorSku: "lime", onHandDisplay: "3", parDisplay: "40" }],
   });
   assert.equal(context.requirement, "not-required");
-  assert.equal(context.candidates[0].replacementNeedUnits, 13);
-  assert.equal(context.candidates[0].forecastDemands.length, 8);
+  assert.equal(context.candidates[0].replacementNeedUnits, 117);
+  assert.equal(context.candidates[0].forecastDemands.length, 52);
   assert.equal(context.candidates[0].forecastDemands.find((entry) => entry.units > 3).week, 2);
 });
 
