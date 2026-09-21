@@ -1300,10 +1300,12 @@ let visibleGlobalSearchResults = [];
 let activeGlobalSearchResultIndex = -1;
 let ownerLoginSyncStarted = false;
 let dashboardBriefingInitialLoadPending = true;
+const DASHBOARD_BACKGROUND_REFRESH_MS = 120_000;
 
 init().finally(() => {
   dashboardBriefingInitialLoadPending = false;
   renderDashboardOverview();
+  void retryFailedSharedReads();
 });
 
 async function init() {
@@ -1313,10 +1315,13 @@ async function init() {
     // The owner dashboard can still load when local storage is unavailable; its
     // existing save paths will surface their own fail-closed recovery notices.
   }
-  await loadSharedDashboardState();
+  // Static files and shared setup are independent. Starting them together keeps
+  // one slow shared read from making the whole dashboard look frozen.
+  const sharedDashboardLoad = loadSharedDashboardState();
 
   if (isEmployeeDashboard) {
-    const [csv, newCocktailsCsv] = await Promise.all([
+    const [, csv, newCocktailsCsv] = await Promise.all([
+      sharedDashboardLoad,
       fetchCsv("/api/recipe-data?set=active"),
       fetchCsv("/api/recipe-data?set=new"),
     ]);
@@ -1333,7 +1338,8 @@ async function init() {
     return;
   }
 
-  const [csv, newCocktailsCsv, inventoryCsv, kegLevelsCsv, weeklyUsageChangeoversCsv] = await Promise.all([
+  const [, csv, newCocktailsCsv, inventoryCsv, kegLevelsCsv, weeklyUsageChangeoversCsv] = await Promise.all([
+    sharedDashboardLoad,
     fetchCsv(CSV_PATH),
     fetchCsv(NEW_COCKTAILS_CSV_PATH),
     fetchCsv(INVENTORY_CSV_PATH),
@@ -1351,19 +1357,25 @@ async function init() {
   inventorySourceRows = parseCsv(inventoryCsv);
   migrateInventoryOnHandOverrides(inventorySourceRows);
   inventoryItems = mergeCustomInventoryItems(parseInventory(inventorySourceRows));
-  await loadSharedInventoryState();
-  inventoryItems = mergeCustomInventoryItems(parseInventory(inventorySourceRows));
   kegWallItems = kegLevelsCsv ? parseKegLevels(parseCsv(kegLevelsCsv)) : [];
   kegPricingItems = buildKegPricingCatalog(kegWallItems, getCurrentKegPricingTapItems());
   // Tap setup supplies identities only. Usage comes from saved/live PMB reports.
   weeklyUsageItems = kegWallItems.map(item => buildWeeklyUsageItemFromAssignment({ ...item, name: item.brand })).filter(Boolean);
   weeklyUsageChangeovers = weeklyUsageChangeoversCsv ? parseWeeklyUsageChangeovers(parseCsv(weeklyUsageChangeoversCsv)) : [];
   applyWeeklyUsageProductChangeovers();
-  await loadSharedWeeklyUsageState();
-  await loadParAgentState();
-  await loadWeeklyOrderTracking();
-  await loadDashboardStaffPrepPlan();
-  await loadDashboardActivity();
+  // These records are independent. A database slowdown should cost one bounded
+  // timeout window, not a separate timeout for every dashboard section.
+  await Promise.all([
+    loadSharedInventoryState().then(() => {
+      inventoryItems = mergeCustomInventoryItems(parseInventory(inventorySourceRows));
+    }),
+    loadSharedWeeklyUsageState(),
+    loadParAgentState(),
+    loadWeeklyOrderTracking(),
+    loadDashboardStaffPrepPlan(),
+    loadDashboardActivity(),
+  ]);
+  reconcileWeeklyOrderTrackingRevision();
   renderDashboardSharedStateStatus();
   hydrateCategoryFilter(recipes);
   bindEvents();
@@ -1382,6 +1394,90 @@ async function init() {
   // Recheck shared data after login sync, including a failed initial read or
   // changes completed by another manager while this device was loading.
   await refreshSharedWeeklyUsageForDisplay();
+}
+
+let failedSharedReadRecoveryPromise = null;
+
+function retryFailedSharedReads() {
+  if (failedSharedReadRecoveryPromise) return failedSharedReadRecoveryPromise;
+  const busy = () => isEmployeeDashboard || dashboardBriefingInitialLoadPending
+    || unifiedPmbRefreshRunning || weeklyPlanUpdating || parAgentRunning
+    || document.activeElement?.matches("input, textarea, select, [contenteditable=true]");
+  if (busy()) return Promise.resolve(false);
+  const dashboardBusy = () => dashboardSharedPatchScheduled || dashboardSharedPendingSlices.size > 0
+    || hasDashboardSharedOutbox() || ["loading", "saving", "importing", "conflict"].includes(dashboardSharedSyncStatus);
+  const inventoryBusy = () => inventorySharedSaving || inventoryFieldSyncPendingCount > 0
+    || inventoryFieldSyncTimers.size > 0 || getPendingInventoryOperations().length > 0;
+  const kegBusy = () => parAgentStateOutbox || parAgentStateSyncTimer || parAgentInputsChangedAt;
+  const jobs = [];
+  // These are read-only retries of failed startup reads. Pending edits retain
+  // their existing revision-checked recovery flow; never import or publish here.
+  if (!dashboardSharedProvisioned && !dashboardBusy()) {
+    const generation = dashboardSharedMutationGeneration;
+    const revision = dashboardSharedState.revision;
+    jobs.push(async () => {
+      const [result, csv, newCsv] = await Promise.all([
+        requestDashboardSharedState(), fetchCsv(CSV_PATH), fetchCsv(NEW_COCKTAILS_CSV_PATH),
+      ]);
+      return () => {
+        if (busy() || dashboardBusy() || dashboardSharedMutationGeneration !== generation
+          || dashboardSharedState.revision !== revision) return false;
+        dashboardSharedProvisioned = true;
+        applySharedDashboardState(result.state);
+        if (result.state.initialized) {
+          recipes = [
+            ...applyMenuOrder(parseRecipes(parseCsv(csv))),
+            ...applyRecipeOrder(parseRecipes(parseCsv(newCsv)), NEW_RECIPE_ORDER),
+            ...customRecipes,
+          ].map(applyRecipeEdits);
+          dashboardSharedWritesPaused = false;
+          dashboardSharedWritePauseReason = "";
+        }
+        setDashboardSharedSyncStatus(result.state.initialized ? "saved" : "setup",
+          result.state.initialized ? "Shared configuration is current." : "Shared setup has not been initialized. Review setup on the service computer.");
+        return true;
+      };
+    });
+  }
+  if (!inventorySharedProvisioned && !inventoryBusy()) {
+    const revision = inventorySharedRevision;
+    const generation = inventoryOutboxClientOrder;
+    jobs.push(async () => {
+      const state = await requestSharedInventory();
+      return () => {
+        if (busy() || inventoryBusy() || inventorySharedRevision !== revision
+          || inventoryOutboxClientOrder !== generation) return false;
+        inventorySharedProvisioned = true;
+        inventorySharedInitialized = Boolean(state.initialized);
+        if (state.initialized) applySharedInventoryState(state, { rebuild: true });
+        inventorySharedSaveError = "";
+        inventorySharedMessage = state.initialized ? "Shared inventory is current."
+          : "Setup needed: import inventory only from the service computer. Changes stay on this device.";
+        return true;
+      };
+    });
+  }
+  if (!parAgentState && !kegBusy()) {
+    const generation = parAgentStateMutationVersion;
+    jobs.push(async () => {
+      const state = await requestParAgentState();
+      return () => {
+        if (busy() || kegBusy() || parAgentState || parAgentStateMutationVersion !== generation) return false;
+        applyParAgentState(state, { hydrate: true });
+        parAgentError = "";
+        return true;
+      };
+    });
+  }
+  if (!jobs.length) return Promise.resolve(false);
+  failedSharedReadRecoveryPromise = Promise.allSettled(jobs.map(job => job()))
+    .then(results => {
+      const applied = results.map(result => result.status === "fulfilled" && result.value());
+      const recovered = applied.some(Boolean);
+      if (recovered) render();
+      return recovered;
+    }).finally(() => { failedSharedReadRecoveryPromise = null; });
+  return failedSharedReadRecoveryPromise;
 }
 
 async function runOwnerLoginSync() {
@@ -2387,12 +2483,9 @@ function setDashboardSharedSyncStatus(status, message) {
 async function loadDashboardActivity() {
   if (isEmployeeDashboard) return;
   try {
-    const response = await fetch("/api/dashboard-activity", {
-      cache: "no-store",
-      credentials: "same-origin",
+    const { response, result } = await requestOperationalSharedJson("/api/dashboard-activity", {
       headers: { Accept: "application/json" },
     });
-    const result = await parseJsonResponse(response);
     if (!response.ok || !Array.isArray(result)) throw new Error(result?.error || "Shared change history is unavailable.");
     dashboardActivity = result;
     dashboardActivityMessage = result.length
@@ -3130,6 +3223,20 @@ function bindEvents() {
       button.closest("details")?.removeAttribute("open");
     });
   });
+  const menu = document.querySelector(".dashboard-menu");
+  if (menu) {
+    const closeOutsideMenu = (event) => {
+      if (menu.open && !menu.contains(event.target)) menu.open = false;
+    };
+    document.addEventListener("pointerdown", closeOutsideMenu);
+    document.addEventListener("focusin", closeOutsideMenu);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && menu.open) {
+        menu.open = false;
+        menu.querySelector("summary")?.focus();
+      }
+    });
+  }
   document.querySelector("#onpar-insights")?.addEventListener("change", (event) => {
     const category = event.target.closest("[data-seller-ranking-category]");
     const wall = event.target.closest("[data-seller-ranking-wall]");
@@ -3359,25 +3466,27 @@ function bindEvents() {
     if (!event.target.closest(".untappd-search-field")) hideUntappdSearchResults();
   });
   window.addEventListener("focus", () => {
+    void retryFailedSharedReads();
+    void refreshSharedWeeklyUsageForDisplay();
     void refreshWeeklyOrderTracking();
     void refreshDashboardStaffPrepPlan();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
+    void retryFailedSharedReads();
     void refreshSharedWeeklyUsageForDisplay();
     void refreshWeeklyOrderTracking();
     void refreshDashboardStaffPrepPlan();
   });
-  window.addEventListener("focus", () => {
-    void refreshSharedWeeklyUsageForDisplay();
-  });
+  window.addEventListener("online", () => { void retryFailedSharedReads(); });
   void refreshTapRepairBriefing();
   window.setInterval(() => {
     if (document.visibilityState !== "visible") return;
     void refreshTapRepairBriefing();
     void refreshDashboardStaffPrepPlan();
+    void retryFailedSharedReads();
     void refreshSharedWeeklyUsageForDisplay();
-  }, 30_000);
+  }, DASHBOARD_BACKGROUND_REFRESH_MS);
 }
 
 function keepSellerRankingFiltersCompatible({ categoryChanged = false, wallChanged = false } = {}) {
@@ -5815,24 +5924,24 @@ async function recallCurrentWeeklyPlan() {
 
 async function loadWeeklyOrderTracking() {
   try {
-    const response = await fetch("/api/weekly-order-tracking", {
-      cache: "no-store",
-      credentials: "same-origin",
+    const { response, result } = await requestOperationalSharedJson("/api/weekly-order-tracking", {
       headers: { Accept: "application/json" },
     });
-    const result = await parseJsonResponse(response);
     if (!response.ok) throw new Error(result?.error || "Weekly order tracking could not be loaded.");
     weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
-    if (parAgentState && weeklyOrderTracking.stateRevision > toNumber(parAgentState.revision)) {
-      parAgentState.revision = weeklyOrderTracking.stateRevision;
-      if (parAgentState.recommendations) {
-        parAgentState.recommendations.publishedStateRevision = weeklyOrderTracking.stateRevision;
-      }
-    }
+    reconcileWeeklyOrderTrackingRevision();
     weeklyOrderTrackingMessage = weeklyOrderTracking.message;
   } catch (error) {
     weeklyOrderTracking = normalizeWeeklyOrderTracking();
     weeklyOrderTrackingMessage = error?.message || "Weekly order tracking could not be loaded.";
+  }
+}
+
+function reconcileWeeklyOrderTrackingRevision() {
+  if (!parAgentState || weeklyOrderTracking.stateRevision <= toNumber(parAgentState.revision)) return;
+  parAgentState.revision = weeklyOrderTracking.stateRevision;
+  if (parAgentState.recommendations) {
+    parAgentState.recommendations.publishedStateRevision = weeklyOrderTracking.stateRevision;
   }
 }
 
@@ -5889,12 +5998,9 @@ let dashboardFinishWeekMessage = "";
 
 async function loadDashboardStaffPrepPlan() {
   try {
-    const response = await fetch("/api/staff-prep-plan", {
-      cache: "no-store",
-      credentials: "same-origin",
+    const { response, result } = await requestOperationalSharedJson("/api/staff-prep-plan", {
       headers: { Accept: "application/json" },
     });
-    const result = await parseJsonResponse(response);
     if (!response.ok) throw new Error(result?.error || "Cocktail prep history could not be loaded.");
     dashboardStaffPrepPlan = normalizeDashboardStaffPrepPlan(result);
     return true;

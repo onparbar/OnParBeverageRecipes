@@ -66,14 +66,11 @@ test("saved order policy retains weeks five through eight and rejects later week
   assert.equal(saved.proofMinimumCandidates[0].forecastDemands.at(-1).units, 12);
 });
 
-test("a later justified prep case closes the Proof minimum without buying the full horizon", () => {
+test("a later forecast never pads this week's Proof order or duplicates a future Monday", () => {
   const result = draft(forecast().candidates);
-  const lime = result.lines.find((line) => line.id === "lime-juice");
-  assert.equal(lime.requestedCases, 1);
-  assert.equal(lime.requestedUnits, 12);
-  assert.match(lime.reason, /Thursday 7/);
-  assert.equal(result.estimatedTotal, 360);
-  assert.equal(result.warnings.some((warning) => warning.code === "PROOF_DELIVERY_FEE"), false);
+  assert.equal(result.lines.some((line) => line.id === "lime-juice"), false);
+  assert.equal(result.estimatedTotal, 300);
+  assert.equal(result.warnings.some((warning) => warning.code === "PROOF_DELIVERY_FEE"), true);
 });
 
 test("nearer prep demand wins before a cheaper distant ingredient", () => {
@@ -103,7 +100,7 @@ test("unrelated missing tap data does not discard justified ingredient candidate
     const result = forecast({ tapInputs: [tap, { ...tap, key: "main:58", tapNumber: 58, ...missing }] });
     assert.equal(result.requirement, "unknown");
     assert.equal(result.candidates[0].replacementNeedUnits, 12);
-    assert.equal(draft(result.candidates, { requirement: result.requirement }).estimatedTotal, 360);
+    assert.equal(draft(result.candidates, { requirement: result.requirement }).estimatedTotal, 300);
   }
 });
 

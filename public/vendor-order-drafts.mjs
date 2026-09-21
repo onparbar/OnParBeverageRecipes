@@ -11,6 +11,10 @@ const VENDOR_ORDER_IDENTITY_FALLBACKS = new Map([
 ]);
 const RETIRED_PRODUCT_PATTERN = /\b(?:breakfast stout|apple pucker)\b/i;
 const PROOF_INDIVIDUAL_UNIT_SKUS = new Set(["437102"]);
+// Monday's order may cover only the current and following Thursday. Demand
+// beyond that belongs to a later Monday and must not be pulled forward merely
+// to avoid Proof's delivery fee.
+const PROOF_AUTOMATIC_TOP_UP_WEEKS = 2;
 
 function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -487,7 +491,9 @@ function selectProofMinimumTopUps(candidates = [], subtotal = 0, minimum = 350, 
         const cases = selected.get(item.id)?.caseCount || 0;
         if (cases >= item.maxCases) return [];
         const available = Number(item.onHandUnits || 0) + item.alreadyOrderedUnits + cases * item.packSize;
-        const demand = item.forecastDemands?.find((entry) => entry.units > available);
+        const demand = item.forecastDemands?.find((entry) => (
+          entry.week < PROOF_AUTOMATIC_TOP_UP_WEEKS && entry.units > available
+        ));
         return demand ? [{ item, week: demand.week }] : [];
       }).sort((a, b) => a.week - b.week
         || a.item.caseCostCents - b.item.caseCostCents
