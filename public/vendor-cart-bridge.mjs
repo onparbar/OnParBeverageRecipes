@@ -14,6 +14,17 @@ export function getVendorCartLabel(order) {
   return order?.vendorKey === "heidelberg" ? "BEES" : order?.vendor;
 }
 
+function getVendorCartLineName(vendorKey, line) {
+  const vendorSku = String(line?.vendorSku ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, "");
+  // BEES lists Heidelberg 41189 as "Blake's Triple Jam" while the saved
+  // pricing record uses "Blake's Hard Cider Triple Jam". Send the stable
+  // ordering identity so an exact SKU search can accept the visible result.
+  if (vendorKey === "heidelberg" && /^(?:0?41189C?|41189)$/.test(vendorSku)) {
+    return "Triple Jam Cider";
+  }
+  return line.name;
+}
+
 export function buildVendorCartRequest(view, { now = Date.now } = {}) {
   const order = view?.order;
   return {
@@ -27,7 +38,7 @@ export function buildVendorCartRequest(view, { now = Date.now } = {}) {
     lineCount: order.lineCount,
     lines: (order.lines || []).map((line) => ({
       internalItemId: line.internalItemId,
-      name: line.name,
+      name: getVendorCartLineName(order.vendorKey, line),
       vendorSku: line.vendorSku,
       packSize: line.packSize,
       requestedCases: line.requestedCases,

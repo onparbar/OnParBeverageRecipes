@@ -20,6 +20,7 @@ const PRODUCT_IDENTITIES = Object.freeze({
   "yuengling": { include: ["yuengling", "traditional", "lager"] },
   "triple jam": { include: ["blake", "triple", "jam"] },
   "triple jam cider": { include: ["blake", "triple", "jam"] },
+  "blakes hard cider triple jam": { include: ["blake", "triple", "jam"] },
   "garage beer regular": { include: ["garage", "beer"], exclude: ["lime"] },
   "garage beer": { include: ["garage", "beer"], exclude: ["lime"] },
   "garage beer lime": { include: ["garage", "beer", "lime"] },

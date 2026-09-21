@@ -52,4 +52,5 @@ test("vendor handoff uses extension-private storage and remains review-only", as
   const missingBeesIdentities = heidelbergKeys.filter((key) => !identityKeys.has(key));
   assert.deepEqual(missingBeesIdentities, []);
   assert.ok(identityKeys.has("non alcoholic beer"));
+  assert.ok(identityKeys.has("blakes hard cider triple jam"));
 });

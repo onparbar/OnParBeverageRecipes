@@ -103,6 +103,25 @@ test("vendor cart request exposes only approved order fields", () => {
   });
 });
 
+test("Heidelberg Triple Jam uses the exact BEES ordering identity", () => {
+  const request = buildVendorCartRequest(createOrderView({
+    id: "heidelberg:2026-09-21",
+    vendor: "Heidelberg",
+    vendorKey: "heidelberg",
+    lines: [{
+      internalItemId: "triple-jam-cider",
+      name: "Blake's Hard Cider Triple Jam",
+      vendorSku: "41189",
+      packSize: 1,
+      requestedCases: 1,
+      requestedUnits: 1,
+    }],
+  }), { now: () => 1234 });
+
+  assert.equal(request.lines[0].name, "Triple Jam Cider");
+  assert.equal(request.lines[0].vendorSku, "41189");
+});
+
 test("vendor cart bridge accepts only the matching same-origin response", async () => {
   const fake = createFakeWindow();
   const promise = sendVendorCartRequest(createOrderView(), {
