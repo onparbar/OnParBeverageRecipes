@@ -26,7 +26,8 @@ function managed(item) {
 }
 
 // Stock stays assigned to its tap. Sum ingredients only after forecasting whole
-// batches for each of the next two Thursday prep sessions.
+// batches for the current Thursday prep session. Future weeks are recalculated
+// from the next saved inventory count instead of being bought ahead.
 export function buildRollingCocktailIngredientOrders({
   inventoryItems = [], tapInputs = [], recipes = [], recipeAliases = {},
 } = {}) {
@@ -50,7 +51,7 @@ export function buildRollingCocktailIngredientOrders({
     const share = Math.min(100, nonnegative(tap.preThursdayUsageSharePct) ?? (300 / 7)) / 100;
     let remaining = Math.max(0, stock - average * share);
     const batches = [];
-    for (let week = 0; week < 2; week += 1) {
+    for (let week = 0; week < 1; week += 1) {
       batches[week] = Math.max(0, Math.ceil(average * (1 + cushion) - remaining - 1e-9));
       remaining = Math.max(0, remaining + batches[week] - average);
     }
@@ -70,13 +71,13 @@ export function buildRollingCocktailIngredientOrders({
       if (!item || !managed(item)) continue;
       const unitOz = nonnegative(item.bottleOz);
       if (!(unitOz > 0)) { issues.push(`${item.name}: inventory package size is missing.`); continue; }
-      const entry = demand.get(item.id) || { units: [0, 0], taps: new Set() };
+      const entry = demand.get(item.id) || { units: [0], taps: new Set() };
       batches.forEach((count, week) => { entry.units[week] += ounces * count / unitOz; });
       entry.taps.add(n);
       demand.set(item.id, entry);
     }
   }
-  if (!seen.size) issues.push("Saved cocktail tap stock and usage are required for the two-Thursday ingredient plan.");
+  if (!seen.size) issues.push("Saved cocktail tap stock and usage are required for the current Thursday ingredient plan.");
   return inventoryItems.map((item) => {
     if (!managed(item)) return item;
     const onHand = item.hasCurrentCount === false ? null : nonnegative(item.onHand);
@@ -93,8 +94,8 @@ export function buildRollingCocktailIngredientOrders({
       par: prep + reserve, orderUnits: quantity,
       estimatedCost: item.excludeFromOrderCost ? 0 : quantity * (Number(item.unitCost) || 0),
       orderHoldReason: hold || item.orderHoldReason || "",
-      rollingPlanReason: `Two Thursday prep sessions need ${prep} units; reserve ${reserve}; ${onHand ?? "unknown"} on hand. Order ${quantity}${item.casePackaged ? ` units in packs of ${pack}` : " units"}.`,
-      rollingPrepWeeks: entry?.units || [0, 0], rollingPrepTapNumbers: [...(entry?.taps || [])],
+      rollingPlanReason: `This Thursday prep needs ${prep} units; reserve ${reserve}; ${onHand ?? "unknown"} on hand. Order ${quantity}${item.casePackaged ? ` units in packs of ${pack}` : " units"}.`,
+      rollingPrepWeeks: entry?.units || [0], rollingPrepTapNumbers: [...(entry?.taps || [])],
     };
   });
 }
@@ -121,7 +122,7 @@ export function netRollingLiquorTapRecommendations(recommendations = [], invento
       ...r, orderQty, suggestedBottleOrderQty: orderQty,
       actionType: requested > used ? "order" : "none", cabinetUsedQty: used,
       cabinetReservedForCocktails: reserved, cabinetInventoryId: item.id,
-      reason: `${r.reason || ""} ${used} cabinet bottles cover the refill after reserving two Thursday sessions and the small reserve.`.trim(),
+      reason: `${r.reason || ""} ${used} cabinet bottles cover the refill after reserving this Thursday's prep and the small reserve.`.trim(),
     };
   });
 }
