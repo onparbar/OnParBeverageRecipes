@@ -14039,6 +14039,57 @@ function stageInventoryFieldOutbox(key, payload) {
   return inventoryFieldOutbox[key];
 }
 
+function stageInventoryFieldBatchOutbox() {
+  const pendingFields = Object.entries(inventoryFieldOutbox)
+    .map(([key, entry]) => ({ key, entry: normalizeOperationalOutboxEntry(entry) }));
+  if (!pendingFields.length
+    || inventoryActionOutbox.length
+    || inventoryQueuedFieldKeys.size
+    || inventoryQueuedActionIds.size
+    || inventoryFieldSyncPendingCount > 0
+    || pendingFields.some(({ entry }) => !entry || entry.conflict)) return null;
+  const changes = pendingFields.map(({ entry }) => ({
+    id: clean(entry.payload.id),
+    field: clean(entry.payload.field),
+    value: clean(entry.payload.value),
+  }));
+  if (changes.some((change) => !change.id || !["onHand", "par"].includes(change.field))) return null;
+  const entry = createOperationalOutboxEntry({
+    baseRevision: inventorySharedRevision,
+    payload: {
+      action: "batch-update-fields",
+      source: "field-auto-save",
+      changes,
+      countedAt: new Date().toISOString(),
+      recoveryOptions: {
+        applyState: true,
+        rebuild: true,
+        successMessage: "Shared inventory saved.",
+      },
+    },
+    updatedAt: new Date().toISOString(),
+    clientOrder: Math.min(...pendingFields.map(({ entry: pending }) => pending.clientOrder)),
+  });
+  if (!entry) return null;
+
+  // Persist the combined operation before removing its individual recovery
+  // entries so a browser interruption can never discard an entered count.
+  inventoryActionOutbox.push(entry);
+  if (!saveInventoryActionOutbox()) {
+    inventoryActionOutbox = inventoryActionOutbox.filter((candidate) => candidate.id !== entry.id);
+    return null;
+  }
+  const previousFields = inventoryFieldOutbox;
+  inventoryFieldOutbox = {};
+  if (!saveInventoryFieldOutbox()) {
+    inventoryFieldOutbox = previousFields;
+    inventoryActionOutbox = inventoryActionOutbox.filter((candidate) => candidate.id !== entry.id);
+    saveInventoryActionOutbox();
+    return null;
+  }
+  return entry;
+}
+
 function overlayInventoryFieldOutbox() {
   Object.values(inventoryFieldOutbox).forEach((entry) => {
     const payload = entry?.payload || {};
@@ -14498,7 +14549,9 @@ function scheduleInventoryFieldSync(id, field, value) {
   inventorySharedSaving = true;
   const timer = setTimeout(() => {
     inventoryFieldSyncTimers.delete(key);
-    queueInventoryFieldSync(key, payload);
+    // Flush every pending field together. A full weekly count should be one
+    // revision-bound save, not dozens of sequential network requests.
+    flushPendingInventorySyncs();
   }, 500);
   inventoryFieldSyncTimers.set(key, { timer, payload });
   renderWeeklyPlan();
@@ -14600,6 +14653,7 @@ async function flushPendingInventorySyncs() {
   inventoryFieldSyncTimers.clear();
   timers.forEach((timer) => clearTimeout(timer));
   inventoryFieldSyncFailures.clear();
+  stageInventoryFieldBatchOutbox();
   const operations = getPendingInventoryOperations();
   const conflictEntry = operations.find(({ entry }) => entry?.conflict)?.entry;
   if (operations.length && !conflictEntry) {
