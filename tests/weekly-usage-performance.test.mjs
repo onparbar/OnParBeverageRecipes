@@ -173,14 +173,13 @@ test("combines the same drink poured from multiple walls into one ranking", () =
   assert.equal(performance.top[0].trendOz, 150);
 });
 
-test("returns an unavailable state when no PMB-sourced history exists", () => {
+test("uses CSV fallback when no PMB-sourced history exists and units can be converted", () => {
   const performance = buildWeeklyUsagePerformance([
     item({ id: "legacy", history: [{ label: latest, value: 0.5 }] }),
-  ]);
+  ], { getFullOunces: () => 1984 });
 
-  assert.equal(performance.latestLabel, "");
-  assert.equal(performance.capturedCount, 0);
-  assert.equal(performance.currentComplete, false);
-  assert.deepEqual(performance.top, []);
-  assert.deepEqual(performance.bottom, []);
+  assert.equal(performance.latestLabel, latest);
+  assert.equal(performance.capturedCount, 1);
+  assert.equal(performance.currentComplete, true);
+  assert.equal(performance.top[0].currentOz, 992);
 });

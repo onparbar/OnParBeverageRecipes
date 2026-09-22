@@ -1,6 +1,6 @@
-import { isUsableWeeklyUsageEntry } from "./weekly-usage-evidence.mjs";
+import { isUsableWeeklyUsageEntry, selectWeeklyUsageHistory } from "./weekly-usage-evidence.mjs";
 import { getTapAssignmentUsageStart } from "./confirmed-tap-starts.mjs";
-import { isPmbUsageEntry, getPmbWeeklyUsageRange } from "./pmb-weekly-usage-policy.mjs";
+import { getPmbWeeklyUsageRange } from "./pmb-weekly-usage-policy.mjs";
 
 const PERFORMANCE_CATEGORIES = new Set(["all", "beer", "cocktail", "liquor"]);
 function shiftWeek(startTime, direction) {
@@ -39,8 +39,8 @@ function getLabelStartTime(label) {
 
 function getTimedPmbHistory(item) {
   const history = [];
-  (Array.isArray(item?.history) ? item.history : []).forEach((entry) => {
-    if (!isPmbUsageEntry(entry) || !getPmbWeeklyUsageRange(entry.label)) return;
+  selectWeeklyUsageHistory(item?.history).forEach((entry) => {
+    if (!getPmbWeeklyUsageRange(entry.label)) return;
     const startTime = getLabelStartTime(entry.label);
     if (startTime) history.push({ entry, startTime });
   });

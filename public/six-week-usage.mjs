@@ -1,4 +1,4 @@
-import { isUsableWeeklyUsageEntry } from "./weekly-usage-evidence.mjs";
+import { isUsableWeeklyUsageEntry, selectWeeklyUsageHistory } from "./weekly-usage-evidence.mjs";
 
 export function getSixWeekUsage(item, now = new Date(), windowWeeks = 6) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
@@ -9,7 +9,7 @@ export function getSixWeekUsage(item, now = new Date(), windowWeeks = 6) {
   const end = monday.getTime();
   const weekMs = 7 * 86400000;
   const weeks = new Map();
-  for (const entry of item.history || []) {
+  for (const entry of selectWeeklyUsageHistory(item.history)) {
     if (!isUsableWeeklyUsageEntry(entry)) continue;
     const match = String(entry.label || "").match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
     if (!match || entry.hasValue === false || entry.value == null || entry.value === "") continue;

@@ -81,5 +81,5 @@ test("weekly snapshots display saved levels and counts without replacing missing
   assert.match(summaryHtml, /Simple syrup needed for next week<\/span><strong>2.5 gal/);
   assert.ok(summaryHtml.indexOf("Total beverage inventory") < summaryHtml.indexOf('data-snapshot-section="counts"'));
   assert.match(renderSavedWeeklySnapshot({}, helpers), /Total beverage inventory<\/span><strong>Not recorded/);
-  assert.match(renderSavedWeeklySnapshot(snapshot, { ...helpers, simpleSyrupNeed: "0 gal", simpleSyrupEstimated: true }), /Estimated using current recipes/);
+  assert.doesNotMatch(renderSavedWeeklySnapshot(snapshot, { ...helpers, simpleSyrupNeed: "0 gal" }), /For the saved cocktail prep plan|Estimated using current recipes/);
 });

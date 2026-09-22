@@ -3,19 +3,20 @@ import {
   getWeeklyUsagePerformanceCategory,
 } from "./weekly-usage-performance.mjs";
 import { getPmbWeeklyUsageRange } from "./pmb-weekly-usage-policy.mjs";
+import { selectWeeklyUsageHistory } from "./weekly-usage-evidence.mjs";
 
 const RANKING_CATEGORIES = new Set(["all", "beer", "cocktail", "liquor"]);
 const RANKING_METRICS = new Set(["volume", "profit", "margin"]);
 const RANKING_WALLS = new Set(["all", "patio", "main", "karaoke"]);
 
 export const WEEKLY_USAGE_SELLER_RANKING_DATA_BOUNDARY = Object.freeze({
-  source: "PMB",
+  source: "PMB with CSV fallback",
   metric: "poured ounces",
-  legacySalesIncluded: false,
+  legacySalesIncluded: true,
   crossWallAggregation: false,
   requiresVerifiedWallAndCategory: true,
-  allTimeLabel: "All saved PMB weeks",
-  allTimeDescription: "PMB weekly readings only. CSV usage history is excluded.",
+  allTimeLabel: "All saved usage weeks",
+  allTimeDescription: "Usable PMB readings take priority. CSV history fills missing weeks for the same product.",
 });
 
 function clean(value) {
@@ -174,15 +175,21 @@ function resolveGrossProfitPerOz(getGrossProfitPerOz, item, context) {
 function getItemHistoryByWeek(
   item,
   itemIndex,
-  { getFullOunces, getGrossProfitPerOz, getSellingPricePerOz, metric },
+  { getFullOunces, getGrossProfitPerOz, getSellingPricePerOz, metric, pmbWeeks },
   quality,
 ) {
   const samplesByTime = new Map();
   const unavailableTimes = new Set();
-  const history = Array.isArray(item?.history) ? item.history : [];
+  const rawHistory = Array.isArray(item?.history) ? item.history : [];
+  const history = selectWeeklyUsageHistory(rawHistory);
+  quality.ignoredEntryCount += rawHistory.length - history.length;
 
   history.forEach((entry) => {
     const time = getWeekStartTime(entry?.label);
+    if (entry.source === "CSV" && pmbWeeks?.has(time)) {
+      quality.ignoredEntryCount += 1;
+      return;
+    }
     if (!time) {
       quality.ignoredEntryCount += 1;
       return;
@@ -253,6 +260,20 @@ function getItemHistoryByWeek(
 
 function buildProducts(items, options, quality) {
   const products = new Map();
+  // Active and archived observations may describe the same physical product.
+  // Apply source priority before resolving prices or conflicting samples.
+  const identity = (item, index) => `${resolveRankingCategory(item)}:${resolveRankingWall(item)}:${normalizeProductKey(item?.name)}:${getMemberKey(item, index)}`;
+  const pmbWeeksByIdentity = new Map();
+  items.forEach((item, index) => {
+    const key = identity(item, index);
+    const weeks = pmbWeeksByIdentity.get(key) || new Set();
+    selectWeeklyUsageHistory(item?.history).forEach(entry => {
+      if (entry.source === "PMB" && getWeeklyUsageEntryPouredOz(item, entry, options.getFullOunces) !== null) {
+        weeks.add(getWeekStartTime(entry.label));
+      }
+    });
+    pmbWeeksByIdentity.set(key, weeks);
+  });
 
   items.forEach((item, index) => {
     const productName = normalizeProductName(item?.name);
@@ -292,7 +313,9 @@ function buildProducts(items, options, quality) {
       name: item?.name,
     });
     const memberSamples = product.membersByKey.get(memberKey) || new Map();
-    const itemHistory = getItemHistoryByWeek(item, index, options, quality);
+    const itemHistory = getItemHistoryByWeek(item, index, {
+      ...options, pmbWeeks: pmbWeeksByIdentity.get(identity(item, index)),
+    }, quality);
     itemHistory.samplesByTime.forEach((sample, time) => {
       const samples = memberSamples.get(time) || [];
       samples.push(sample);

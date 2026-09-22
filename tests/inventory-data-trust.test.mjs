@@ -48,6 +48,17 @@ test("cocktail ingredients prefer the canonical inventory item when duplicate na
   assert.equal(findCatalogItem(catalog, { name: "Tito's" })?.id, "titos");
 });
 
+test("Tito's and Jose recipes resolve to the live cabinet inventory identities", () => {
+  const catalog = [
+    { id: "tito-s-1-75l", name: "Tito's 1.75L" },
+    { id: "tito-s", name: "Tito's" },
+    { id: "jose-cuervo", name: "Jose Cuervo" },
+    { id: "jose-cuervo-silver", name: "Jose Cuervo Silver" },
+  ];
+  assert.equal(findCatalogItem(catalog, { name: "Tito's", raw: "Tito's=6 bottles (1.75L)" })?.id, "tito-s");
+  assert.equal(findCatalogItem(catalog, { name: "Jose Cuervo", raw: "Jose Cuervo=8 bottles (1.75L)" })?.id, "jose-cuervo-silver");
+});
+
 test("vanilla syrup recipes keep the existing vanilla inventory identity", () => {
   const catalog = [{ id: "vanilla", name: "Vanilla", baseline: 2 }];
   assert.equal(findCatalogItem(catalog, { name: "Vanilla Syrup" })?.id, "vanilla");
@@ -105,8 +116,64 @@ test("cocktail prep deducts only tracked on-hand ingredients using the requested
   }), [{ id: "titos-1-75l", quantity: -6, baseline: 10 }]);
 });
 
-test("excluded prep juices need no inventory match and still contribute to batch scaling", () => {
-  for (const name of ["Strawberry lemonade", "Cranberry juice", "Cranberry"]) {
+test("a one-ounce nominal batch mismatch does not create fractional bottle deductions", () => {
+  const catalog = [
+    { id: "lime-juice", name: "Lime Juice", baseline: 24 },
+    { id: "raspberry-schnapps", name: "Raspberry Schnapps", baseline: 10 },
+  ];
+  const recipe = { ingredients: [
+    { name: "Lime Juice", raw: "Lime Juice=8 bottles (1L)", oz: 270 },
+    { name: "Raspberry Schnapps", raw: "Raspberry Schnapps=8 bottles (1L)", oz: 270 },
+    { name: "Water", raw: "Water", oz: 999 },
+  ] };
+  const contribution = buildRecipeInventoryContributions(recipe, catalog, { batchSizeOz: 1540, quantity: 1 });
+  assert.deepEqual(contribution, [
+    { id: "lime-juice", quantity: -8, baseline: 24 },
+    { id: "raspberry-schnapps", quantity: -8, baseline: 10 },
+  ]);
+  assert.equal(
+    buildRecipeInventoryContributions(recipe, catalog, { batchSizeOz: 770, quantity: 1 })[0].quantity,
+    -5,
+    "a scaled bottle requirement is rounded up to the complete bottle actually used",
+  );
+});
+
+test("rounded ingredient ounces always deduct complete bottles", () => {
+  const catalog = [
+    { id: "tito-s", name: "Tito's", baseline: 20 },
+    { id: "triple-sec", name: "Triple Sec", baseline: 20 },
+    { id: "korbel-brut", name: "Korbel Brut", baseline: 20 },
+  ];
+  const recipe = { ingredients: [
+    { name: "Tito's", raw: "Tito's=5 bottles (1.75L)", oz: 295.9 },
+    { name: "Triple Sec", raw: "Triple Sec=5 bottles (1L)", oz: 169.1 },
+    { name: "Korbel Brut", raw: "Korbel Brut=5 bottles (750mL)", oz: 126.8 },
+  ] };
+
+  assert.deepEqual(buildRecipeInventoryContributions(recipe, catalog, {
+    // The planned yield is intentionally half an ounce above the rounded
+    // ingredient total. Each written five-bottle amount remains five bottles.
+    batchSizeOz: 592.3,
+    quantity: 1,
+  }), [
+    { id: "tito-s", quantity: -5, baseline: 20 },
+    { id: "triple-sec", quantity: -5, baseline: 20 },
+    { id: "korbel-brut", quantity: -5, baseline: 20 },
+  ]);
+});
+
+test("uncounted prep mixers need no inventory match and still contribute to batch scaling", () => {
+  for (const name of [
+    "Strawberry lemonade",
+    "Cranberry juice",
+    "Cranberry",
+    "Lemonade",
+    "gallon lemonade",
+    "Sweet Tea",
+    "Simple Syrup",
+    "Mint",
+    "1152 blue dot juice",
+  ]) {
     const recipe = { ingredients: [
       { name: "Tito's", raw: "Tito's=6 bottles (1.75L)", oz: 355 },
       { name, oz: 1024 },
@@ -117,6 +184,32 @@ test("excluded prep juices need no inventory match and still contribute to batch
       { id: "titos", quantity: -6, baseline: 12 },
     ]);
   }
+});
+
+test("this week's Arnold Palmer and Cranberry Lemonade deduct only Tito's", () => {
+  const catalog = [{ id: "titos-1-75l", name: "Tito's 1.75L", baseline: 18 }];
+  const recipes = [{
+    title: "Spiked Arnold Palmer (Vodka)",
+    ingredients: [
+      { name: "Titos", raw: "Titos=6 bottles (1.75L bts)", oz: 355 },
+      { name: "Lemonade", raw: "4.5 Gallons Lemonade", oz: 576 },
+      { name: "Sweet Tea", raw: "4.5 Gallons Sweet Tea", oz: 576 },
+    ],
+    batchSizeOz: 1507,
+  }, {
+    title: "Spiked Cranberry Lemonade (Vodka)",
+    ingredients: [
+      { name: "Tito's", raw: "Tito's 6 bottles (1.75L)", oz: 355 },
+      { name: "Lemonade", raw: "5 Gallons Lemonade", oz: 640 },
+      { name: "Cranberry", raw: "3 Gallons Cranberry", oz: 384 },
+    ],
+    batchSizeOz: 1379,
+  }];
+
+  recipes.forEach((recipe) => assert.deepEqual(buildRecipeInventoryContributions(recipe, catalog, {
+    batchSizeOz: recipe.batchSizeOz,
+    quantity: 1,
+  }), [{ id: "titos-1-75l", quantity: -6, baseline: 18 }]));
 });
 
 test("the source recipe's pomegrante spelling maps to counted pomegranate schnapps", () => {

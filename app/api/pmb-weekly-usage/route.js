@@ -18,6 +18,8 @@ import {
 } from "../../../lib/pmb-weekly-usage-identity.mjs";
 import { readSharedDashboardState } from "../../../lib/shared-dashboard-store.mjs";
 import { isCompletedMondayWeekStart } from "../../../lib/weekly-usage-periods.mjs";
+import { pmbLocalMidnight } from "../../../lib/pmb-first-pour-report.mjs";
+import { filterPmbTransactionWindow } from "../../../lib/pmb-transaction-window.mjs";
 
 export const runtime = "nodejs";
 
@@ -373,21 +375,14 @@ function formatDate(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function formatOffset(date) {
-  const offsetMinutes = -date.getTimezoneOffset();
-  const sign = offsetMinutes >= 0 ? "+" : "-";
-  const absolute = Math.abs(offsetMinutes);
-  return `${sign}${String(Math.floor(absolute / 60)).padStart(2, "0")}:${String(absolute % 60).padStart(2, "0")}`;
-}
-
 function formatShortDate(date) {
   return `${date.getMonth() + 1}/${date.getDate()}/${String(date.getFullYear()).slice(-2)}`;
 }
 
 function getTransactionRangePayload(range) {
   return {
-    start_time: `${formatDate(range.start)}T00:00:00${formatOffset(range.start)}`,
-    end_time: `${formatDate(range.endExclusive)}T00:00:00${formatOffset(range.endExclusive)}`,
+    start_time: pmbLocalMidnight(Date.parse(formatDate(range.start))),
+    end_time: pmbLocalMidnight(Date.parse(formatDate(range.endExclusive))),
   };
 }
 
@@ -396,8 +391,8 @@ function getPreThursdayTransactionRangePayload(range) {
   thursdayDelivery.setDate(thursdayDelivery.getDate() + 3);
   thursdayDelivery.setHours(9, 0, 0, 0);
   return {
-    start_time: `${formatDate(range.start)}T00:00:00${formatOffset(range.start)}`,
-    end_time: `${formatDate(thursdayDelivery)}T09:00:00${formatOffset(thursdayDelivery)}`,
+    start_time: pmbLocalMidnight(Date.parse(formatDate(range.start))),
+    end_time: pmbLocalMidnight(Date.parse(formatDate(thursdayDelivery))).replace('T00:00:00', 'T09:00:00'),
   };
 }
 
@@ -529,20 +524,9 @@ export async function GET(request) {
       );
     }
 
-    const [transactionResults, preThursdayTransactionResults] = await Promise.all([
-      Promise.all(ranges.map((range) => (
-        postJson(config.baseUrl, "/api/transactions", { id: config.clientId, ...getTransactionRangePayload(range) }, token)
-      ))),
-      Promise.all(ranges.map((range) => (
-        postJson(config.baseUrl, "/api/transactions", { id: config.clientId, ...getPreThursdayTransactionRangePayload(range) }, token)
-      ))),
-    ]);
-
-    preThursdayTransactionResults.forEach((transactions, index) => {
-      if (transactions.status !== 200 || !Array.isArray(transactions.json?.taptransactions)) {
-        throw new Error(`PMB pre-Thursday transactions failed for ${formatShortDate(ranges[index].start)} (${transactions.status})`);
-      }
-    });
+    const transactionResults = await Promise.all(ranges.map((range) => (
+      postJson(config.baseUrl, "/api/transactions", { id: config.clientId, ...getTransactionRangePayload(range) }, token)
+    )));
 
     const minimumPositiveRows = getSparseWeekPositiveRowThreshold(currentTaps.length);
     const reviewWeeks = [];
@@ -551,6 +535,9 @@ export async function GET(request) {
       if (transactions.status !== 200 || !Array.isArray(transactions.json?.taptransactions)) {
         throw new Error(`PMB transactions failed for ${formatShortDate(ranges[index].start)} (${transactions.status})`);
       }
+      transactions.json.taptransactions = filterPmbTransactionWindow(
+        transactions.json.taptransactions, getTransactionRangePayload(ranges[index]),
+      );
       const label = `${formatShortDate(ranges[index].start)} - ${formatShortDate(ranges[index].endInclusive)}`;
       try {
         requirePlausibleWeeklyTransactions(transactions.json.taptransactions, {
@@ -577,6 +564,20 @@ export async function GET(request) {
         });
       }
     });
+
+    // The pre-Thursday period is a strict subset of the downloaded full week.
+    // Deriving it locally halves transaction calls while preserving the same
+    // timestamp validation and exclusive Thursday 9am boundary.
+    const preThursdayTransactionResults = transactionResults.map((transactions, index) => ({
+      ...transactions,
+      json: {
+        ...transactions.json,
+        taptransactions: filterPmbTransactionWindow(
+          transactions.json.taptransactions,
+          getPreThursdayTransactionRangePayload(ranges[index]),
+        ),
+      },
+    }));
 
     if (reviewWeeks.length) {
       const confirmationToken = createWeeklyReviewToken(reviewTokenMaterial);
@@ -623,8 +624,8 @@ export async function GET(request) {
     ), {
       currentTaps,
       assignments,
-      startTime: range.start.getTime(),
-      endTime: range.endExclusive.getTime(),
+      startTime: Date.parse(getTransactionRangePayload(range).start_time),
+      endTime: Date.parse(getTransactionRangePayload(range).end_time),
       reportDigest: createHash("sha256").update(JSON.stringify(transactionResults[index].json.taptransactions)).digest("hex"),
     }));
     const primaryReport = reports[reports.length - 1] || buildWeeklyReport(getLastCompletedWeekRange(), [], [], productByPlu, context);

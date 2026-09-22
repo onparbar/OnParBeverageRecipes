@@ -151,8 +151,47 @@ test("routine Monday counts alone produce no briefing error while the plan stays
   assert.deepEqual(readiness.blockers, [reason]);
 });
 
-test("briefing shortens whole-week gaps but preserves the missing-data warning", () => {
-  const result = prepareBriefingInputs([], { staleReasons: ["0/102 active taps have saved usage. Missing: Tap 1, Tap 2, Tap 3"] });
-  assert.match(result.readiness.staleReasons[0], /0\/102 active taps/);
-  assert.doesNotMatch(result.readiness.staleReasons[0], /Tap 1/);
+test("briefing omits routine weekly-usage coverage gaps without changing ordering safety", () => {
+  const readiness = { status: "stale", staleReasons: ["0/102 active taps have saved usage. Missing: Tap 1, Tap 2, Tap 3"] };
+  const result = prepareBriefingInputs([
+    { id: "weekly-usage-partial", severity: "warning", title: "Weekly Usage coverage is partial" },
+    { id: "weekly-plan-stale", severity: "critical", title: "Weekly plan needs attention", message: readiness.staleReasons[0] },
+  ], readiness);
+  assert.deepEqual(result.alerts, []);
+  assert.deepEqual(result.readiness.staleReasons, []);
+  assert.equal(result.readiness.status, "ready");
+  assert.equal(readiness.status, "stale", "presentation filtering must not alter the real ordering safeguard");
+  assert.equal(readiness.staleReasons.length, 1);
+});
+
+test("briefing retains real weekly-usage storage and setup failures", () => {
+  const messages = [
+    "Shared Weekly Usage setup is incomplete.",
+    "The latest Weekly Usage save failed: Shared storage is unavailable.",
+  ];
+  const result = prepareBriefingInputs([], { status: "blocked", blockers: messages });
+  assert.deepEqual(result.readiness.blockers, messages);
+  assert.equal(result.readiness.status, "blocked");
+});
+
+test("recovery upgrades CSV to usable PMB and preserves CSV when PMB is unknown", async () => {
+  const initial = base();
+  const csv = { label: "09/07/2026-09/13/2026", source: "CSV", value: 1, hasValue: true };
+  initial.data.activeItems[0].history = [csv];
+  initial.data.historyOverrides[item.id] = [csv];
+  const unknown = report();
+  unknown.items[0] = { ...unknown.items[0], volumeOz: 0, hasValue: false, usageUnknownReason: "Missing" };
+  assert.deepEqual(mergeRecoveredWeeklyReport(initial.data, unknown, snapshot).activeItems[0].history, [csv]);
+  const recovered = mergeRecoveredWeeklyReport(initial.data, report(), snapshot);
+  assert.equal(recovered.activeItems[0].history.length, 1);
+  assert.equal(recovered.activeItems[0].history[0].source, "PMB");
+  assert.equal(recovered.activeItems[0].history[0].volumeOz, 992);
+  assert.deepEqual(recovered.historyOverrides[item.id], recovered.activeItems[0].history);
+  let loads = 0;
+  const recovery = createWeeklyUsageRecovery({
+    now: monday, readState: async () => initial, readSnapshot: async () => snapshot,
+    replaceState: async ({ data }) => ({ ...initial, revision: 2, data }),
+  });
+  await recovery(initial, async () => { loads += 1; return report(); });
+  assert.equal(loads, 1, "CSV must not prevent later PMB recovery");
 });

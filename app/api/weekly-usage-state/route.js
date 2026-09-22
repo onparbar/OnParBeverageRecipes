@@ -1,6 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
-import { GET as getPmbWeeklyReport } from "../pmb-weekly-usage/route.js";
-import { recoverWeeklyUsageState } from "../../../lib/weekly-usage-recovery.mjs";
+import { NextResponse } from "next/server";
 import {
   initializeSharedWeeklyUsageState,
   readSharedWeeklyUsageState,
@@ -55,16 +53,10 @@ export async function GET(request) {
     if (state.initialized) {
       void captureProductNamesBestEffort(state.data.activeItems, { source: 'weekly-usage-forward' });
     }
-    return jsonResponse(await recoverWeeklyUsageState(state, async (week) => {
-      const url = new URL(request.url);
-      url.pathname = "/api/pmb-weekly-usage";
-      url.search = "";
-      url.searchParams.set("weeks", week.startDate);
-      const response = await getPmbWeeklyReport(new NextRequest(url, { headers: request.headers }));
-      const report = await response.json();
-      if (!response.ok) throw new Error(report.error || report.message || "PMB weekly usage is unavailable.");
-      return report;
-    }));
+    // Keep display reads storage-only so the last saved report renders without
+    // inheriting a live PMB timeout. PMB refresh has a separate single-flight
+    // path that saves its result with revision checks.
+    return jsonResponse(state);
   } catch (error) {
     return errorResponse(error);
   }

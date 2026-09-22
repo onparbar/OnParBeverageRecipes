@@ -2,9 +2,10 @@ import { mountProductDuplicator, pmbCatalogProductKind } from "./product-duplica
 import { validateRecipeSetup } from "./recipe-setup.mjs";
 import { completeCoolerCount, hasCompletedCoolerCount } from "./weekly-run-progress.mjs";
 import { observePackagePrice, createSupplierMapping, supplierSetupIssues } from "./vendor-pricing-state.mjs";
-import { isUsableWeeklyUsageEntry, retainPmbWeeklyUsageItems, retainPmbWeeklyUsageOverrides } from "./weekly-usage-evidence.mjs";
+import { getPmbWeeklyUsageRange } from "./pmb-weekly-usage-policy.mjs";
+import { isUsableWeeklyUsageEntry, retainWeeklyUsageItems, retainWeeklyUsageOverrides, selectWeeklyUsageHistory, mergeWeeklyUsageCsvFallbackData } from "./weekly-usage-evidence.mjs";
 import { MINIMUM_KEG_CUSHION, getEightWeekPeakUsage } from "./keg-demand-policy.mjs";
-import { applyInventoryCountPolicy, getUncountedInventoryAmount } from "./inventory-count-policy.mjs";
+import { applyInventoryCountPolicy, getUncountedInventoryAmount, isWeeklyCountOnlyInventoryItem } from "./inventory-count-policy.mjs";
 import { getInventoryCountSections } from "./inventory-weekly-counts.mjs";
 import { answerLocalInventoryQuestion } from "./local-inventory-questions.mjs";
 import { answerLocalBeverageQuestion, BEVERAGE_QUESTION_EXAMPLES } from "./local-beverage-answers.mjs";
@@ -264,6 +265,8 @@ const NEW_COCKTAILS_CSV_PATH = "./data/new-cocktails.csv";
 const INVENTORY_CSV_PATH = "./data/inventory-2026-06-01.csv";
 const INVENTORY_BASELINE_DATE = "2026-06-01T12:00:00";
 const KEG_LEVELS_CSV_PATH = "./data/keg-levels-template.csv";
+const WEEKLY_USAGE_CSV_PATH = "./data/weekly-usage-history.csv";
+const WEEKLY_USAGE_EXTRA_CSV_PATH = "./data/weekly-usage-history-extra.csv";
 const WEEKLY_USAGE_CHANGEOVERS_CSV_PATH = "./data/weekly-usage-changeovers.csv";
 const STORAGE_KEY = "cocktail-dashboard-ingredient-prices";
 const CHARGE_STORAGE_KEY = "cocktail-dashboard-charge-prices";
@@ -294,10 +297,9 @@ const EMPLOYEE_SHARED_RECIPE_CACHE_STORAGE_KEY = "cocktail-dashboard-employee-sh
 const OWNER_LOGIN_SYNC_LOCK_STORAGE_KEY = "cocktail-dashboard-owner-login-sync-lock";
 const OWNER_LOGIN_SYNC_LOCK_MAX_AGE_MS = 2 * 60 * 1000;
 const ORDER_REHEARSAL_AVAILABLE = false;
-// Healthy remote reads can take about five seconds under load. Six seconds was
-// close enough to abort valid saved setup at the browser boundary.
-const DASHBOARD_STATE_REQUEST_TIMEOUT_MS = 12_000;
+const DASHBOARD_STATE_REQUEST_TIMEOUT_MS = 6000;
 const OPERATIONAL_SHARED_REQUEST_TIMEOUT_MS = 8000;
+const INVENTORY_SNAPSHOT_REQUEST_TIMEOUT_MS = 20000;
 const PAR_AGENT_RUN_REQUEST_TIMEOUT_MS = 30000;
 const WEEKLY_USAGE_CURRENT_STORAGE_KEY = "cocktail-dashboard-weekly-usage-current";
 const WEEKLY_USAGE_HISTORY_STORAGE_KEY = "cocktail-dashboard-weekly-usage-history";
@@ -1063,6 +1065,7 @@ let ingredients = [];
 let inventoryItems = [];
 let kegWallItems = [];
 let weeklyUsageItems = [];
+let weeklyUsageCsvFallbackItems = [];
 let weeklyUsageChangeovers = [];
 let weeklyUsageCurrentOverrides = loadWeeklyUsageCurrentOverrides();
 let weeklyUsageHistoryOverrides = loadWeeklyUsageHistoryOverrides();
@@ -1340,12 +1343,14 @@ async function init() {
     return;
   }
 
-  const [, csv, newCocktailsCsv, inventoryCsv, kegLevelsCsv, weeklyUsageChangeoversCsv] = await Promise.all([
+  const [, csv, newCocktailsCsv, inventoryCsv, kegLevelsCsv, weeklyUsageCsv, weeklyUsageExtraCsv, weeklyUsageChangeoversCsv] = await Promise.all([
     sharedDashboardLoad,
     fetchCsv(CSV_PATH),
     fetchCsv(NEW_COCKTAILS_CSV_PATH),
     fetchCsv(INVENTORY_CSV_PATH),
     fetchOptionalCsv(KEG_LEVELS_CSV_PATH),
+    fetchOptionalCsv(WEEKLY_USAGE_CSV_PATH),
+    fetchOptionalCsv(WEEKLY_USAGE_EXTRA_CSV_PATH),
     fetchOptionalCsv(WEEKLY_USAGE_CHANGEOVERS_CSV_PATH),
   ]);
 
@@ -1361,12 +1366,15 @@ async function init() {
   inventoryItems = mergeCustomInventoryItems(parseInventory(inventorySourceRows));
   kegWallItems = kegLevelsCsv ? parseKegLevels(parseCsv(kegLevelsCsv)) : [];
   kegPricingItems = buildKegPricingCatalog(kegWallItems, getCurrentKegPricingTapItems());
-  // Tap setup supplies identities only. Usage comes from saved/live PMB reports.
-  weeklyUsageItems = kegWallItems.map(item => buildWeeklyUsageItemFromAssignment({ ...item, name: item.brand })).filter(Boolean);
+  weeklyUsageItems = weeklyUsageCsv ? parseWeeklyUsage(parseCsv(weeklyUsageCsv)) : [];
+  if (weeklyUsageExtraCsv) {
+    weeklyUsageItems = mergeWeeklyUsageExtraHistory(weeklyUsageItems, parseWeeklyUsageExtraHistory(parseCsv(weeklyUsageExtraCsv)));
+  }
   weeklyUsageChangeovers = weeklyUsageChangeoversCsv ? parseWeeklyUsageChangeovers(parseCsv(weeklyUsageChangeoversCsv)) : [];
   applyWeeklyUsageProductChangeovers();
-  // These records are independent. A database slowdown should cost one bounded
-  // timeout window, not a separate timeout for every dashboard section.
+  weeklyUsageCsvFallbackItems = cloneWeeklyUsageValue([...weeklyUsageItems, ...weeklyUsageArchivedItems]);
+  // These reads use separate shared records and do not need to wait on one
+  // another. A database slowdown now costs one timeout window, not six.
   await Promise.all([
     loadSharedInventoryState().then(() => {
       inventoryItems = mergeCustomInventoryItems(parseInventory(inventorySourceRows));
@@ -1481,6 +1489,7 @@ function retryFailedSharedReads() {
     }).finally(() => { failedSharedReadRecoveryPromise = null; });
   return failedSharedReadRecoveryPromise;
 }
+
 
 async function runOwnerLoginSync() {
   if (isEmployeeDashboard || ownerLoginSyncStarted) return;
@@ -3336,6 +3345,7 @@ function bindEvents() {
         "six-weeks",
         "eight-weeks",
         "twelve-weeks",
+        "fifty-two-weeks",
         "all-time",
       ].includes(nextPeriod)
         ? nextPeriod
@@ -4703,7 +4713,8 @@ function renderShotPricing(visibleTapRows = []) {
   rows.forEach((row) => {
     const index = visibleTapRows.findIndex((tap) => (tap.livePrice || tap) === row.livePrice);
     const chargeCell = shotPricingTable.children[index]?.children[3];
-    if (!chargeCell) return;
+    const productCell = shotPricingTable.children[index]?.children[1];
+    if (!chargeCell || !productCell) return;
     const running = activePmbPortionPriceUpdateKey === row.key;
     const message = pmbPortionPriceUpdateMessages.get(row.key);
     const suggestedPrices = new Map((recommendations.get(row.key)?.portions || []).map((portion) => [
@@ -4741,7 +4752,7 @@ function renderShotPricing(visibleTapRows = []) {
     editor.open = running || Boolean(message) || Boolean(draft?.open);
     editor.dataset.shotPricingKey = row.key;
     editor.innerHTML = `
-      <summary>Edit single / double prices</summary>
+      <summary aria-label="Edit prices for ${escapeHtml(row.name)}">Edit prices</summary>
       <div class="shot-pricing-fields">${editors}</div>
       <p class="shot-pricing-editor__status" role="status">${escapeHtml(row.canEdit ? "" : row.blockers.map((blocker) => /socket hang up|econnreset|econnrefused|fetch failed|failed to fetch|timed? ?out|etimedout/i.test(blocker)
         ? "The PMB connection was interrupted. You can enter both prices now; your entries stay here during a recheck. Saving is paused until PMB verification succeeds."
@@ -4762,7 +4773,7 @@ function renderShotPricing(visibleTapRows = []) {
     editor.addEventListener("input", rememberDraft);
     editor.addEventListener("toggle", rememberDraft);
     chargeCell.innerHTML = renderPortionList(row.portions.slice(0, 2));
-    chargeCell.append(editor);
+    productCell.append(editor);
   });
   pricingAdvisorTable.querySelectorAll("[data-pricing-portion-tap]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -4963,20 +4974,20 @@ function renderPricingAdvisor(visibleTapRows = []) {
       ? `${item.tapPosition}${item.wall ? `<span>${escapeHtml(item.wall)}</span>` : ""}`
       : "—";
     const currentMargin = item.currentPricePerOz && item.costPerOz
-      ? `${formatNumber(item.currentMarginPercent)}% / ${money(item.currentPricePerOz - item.costPerOz)} gross profit per oz`
+      ? `${formatNumber(item.currentMarginPercent)}% / ${money(item.currentPricePerOz - item.costPerOz)} per oz`
       : "—";
     const delta = item.currentPricePerOz && item.recommendedPricePerOz
       ? `${item.priceChange > 0 ? "+" : ""}${money(item.priceChange)} / oz`
       : "—";
     const costNote = item.costPerOz ? `${money(item.costPerOz)} / oz cost` : "Cost needed";
-    const portionValues = (field, suffix = "") => `<div class="portion-list">${item.portions.map((portion) => {
+    const portionValues = (field, suffix = "") => `<div class="portion-list${field === "currentMarginPercent" ? "" : " portion-list--prices"}">${item.portions.map((portion) => {
       const value = field === "currentMarginPercent"
-        ? (portion.costPerOz && portion.currentPricePerOz ? `${formatNumber(portion[field])}% / ${money(portion.currentPricePerOz - portion.costPerOz)} gross profit` : "Not available")
+        ? (portion.costPerOz && portion.currentPricePerOz ? `${formatNumber(portion[field])}% / ${money(portion.currentPricePerOz - portion.costPerOz)}` : "Not available")
         : (field === "priceChange" || portion[field] > 0 ? `${money(portion[field])}${suffix}` : "Not available");
       return `<span><b>${escapeHtml(portion.portionName)}</b> ${escapeHtml(value)}</span>`;
     }).join("") || "Portion prices needed"}</div>`;
     const updateControl = item.portionPricing
-      ? `<button type="button" data-pricing-portion-tap="${escapeHtml(item.tapPosition)}">Edit single / double prices</button>`
+      ? `<button type="button" data-pricing-portion-tap="${escapeHtml(item.tapPosition)}" aria-label="Edit prices for ${escapeHtml(item.name)}">Edit prices</button>`
       : `<button type="button" data-pricing-tap-edit="${escapeHtml(getPmbPriceUpdateKey(source))}">Edit tap price</button>`;
 
     return `
@@ -5422,7 +5433,7 @@ function getLiveTapPortions(livePrice) {
 }
 
 function renderPortionList(portions) {
-  return `<div class="portion-list">${portions.map((portion) => `
+  return `<div class="portion-list portion-list--prices">${portions.map((portion) => `
     <span><b>${escapeHtml(portion.name)}</b> ${money(toNumber(portion.price))}</span>
   `).join("")}</div>`;
 }
@@ -5441,7 +5452,7 @@ function renderPortionMarginList(portions, costPerOz) {
     const servingOz = getPortionServingOz(portion);
     const profit = price - (costPerOz * servingOz);
     const margin = price ? (profit / price) * 100 : 0;
-    return `<span><b>${escapeHtml(portion.name)}</b> ${formatNumber(margin)}% / ${money(profit)} gross profit</span>`;
+    return `<span><b>${escapeHtml(portion.name)}</b> ${formatNumber(margin)}% / ${money(profit)}</span>`;
   }).join("")}</div>`;
 }
 
@@ -7515,6 +7526,7 @@ function renderOnParInsights() {
     "six-weeks": 6,
     "eight-weeks": 8,
     "twelve-weeks": 12,
+    "fifty-two-weeks": 52,
   }[sellerRankingPeriod] || 6;
   const isSalesRanking = sellerRankingMetric === "sales";
   const isProfitRanking = sellerRankingMetric === "profit";
@@ -7572,7 +7584,7 @@ function renderOnParInsights() {
   const periodRankings = getSellerRankingPeriod(selectedPeriodRankings, sellerRankingListSize);
   const displayedListSize = periodRankings.listSize;
   const periodTitle = sellerRankingPeriod === "all-time"
-    ? "All saved PMB weeks"
+    ? "All saved usage weeks"
     : recentWeekLimit === 1
       ? "Latest saved week"
       : `Last ${recentWeekLimit} saved weeks`;
@@ -7604,6 +7616,7 @@ function renderOnParInsights() {
           <option value="six-weeks"${sellerRankingPeriod === "six-weeks" ? " selected" : ""}>6 weeks</option>
           <option value="eight-weeks"${sellerRankingPeriod === "eight-weeks" ? " selected" : ""}>8 weeks</option>
           <option value="twelve-weeks"${sellerRankingPeriod === "twelve-weeks" ? " selected" : ""}>12 weeks</option>
+          <option value="fifty-two-weeks"${sellerRankingPeriod === "fifty-two-weeks" ? " selected" : ""}>52 weeks</option>
           <option value="all-time"${sellerRankingPeriod === "all-time" ? " selected" : ""}>All time</option>
         </select></label>
         <label class="select-field"><span>Rank by</span><select data-seller-ranking-metric>
@@ -7815,6 +7828,7 @@ function renderDashboardBeveragePulse() {
     "six-weeks": 6,
     "eight-weeks": 8,
     "twelve-weeks": 12,
+    "fifty-two-weeks": 52,
     "all-time": Number.MAX_SAFE_INTEGER,
   }[sellerRankingPeriod] || 6;
   const rankings = buildWeeklyUsageSellerRankings(
@@ -7829,7 +7843,7 @@ function renderDashboardBeveragePulse() {
       bottomLimit: 3,
     },
   );
-  const leaders = rankings.recent.top || [];
+  const leaders = (sellerRankingPeriod === "all-time" ? rankings.allTime : rankings.recent).top || [];
   const pourLeaders = buildLastWeekPourLeaders(
     analyticsItems,
     {
@@ -7886,6 +7900,7 @@ function renderDashboardBeveragePulse() {
           <option value="six-weeks"${sellerRankingPeriod === "six-weeks" ? " selected" : ""}>6 weeks</option>
           <option value="eight-weeks"${sellerRankingPeriod === "eight-weeks" ? " selected" : ""}>8 weeks</option>
           <option value="twelve-weeks"${sellerRankingPeriod === "twelve-weeks" ? " selected" : ""}>12 weeks</option>
+          <option value="fifty-two-weeks"${sellerRankingPeriod === "fifty-two-weeks" ? " selected" : ""}>52 weeks</option>
           <option value="all-time"${sellerRankingPeriod === "all-time" ? " selected" : ""}>All time</option>
         </select></label>
       </div>
@@ -8294,7 +8309,7 @@ function renderWeeklyPlanReview(plan) {
 }
 
 function getCurrentVendorOrderPolicy(plan, snapshot = null) {
-  if (toNumber(snapshot?.orderPolicy?.version) >= 3) {
+  if (toNumber(snapshot?.orderPolicy?.version) >= 2) {
     return normalizeVendorOrderPolicy(snapshot.orderPolicy);
   }
   const savedInventoryItems = getWeeklyPlanInventoryItems();
@@ -8339,7 +8354,6 @@ function getCurrentVendorOrderPolicy(plan, snapshot = null) {
       };
     });
   return normalizeVendorOrderPolicy({
-    cutoffConfirmations: snapshot?.orderPolicy?.cutoffConfirmations,
     proofMinimum: 350,
     proofMinimumCandidates: proofPrep.candidates,
     proofPrepRequirement: proofPrep.requirement,
@@ -9566,6 +9580,7 @@ function renderWeeklyUsage() {
 
   weeklyUsageSummary.innerHTML = `
     <h2>Weekly Usage</h2>
+    <p class="sync-status">Usable PMB readings take priority. CSV history fills gaps for the same product.</p>
     <div class="weekly-usage-summary__hero">
       <span>Latest history week</span>
       <strong>${escapeHtml(latestLabel)}</strong>
@@ -9590,7 +9605,7 @@ function renderWeeklyUsage() {
     <tr>
       <th>Tap #</th>
       <th>Product</th>
-      <th class="weekly-usage-average" title="Average of usable readings in the displayed weeks. Only explicitly verified zeros are included; missing and uncertain readings are excluded.">Avg weekly</th>
+      <th class="weekly-usage-average" title="Average of usable readings in the displayed weeks. PMB takes priority; CSV fills gaps. Recorded CSV zeros and verified PMB zeros are included; missing readings are excluded.">Avg weekly</th>
       ${historyHeaders.map((label) => `<th class="weekly-usage-week">${formatWeeklyUsageHeader(label)}</th>`).join("")}
     </tr>
   `;
@@ -9614,7 +9629,8 @@ function renderWeeklyUsage() {
       const historyCells = historyHeaders
         .map((label) => {
           const match = item.history.find((entry) => entry.label === label);
-          return `<td class="weekly-usage-week">${escapeHtml(formatUsageDisplay(getDisplayValue(match), displayUnit))}</td>`;
+          const csvFallback = match?.source === "CSV";
+          return `<td class="weekly-usage-week" title="${csvFallback ? "CSV fallback: no usable PMB reading for this product and week" : "PMB weekly reading"}">${escapeHtml(formatUsageDisplay(getDisplayValue(match), displayUnit))}${csvFallback ? '<small class="weekly-usage-source">CSV</small>' : ""}</td>`;
         })
         .join("");
       const displayHistoryValues = historyHeaders
@@ -9813,17 +9829,18 @@ function stageWeeklyUsageSharedOutbox() {
 }
 
 function restoreWeeklyUsageFromOutbox() {
-  const data = weeklyUsageSharedOutbox?.payload?.data;
-  if (!data || typeof data !== "object") return false;
+  const saved = weeklyUsageSharedOutbox?.payload?.data;
+  if (!saved || typeof saved !== "object") return false;
+  const data = mergeWeeklyUsageCsvFallbackData(saved, weeklyUsageCsvFallbackItems);
   weeklyUsageApplyingSharedState = true;
   try {
-    weeklyUsageItems = Array.isArray(data.activeItems) ? retainPmbWeeklyUsageItems(cloneWeeklyUsageValue(data.activeItems)) : weeklyUsageItems;
-    weeklyUsageArchivedItems = Array.isArray(data.archivedItems) ? retainPmbWeeklyUsageItems(cloneWeeklyUsageValue(data.archivedItems)) : weeklyUsageArchivedItems;
+    weeklyUsageItems = Array.isArray(data.activeItems) ? retainWeeklyUsageItems(cloneWeeklyUsageValue(data.activeItems)) : weeklyUsageItems;
+    weeklyUsageArchivedItems = Array.isArray(data.archivedItems) ? retainWeeklyUsageItems(cloneWeeklyUsageValue(data.archivedItems)) : weeklyUsageArchivedItems;
     weeklyUsageCurrentOverrides = data.currentOverrides && typeof data.currentOverrides === "object"
       ? cloneWeeklyUsageValue(data.currentOverrides)
       : weeklyUsageCurrentOverrides;
     weeklyUsageHistoryOverrides = data.historyOverrides && typeof data.historyOverrides === "object"
-      ? retainPmbWeeklyUsageOverrides(cloneWeeklyUsageValue(data.historyOverrides))
+      ? retainWeeklyUsageOverrides(cloneWeeklyUsageValue(data.historyOverrides))
       : weeklyUsageHistoryOverrides;
     weeklyUsageLastSyncAt = clean(data.lastSyncAt) || weeklyUsageLastSyncAt;
     saveWeeklyUsageCurrentOverrides();
@@ -9851,22 +9868,23 @@ function getSharedWeeklyUsageData() {
 }
 
 function applySharedWeeklyUsageState(state) {
-  const data = state?.data || {};
-  weeklyUsageSharedBaseline = cloneWeeklyUsageValue(data);
+  const saved = state?.data || {};
+  weeklyUsageSharedBaseline = cloneWeeklyUsageValue(saved);
+  const data = mergeWeeklyUsageCsvFallbackData(saved, weeklyUsageCsvFallbackItems);
   weeklyUsageApplyingSharedState = true;
   try {
     weeklyUsageSharedRevision = Number(state.revision) || 0;
     weeklyUsageSharedInitialized = Boolean(state.initialized);
     weeklyUsageSharedProvisioned = true;
-    weeklyUsageItems = Array.isArray(data.activeItems) ? retainPmbWeeklyUsageItems(cloneWeeklyUsageValue(data.activeItems)) : [];
+    weeklyUsageItems = Array.isArray(data.activeItems) ? retainWeeklyUsageItems(cloneWeeklyUsageValue(data.activeItems)) : [];
     weeklyUsageArchivedItems = Array.isArray(data.archivedItems)
-      ? retainPmbWeeklyUsageItems(cloneWeeklyUsageValue(data.archivedItems))
+      ? retainWeeklyUsageItems(cloneWeeklyUsageValue(data.archivedItems))
       : [];
     weeklyUsageCurrentOverrides = data.currentOverrides && typeof data.currentOverrides === "object"
       ? cloneWeeklyUsageValue(data.currentOverrides)
       : {};
     weeklyUsageHistoryOverrides = data.historyOverrides && typeof data.historyOverrides === "object"
-      ? retainPmbWeeklyUsageOverrides(cloneWeeklyUsageValue(data.historyOverrides))
+      ? retainWeeklyUsageOverrides(cloneWeeklyUsageValue(data.historyOverrides))
       : {};
     weeklyUsageLastSyncAt = clean(data.lastSyncAt);
     saveWeeklyUsageCurrentOverrides();
@@ -13908,7 +13926,9 @@ async function requestSharedInventory(body = null) {
     method: body ? "POST" : "GET",
     headers: body ? { "Content-Type": "application/json", Accept: "application/json" } : { Accept: "application/json" },
     body: body ? JSON.stringify(body) : undefined,
-  });
+  }, body?.action === "save-snapshot"
+    ? INVENTORY_SNAPSHOT_REQUEST_TIMEOUT_MS
+    : OPERATIONAL_SHARED_REQUEST_TIMEOUT_MS);
   if (!response.ok) {
     const error = new Error(result.error || `Shared inventory request failed (${response.status}).`);
     error.code = result.code || "INVENTORY_STATE_ERROR";
@@ -13972,6 +13992,11 @@ function stageInventoryActionOutbox(payload, options = {}) {
     clientOrder: nextInventoryOutboxClientOrder(),
   });
   if (!entry) return null;
+  if (entry.payload.action === "save-snapshot" && !clean(entry.payload.captureId)) {
+    // This survives an uncertain response and lets the server recognize that a
+    // retry is the same snapshot write, not a competing inventory change.
+    entry.payload.captureId = entry.id;
+  }
   inventoryActionOutbox.push(entry);
   saveInventoryActionOutbox();
   return entry;
@@ -15159,6 +15184,7 @@ function buildCompletedInventorySectionChanges(group, submittedChanges) {
   if (cabinets.length && cabinets.every((section) => section.complete)) {
     const other = sections.find((section) => section.name === "Other");
     other?.missing.forEach((item) => {
+      if (isWeeklyCountOnlyInventoryItem(item)) return;
       changes.set(item.id, { id: item.id, target: "inventory", value: "0" });
     });
   }
@@ -16226,7 +16252,7 @@ async function saveInventorySnapshot(options = {}) {
     applySharedInventoryState(latest, { rebuild: true });
     inventorySharedSaveError = "";
     try {
-      return await saveInventorySnapshotAttempt(options);
+      return await saveInventorySnapshotAttempt({ ...options, snapshotBaseState: latest });
     } catch (error) {
       if (error.code !== "INVENTORY_SNAPSHOT_INPUTS_CHANGED") throw error;
       inventorySharedMessage = "Inventory changed while saving. Using the latest saved counts and recalculating...";
@@ -16242,7 +16268,7 @@ async function saveInventorySnapshot(options = {}) {
   return false;
 }
 
-async function saveInventorySnapshotAttempt({ replaceExisting = false } = {}) {
+async function saveInventorySnapshotAttempt({ replaceExisting = false, snapshotBaseState = null } = {}) {
   // Login refresh and Save & Lock share the same work instead of racing it.
   if (mondayPmbRefreshPromise) await mondayPmbRefreshPromise;
   if (mondayKegLevelSyncPromise) await mondayKegLevelSyncPromise;
@@ -16303,7 +16329,7 @@ async function saveInventorySnapshotAttempt({ replaceExisting = false } = {}) {
   }
   let calculationBaseState;
   try {
-    calculationBaseState = await refreshInventoryRevisionForSnapshot();
+    calculationBaseState = snapshotBaseState || await refreshInventoryRevisionForSnapshot();
     const missingSections = getInventoryCountSections(inventoryItems, inventoryCountedItemsAt)
       .filter((section) => !section.complete);
     if (missingSections.length) {
@@ -16385,29 +16411,12 @@ async function saveInventorySnapshotAttempt({ replaceExisting = false } = {}) {
     await failCapture("Inventory changes are pending. Recover any blocked snapshot attempt from Inventory before saving again.", "INVENTORY_NOT_READY");
     return false;
   }
-  let snapshotBaseState;
-  try {
-    snapshotBaseState = await refreshInventoryRevisionForSnapshot();
-  } catch (error) {
-    if (error.code === "INVENTORY_SNAPSHOT_INPUTS_CHANGED") throw error;
-    await failCapture(error.message, "INVENTORY_REVISION_REVIEW_REQUIRED");
-    return false;
-  }
-  if (!inventorySnapshotInputsMatch(calculationBaseState.current, snapshotBaseState.current)
-    || JSON.stringify(calculationBaseState.current.groupOverrides) !== JSON.stringify(snapshotBaseState.current.groupOverrides)
-    || JSON.stringify(calculationBaseState.current.inventoryContributions) !== JSON.stringify(snapshotBaseState.current.inventoryContributions)
-    || JSON.stringify(calculationBaseState.snapshots) !== JSON.stringify(snapshotBaseState.snapshots)) {
-    const error = new Error("Inventory changed during calculation.");
-    error.code = "INVENTORY_SNAPSHOT_INPUTS_CHANGED";
-    throw error;
-  }
-
   weeklyPlanRefreshMessage = "Saving this week's snapshot and locking the plan...";
   renderWeeklyPlan();
   const state = await runSharedInventoryAction(
     {
       action: "save-snapshot",
-      snapshotBaseState,
+      snapshotBaseState: calculationBaseState,
       items: getInventorySnapshotItems(),
       summary,
       kegPlanSnapshot,
@@ -16423,7 +16432,7 @@ async function saveInventorySnapshotAttempt({ replaceExisting = false } = {}) {
           recommendations: "current",
         },
         sourceRevisions: {
-          inventory: inventorySharedRevision,
+          inventory: calculationBaseState.revision,
           weeklyUsage: weeklyUsageSharedRevision,
           pmb: toNumber(parAgentState?.revision),
           pricing: toNumber(parAgentState?.revision),
@@ -16539,10 +16548,8 @@ function renderInventoryHistory() {
       openSections: [...openSectionKeys],
       dateLabel: formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot)),
       simpleSyrupNeed: formatInventorySnapshotSimpleSyrupNeed(snapshot),
-      simpleSyrupEstimated: !snapshot.summary?.simpleSyrupNeed && Array.isArray(snapshot.kegPlanSnapshot?.items),
     });
     content.querySelector(".inventory-history-restore")?.addEventListener("click", () => restoreInventorySnapshot(snapshot.id));
-    content.querySelector(".inventory-history-delete").addEventListener("click", () => deleteInventorySnapshot(snapshot.id));
   };
   showSnapshot(selected);
   inventoryHistoryList.querySelector("#weekly-snapshot-date").addEventListener("change", (event) => {
@@ -19608,6 +19615,174 @@ function parseKegLevels(rows) {
 }
 
 
+function parseWeeklyUsage(rows) {
+  const headerRow = rows[0] || [];
+  const historyColumns = headerRow
+    .map((value, index) => ({ label: clean(value).replace(/\s+/g, " "), index }))
+    .filter((entry) => entry.index >= 6 && isWeeklyHistoryHeader(entry.label));
+
+  const parsedItems = rows
+    .slice(2)
+    .map((row) => {
+      const tapNumber = toNumber(row[1]);
+      const name = clean(row[2]);
+      if (!tapNumber || !name || /^do not erase/i.test(name)) return null;
+
+      const kegInfo = kegWallItems.find((item) => item.tapNumber === tapNumber);
+      const rawOz = toNumber(row[3]);
+      const currentEquivalentRaw = clean(row[4]);
+      const currentEquivalent = toNumber(row[4]);
+      const historicalFullKegOunces = toNumber(rawOz / currentEquivalent);
+      const averageRaw = clean(row[5]);
+      const average = toNumber(row[5]);
+      const displayUnit = getWeeklyUsageDisplayUnitForTap({
+        tapNumber,
+        type: kegInfo?.type,
+        name,
+      }, {
+        displayUnit: currentEquivalentRaw !== "" ? "kegs" : "oz",
+      });
+      const history = historyColumns
+        .map((column) => {
+          const rawValue = clean(row[column.index]);
+          return {
+            label: column.label,
+            value: toNumber(row[column.index]),
+            hasValue: /^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(rawValue),
+            source: "CSV",
+            sourceFile: "weekly-usage-history.csv",
+          };
+        })
+        .filter((entry) => entry.hasValue);
+
+      return {
+        id: slugify(`${tapNumber}-${name}`),
+        tapNumber,
+        name,
+        wall: kegInfo?.wall || "",
+        type: kegInfo?.type || "",
+        rawOz,
+        currentEquivalent,
+        historicalFullKegOunces,
+        average: averageRaw !== "" ? average : calculateAverage(history.filter(isUsableWeeklyUsageEntry).map((entry) => entry.value)),
+        history: [...(weeklyUsageHistoryOverrides[slugify(`${tapNumber}-${name}`)] || []), ...history],
+        isLiquorShot: displayUnit === "oz",
+        displayUnit,
+        currentDisplayValue: currentEquivalentRaw !== "" ? currentEquivalent : rawOz,
+      };
+    })
+    .map((item) => item ? ({
+      ...item,
+      average: calculateAverage(item.history.filter(isUsableWeeklyUsageEntry).map((entry) => entry.value)),
+    }) : null)
+    .filter(Boolean);
+
+  return mergeWeeklyUsageDuplicates(parsedItems).sort((a, b) => a.tapNumber - b.tapNumber);
+}
+
+function mergeWeeklyUsageDuplicates(items) {
+  const byId = new Map();
+
+  items.forEach((item) => {
+    const existing = byId.get(item.id);
+    if (!existing) {
+      byId.set(item.id, {
+        ...item,
+        history: mergeWeeklyUsageHistory(item.history),
+      });
+      return;
+    }
+
+    existing.rawOz = pickWeeklyUsageValue(existing.rawOz, item.rawOz);
+    existing.currentEquivalent = pickWeeklyUsageValue(existing.currentEquivalent, item.currentEquivalent);
+    existing.currentDisplayValue = pickWeeklyUsageValue(existing.currentDisplayValue, item.currentDisplayValue);
+    existing.historicalFullKegOunces = pickWeeklyUsageValue(
+      existing.historicalFullKegOunces,
+      item.historicalFullKegOunces,
+    );
+    existing.history = mergeWeeklyUsageHistory([...existing.history, ...item.history]);
+    existing.average = calculateAverage(existing.history.filter(isUsableWeeklyUsageEntry).map((entry) => entry.value));
+  });
+
+  return [...byId.values()].map((item) => ({
+    ...item,
+    average: calculateAverage(item.history.filter(isUsableWeeklyUsageEntry).map((entry) => entry.value)),
+  }));
+}
+
+function parseWeeklyUsageExtraHistory(rows) {
+  const headerRow = rows[0] || [];
+  const historyColumns = headerRow
+    .map((value, index) => ({ label: clean(value).replace(/\s+/g, " "), index }))
+    .filter((entry) => entry.index >= 4 && isWeeklyHistoryHeader(entry.label));
+
+  return rows
+    .slice(1)
+    .map((row) => {
+      const tapNumber = toNumber(row[1]);
+      const name = clean(row[2]);
+      if (!tapNumber || !name || /^do not erase/i.test(name)) return null;
+
+      const history = historyColumns
+        .map((column) => {
+          const rawValue = clean(row[column.index]);
+          if (!/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(rawValue)) return null;
+          return {
+            label: column.label,
+            value: toNumber(rawValue),
+            hasValue: true,
+            source: "CSV",
+            sourceFile: "weekly-usage-history-extra.csv",
+          };
+        })
+        .filter(Boolean);
+
+      return {
+        id: slugify(`${tapNumber}-${name}`),
+        tapNumber,
+        name,
+        nameKey: normalizeWeeklyUsageName(name),
+        history,
+      };
+    })
+    .filter(Boolean);
+}
+
+function mergeWeeklyUsageExtraHistory(items, extraRows) {
+  if (!extraRows.length) return items;
+
+  const byId = new Map(items.map((item) => [item.id, item]));
+
+  extraRows.forEach((extra) => {
+    const item = byId.get(extra.id) || items.find(candidate => candidate.tapNumber === extra.tapNumber && normalizeWeeklyUsageName(candidate.name) === extra.nameKey);
+    if (!item) {
+      const displayUnit = getWeeklyUsageDisplayUnitForTap(extra);
+      archiveWeeklyUsageItem({ ...extra, displayUnit, isLiquorShot: displayUnit === "oz",
+        type: getWeeklyUsagePerformanceCategory(extra),
+        wall: extra.tapNumber <= 20 ? "Patio" : extra.tapNumber <= 72 ? "Main" : "Karaoke",
+      });
+      return;
+    }
+
+    item.history = mergeWeeklyUsageHistory([...extra.history, ...item.history]);
+    item.average = calculateAverage(item.history.filter(isUsableWeeklyUsageEntry).map((entry) => entry.value));
+  });
+
+  return items;
+}
+
+function pickWeeklyUsageValue(primary, fallback) {
+  const primaryNumber = toNumber(primary);
+  const fallbackNumber = toNumber(fallback);
+  if (Number.isFinite(primaryNumber) && primaryNumber > 0) return primaryNumber;
+  if (Number.isFinite(fallbackNumber) && fallbackNumber > 0) return fallbackNumber;
+  return Number.isFinite(primaryNumber) ? primaryNumber : fallbackNumber;
+}
+
+function isWeeklyHistoryHeader(label) {
+  return Boolean(getPmbWeeklyUsageRange(label));
+}
+
 function parseWeeklyUsageChangeovers(rows) {
   const headerRow = (rows[0] || []).map((value) => normalizeWeeklyUsageColumnName(value));
   const columnIndex = (aliases, fallback) => {
@@ -19688,13 +19863,7 @@ function normalizeWeeklyUsageName(value, { stripWallNumber = false } = {}) {
 
 
 function mergeWeeklyUsageHistory(history) {
-  const byLabel = new Map();
-  history.forEach((entry) => {
-    if (!entry?.label || byLabel.has(entry.label)) return;
-    if (!Number.isFinite(entry.value)) return;
-    byLabel.set(entry.label, entry);
-  });
-  return sortWeeklyUsageHistory([...byLabel.values()]);
+  return sortWeeklyUsageHistory(selectWeeklyUsageHistory(history));
 }
 
 function sortWeeklyUsageHistory(history) {
@@ -20556,7 +20725,7 @@ function saveWeeklyUsageCurrentOverrides() {
 
 function loadWeeklyUsageHistoryOverrides() {
   try {
-    return retainPmbWeeklyUsageOverrides(JSON.parse(localStorage.getItem(WEEKLY_USAGE_HISTORY_STORAGE_KEY) || "{}"));
+    return retainWeeklyUsageOverrides(JSON.parse(localStorage.getItem(WEEKLY_USAGE_HISTORY_STORAGE_KEY) || "{}"));
   } catch {
     return {};
   }
@@ -20569,7 +20738,7 @@ function saveWeeklyUsageHistoryOverrides() {
 
 function loadWeeklyUsageArchivedItems() {
   try {
-    return retainPmbWeeklyUsageItems(JSON.parse(localStorage.getItem(WEEKLY_USAGE_ARCHIVE_STORAGE_KEY) || "[]"));
+    return retainWeeklyUsageItems(JSON.parse(localStorage.getItem(WEEKLY_USAGE_ARCHIVE_STORAGE_KEY) || "[]"));
   } catch {
     return [];
   }

@@ -81,3 +81,28 @@ test("waits until after Thursday to flag an unverified Bonbright delivery", () =
   const friday = buildThirtySecondBriefing({ ...input, now: new Date(2026, 7, 28, 9, 0) });
   assert.equal(friday.lines.some((item) => item.bullets?.includes("Expected Bonbright delivery not verified")), true);
 });
+
+test("does not present insufficient weekly-usage history as a briefing error", () => {
+  const briefing = buildThirtySecondBriefing({
+    overview: {
+      alerts: [
+        { id: "weekly-usage-unavailable", severity: "warning", title: "Weekly Usage is not ready for trends", message: "A complete current PMB week is not available." },
+        { id: "weekly-plan-stale", severity: "critical", title: "Weekly plan needs attention", message: "0/102 active taps have saved usage. Missing: Tap 1." },
+      ],
+    },
+    readiness: { status: "stale", staleReasons: ["0/102 active taps have saved usage. Missing: Tap 1."] },
+    mondayRun: { complete: true },
+  });
+  assert.equal(briefing.lines.some((item) => /weekly usage|weekly plan needs attention/i.test(item.text)), false);
+  assert.equal(briefing.lines[0].tone, "ready");
+});
+
+test("still presents a failed weekly-usage save in the briefing", () => {
+  const briefing = buildThirtySecondBriefing({
+    overview: { alerts: [] },
+    readiness: { status: "blocked", blockers: ["The latest Weekly Usage save failed: Shared storage is unavailable."] },
+    mondayRun: { complete: true },
+  });
+  assert.equal(briefing.lines[0].text, "Weekly usage needs attention");
+  assert.match(briefing.voiceText, /save failed/i);
+});

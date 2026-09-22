@@ -3,14 +3,21 @@ import { carryForwardPlannedProofPrep } from "./proof-planned-prep.mjs";
 export const PROOF_PREP_LOOK_AHEAD_WEEKS = 52;
 
 export function buildProofPrepOrderContext(options = {}) {
-  if (!Array.isArray(options.tapInputs) || !options.tapInputs.length) {
-    return buildProofPrepOrderContextFromInputs(options);
+  try {
+    if (!Array.isArray(options.tapInputs) || !options.tapInputs.length) {
+      return buildProofPrepOrderContextFromInputs(options);
+    }
+    const carried = carryForwardPlannedProofPrep(options);
+    const context = buildProofPrepOrderContextFromInputs(carried.options);
+    return carried.unresolved && context.requirement === "not-required"
+      ? { ...context, requirement: "unknown" }
+      : context;
+  } catch {
+    // This forecast is advisory. A malformed recipe or tap observation must
+    // never prevent the weekly snapshot from being saved or the plan loading.
+    // Fail closed so no demand or safe minimum-order filler is invented.
+    return { candidates: [], requirement: "unknown" };
   }
-  const carried = carryForwardPlannedProofPrep(options);
-  const context = buildProofPrepOrderContextFromInputs(carried.options);
-  return carried.unresolved && context.requirement === "not-required"
-    ? { ...context, requirement: "unknown" }
-    : context;
 }
 
 function clean(value) {
@@ -227,6 +234,10 @@ function buildProofLookAheadContext(options) {
       ? 3 / 7 : Math.min(1, Math.max(0, number(tap.preThursdayUsageSharePct) / 100));
     let remaining = Math.max(0, stock - average * preThursdayShare);
     for (let week = 0; week < PROOF_PREP_LOOK_AHEAD_WEEKS; week += 1) {
+      // Every week begins with the prior week's projected closing stock. A
+      // batch made in an earlier week remains available here, then expected
+      // weekly usage is consumed below. This prevents the same prep action
+      // from being recommended again in each future week.
       const batches = Math.max(0, Math.ceil(average * (1 + cushion) - remaining - 1e-9));
       if (batches) addRecipe(recipe, batches, week);
       remaining = Math.max(0, remaining + batches - average);

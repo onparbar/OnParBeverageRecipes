@@ -774,6 +774,33 @@ function findOhlqDateChoice(isoDate) {
     && !labelled.closest('[aria-disabled="true"], [disabled], .disabled') ? labelled : null;
 }
 
+function ohlqDateValueMatches(value, isoDate) {
+  const normalized = clean(value);
+  if (!normalized) return false;
+
+  const iso = normalized.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (iso) {
+    return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}` === isoDate;
+  }
+
+  const us = normalized.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (us) {
+    return `${us[3]}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}` === isoDate;
+  }
+
+  return normalized.toLowerCase() === ohlqDateLabel(isoDate).toLowerCase();
+}
+
+function ohlqDeliveryDateWasAccepted(isoDate) {
+  const input = findOhlqDeliveryDateInput();
+  if (!input) return false;
+  return [
+    input.value,
+    input.getAttribute("value"),
+    input.getAttribute("aria-valuetext"),
+  ].some((value) => ohlqDateValueMatches(value, isoDate));
+}
+
 async function selectOhlqDeliveryDate(isoDate) {
   let input = findOhlqDeliveryDateInput();
   const deadline = Date.now() + 15000;
@@ -817,13 +844,14 @@ async function selectOhlqDeliveryDate(isoDate) {
     ? choice
     : choice.querySelector("button, [role='button']") || choice;
   clickable.click();
-  await delay(350);
-  const value = clean(input.value);
-  const parts = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  const selectedDate = parts ? `${parts[3]}-${parts[1].padStart(2, "0")}-${parts[2].padStart(2, "0")}` : value;
-  if (selectedDate !== isoDate) {
-    throw new Error("OHLQ did not accept the plan week's Thursday as the delivery date.");
+  const confirmationDeadline = Date.now() + 15000;
+  while (Date.now() < confirmationDeadline) {
+    // OHLQ can replace the Angular input after a calendar click, so re-find it
+    // instead of checking the now-detached element that opened the calendar.
+    if (ohlqDeliveryDateWasAccepted(isoDate)) return;
+    await delay(100);
   }
+  throw new Error("OHLQ did not confirm the plan week's Thursday as the delivery date.");
 }
 
 function findOhlqDeliveryTimeSelect() {

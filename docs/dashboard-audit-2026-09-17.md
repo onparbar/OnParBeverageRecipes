@@ -64,3 +64,13 @@ No orders were submitted, prices/counts changed, recipes created, prep or delive
 - New regression files: [dashboard audit regressions](/Users/samanthawatkins/Desktop/OnParBeverageRecipes-main/tests/dashboard-audit-regressions.test.mjs), [staff read recovery regressions](/Users/samanthawatkins/Desktop/OnParBeverageRecipes-main/tests/staff-read-recovery-regressions.test.mjs).
 
 Existing unrelated working-tree changes were preserved. No commit, deployment, or operational-data repair was performed.
+
+## Follow-up: PMB report date boundaries — September 18
+
+The PMB weekly endpoint did not filter returned transactions by original `tst_start`. Added explicit Eastern boundaries and timestamp validation for weekly and pre-Thursday totals before sparse-report review, grouping, and zero verification. Five new regression tests pass; the full suite now passes1,156 tests, with scoped lint, build, and whitespace checks passing. The code fix is local, not deployed, and cannot recover transactions omitted by the PMB source.
+
+The separately authorized historical-data recovery used Cloudflare and the live daily-report import endpoint. Daily source reports were saved; unverified historical product assignments were not merged into current tap history. See [recovery evidence](pmb-history-recovery-2026-09-18.md) for dates, totals, and limitations. This later recovery changes daily-report storage; the original dashboard audit above was read-only.
+
+## Revised source preference — September 18
+
+The user has superseded the PMB-only instruction: CSV usage should fill gaps where usable PMB readings are unavailable. The CSV fallback implementation and validation are documented in [CSV restoration](csv-usage-fallback-2026-09-18.md). Earlier PMB-only descriptions above are historical, not the current policy. Deployment remains subject to the automatic approval review described in that report.

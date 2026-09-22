@@ -615,3 +615,35 @@
   #pricing-panel #pricing-advisor-table > tr > td:nth-child(6) { grid-column: 2; grid-row: 4; }
   #pricing-panel #pricing-advisor-table > tr > td:nth-child(8) { grid-row: 5; }
 }
+
+/* Keep serving labels and money intact, with editing beside the product. */
+#pricing-panel .portion-list--prices {
+  max-width: 100%;
+  overflow-x: auto;
+}
+#pricing-panel .portion-list--prices > span,
+#pricing-panel #pricing-advisor-table .portion-list--prices > span {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+#pricing-panel .pricing-directory .shot-pricing-editor {
+  margin-top: 8px;
+}
+#pricing-panel .pricing-directory .shot-pricing-editor > summary {
+  width: fit-content;
+  padding: 6px 0;
+  color: var(--juniper);
+  font-size: .78rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+#pricing-panel .pricing-directory .shot-pricing-editor[open] {
+  margin-top: 10px;
+}
+#pricing-panel .pricing-directory .shot-pricing-editor .shot-pricing-fields {
+  grid-template-columns: minmax(0, 1fr);
+}

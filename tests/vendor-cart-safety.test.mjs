@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 
 test("vendor handoff uses extension-private storage and remains review-only", async () => {
-  const [background, vendorCart, manifestText, beesCart, dashboardSource] = await Promise.all([
+  const [background, vendorCart, manifestText, beesCart, checkoutReview, dashboardSource] = await Promise.all([
     readFile(new URL("../chrome-extension/bees-cart-builder/background.js", import.meta.url), "utf8"),
     readFile(new URL("../chrome-extension/bees-cart-builder/vendor-cart.js", import.meta.url), "utf8"),
     readFile(new URL("../chrome-extension/bees-cart-builder/manifest.json", import.meta.url), "utf8"),
     readFile(new URL("../chrome-extension/bees-cart-builder/bees-cart.js", import.meta.url), "utf8"),
+    readFile(new URL("../chrome-extension/bees-cart-builder/checkout-review.js", import.meta.url), "utf8"),
     readFile(new URL("../public/dashboard.js", import.meta.url), "utf8"),
   ]);
   const manifest = JSON.parse(manifestText);
@@ -53,4 +55,53 @@ test("vendor handoff uses extension-private storage and remains review-only", as
   assert.deepEqual(missingBeesIdentities, []);
   assert.ok(identityKeys.has("non alcoholic beer"));
   assert.ok(identityKeys.has("blakes hard cider triple jam"));
+
+  assert.match(checkoutReview, /i have kegs\? to \(\?:be \)\?pick/);
+  assert.match(checkoutReview, /input\[type="radio"\].*\[role="switch"\]/s);
+  assert.match(checkoutReview, /const discoveryDeadline = Date\.now\(\) \+ 15000/);
+  assert.match(checkoutReview, /const confirmationDeadline = Date\.now\(\) \+ 15000/);
+  assert.match(checkoutReview, /beesKegPickupIsChecked\(matches\[0\]\)/);
+  assert.match(checkoutReview, /Keg pickup is checked\. Review the order and submit it yourself\./);
+});
+
+test("BEES waits for its exact keg-pickup choice and verifies a re-rendered control", async () => {
+  const checkoutReview = await readFile(
+    new URL("../chrome-extension/bees-cart-builder/checkout-review.js", import.meta.url),
+    "utf8",
+  );
+  let elapsed = 0;
+  let clicked = false;
+  const control = (checked) => ({
+    checked,
+    disabled: false,
+    labels: [],
+    textContent: "",
+    getAttribute(name) {
+      if (name === "aria-label") return "I have kegs to pick up";
+      return null;
+    },
+    closest() { return null; },
+    matches() { return true; },
+    click() { clicked = true; },
+  });
+  const stale = control(false);
+  const confirmed = control(true);
+  const context = {
+    Date: { now: () => elapsed },
+    document: {
+      getElementById: () => null,
+      querySelectorAll: () => [clicked && elapsed >= 700 ? confirmed : stale],
+    },
+    pause: async (milliseconds) => { elapsed += milliseconds; },
+    visible: () => true,
+  };
+  const source = checkoutReview.slice(
+    checkoutReview.indexOf("function beesKegPickupText("),
+    checkoutReview.indexOf("function stop("),
+  );
+  runInNewContext(source, context);
+
+  await context.selectBeesKegPickup();
+  assert.equal(clicked, true);
+  assert.equal(elapsed, 700);
 });

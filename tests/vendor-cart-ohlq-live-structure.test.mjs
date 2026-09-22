@@ -71,3 +71,55 @@ test("exact product pages prefer the ancestor that owns the quantity control", (
   assert.match(vendorCart, /skuPattern\.test\(text\)/);
   assert.match(vendorCart, /lineScore\(candidate, line\) > 0/);
 });
+
+test("OHLQ delivery-date verification accepts the formats used by its checkout", () => {
+  const context = { Intl };
+  const source = [
+    vendorCart.slice(vendorCart.indexOf("function clean("), vendorCart.indexOf("function escapeHtml(")),
+    vendorCart.slice(vendorCart.indexOf("function ohlqDateLabel("), vendorCart.indexOf("function renderOhlqDeliveryNotice(")),
+    vendorCart.slice(vendorCart.indexOf("function ohlqDateValueMatches("), vendorCart.indexOf("function ohlqDeliveryDateWasAccepted(")),
+  ].join("\n");
+  runInNewContext(source, context);
+
+  for (const value of [
+    "9/24/2026",
+    "09/24/2026",
+    "9-24-2026",
+    "2026-09-24",
+    "Thursday, September 24, 2026",
+  ]) {
+    assert.equal(context.ohlqDateValueMatches(value, "2026-09-24"), true, value);
+  }
+  assert.equal(context.ohlqDateValueMatches("9/25/2026", "2026-09-24"), false);
+});
+
+test("OHLQ re-finds an Angular-replaced input before rejecting the selected date", async () => {
+  let elapsed = 0;
+  const input = (value) => ({
+    value,
+    click() {},
+    getAttribute(name) { return name === "value" ? value : null; },
+  });
+  const staleInput = input("");
+  const updatedInput = input("9/24/2026");
+  const context = {
+    Date: { now: () => elapsed },
+    clean: (value) => String(value ?? "").trim(),
+    delay: async (milliseconds) => { elapsed += milliseconds; },
+    findOhlqDeliveryDateInput: () => elapsed >= 700 ? updatedInput : staleInput,
+    findOhlqDateChoice: () => ({ matches: () => true, click() {} }),
+    ohlqDateLabel: () => "Thursday, September 24, 2026",
+  };
+  const source = vendorCart.slice(
+    vendorCart.indexOf("function ohlqDateValueMatches("),
+    vendorCart.indexOf("function findOhlqDeliveryTimeSelect("),
+  );
+  runInNewContext(source, context);
+
+  await context.selectOhlqDeliveryDate("2026-09-24");
+  assert.equal(elapsed, 700);
+});
+
+test("OHLQ allows up to 15 seconds for delayed date confirmation", () => {
+  assert.match(vendorCart, /const confirmationDeadline = Date\.now\(\) \+ 15000/);
+});

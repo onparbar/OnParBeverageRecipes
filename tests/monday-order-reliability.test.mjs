@@ -11,6 +11,7 @@ const items = [{ id: "vodka", name: "Vodka", onHandDisplay: "2", parDisplay: "4"
 const summary = { tapCount: 2, liveTapCount: 2, pmbUpdatedAt: "2026-08-17T14:30:00.000Z" };
 const kegPlanSnapshot = { generatedAt: "2026-08-17T14:45:00.000Z", items: [], tapInputs: [], summary: {} };
 const captureMetadata = {
+  captureId: "snapshot-attempt-2026-08-17",
   sourceFreshness: {
     inventory: "current",
     weeklyUsage: "current",
@@ -39,7 +40,30 @@ test("captures one immutable Monday snapshot with actor and source provenance", 
   assert.equal(state.snapshots.length, 1);
   assert.equal(state.snapshots[0].weekOf, "2026-08-17");
   assert.equal(state.snapshots[0].captureMetadata.actorRole, "owner");
+  assert.equal(state.snapshots[0].captureMetadata.captureId, captureMetadata.captureId);
   assert.equal(state.snapshots[0].captureMetadata.sourceRevisions.weeklyUsage, 8);
+});
+
+test("Monday capture archives NA beer for ordering then clears only its running count", () => {
+  const initial = applyInventoryStateAction(createEmptyInventoryState(), "initialize", {
+    onHandOverrides: { vodka: "2", "non-alcoholic-beer": "47" },
+  }, "owner", monday);
+  const counted = applyInventoryStateAction(initial, "batch-update-fields", {
+    changes: [
+      { id: "vodka", field: "onHand", value: "2" },
+      { id: "non-alcoholic-beer", field: "onHand", value: "47" },
+    ],
+  }, "owner", monday);
+  const captured = applyInventoryStateAction(counted, "save-snapshot", {
+    items: [...items, { id: "non-alcoholic-beer", name: "Non Alcoholic Beer", group: "Other", onHandDisplay: "47", parDisplay: "48", orderDisplay: "24" }],
+    summary, kegPlanSnapshot, reliableCapture: true, captureMetadata,
+  }, "owner", monday);
+  assert.equal(captured.snapshots[0].items.find((item) => item.id === "non-alcoholic-beer").onHandDisplay, "47");
+  assert.equal(captured.snapshots[0].items.find((item) => item.id === "non-alcoholic-beer").orderDisplay, "24");
+  assert.equal(captured.current.onHandOverrides.vodka, "2");
+  assert.equal(captured.current.countedItemsAt.vodka, monday.toISOString());
+  assert.equal(captured.current.onHandOverrides["non-alcoholic-beer"], undefined);
+  assert.equal(captured.current.countedItemsAt["non-alcoholic-beer"], undefined);
 });
 
 test("a duplicate reliable capture preserves the first valid snapshot", () => {

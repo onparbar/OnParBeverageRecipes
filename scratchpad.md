@@ -760,7 +760,110 @@ curl -I 'https://onparbev.com/dashboard.js?v=check'
 - Regression coverage: inventory-shortfall-regressions (10 tests), pmb-only-usage-regressions (4), plus durable recovery test extensions. Updated calculation fixtures to explicitly represent PMB records with complete week labels; legacy CSV ranking test now verifies exclusion.
 - Final checks: all1,151 tests pass, lint zero warnings, build:check pass, git diff --check pass. Report updated docs/dashboard-audit-2026-09-17.md. Fixes local only, no commit/deploy. Concurrent unrelated snapshot/syrup changes appeared in shared workspace and were preserved.
 
-### Combined production release — September 17, 2026
+### Production release verified — September 17, 2026
 
-- User approved deploying all pending changes. Combined application changes, tests, documentation, and prepared extension assets onto current production commit 4c6b2dc in an isolated release checkout; preserved newer production fixes. Generated output exports remain local.
-- Combined release validation: 1,151 tests passed, lint passed, production build passed; read-only shared storage readiness passed. Tap Pricing continues using 2 oz doubles.
+- Deployed all pending application changes in commit 3078dbdb2e2419062750e657dda0cbfeb64cf44a using an isolated checkout based on latest origin/main, preserving newer production commits and this working tree. Included associated tests/docs/prepared extension assets; generated output exports remain local.
+- Combined 1,151 tests, lint, build, storage readiness, GitHub Quality checks 35300033296, and on-site Deploy 35300108960 all passed. Public /api/version confirms the exact release commit.
+- Includes snapshot beverage inventory total, syrup gallons/frozen future calculation, prior profit/heading/recovery fixes, PMB-only usage and inventory shortfall accounting. Two-ounce doubles remain in Tap Pricing.
+- Post-release public storage check briefly returned 503; after its 30-second cache expired, the fresh check returned ok:true with all seven resources provisioned and reachable. Health remains degraded solely by the previously recorded September 14 par-agent error, also present in deployment smoke output. No credentials or operational records changed during release verification.
+
+### Liquor pricing combined thresholds — September 17, 2026
+
+- Liquor portion price warnings now require both margin below 82% AND gross profit below $8. Reaching either threshold clears the price warning; Single/Double evaluated separately with the existing 2 oz double rule.
+- Suggested increases stop at the first threshold reached; updated editor/confirmation copy. Data-quality warnings remain intact.
+- 37 focused tests passed, scoped lint passed, whitespace check passed. Local change only; not deployed. Preserved concurrent PMB transaction-window work.
+
+### PMB historical recovery through Cloudflare — September 18, 2026
+
+- User specifically requested the existing Cloudflare connection, and chose PMB's first recorded pours instead of an assumed November 2023 opening date. Used authenticated onparbev.com reporting APIs. No further SSH/native remote access pursued after the earlier automatic approval review rejected accepting an unverified SSH host key.
+- Shared Weekly Usage revision106 contains29 distinct PMB weeks, with25 missing weeks between September2025 and September2026. Recovered those25 gaps plus9 earlier summer2025 weeks through the existing daily-import endpoint, using two padded reads filtered by original pour timestamps.
+- All238 target daily reports read back correctly from live shared storage:227 matching-overlap days and11 empty-unverified days;233 newly added and5 previously saved. Aggregates contain45,044 recorded pours and422,059.249oz across197 PLUs. These are retained-record totals, not certified complete business usage. No empty date was confirmed as zero.
+- None of the recovered product rows has verified historical tap assignment. Preserved current names/taps as suggestions only; did not merge them into current product histories, weekly averages, or profit. Source reports are live in daily-report storage; weekly product-ID aggregates in output/pmb-recovered-weekly-history-2026-09-18.json and explanation in docs/pmb-history-recovery-2026-09-18.md. Historical scan still running; append its final result below.
+- Found weekly PMB endpoint lacked original timestamp filtering. Local fix filters both full-week and pre-Thursday transactions before sparse review/grouping, uses explicit Eastern boundaries for requests/zero verification, and fails on unusable timestamps. It prevents out-of-range inclusion; it does not certify PMB completeness or recover omitted pours. Five new regression tests cover boundaries, seconds/milliseconds, DST, Thursday9am, malformed timestamps, and legitimate repeated pours.
+- Validation: all1,156 tests pass (loopback-server tests required the normal sandbox escalation); scoped lint, build:check, whitespace check pass. No app deployment, weekly shared-state rewrite, inventory/price/PMB configuration change, or commit performed.
+- Lesson: PMB query labels and accepted date parameters are not proof of coverage. Retain original timestamp evidence, unknown empty days, and historical identity uncertainty. Cloudflare origin502 and intermittent PMB401/tap-read errors occurred; bounded retries recovered every targeted missing-day import, preserving saved reports.
+
+### Tap Pricing layout — September 17, 2026
+
+- Added a clear page header/search area and short category target explanations. Converted the dense eight-column suggestions into comparison cards while retaining table headers, existing selectors, editors, confirmation flows, and full current price directory.
+- Suggestions show tap/product, status, current price, margin/profit, suggestion and change, with room for the price editor. Expanded directory margin width; responsive two-column comparisons on phones.
+- Production build and repository lint passed; focused pricing UI/search/shot tests passed. Rendered sample-data desktop (1280px) and mobile (390px) previews, inspected both with no horizontal overflow. Local only; not deployed.
+
+### Tap Pricing deployment verified — September 17, 2026
+
+- User approved deployment of the layout and combined liquor thresholds. Released only the five pricing-related files from the isolated production checkout; preserved concurrent PMB historical-recovery work locally.
+- Live commit 7dd13e5ba2591ef41a04cd286f50534bb4222e4e verified at onparbev.com/api/version. All 1,152 tests, lint, build, storage readiness, GitHub quality run35301263644 and deployment run35301328341 passed. Final public health returned ok:true with all shared resources available; previously reported September14 par-agent error remains.
+
+### Tap Pricing annotation cleanup — September 17, 2026
+
+- Removed repeated gross-profit wording from per-serving figures, retaining metric headings. Single/Double money rows remain on one line, with contained scrolling if necessary.
+- Moved the liquor editor from the charge column to the product cell and shortened its label to Edit prices with product-specific accessible names. Suggestion buttons open/focus the matching directory editor.
+- Fourteen pricing tests, lint, production build and whitespace checks passed. Sample-data previews at1131px/390px show no page overflow. Local only; not deployed.
+
+- Final source audit:102 overlapping Cloudflare transaction queries cover Oct31,2023–Jul4,2025;101 empty windows and3 records in the last window. Jun28–29 follow-up is empty, as are Jun30–Jul2 daily reports. Earliest returned day is Jul3,2025; this is not a first-ever opening date or a proven limit of all PMB report types.
+- CRITICAL reconciliation finding: native PMB monthly poured-volume totals disagree materially with recovered daily records, even for months with every day retrieved. February2026 has12,348.692 recorded daily oz versus121,329.4 readable native monthly oz plus24 unreadable cells. December,March,April,May also disagree. Matching overlapping reads demonstrate repeatability, not completeness. Existing active weekly figures were NOT replaced. Recovery JSON now explicitly sets safeForWeeklyReplacement:false and retains monthly reconciliation evidence; complete weekly backfill remains unresolved.
+- User asked specifically about other kinds of reports, especially weekly. Direct weekly exports for Dec1–7,2025 and Nov1–30,2023 accepted date filters but both returned2026W29–W38. Monthly export requestedNov2023 returnedApr–Sep2026; daily export requestedDec1–7,2025 returnedSep7–17,2026. Native monthly HTML retainsSep2025–Sep2026. No export was mislabeled or imported as the requested old period.
+- Reporting metadata advertises additional explicit-date transaction, money, servings, cleaning, staff, and sold-versus-dispensed reports. These have NOT all been downloaded; the deployed read-only bridge supports poured-volume exports only. Do not claim all PMB report types exhausted or all pre-Jul2025 data permanently gone. Asked which report screen the user normally uses for older weekly usage; optional answer pending.
+- Durable evidence: output/pmb-export-period-checks-2026-09-18.json, output/pmb-report-options-2026-09-18.json, output/pmb-older-history-scan-2026-09-18.json, output/pmb-native-report-history-2026-09-18.json, output/pmb-monthly-reconciliation-2026-09-18.json, and docs/pmb-history-recovery-2026-09-18.md. All imports/scans finished; no background runner remains.
+
+### Remove snapshot options — September 17, 2026
+
+- Removed Snapshot options and its Delete snapshot menu control from the saved snapshot header, plus the obsolete click binding to avoid a missing-element error. Saved records are unchanged.
+- Seven dashboard simplification tests, scoped lint, and whitespace checks passed. Local only, pending deployment.
+
+### Guest favorites 52-week option — September 17, 2026
+
+- Added 52 weeks before All time, retaining shorter ranges. Kept the linked Drink rankings selector consistent and wired selection/period calculations to52. All-time crowd favorite now uses the all-time ranking instead of its52-week-capped recent window.
+-43 focused tests, lint and whitespace checks passed. Additional60-week fixture verified52 versus60 reports across rankings, leaders and mix. Local only; not deployed.
+
+## CSV fallback restoration — September 18, 2026
+
+- User reversed the PMB-only preference and authorized restoring CSV usage where no usable PMB reading exists.
+- Implemented common per-product/week source priority, CSV source labels, date validation, fresh-login/outbox restoration, demand/performance/ranking support, and later PMB upgrades. Known spreadsheet label variants resolve without merging distinct products or walls. Malformed/overlapping ranges remain excluded.
+- Read original CSVs through the restored parser/changeover policy and rehearsed against fresh live revision 108. Candidate adds 979 CSV entries and two distinct former-product archives; all 5,066 PMB entries and current counts are unchanged. Latest coverage remains 102/102. No live write performed.
+- Main workspace suite passed 1,164 tests before the final spelling regression; isolated release gate passed all 1,160 tests including the final regression, zero-warning lint, build, and whitespace checks. Isolated release excludes concurrent pricing/snapshot edits.
+- Release commit a4f036c prepared in /tmp/onpar-csv-fallback-release. Push to origin/main was rejected by automatic approval review because it triggers shared production deployment and explicit deployment approval was required. Do not bypass. Asked user through async approval question. Live inspected version 7dd13e5 still has PMB-only filtering.
+- Pending after explicit approval: push the exact tested isolated commit (handle a newer remote revision normally), verify GitHub quality/deploy and live version, re-read current shared history, recompute CSV-only gaps, check preservation, write via revision-checked POST /api/weekly-usage-state through Cloudflare, and read back. Private candidate, source fallback, and preservation verifier are in /tmp/onpar-history-20260918; do not expose the session cookie.
+
+### Pre-deployment year-coverage question — September 18
+
+- User paused deployment to ask whether every week in the last year has data. This is not deployment approval.
+- Fresh Cloudflare read still revision 108. Audited all 52 completed Monday–Sunday weeks, September 15, 2025–September 13, 2026. Every week already has at least one usable PMB reading; no wholly blank week. Current partial week excluded.
+- Coverage is not complete: many historical taps lack usable readings or verified assignments, and some recovered PMB entries explicitly flag reportComplete:false. CSV restoration fills product-level gaps across 25 weeks but does not establish complete annual usage. A reading on every tap also does not verify all pours. Do not describe the year as fully recovered.
+- Detailed read-only coverage is output/weekly-history-year-coverage-2026-09-18.json. No deployment or shared-history mutation.
+
+### Hennessy price button — September 18, 2026
+
+- Reproduced the live Pricing Suggestions shortcut doing nothing for Hennessy. Opened the direct Patio Hennessy editor in the user's existing Chrome tab; both price fields are available. Save is disabled until at least one value changes. No price was changed or saved.
+- Confirmed the already-pending local renderShotPricing change binds suggestion buttons after editors exist and opens/focuses the corresponding editor. Live HEAD lacks that binding.
+- Added behavioral VM regression tests for Hennessy taps 1 and 84, checking matching editor, directory expansion, scroll and focus. All 11 focused tests and scoped ESLint passed. Shortcut fix remains local, not deployed; preserve other concurrent pending changes.
+
+### Hennessy deployment approved — September 18, 2026
+
+- User explicitly requested testing and deployment. Isolated release at /tmp/onpar-hennessy-button-release contains only the missing 13-line shortcut handler and regression tests; other pending edits remain excluded.
+- Regression fails on production baseline for both taps (missing handler) and passes with fix. All 1,154 tests, lint, build passed. Commit c3e6cba0f7e2e6ea7d84c7d4400d1336c2a042c8 pushed to origin/main; GitHub quality run 35370183667 in progress, followed by automatic on-site deployment.
+- First on-site attempt failed the 30-second startup smoke check and rolled back to 7dd13e5. Retried the same guarded deployment; attempt 2 succeeded. Live /api/version verified exact c3e6cba commit. /api/health?storage=1 returns ok:true and all shared resources available; pre-existing September 14 par-agent error still reported.
+- Live browser reload: Karaoke Hennessy suggestion opens and focuses the correct editor. Initial PMB form verification was pending after restart; clicked its read-only recheck before final verification.
+- Final live UI verification passed for both Hennessy suggestion buttons. PMB recheck succeeded. Patio shortcut opened and focused the correct editor; entering 11.17 enabled Save, restoring 11.00 disabled it again. No Save was submitted and no live prices changed. User's tab left with the Patio editor open and original prices. Deployment complete.
+
+### Shared-data warning recovery — September 20, 2026
+
+- Compared existing live Chrome dashboard tabs: one retained Dashboard setup/Inventory read failures; another also retained Keg Levels and an inventory timeout. Network-enabled read-only storage readiness passed all seven resources. Reloaded both tabs and verified both visibly show All is Well / No current issues and Weekly Plan Complete.
+- Root cause of the stuck UI: failed startup reads for dashboard configuration and inventory were not retried by the visible refresh loop (Weekly Usage already retries). Added read-only recovery for unavailable dashboard configuration, inventory, and Keg Levels on startup completion, focus, visible timer, visibility, and online events.
+- Recovery does not publish/import data or clear pending operations. It skips active forms, saves, outboxes/conflicts, and rejects reads raced by edits using mutation counters/revisions. Recipe collections and inventory catalog rebuild from the recovered data. Actual database outage cause remains unconfirmed; this fixes stale browser error recovery, not the Supabase incident itself.
+- Nine new behavior regressions; 24 focused tests and scoped lint passed. Isolated production-baseline candidate at /tmp/onpar-shared-read-fix-20260920 based on deployed 04634a90b39512dd9052395d40135d54677ffd19 includes only public/dashboard.js and tests/shared-read-recovery.test.mjs. Full isolated gate: 1,165 tests, lint and build pass. Sandbox-only initial full check could not bind local test servers; network-enabled check passed.
+- Existing unrelated working-tree changes preserved. Automatic retry change remains local and is not deployed. Live windows recovered through reload only.
+
+### Proof eight-week minimum-order forecast — September 21, 2026
+
+- Proof minimum-order top-ups now consider the full saved eight-week cocktail-ingredient forecast, including a shelf-stable case first needed in week eight. Selection remains earliest-need-first, deducts counted and already-ordered units, stops once the $350 threshold is reached, and never uses refrigerated, unknown-count, or unjustified products.
+- The existing Monday flow recalculates and freezes this policy from the newly saved inventory/keg snapshot before publishing the weekly plan. Forecast calculation now fails closed to `unknown` with no candidates if malformed input throws, so it cannot interrupt snapshot saving or invent an order.
+- The forecast is explicitly driven by each tap's expected weekly usage. Every future week carries forward the preceding week's projected closing stock, including projected prep batches, before subtracting that week's expected usage; locked prep is credited once rather than recommended again. Newly saved physical inventory and keg counts remain the next run's authoritative starting point, so completed receipts/prep from the prior operating week enter through the saved state rather than being assumed.
+- All 57 focused Proof/rolling-order tests passed, scoped lint passed, production build passed, and whitespace checks passed. Full suite: 1,181/1,190 passed; two unrelated dirty-worktree NA-beer inventory assertions failed, and seven PMB loopback tests failed because sandbox networking cannot bind localhost. Local only; not deployed.
+
+### Snapshot shared-save reliability — September 21, 2026
+
+- Fixed the Monday snapshot retry trap where storage could commit successfully but the browser could time out before receiving the response. Every new snapshot attempt now carries a durable capture ID; retrying that exact attempt returns the already-saved state instead of reporting a false shared-inventory revision conflict or writing twice.
+- The snapshot commit receives a 20-second browser deadline instead of racing the storage layer's own 8-second deadline. The normal snapshot workflow now reuses its initial verified inventory state through calculation and relies on the server's atomic revision check at commit, removing two redundant full shared-inventory reads.
+- Added regressions for a lost response after commit, stable browser recovery IDs, the longer commit deadline, and the single-read save path. Fourteen focused reliability/store tests and five applicable Monday capture tests pass; scoped lint, production build, and whitespace checks pass. The broader 113-test inventory/weekly group has 111 passes and the same two pre-existing dirty-worktree NA-beer policy assertion failures noted above. Local only; not deployed.
+- Follow-up regression coverage for weekly usage and prior-week action carry-forward raised the focused total to 59 passing tests.

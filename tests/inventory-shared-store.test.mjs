@@ -307,6 +307,58 @@ test("every recovered inventory mutation fails closed at a stale base revision",
   }
 });
 
+test("a snapshot retry succeeds when the first response was lost after commit", async () => {
+  const initialState = createEmptyInventoryState();
+  initialState.initialized = true;
+  initialState.current.onHandOverrides.vodka = "2";
+  initialState.current.countedItemsAt.vodka = "2026-08-17T15:00:00.000Z";
+  const baseFetch = createSupabaseFetch(makeRow({
+    revision: 4,
+    initialized: true,
+    initialized_at: "2026-07-31T14:00:00.000Z",
+    data: { current: initialState.current, snapshots: [] },
+  }));
+  let loseFirstPatchResponse = true;
+  const fetchImpl = async (input, init = {}) => {
+    const response = await baseFetch(input, init);
+    if (String(init.method || "GET").toUpperCase() === "PATCH" && loseFirstPatchResponse) {
+      loseFirstPatchResponse = false;
+      throw new Error("connection closed after commit");
+    }
+    return response;
+  };
+  const shared = createSharedInventoryStore({
+    env: makeEnvironment(),
+    fetchImpl,
+    now: () => new Date("2026-08-17T15:00:00.000Z"),
+  });
+  const payload = {
+    reliableCapture: true,
+    captureId: "snapshot-attempt-1",
+    snapshotBaseState: { ...initialState, revision: 4 },
+    items: [{ id: "vodka", name: "Vodka", group: "Liquor Cabinet", onHandDisplay: "2" }],
+    summary: { tapCount: 1, liveTapCount: 1 },
+    kegPlanSnapshot: { generatedAt: "2026-08-17T14:45:00.000Z", items: [], tapInputs: [], summary: {} },
+    captureMetadata: {
+      sourceFreshness: { inventory: "current", weeklyUsage: "current", pmb: "verified", pricing: "current", recommendations: "current" },
+      sourceRevisions: { inventory: 4, weeklyUsage: 8, pmb: 2, pricing: 3, recommendations: 9 },
+      sourceTimestamps: { inventory: "2026-08-17T15:00:00.000Z", weeklyUsage: "2026-08-17T15:00:00.000Z", pmb: "2026-08-17T15:00:00.000Z", pricing: "2026-08-17T15:00:00.000Z", recommendations: "2026-08-17T15:00:00.000Z" },
+    },
+  };
+
+  await assert.rejects(
+    shared.mutate("save-snapshot", payload, "owner", { expectedRevision: 4 }),
+    (error) => assertStoreError(error, "INVENTORY_STATE_UNAVAILABLE", 503),
+  );
+  const patchCountAfterCommit = baseFetch.calls.filter((call) => call.method === "PATCH").length;
+  const recovered = await shared.mutate("save-snapshot", payload, "owner", { expectedRevision: 4 });
+
+  assert.equal(recovered.revision, 5);
+  assert.equal(recovered.snapshots.length, 1);
+  assert.equal(recovered.snapshots[0].captureMetadata.captureId, payload.captureId);
+  assert.equal(baseFetch.calls.filter((call) => call.method === "PATCH").length, patchCountAfterCommit);
+});
+
 test("maps a missing inventory table to a typed unavailable error", async () => {
   const store = createSharedInventoryStore({
     env: makeEnvironment(),

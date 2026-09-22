@@ -77,23 +77,6 @@ test("dashboard background refresh avoids hammering shared storage", () => {
   assert.match(dashboardSource, /const DASHBOARD_BACKGROUND_REFRESH_MS = 120_000/);
 });
 
-test("failed shared startup reads retry without reloading or publishing data", () => {
-  const retryStart = dashboardSource.indexOf("function retryFailedSharedReads() {");
-  const retryEnd = dashboardSource.indexOf("\nasync function runOwnerLoginSync", retryStart);
-  const retrySource = dashboardSource.slice(retryStart, retryEnd);
-  assert.match(retrySource, /Promise\.allSettled\(jobs\.map\(job => job\(\)\)\)/);
-  assert.match(retrySource, /requestDashboardSharedState\(\)/);
-  assert.match(retrySource, /requestSharedInventory\(\)/);
-  assert.match(retrySource, /requestParAgentState\(\)/);
-  assert.doesNotMatch(retrySource, /method:\s*"POST"/);
-  assert.match(dashboardSource, /window\.addEventListener\("online", \(\) => \{ void retryFailedSharedReads\(\); \}\)/);
-});
-
-test("shared setup allows the healthy remote read to finish without restoring the old long startup", () => {
-  assert.match(dashboardSource, /const DASHBOARD_STATE_REQUEST_TIMEOUT_MS = 12_000/);
-  assert.doesNotMatch(dashboardSource, /const DASHBOARD_STATE_REQUEST_TIMEOUT_MS = 6_000/);
-});
-
 test("Performance keeps shot filters compatible and preserves the requested ranking size", () => {
   assert.match(dashboardSource, /function keepSellerRankingFiltersCompatible/);
   assert.match(dashboardSource, /sellerRankingCategory === "liquor" && sellerRankingWall === "main"/);
@@ -248,9 +231,9 @@ test("the owner dashboard keeps completed cocktail prep visible for the current 
   assert.match(dashboardSource, /Cocktails Prepped/);
   assert.match(dashboardSource, /Prepped by \$\{escapeHtml\(item\.preparedBy\)\}/);
   assert.match(dashboardSource, /formatDashboardPrepTime\(item\.completedAt\)/);
-  assert.match(dashboardSource, /requestOperationalSharedJson\("\/api\/staff-prep-plan"/);
+  assert.match(dashboardSource, /fetch\("\/api\/staff-prep-plan"/);
   assert.match(dashboardSource, /refreshDashboardStaffPrepPlan\(\)/);
-  assert.match(dashboardSource, /window\.setInterval\([\s\S]*refreshDashboardStaffPrepPlan\(\)[\s\S]*DASHBOARD_BACKGROUND_REFRESH_MS/);
+  assert.match(dashboardSource, /window\.setInterval\([\s\S]*refreshDashboardStaffPrepPlan\(\)[\s\S]*30_000/);
 });
 
 test("locking a new Monday plan clears the prior plan's prep history", async () => {

@@ -5009,6 +5009,12 @@ td {
   line-height: 1.15;
 }
 
+.weekly-usage-source {
+  display: block;
+  font-size: 0.65rem;
+  color: var(--ink);
+}
+
 .weekly-usage-week-label span:last-child {
   color: var(--ink);
   font-size: 0.68rem;

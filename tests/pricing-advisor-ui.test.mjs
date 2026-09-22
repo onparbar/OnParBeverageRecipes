@@ -40,8 +40,9 @@ test("tap price advisors retain editors and liquor prices use expandable editors
   assert.equal(renderers.split("advisorButton.replaceWith(editor)").length - 1, 1);
   assert.match(renderers, /else row\.children\[3\]\?\.append\(editor\)/);
   assert.match(renderers, /chargeCell\.innerHTML = renderPortionList/);
-  assert.match(renderers, /chargeCell\.append\(editor\)/);
-  assert.match(renderers, /<summary>Edit single \/ double prices<\/summary>/);
+  assert.match(renderers, /productCell\.append\(editor\)/);
+  assert.doesNotMatch(renderers, /chargeCell\.append\(editor\)/);
+  assert.match(renderers, /<summary aria-label="Edit prices for.*">Edit prices<\/summary>/);
   const advisor = dashboard.slice(dashboard.indexOf("function renderPricingAdvisor("), dashboard.indexOf("function buildPricingAdvisorInput("));
   const editorMarkup = advisor.slice(advisor.indexOf("pricingAdvisorTable.innerHTML ="));
   assert.doesNotMatch(editorMarkup, /scrollIntoView|addEventListener\("click"/);

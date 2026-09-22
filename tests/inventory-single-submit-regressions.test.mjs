@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { getInventoryCountSections } from "../public/inventory-weekly-counts.mjs";
-import { getUncountedInventoryAmount } from "../public/inventory-count-policy.mjs";
+import { getUncountedInventoryAmount, isWeeklyCountOnlyInventoryItem } from "../public/inventory-count-policy.mjs";
 
 const source = readFileSync(new URL("../public/dashboard.js", import.meta.url), "utf8");
 const page = readFileSync(new URL("../app/page.jsx", import.meta.url), "utf8");
@@ -48,6 +48,7 @@ function makeHarness(overrides = {}) {
     clean: (value) => String(value ?? "").trim(),
     isRecommendationForOperatingWeek: (value) => value === stamp,
     getUncountedInventoryAmount,
+    isWeeklyCountOnlyInventoryItem,
     getInventoryCountSections: (items, counts) => getInventoryCountSections(items, counts, now),
     Date: class extends Date {
       constructor(...args) { super(...(args.length ? args : [stamp])); }
@@ -88,6 +89,13 @@ test("one atomic submission verifies all running counts without zeroing older co
   assert.ok(action.changes.every(({ field }) => field === "onHand"));
   assert.equal(harness.confirmations.length, 0);
   assert.equal(harness.scope.inventoryCountSubmitting, false);
+});
+
+test("cabinet completion cannot silently count NA beer as zero", () => {
+  const harness = makeHarness({ inventoryCountedItemsAt: { vodka: stamp, gin: stamp, lime: stamp } });
+  const changes = harness.scope.buildCompletedInventorySectionChanges("Mixer Cabinet", []);
+  assert.ok(changes.some((change) => change.id === "garnish" && change.value === "0"));
+  assert.ok(!changes.some((change) => change.id === "na-beer"));
 });
 
 test("an unknown count blocks submission without replacing it with zero", async () => {

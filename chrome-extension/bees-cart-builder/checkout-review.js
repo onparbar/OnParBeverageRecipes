@@ -9,29 +9,58 @@
   const final = /^(place order|submit order|confirm order|complete order|confirm purchase|pay now|buy now|send order)$/;
   const navigation = /^(view cart|view basket|cart|basket|checkout|check out|proceed to checkout|continue to checkout|review order|review your order|continue to review)$/;
   function persist() { sessionStorage.setItem(key, JSON.stringify(active)); }
+  const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+  function beesKegPickupText(element) {
+    const labelledBy = (element.getAttribute("aria-labelledby") || "").split(/\s+/)
+      .map(id => document.getElementById(id)?.textContent || "").join(" ");
+    return [element.getAttribute("aria-label"), labelledBy,
+      ...[...(element.labels || [])].map(item => item.textContent),
+      element.closest("label")?.textContent,
+      /^(checkbox|radio|switch)$/.test(element.getAttribute("role") || "") ? element.textContent : ""]
+      .filter(Boolean).join(" ").trim().replace(/\s+/g, " ").toLowerCase();
+  }
+  function findBeesKegPickupControls() {
+    const controls = [...document.querySelectorAll(
+      'input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="radio"], [role="switch"]',
+    )].map(element => ({ element, text: beesKegPickupText(element) }));
+    const exact = controls.filter(({ text }) => /\bi have kegs? to (?:be )?pick(?:ed)?[ -]?up\b/.test(text));
+    const matches = exact.length ? exact : controls.filter(({ text }) => (
+      /\bkegs?\b/.test(text) && /pick[ -]?up|picked up|collect(?:ion|ed)?/.test(text)
+      && !/\bno\b|\bnot\b|don't|do not/.test(text)
+    ));
+    return matches.map(({ element }) => element);
+  }
+  function beesKegPickupIsChecked(control) {
+    return control.matches('input[type="checkbox"], input[type="radio"]')
+      ? control.checked
+      : control.getAttribute("aria-checked") === "true";
+  }
   async function selectBeesKegPickup() {
-    const matches = [...document.querySelectorAll('input[type="checkbox"], [role="checkbox"]')].filter(element => {
-      const labelledBy = (element.getAttribute("aria-labelledby") || "").split(/\s+/)
-        .map(id => document.getElementById(id)?.textContent || "").join(" ");
-      const text = [element.getAttribute("aria-label"), labelledBy,
-        ...[...(element.labels || [])].map(item => item.textContent),
-        element.closest("label")?.textContent, element.getAttribute("role") === "checkbox" ? element.textContent : ""]
-        .filter(Boolean).join(" ").toLowerCase();
-      return /\bkegs?\b/.test(text) && /pick[ -]?up|picked up|collect(?:ion|ed)?/.test(text)
-        && !/\bno\b|\bnot\b|don't|do not/.test(text);
-    });
+    let matches = findBeesKegPickupControls();
+    const discoveryDeadline = Date.now() + 15000;
+    while (matches.length !== 1 && Date.now() < discoveryDeadline) {
+      await pause(250);
+      matches = findBeesKegPickupControls();
+    }
     if (matches.length !== 1) throw new Error("Please check BEES' keg-pickup box manually; its control could not be identified uniquely.");
     const checkbox = matches[0];
-    const checked = () => checkbox.matches('input[type="checkbox"]') ? checkbox.checked : checkbox.getAttribute("aria-checked") === "true";
-    if (checked()) return;
+    if (beesKegPickupIsChecked(checkbox)) return;
     if (checkbox.disabled || checkbox.getAttribute("aria-disabled") === "true") {
       throw new Error("BEES' keg-pickup box is disabled. Please review it before submitting.");
     }
-    const target = visible(checkbox) ? checkbox : [...(checkbox.labels || [])].find(visible);
+    const target = visible(checkbox) ? checkbox : [
+      ...(checkbox.labels || []),
+      checkbox.closest("label"),
+    ].find(visible);
     if (!target) throw new Error("BEES' keg-pickup box is not available to select. Please check it before submitting.");
     target.click();
-    await new Promise(resolve => setTimeout(resolve, 300));
-    if (!checkbox.isConnected || !checked()) throw new Error("Please confirm BEES saved the keg-pickup selection before submitting.");
+    const confirmationDeadline = Date.now() + 15000;
+    while (Date.now() < confirmationDeadline) {
+      matches = findBeesKegPickupControls();
+      if (matches.length === 1 && beesKegPickupIsChecked(matches[0])) return;
+      await pause(100);
+    }
+    throw new Error("Please confirm BEES saved the keg-pickup selection before submitting.");
   }
   function stop(message) {
     active = null;

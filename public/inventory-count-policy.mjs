@@ -9,6 +9,11 @@ const ASSUMED_UNITS = Object.freeze({
   "vanilla-syrup": 2,
 });
 
+export function isWeeklyCountOnlyInventoryItem(item) {
+  return item?.id === "non-alcoholic-beer"
+    || /^non[-\s]*alcoholic beer$/i.test(String(item?.name || ""));
+}
+
 export function getUncountedInventoryAmount(item) {
   const names = typeof item === "string" ? [item] : [item?.name, item?.id];
   for (const name of names) {

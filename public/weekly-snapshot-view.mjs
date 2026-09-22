@@ -35,15 +35,11 @@ export function renderSavedWeeklySnapshot(snapshot, helpers) {
   return `<article class="weekly-snapshot-record" aria-label="Snapshot for ${html(dateLabel)}">
     <header class="weekly-snapshot-record__header">
       <div><h3>Week of ${html(dateLabel)}</h3><p class="muted">Saved ${html(formatUpdatedAt(snapshot.savedAt))}</p></div>
-      <details class="weekly-snapshot-options"><summary>Snapshot options</summary><div class="inventory-history-actions">
-        <button class="ghost-button inventory-history-delete" type="button">Delete snapshot</button>
-      </div></details>
     </header>
     ${lateReason ? `<p class="muted">Late capture: ${html(lateReason)}</p>` : ""}
     <div class="inventory-history-value-summary">
       <div class="inventory-history-value-summary__total"><span>Total beverage inventory</span><strong>${currency(snapshot.summary?.totalBeverageInventoryValue)}</strong></div>
       <div><span>Simple syrup needed for next week</span><strong>${html(helpers.simpleSyrupNeed || "Not recorded")}</strong></div>
-      <p>For the saved cocktail prep plan.${helpers.simpleSyrupEstimated ? " Estimated using current recipes; the original syrup amount was not saved." : ""}</p>
     </div>
     <details class="weekly-snapshot-section" data-snapshot-section="counts"${["counts", "kegs", "inventory"].some(key => openSections.has(key)) ? " open" : ""}>
       <summary><span>Saved counts</span><strong>${quantity(taps.length)} taps / ${quantity(items.length)} items</strong></summary>

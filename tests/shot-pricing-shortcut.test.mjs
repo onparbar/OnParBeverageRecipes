@@ -19,7 +19,7 @@ for (const tapNumber of [1, 84]) {
       canEdit: true,
     }));
     const shotPricingTable = {
-      children: rows.map(() => ({ children: [{}, { append(editor) { editors.push(editor); } }, {}, { append(editor) { editors.push(editor); } }] })),
+      children: rows.map(() => ({ children: [{}, { append(editor) { editors.push(editor); } }, {}, {}] })),
       querySelectorAll() { return editors; },
     };
     const context = vm.createContext({

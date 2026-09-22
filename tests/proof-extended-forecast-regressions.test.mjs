@@ -56,6 +56,27 @@ test("Proof forecasts a full year so the next real need can satisfy its minimum"
   assert.ok(candidate.replacementNeedUnits > 12);
 });
 
+test("each forecast week consumes expected usage after carrying forward the prior week's prep action", () => {
+  const result = forecast({
+    tapInputs: [{ ...tap, currentStockKegs: 0, avgWeeklyKegs: 0.6 }],
+  });
+  assert.deepEqual(
+    result.candidates[0].forecastDemands.slice(0, 8).map(({ units }) => units),
+    [12, 24, 24, 36, 36, 48, 60, 60],
+  );
+});
+
+test("changing expected weekly usage changes the rolling ingredient forecast", () => {
+  const slower = forecast({
+    tapInputs: [{ ...tap, currentStockKegs: 1, avgWeeklyKegs: 0.2 }],
+  });
+  const faster = forecast({
+    tapInputs: [{ ...tap, currentStockKegs: 1, avgWeeklyKegs: 0.6 }],
+  });
+  assert.deepEqual(slower.candidates[0].forecastDemands.slice(0, 8).map(({ units }) => units), [0, 0, 0, 0, 0, 12, 12, 12]);
+  assert.deepEqual(faster.candidates[0].forecastDemands.slice(0, 8).map(({ units }) => units), [0, 12, 12, 24, 24, 36, 48, 48]);
+});
+
 test("saved order policy retains the full forecast horizon and rejects later weeks", () => {
   const [candidate] = forecast().candidates;
   const saved = normalizeVendorOrderPolicy({ proofMinimumCandidates: [{
@@ -102,6 +123,17 @@ test("unrelated missing tap data does not discard justified ingredient candidate
     assert.equal(result.candidates[0].replacementNeedUnits, 144);
     assert.equal(draft(result.candidates, { requirement: result.requirement }).estimatedTotal, 360);
   }
+});
+
+test("forecast failures stay non-blocking and never invent minimum-order filler", () => {
+  const brokenRecipe = { title: recipe.title };
+  Object.defineProperty(brokenRecipe, "ingredients", { get() { throw new Error("broken recipe"); } });
+  assert.doesNotThrow(() => buildProofPrepOrderContext({
+    inventoryItems: [ingredient], recipes: [brokenRecipe], tapInputs: [tap],
+  }));
+  assert.deepEqual(buildProofPrepOrderContext({
+    inventoryItems: [ingredient], recipes: [brokenRecipe], tapInputs: [tap],
+  }), { candidates: [], requirement: "unknown" });
 });
 
 test("unknown tap stock never becomes an invented zero-stock forecast", () => {

@@ -8,6 +8,15 @@ export function isPmbUsageEntry(entry) {
     && Number.isFinite(Number(entry.volumeOz)) && Number(entry.volumeOz) >= 0;
 }
 
+export function getWeeklyUsageSource(entry) {
+  if (!entry || typeof entry !== "object") return "";
+  if (isPmbUsageEntry(entry)) return "PMB";
+  const source = String(entry.source || "").trim().toLowerCase();
+  // Saved spreadsheet history predates source labels and has value, not volumeOz.
+  if (source === "csv" || (!source && entry.value !== undefined && entry.volumeOz == null)) return "CSV";
+  return "";
+}
+
 export function getPmbWeeklyUsageRange(label) {
   const match = String(label || "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})\s*[-–—]\s*(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
   if (!match) return null;
