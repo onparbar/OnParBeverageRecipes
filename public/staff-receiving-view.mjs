@@ -15,6 +15,7 @@ if (!drafts || typeof drafts !== "object" || Array.isArray(drafts)) drafts = {};
 const clean = (value) => String(value ?? "").trim();
 const complete = (item) => ["received", "extra"].includes(item.status);
 const quantity = (item) => `${Number(item.quantity) || 0} ${clean(item.unit) || "units"}`;
+const itemCount = (count) => `${count} item${count === 1 ? "" : "s"}`;
 function remember() {
   try { sessionStorage.setItem(draftKey, JSON.stringify(drafts)); } catch { /* Keep drafts in memory when storage is unavailable. */ }
 }
@@ -61,7 +62,7 @@ export function renderStaffReceiving({ root, tracking, saveReceipts }) {
     const pending = entry.items.filter((item) => !complete(item)).length;
     const node = button("", () => choose(entry), true);
     node.classList.add("receiving-delivery-tile");
-    node.append(element("strong", "", entry.vendor), element("span", "", pending ? `${pending} items to check` : `${entry.items.length} items received`));
+    node.append(element("strong", "", entry.vendor), element("span", "", pending ? `${itemCount(pending)} to check` : `${itemCount(entry.items.length)} received`));
     parent.append(node);
   }
   if (!vendor) {
@@ -92,7 +93,7 @@ export function renderStaffReceiving({ root, tracking, saveReceipts }) {
   const title = element("div");
   title.append(element("h3", "", vendor.vendor));
   const checked = vendor.items.filter(complete).length;
-  title.append(element("p", "", `${checked} of ${vendor.items.length} items received`));
+  title.append(element("p", "", `${checked} of ${itemCount(vendor.items.length)} received`));
   top.append(title);
   root.append(top);
   if (vendor.deliveryNote) root.append(element("p", "receiving-note", vendor.deliveryNote));
@@ -236,7 +237,7 @@ export function renderStaffReceiving({ root, tracking, saveReceipts }) {
     const remaining = vendor.items.filter((item) => !complete(item)).length;
     const draftCount = vendor.items.filter((item) => drafts[`${currentWeek}:${item.id}`]).length;
     if (draftCount && !window.confirm(`${draftCount} difference form(s) have entries that are not recorded yet. Keep them as drafts and finish for now?`)) return;
-    message = `${vendor.vendor}: ${completed.length} of ${vendor.items.length} items received.${remaining ? ` ${remaining} remain open for follow-up.` : " Delivery complete."}${draftCount ? " Unsaved difference drafts are kept in this tab." : ""}`;
+    message = `${vendor.vendor}: ${completed.length} of ${itemCount(vendor.items.length)} received.${remaining ? ` ${remaining} remain open for follow-up.` : " Delivery complete."}${draftCount ? " Unsaved difference drafts are kept in this tab." : ""}`;
     messageError = false;
     selectedVendor = "";
     rerender();

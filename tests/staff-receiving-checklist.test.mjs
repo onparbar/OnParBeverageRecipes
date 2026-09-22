@@ -71,6 +71,14 @@ test("bulk receive excludes a difference typed after the delivery first rendered
   assert.match(h.confirmations[0], /unsaved difference drafts will not change/);
 });
 
+test("delivery counts use singular item copy", () => {
+  const h = harness();
+  h.tracking.vendors[0].items = [h.tracking.vendors[0].items[0]];
+  h.render();
+  assert.match(h.root.textContent, /1 item to check/);
+  assert.doesNotMatch(h.root.textContent, /1 items/);
+});
+
 test("bulk action does nothing when every unchecked item now has a draft", () => {
   const h = harness(); action(h.root, "Proof").fire("click");
   const bulk = action(h.root, "Receive all unchecked items");
