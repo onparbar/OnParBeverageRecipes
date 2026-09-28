@@ -296,6 +296,26 @@ test("makes an unprepared On Deck cocktail when the physical tap is Coming Soon"
   assert.equal(prepared.orderQty, 0);
 });
 
+test("makes the intended cocktail when a Coming Soon tap has no On Deck selection", () => {
+  const tap = {
+    ...cocktailTap("Coming Soon!", 67),
+    templateBrand: "CROWN APPLE 'RITA 1",
+  };
+  const result = buildRawRecommendation(
+    tap,
+    { fillLevelPercent: 5, rawKegSize: 1536, rawKegSizeDp: 0 },
+    [],
+    { onHandOverrides: {}, onDeckOverrides: {} },
+    {},
+  );
+
+  assert.equal(result.currentStockKegs, 0);
+  assert.equal(result.actionType, "make");
+  assert.equal(result.orderQty, 1);
+  assert.equal(result.orderProductName, "CROWN APPLE 'RITA 1");
+  assert.match(result.reason, /intended for CROWN APPLE 'RITA 1.*Make 1/i);
+});
+
 test("orders beer against current stock without subtracting a Thursday forecast", () => {
   const tap = beerTap();
   const baseArgs = [

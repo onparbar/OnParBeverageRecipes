@@ -13615,12 +13615,18 @@ function getKegNeedCalculation(item) {
   }
 
   const onDeck = getKegOnDeckItem(item);
+  const intendedCocktailName = clean(onDeck?.name || item.brand || item.tapProduct);
   const isComingSoonCocktail = isPricingPlaceholder(displayBrand)
-    && ["recipe", "cocktail"].includes(normalizeTitle(onDeck?.kind));
+    && intendedCocktailName
+    && !isPricingPlaceholder(intendedCocktailName)
+    && (normalizeTitle(item.type) === "cocktail"
+      || ["recipe", "cocktail"].includes(normalizeTitle(onDeck?.kind)));
   if (isComingSoonCocktail) {
     return buildStockGapRecommendation({
       targetStock: 1,
-      position: buildInventoryPosition({ onDeck: toNumber(onDeck.onHand) }),
+      position: buildInventoryPosition(onDeck
+        ? { onDeck: toNumber(onDeck.onHand) }
+        : { onHand: toNumber(getKegOnHandDisplay(item)) }),
     });
   }
 
@@ -13676,7 +13682,8 @@ function renderKegNeedValue(item, need) {
   if (!(need > 0)) return '<span class="inventory-order-zero">0</span>';
   const onDeck = getKegOnDeckItem(item);
   const orderProductName = getCanonicalProductDisplayName(
-    recommendation?.orderProductName || onDeck?.name || getKegDisplayBrand(item, getKegLiveRow(item)),
+    recommendation?.orderProductName || onDeck?.name || item.brand || item.tapProduct
+      || getKegDisplayBrand(item, getKegLiveRow(item)),
   );
   if (isLiquorOunceTap(toNumber(item.tapNumber))) {
     return `<span class="inventory-order-value">Order ${formatNumber(need)} bottle${need === 1 ? "" : "s"}</span>`;

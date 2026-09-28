@@ -62,6 +62,7 @@ test("order hover uses the same stock target as the recommendation", () => {
     getKegItemKey: () => "21", isLiquorOunceTap: () => false,
     getKegParDisplay: () => "2.25", getKegOnDeckItem: () => ({ kind: "beer", onHand: 1 }),
     getKegOnHandDisplay: () => "0", normalizeTitle: String, toNumber: Number,
+    clean: (value) => String(value || "").trim(),
     isPricingPlaceholder,
     getWeeklyUsageForKegItem: () => ({}), getSixWeekUsage: () => ({ sampleWeeks: 6, average: 1.8 }),
     MINIMUM_KEG_CUSHION: 0.25,
@@ -97,6 +98,7 @@ test("Coming Soon uses its unprepared On Deck cocktail as the make target", () =
     getKegDisplayBrand: () => "Coming Soon!", getWeeklyUsageForKegItem: () => ({}),
     getSixWeekUsage: () => ({ sampleWeeks: 0, average: 0 }), isLiquorOunceTap: () => false,
     getKegOnDeckItem: () => onDeck, getKegOnHandDisplay: () => "0",
+    clean: (value) => String(value || "").trim(),
     normalizeTitle: (value) => String(value || "").toLowerCase(), toNumber: Number,
     isPricingPlaceholder, buildInventoryPosition, buildOperationalRecommendation, buildStockGapRecommendation,
   };
@@ -111,6 +113,32 @@ test("Coming Soon uses its unprepared On Deck cocktail as the make target", () =
     normalizeTitle: scope.normalizeTitle, formatNumber: String, escapeHtml,
   });
   assert.match(render(comingSoon, 1), />Make 1</);
+});
+
+test("Coming Soon uses the tap's intended cocktail when On Deck is empty", () => {
+  const comingSoon = { ...item, tapNumber: 67, type: "Cocktail", tapProduct: "Coming Soon!", brand: "CROWN APPLE 'RITA 1" };
+  const scope = {
+    getKegLiveRow: () => ({}), getKegCurrentFraction: () => 0.05,
+    getKegDisplayBrand: () => "Coming Soon!", getWeeklyUsageForKegItem: () => ({}),
+    getSixWeekUsage: () => ({ sampleWeeks: 0, average: 0 }), isLiquorOunceTap: () => false,
+    getKegOnDeckItem: () => null, getKegOnHandDisplay: () => "0",
+    clean: (value) => String(value || "").trim(),
+    normalizeTitle: (value) => String(value || "").toLowerCase(), toNumber: Number,
+    isPricingPlaceholder, buildInventoryPosition, buildOperationalRecommendation, buildStockGapRecommendation,
+  };
+  const calculate = load("getKegNeedCalculation", scope);
+  assert.equal(calculate(comingSoon).targetStock, 1);
+  assert.equal(calculate(comingSoon).orderQuantity, 1);
+
+  const render = load("renderKegNeedValue", {
+    getParAgentRecommendation: () => null, getKegOnDeckItem: () => null,
+    getCanonicalProductDisplayName: String, getKegDisplayBrand: () => "Coming Soon!",
+    getKegLiveRow: () => ({}), isLiquorOunceTap: () => false, toNumber: Number,
+    normalizeTitle: scope.normalizeTitle, formatNumber: String, escapeHtml,
+  });
+  const html = render(comingSoon, 1);
+  assert.match(html, />Make 1</);
+  assert.match(html, /CROWN APPLE 'RITA 1/);
 });
 
 test("liquor targets use the shared refill batch and preserve missing readings", () => {
