@@ -13614,10 +13614,19 @@ function getKegNeedCalculation(item) {
     });
   }
 
+  const onDeck = getKegOnDeckItem(item);
+  const isComingSoonCocktail = isPricingPlaceholder(displayBrand)
+    && ["recipe", "cocktail"].includes(normalizeTitle(onDeck?.kind));
+  if (isComingSoonCocktail) {
+    return buildStockGapRecommendation({
+      targetStock: 1,
+      position: buildInventoryPosition({ onDeck: toNumber(onDeck.onHand) }),
+    });
+  }
+
   const peakUsage = getEightWeekPeakUsage(usageItem || {}, new Date(), getKegFullOunces(liveRow, item));
   if (!peakUsage.sampleWeeks) return null;
   const bufferedTarget = peakUsage.targetStock;
-  const onDeck = getKegOnDeckItem(item);
   const position = buildInventoryPosition({
     connected: liveFraction,
     onHand: toNumber(getKegOnHandDisplay(item)),
@@ -13665,14 +13674,16 @@ function renderKegNeedValue(item, need) {
     return '<span class="inventory-order-zero" title="Live level or usage target unavailable">-</span>';
   }
   if (!(need > 0)) return '<span class="inventory-order-zero">0</span>';
+  const onDeck = getKegOnDeckItem(item);
   const orderProductName = getCanonicalProductDisplayName(
-    recommendation?.orderProductName || getKegOnDeckItem(item)?.name || getKegDisplayBrand(item, getKegLiveRow(item)),
+    recommendation?.orderProductName || onDeck?.name || getKegDisplayBrand(item, getKegLiveRow(item)),
   );
   if (isLiquorOunceTap(toNumber(item.tapNumber))) {
     return `<span class="inventory-order-value">Order ${formatNumber(need)} bottle${need === 1 ? "" : "s"}</span>`;
   }
   const actionLabel = recommendation?.actionType === "make"
-    || (!recommendation && normalizeTitle(item.type) === "cocktail") ? "Make" : "Order";
+    || (!recommendation && (normalizeTitle(item.type) === "cocktail"
+      || ["recipe", "cocktail"].includes(normalizeTitle(onDeck?.kind)))) ? "Make" : "Order";
   return `<span class="inventory-order-value" title="${escapeHtml(orderProductName)}">${actionLabel} ${formatNumber(need)}</span>`;
 }
 

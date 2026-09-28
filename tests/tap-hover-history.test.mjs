@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { buildInventoryPosition, buildOperationalRecommendation, buildStockGapRecommendation } from "../public/operations-truth-model.mjs";
 import { attachTapProductHistory, tapProductIdentity } from "../lib/pmb-tap-product-history.mjs";
 import { normalizePmbLevelSnapshot } from "../lib/pmb-level-snapshot-store.mjs";
+import { isPricingPlaceholder } from "../public/pricing-placeholders.mjs";
 
 const source = readFileSync(new URL("../public/dashboard.js", import.meta.url), "utf8");
 function load(name, scope = {}) {
@@ -61,6 +62,7 @@ test("order hover uses the same stock target as the recommendation", () => {
     getKegItemKey: () => "21", isLiquorOunceTap: () => false,
     getKegParDisplay: () => "2.25", getKegOnDeckItem: () => ({ kind: "beer", onHand: 1 }),
     getKegOnHandDisplay: () => "0", normalizeTitle: String, toNumber: Number,
+    isPricingPlaceholder,
     getWeeklyUsageForKegItem: () => ({}), getSixWeekUsage: () => ({ sampleWeeks: 6, average: 1.8 }),
     MINIMUM_KEG_CUSHION: 0.25,
     getKegDisplayBrand: () => "Test beer",
@@ -85,6 +87,30 @@ test("order hover uses the same stock target as the recommendation", () => {
   assert.match(html, /Need at least/);
   assert.match(html, /2.25 kegs/);
   assert.doesNotMatch(html, /Last tapped|Replaced/);
+});
+
+test("Coming Soon uses its unprepared On Deck cocktail as the make target", () => {
+  const comingSoon = { ...item, tapNumber: 94, type: "Cocktail", tapProduct: "Coming Soon!", brand: "Coming Soon!" };
+  const onDeck = { name: "Vodka Cran (Tito's) 2", kind: "recipe", onHand: "0", onHandUnit: "keg" };
+  const scope = {
+    getKegLiveRow: () => ({}), getKegCurrentFraction: () => 0.197,
+    getKegDisplayBrand: () => "Coming Soon!", getWeeklyUsageForKegItem: () => ({}),
+    getSixWeekUsage: () => ({ sampleWeeks: 0, average: 0 }), isLiquorOunceTap: () => false,
+    getKegOnDeckItem: () => onDeck, getKegOnHandDisplay: () => "0",
+    normalizeTitle: (value) => String(value || "").toLowerCase(), toNumber: Number,
+    isPricingPlaceholder, buildInventoryPosition, buildOperationalRecommendation, buildStockGapRecommendation,
+  };
+  const calculate = load("getKegNeedCalculation", scope);
+  assert.equal(calculate(comingSoon).targetStock, 1);
+  assert.equal(calculate(comingSoon).orderQuantity, 1);
+
+  const render = load("renderKegNeedValue", {
+    getParAgentRecommendation: () => null, getKegOnDeckItem: () => onDeck,
+    getCanonicalProductDisplayName: String, getKegDisplayBrand: () => "Coming Soon!",
+    getKegLiveRow: () => ({}), isLiquorOunceTap: () => false, toNumber: Number,
+    normalizeTitle: scope.normalizeTitle, formatNumber: String, escapeHtml,
+  });
+  assert.match(render(comingSoon, 1), />Make 1</);
 });
 
 test("liquor targets use the shared refill batch and preserve missing readings", () => {
