@@ -5949,10 +5949,13 @@ async function recallCurrentWeeklyPlan() {
 
 async function loadWeeklyOrderTracking() {
   try {
-    const { response, result } = await requestOperationalSharedJson("/api/weekly-order-tracking", {
+    const knownRevision = toNumber(weeklyOrderTracking?.stateRevision);
+    const path = knownRevision > 0 ? `/api/weekly-order-tracking?revision=${knownRevision}` : "/api/weekly-order-tracking";
+    const { response, result } = await requestOperationalSharedJson(path, {
       headers: { Accept: "application/json" },
     });
     if (!response.ok) throw new Error(result?.error || "Weekly order tracking could not be loaded.");
+    if (result?.unchanged === true) return true;
     weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
     reconcileWeeklyOrderTrackingRevision();
     weeklyOrderTrackingMessage = weeklyOrderTracking.message;
@@ -6023,10 +6026,13 @@ let dashboardFinishWeekMessage = "";
 
 async function loadDashboardStaffPrepPlan() {
   try {
-    const { response, result } = await requestOperationalSharedJson("/api/staff-prep-plan", {
+    const knownRevision = toNumber(dashboardStaffPrepPlan?.stateRevision);
+    const path = knownRevision > 0 ? `/api/staff-prep-plan?revision=${knownRevision}` : "/api/staff-prep-plan";
+    const { response, result } = await requestOperationalSharedJson(path, {
       headers: { Accept: "application/json" },
     });
     if (!response.ok) throw new Error(result?.error || "Cocktail prep history could not be loaded.");
+    if (result?.unchanged === true) return true;
     dashboardStaffPrepPlan = normalizeDashboardStaffPrepPlan(result);
     return true;
   } catch {
@@ -9818,8 +9824,12 @@ async function requestOperationalSharedJson(path, options = {}, timeoutMs = OPER
   }
 }
 
-async function requestSharedWeeklyUsage(body = null) {
-  const { response, result } = await requestOperationalSharedJson("/api/weekly-usage-state", {
+async function requestSharedWeeklyUsage(body = null, { knownRevision = null } = {}) {
+  const path = !body && knownRevision !== null
+    && Number.isSafeInteger(Number(knownRevision)) && Number(knownRevision) >= 0
+    ? `/api/weekly-usage-state?revision=${Number(knownRevision)}`
+    : "/api/weekly-usage-state";
+  const { response, result } = await requestOperationalSharedJson(path, {
     method: body ? "POST" : "GET",
     headers: body ? { "Content-Type": "application/json", Accept: "application/json" } : { Accept: "application/json" },
     body: body ? JSON.stringify(body) : undefined,
@@ -9978,7 +9988,8 @@ function refreshSharedWeeklyUsageForDisplay() {
   const revisionAtStart = weeklyUsageSharedRevision;
   weeklyUsageDisplayRefreshPromise = (async () => {
     try {
-      const state = await requestSharedWeeklyUsage();
+      const state = await requestSharedWeeklyUsage(null, { knownRevision: revisionAtStart });
+      if (state?.unchanged === true) return false;
       // A read must never replace edits or another refresh that arrived in flight.
       if (hasLocalWork() || weeklyUsageSharedRevision !== revisionAtStart
         || !state.initialized

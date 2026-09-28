@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireDashboardRequestIdentity, requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
-import { readParAgentState, writeParAgentState } from "../../../lib/par-agent.mjs";
+import { readParAgentState, readParAgentStateMetadata, writeParAgentState } from "../../../lib/par-agent.mjs";
 import {
   applyWeeklyOrderTrackingUpdate,
   buildWeeklyOrderTracking,
@@ -64,6 +64,14 @@ function errorResponse(error) {
 export async function GET(request) {
   try {
     await requireDashboardRequestRole(request);
+    const revisionParam = new URL(request.url).searchParams.get("revision");
+    const knownRevision = revisionParam === null ? Number.NaN : Number(revisionParam);
+    if (Number.isSafeInteger(knownRevision) && knownRevision >= 0) {
+      const metadata = await readParAgentStateMetadata();
+      if (metadata.initialized && metadata.revision === knownRevision) {
+        return jsonResponse({ unchanged: true, stateRevision: metadata.revision });
+      }
+    }
     const state = await readParAgentState();
     const tracking = buildWeeklyOrderTracking(state?.recommendations);
     if (!state.initialized || !tracking) return jsonResponse(unavailablePlan(state));

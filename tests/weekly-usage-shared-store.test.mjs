@@ -71,6 +71,14 @@ test("reads an uninitialized Weekly Usage row without importing browser reports"
   assert.deepEqual(fetchImpl.calls.map((call) => call.method), ["GET"]);
 });
 
+test("reads Weekly Usage revision metadata without selecting the multi-megabyte data field", async () => {
+  const fetchImpl = createSupabaseFetch(makeRow({ revision: 42, initialized: true }));
+  const metadata = await createSharedWeeklyUsageStore({ env: makeEnvironment(), fetchImpl }).readMetadata();
+  assert.equal(metadata.revision, 42);
+  assert.equal(metadata.initialized, true);
+  assert.equal(fetchImpl.calls[0].url.searchParams.get("select"), "id,revision,initialized,updated_at");
+});
+
 test("Weekly Usage Supabase requests abort after the configured timeout", async () => {
   let observedSignal = null;
   const shared = createSharedWeeklyUsageStore({

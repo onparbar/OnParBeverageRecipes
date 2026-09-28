@@ -39,6 +39,7 @@ export function normalizeDashboardStaffPrepPlan(result = {}) {
     totalCount: toNumber(result?.totalCount),
     liquorRefillCompletedCount: toNumber(result?.liquorRefillCompletedCount),
     liquorRefillTotalCount: toNumber(result?.liquorRefillTotalCount),
+    stateRevision: toNumber(result?.stateRevision),
     message: clean(result?.message),
   };
 }

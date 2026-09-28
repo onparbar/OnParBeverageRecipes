@@ -50,6 +50,13 @@ test("Keg Levels reads an empty row without importing this browser", async () =>
   assert.deepEqual(fetchImpl.calls.map((call) => call.method), ["GET"]);
 });
 
+test("Keg Levels exposes a lightweight revision check for polling", async () => {
+  const fetchImpl = fetchFor({ id: "keg-par-agent", revision: 27, initialized: true, data: {}, initialized_at: null, updated_at: "2026-07-31T12:00:00.000Z", updated_by_role: "" });
+  const metadata = await store(fetchImpl).readMetadata();
+  assert.equal(metadata.revision, 27);
+  assert.equal(fetchImpl.calls[0].url.searchParams.get("select"), "id,revision,initialized,updated_at");
+});
+
 test("Keg Levels Supabase requests abort after the configured timeout", async () => {
   let observedSignal = null;
   const shared = createSharedKegParAgentStore({

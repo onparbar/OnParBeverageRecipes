@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   initializeSharedWeeklyUsageState,
+  readSharedWeeklyUsageMetadata,
   readSharedWeeklyUsageState,
   replaceSharedWeeklyUsageState,
 } from "../../../lib/weekly-usage-shared-store.mjs";
@@ -49,6 +50,14 @@ function errorResponse(error) {
 export async function GET(request) {
   try {
     await requireOwner(request);
+    const revisionParam = new URL(request.url).searchParams.get("revision");
+    const knownRevision = revisionParam === null ? Number.NaN : Number(revisionParam);
+    if (Number.isSafeInteger(knownRevision) && knownRevision >= 0) {
+      const metadata = await readSharedWeeklyUsageMetadata();
+      if (metadata.initialized && metadata.revision === knownRevision) {
+        return jsonResponse({ unchanged: true, revision: metadata.revision, updatedAt: metadata.updatedAt });
+      }
+    }
     const state = await readSharedWeeklyUsageState();
     if (state.initialized) {
       void captureProductNamesBestEffort(state.data.activeItems, { source: 'weekly-usage-forward' });

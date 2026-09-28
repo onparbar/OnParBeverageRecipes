@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireDashboardRequestIdentity } from "../../../lib/dashboard-auth.mjs";
-import { readParAgentState, writeParAgentState } from "../../../lib/par-agent.mjs";
+import { readParAgentState, readParAgentStateMetadata, writeParAgentState } from "../../../lib/par-agent.mjs";
 import {
   isRecommendationForOperatingWeek,
 } from "../../../public/weekly-action-plan.mjs";
@@ -74,6 +74,14 @@ export async function GET(request) {
   try {
     const identity = await requireDashboardRequestIdentity(request);
     const role = identity.role;
+    const revisionParam = new URL(request.url).searchParams.get("revision");
+    const knownRevision = revisionParam === null ? Number.NaN : Number(revisionParam);
+    if (Number.isSafeInteger(knownRevision) && knownRevision >= 0) {
+      const metadata = await readParAgentStateMetadata();
+      if (metadata.initialized && metadata.revision === knownRevision) {
+        return jsonResponse({ unchanged: true, stateRevision: metadata.revision });
+      }
+    }
     const state = await readParAgentState();
     const rehearsal = role === "owner"
       && new URL(request.url).searchParams.get("rehearsal") === "1";
@@ -85,6 +93,7 @@ export async function GET(request) {
       available: true,
       message: "",
       rehearsal,
+      stateRevision: state.revision,
       ...buildStaffPrepPlan(recommendations),
     });
   } catch (error) {

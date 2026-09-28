@@ -75,6 +75,41 @@ test("overlapping scheduler ticks share one recovery attempt", async () => {
   assert.equal(reads, 1);
 });
 
+test("idle background recovery uses revision metadata instead of rereading weekly history", async () => {
+  let reads = 0;
+  let metadataReads = 0;
+  const state = { initialized: true, revision: 19, data: { activeItems: [] } };
+  const run = createWeeklyUsageRecoveryJob({
+    readState: async () => { reads += 1; return state; },
+    readMetadata: async () => { metadataReads += 1; return { initialized: true, revision: 19 }; },
+    recover: async (value) => value,
+    now: () => Date.parse("2026-09-28T12:00:00.000Z"),
+  });
+
+  await run();
+  const skipped = await run();
+  assert.equal(reads, 1);
+  assert.equal(metadataReads, 1);
+  assert.equal(skipped.skipped, true);
+});
+
+test("a new completed reporting week forces a full recovery audit even when the revision is unchanged", async () => {
+  let time = Date.parse("2026-09-28T12:00:00.000Z");
+  let reads = 0;
+  const state = { initialized: true, revision: 19, data: { activeItems: [] } };
+  const run = createWeeklyUsageRecoveryJob({
+    readState: async () => { reads += 1; return state; },
+    readMetadata: async () => ({ initialized: true, revision: 19 }),
+    recover: async (value) => value,
+    now: () => time,
+  });
+
+  await run();
+  time += 7 * 24 * 60 * 60_000;
+  await run();
+  assert.equal(reads, 2);
+});
+
 test("service recovery requests only the intended completed week with a short-lived owner session", async () => {
   let capturedRequest;
   const payload = { reports: [{ startDate: "2026-09-14" }] };
