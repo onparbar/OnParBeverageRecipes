@@ -6,6 +6,10 @@ import {
 } from "../../../lib/inventory-shared-store.mjs";
 import { DASHBOARD_SESSION_COOKIE, getDashboardSessionRole } from "../../../lib/dashboard-auth.mjs";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
+import { readParAgentState } from "../../../lib/par-agent.mjs";
+import { buildWeeklyOrderTracking } from "../../../lib/weekly-order-tracking.mjs";
+import { buildStaffPrepPlan } from "../../../lib/staff-prep-plan.mjs";
+import { buildWeeklySnapshotCompletion } from "../../../public/weekly-snapshot-completion.mjs";
 
 export const runtime = "nodejs";
 
@@ -63,6 +67,20 @@ export async function POST(request) {
   try {
     role = await requireOwner(request);
     body = await getBody(request);
+    if (String(body.action || "") === "save-snapshot" && body.kegPlanSnapshot?.generatedAt) {
+      const parState = await readParAgentState();
+      const recommendations = parState?.recommendations;
+      if (recommendations?.generatedAt === body.kegPlanSnapshot.generatedAt) {
+        body = {
+          ...body,
+          weeklySnapshotCompletion: buildWeeklySnapshotCompletion({
+            generatedAt: recommendations.generatedAt,
+            tracking: buildWeeklyOrderTracking(recommendations),
+            prep: buildStaffPrepPlan(recommendations),
+          }),
+        };
+      }
+    }
     let state;
 
     switch (String(body.action || "")) {

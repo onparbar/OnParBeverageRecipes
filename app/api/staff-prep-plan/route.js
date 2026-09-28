@@ -16,6 +16,8 @@ import { executeInventoryBackedOperation, withInventoryReviewWarning } from "../
 import { recoverPendingInventoryUpdates } from "../../../lib/keg-par-agent-shared-store.mjs";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 import { applyPrepKegCounts } from "../../../lib/prep-keg-counts.mjs";
+import { buildWeeklyOrderTracking } from "../../../lib/weekly-order-tracking.mjs";
+import { buildWeeklySnapshotCompletion } from "../../../public/weekly-snapshot-completion.mjs";
 
 export const runtime = "nodejs";
 
@@ -157,6 +159,11 @@ export async function POST(request) {
       unmatched: inventoryPlans
         .filter((entry) => entry.kind !== "liquor-refill")
         .flatMap((entry) => Array.isArray(entry.plan?.unmatched) ? entry.plan.unmatched : []),
+      weeklySnapshotCompletion: buildWeeklySnapshotCompletion({
+        generatedAt: updatedRecommendations.generatedAt,
+        tracking: buildWeeklyOrderTracking(updatedRecommendations),
+        prep: buildStaffPrepPlan(updatedRecommendations),
+      }),
     };
     const stateChanged = changes.some((change) => change.stateChanged);
     const prepState = applyPrepKegCounts(state, updatedRecommendations, changes);

@@ -5,6 +5,8 @@ import {
   applyWeeklyOrderTrackingUpdate,
   buildWeeklyOrderTracking,
 } from "../../../lib/weekly-order-tracking.mjs";
+import { buildStaffPrepPlan } from "../../../lib/staff-prep-plan.mjs";
+import { buildWeeklySnapshotCompletion } from "../../../public/weekly-snapshot-completion.mjs";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
 import {
   assertInventoryContributionPlan,
@@ -122,6 +124,14 @@ export async function POST(request) {
         inventoryPlan = proposedPlan;
       }
       assertInventoryContributionPlan(inventoryPlan);
+      inventoryPlan = {
+        ...inventoryPlan,
+        weeklySnapshotCompletion: buildWeeklySnapshotCompletion({
+          generatedAt: updatedRecommendations.generatedAt,
+          tracking: buildWeeklyOrderTracking(updatedRecommendations),
+          prep: buildStaffPrepPlan(updatedRecommendations),
+        }),
+      };
     }
     const receiptState = inventoryPlan ? applyBeerReceiptCounts(
       state, updatedRecommendations, priorTracking,

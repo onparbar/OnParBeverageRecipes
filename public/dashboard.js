@@ -10,7 +10,7 @@ import { getInventoryCountSections } from "./inventory-weekly-counts.mjs";
 import { answerLocalInventoryQuestion } from "./local-inventory-questions.mjs";
 import { answerLocalBeverageQuestion, BEVERAGE_QUESTION_EXAMPLES } from "./local-beverage-answers.mjs";
 import { requestLocalAiAnswer } from "./local-ai-client.mjs";
-import { renderSavedWeeklySnapshot } from "./weekly-snapshot-view.mjs";
+import { getWeeklySnapshotCompletionSummary, renderSavedWeeklySnapshot } from "./weekly-snapshot-view.mjs";
 import { getSixWeekUsage } from "./six-week-usage.mjs";
 import { getCurrentTapUsage } from "./current-tap-usage.mjs";
 import { reconcileWeeklyUsageData } from "./weekly-usage-reconciliation.mjs";
@@ -163,6 +163,7 @@ import { buildWeeklyPlanTrends } from "./weekly-plan-trends.mjs";
 import {
   buildDashboardOverview,
   DASHBOARD_OVERVIEW_TARGETS,
+  sortDashboardOverviewAlerts,
 } from "./dashboard-overview.mjs";
 import { buildOhioComplianceWatchViewModel } from "./ohio-compliance-watch.mjs";
 import { buildWeeklyUsageSellerRankings } from "./weekly-usage-seller-rankings.mjs";
@@ -6984,10 +6985,37 @@ function renderDashboardOverview() {
   }, { now: new Date() });
   const tapPrintAlerts = getTapWallPrintAlerts();
   const missingPriceAlerts = getMissingPriceAlerts();
-  overview.alerts = [...tapPrintAlerts, ...missingPriceAlerts, ...overview.alerts];
+  const currentSnapshot = getCurrentMondayInventorySnapshot(inventoryHistory, new Date());
+  const priorSnapshot = [...inventoryHistory]
+    .filter((snapshot) => snapshot?.completion && snapshot.id !== currentSnapshot?.id)
+    .sort((left, right) => String(right.weekOf || "").localeCompare(String(left.weekOf || "")))[0];
+  const priorCompletion = priorSnapshot ? getWeeklySnapshotCompletionSummary(priorSnapshot) : null;
+  const priorWeekAlerts = priorCompletion && (
+    priorCompletion.deliveryChecked < priorCompletion.deliveryTotal
+    || priorCompletion.cocktailCompleted < priorCompletion.cocktailTotal
+  ) ? [{
+    id: "prior-week-checkoffs-incomplete",
+    severity: "warning",
+    priority: 57,
+    title: "Last week still has unchecked work",
+    message: [
+      priorCompletion.deliveryChecked < priorCompletion.deliveryTotal
+        ? `Deliveries: ${formatNumber(priorCompletion.deliveryChecked)} of ${formatNumber(priorCompletion.deliveryTotal)} checked.` : "",
+      priorCompletion.cocktailCompleted < priorCompletion.cocktailTotal
+        ? `Cocktails: ${formatNumber(priorCompletion.cocktailCompleted)} of ${formatNumber(priorCompletion.cocktailTotal)} prepared.` : "",
+    ].filter(Boolean).join(" "),
+    details: [],
+    action: { label: "Open Weekly Snapshots", target: "weekly-snapshots" },
+  }] : [];
+  overview.alerts = sortDashboardOverviewAlerts([
+    ...tapPrintAlerts,
+    ...missingPriceAlerts,
+    ...priorWeekAlerts,
+    ...overview.alerts,
+  ]);
   overview.alertCounts = {
     ...overview.alertCounts,
-    warning: overview.alertCounts.warning + tapPrintAlerts.length + missingPriceAlerts.length,
+    warning: overview.alertCounts.warning + tapPrintAlerts.length + missingPriceAlerts.length + priorWeekAlerts.length,
   };
   const mondayRun = getMondayRunModel(plan, freshness);
     const briefing = buildThirtySecondBriefing({
