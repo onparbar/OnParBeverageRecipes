@@ -245,6 +245,57 @@ test("counts a prepared On Deck cocktail keg before recommending another batch",
   assert.equal(result.orderQty, 0);
 });
 
+test("makes an unprepared On Deck cocktail when the physical tap is Coming Soon", () => {
+  const tap = {
+    ...cocktailTap("Coming Soon!", 94),
+    key: "karaoke-94",
+    wall: "Karaoke",
+  };
+  const result = buildRawRecommendation(
+    tap,
+    { fillLevelPercent: 19.7, rawKegSize: 1536, rawKegSizeDp: 0 },
+    [],
+    {
+      onHandOverrides: {},
+      onDeckOverrides: {
+        [tap.key]: {
+          comingSoonId: "recipe:vodka-cran-titos-2",
+          name: "Vodka Cran (Tito's) 2",
+          kind: "recipe",
+          onHand: "0",
+          onHandUnit: "keg",
+        },
+      },
+    },
+    {},
+  );
+
+  assert.equal(result.currentStockKegs, 0);
+  assert.equal(result.actionType, "make");
+  assert.equal(result.orderQty, 1);
+  assert.equal(result.orderProductName, "Vodka Cran (Tito's) 2");
+  assert.match(result.reason, /Coming Soon.*Make 1/i);
+
+  const prepared = buildRawRecommendation(
+    tap,
+    { fillLevelPercent: 19.7, rawKegSize: 1536, rawKegSizeDp: 0 },
+    [],
+    {
+      onHandOverrides: {},
+      onDeckOverrides: {
+        [tap.key]: {
+          ...result.onDeckProduct,
+          onHand: "1",
+          onHandUnit: "keg",
+        },
+      },
+    },
+    {},
+  );
+  assert.equal(prepared.currentStockKegs, 1);
+  assert.equal(prepared.orderQty, 0);
+});
+
 test("orders beer against current stock without subtracting a Thursday forecast", () => {
   const tap = beerTap();
   const baseArgs = [
