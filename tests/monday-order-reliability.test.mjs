@@ -126,3 +126,45 @@ test("an explained outside-Monday capture is saved for the Monday operating week
   assert.equal(state.snapshots[0].captureMetadata.capturedOutsideMonday, true);
   assert.equal(state.snapshots[0].captureMetadata.outsideMondayReason, "Inventory issues were corrected after Monday's count.");
 });
+
+test("a verified movement ledger can capture the next Monday without falsifying the physical count date", () => {
+  const nextMonday = new Date("2026-08-24T15:00:00.000Z");
+  const state = initializedState();
+  state.current.onHandOverrides.vodka = "1";
+  state.current.inventoryContributions["prep::vodka"] = {
+    sourceId: "prep", itemId: "vodka", quantity: -1, baseline: 2,
+    balanceVersion: 1, updatedAt: "2026-08-20T15:00:00.000Z",
+  };
+  const captured = applyInventoryStateAction(state, "save-snapshot", {
+    items: [{ ...items[0], onHandDisplay: "1" }],
+    summary,
+    kegPlanSnapshot: { ...kegPlanSnapshot, generatedAt: "2026-08-24T14:45:00.000Z" },
+    reliableCapture: true,
+    captureMetadata: {
+      ...captureMetadata,
+      captureId: "snapshot-attempt-2026-08-24",
+      sourceFreshness: { ...captureMetadata.sourceFreshness, inventory: "tracked" },
+    },
+  }, "owner", nextMonday);
+  assert.equal(captured.snapshots[0].weekOf, "2026-08-24");
+  assert.equal(captured.snapshots[0].captureMetadata.sourceFreshness.inventory, "tracked");
+  assert.equal(captured.current.countedItemsAt.vodka, monday.toISOString());
+});
+
+test("tracked capture refuses a shortfall or unverified legacy movement", () => {
+  const nextMonday = new Date("2026-08-24T15:00:00.000Z");
+  for (const unsafe of [
+    { contributionShortfalls: { vodka: 1 } },
+    { inventoryContributions: { "prep::vodka": { sourceId: "prep", itemId: "vodka", quantity: -1, baseline: 2, balanceVersion: 0 } } },
+  ]) {
+    const state = initializedState();
+    Object.assign(state.current, unsafe);
+    assert.throws(() => applyInventoryStateAction(state, "save-snapshot", {
+      items, summary, kegPlanSnapshot, reliableCapture: true,
+      captureMetadata: {
+        ...captureMetadata,
+        sourceFreshness: { ...captureMetadata.sourceFreshness, inventory: "tracked" },
+      },
+    }, "owner", nextMonday), (error) => error.code === "INVENTORY_COUNTS_NOT_CURRENT");
+  }
+});

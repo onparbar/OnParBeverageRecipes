@@ -227,6 +227,28 @@ test("shows inventory ordering holds without adding them to active orders", () =
   assert.deepEqual(plan.review.excludedInventory.map((item) => item.name), ["Paused Gin"]);
   assert.equal(plan.review.excludedInventory[0].quantity, 3);
   assert.equal(plan.summary.excludedLineCount, 1);
+  assert.equal(plan.summary.heldInventoryRuleCount, 1);
+});
+
+test("routine standing rules stay silent unless they suppress a positive need", () => {
+  const plan = buildWeeklyActionPlan({
+    inventoryItems: [
+      { id: "routine", name: "Routine", group: "Other", par: 6, onHand: 6, orderUnits: 0, orderHoldReason: "Department managed" },
+      { id: "needed", name: "Needed", group: "Other", par: 6, onHand: 2, orderUnits: 4, orderHoldReason: "Department managed" },
+    ],
+  });
+  assert.equal(plan.summary.excludedLineCount, 2);
+  assert.equal(plan.summary.heldInventoryRuleCount, 1);
+  const routine = evaluateWeeklyPlanReadiness({
+    parInitialized: true, weeklyUsageInitialized: true, latestCompletedUsageSaved: true,
+    inventoryInitialized: true, excludedLineCount: 0,
+  });
+  const exception = evaluateWeeklyPlanReadiness({
+    parInitialized: true, weeklyUsageInitialized: true, latestCompletedUsageSaved: true,
+    inventoryInitialized: true, excludedLineCount: plan.summary.heldInventoryRuleCount,
+  });
+  assert.doesNotMatch(routine.reviewReasons.join(" "), /ordering rule/i);
+  assert.match(exception.reviewReasons.join(" "), /1 inventory ordering rule/i);
 });
 
 test("refreshes locked vendor, price, and review metadata without changing order quantities", () => {

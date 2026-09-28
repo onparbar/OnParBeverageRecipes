@@ -610,6 +610,7 @@ export function buildWeeklyActionPlan({ inventoryItems = [], recommendations = [
       heldLineCount: heldRecommendations.length,
       heldUnitTotal: heldRecommendations.reduce((total, item) => total + item.quantity, 0),
       excludedLineCount: excludedInventory.length,
+      heldInventoryRuleCount: excludedInventory.filter((item) => item.quantity > 0).length,
     },
   };
 }
@@ -670,6 +671,7 @@ export function refreshWeeklyPlanMetadata(plan, {
       missingPriceCount,
       estimatedPurchaseCostComplete: missingPriceCount === 0,
       excludedLineCount: excludedInventory.length,
+      heldInventoryRuleCount: excludedInventory.filter((item) => number(item.quantity) > 0).length,
     },
   };
 }

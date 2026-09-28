@@ -287,6 +287,12 @@ test("owner login automatically attempts PMB and defers mapped vendor price refr
   assert.doesNotMatch(ownerSyncSource, /if \(!lockToken\) return;/);
 });
 
+test("incomplete weekly usage schedules an automatic retry instead of waiting for a click", () => {
+  assert.match(dashboardSource, /function scheduleAutomaticWeeklyUsageRecovery/);
+  assert.match(dashboardSource, /scheduleAutomaticWeeklyUsageRecovery\(\)/);
+  assert.match(dashboardSource, /automaticWeeklyUsageRecoveryTimer/);
+});
+
 test("vendor price sync remains automatic at login but stays outside the unified PMB refresh", () => {
   assert.match(dashboardSource, /async function runVendorSync\(\{ automatic = false \} = \{\}\)/);
   assert.match(dashboardSource, /const syncScope = automatic \? "all" : vendorSyncScope/);

@@ -1076,6 +1076,8 @@ let weeklyUsageSharedBaseline = null;
 let weeklyUsageSyncMessage = "Open Weekly Usage on the work network to check Pour My Beer. After the service-computer import, saved reports remain available anywhere.";
 let weeklyUsageLastSyncAt = loadWeeklyUsageLastSyncAt();
 let weeklyUsageSyncAttempted = false;
+let automaticWeeklyUsageRecoveryTimer = null;
+let automaticWeeklyUsageReviewRequired = false;
 let weeklyUsageHistoryLimit = 6;
 let weeklyUsageSharedRevision = 0;
 let weeklyUsageSharedInitialized = false;
@@ -1120,6 +1122,8 @@ let inventorySpeechInventoryScope = "liquor";
 let inventorySourceRows = [];
 let inventorySharedUpdatedAt = "";
 let inventoryCountedItemsAt = {};
+let inventoryContributions = {};
+let inventoryContributionShortfalls = {};
 let inventorySharedMessage = "Loading shared inventory...";
 let inventorySharedSaving = false;
 let inventorySharedSaveError = "";
@@ -1404,6 +1408,7 @@ async function init() {
   // Recheck shared data after login sync, including a failed initial read or
   // changes completed by another manager while this device was loading.
   await refreshSharedWeeklyUsageForDisplay();
+  scheduleAutomaticWeeklyUsageRecovery();
 }
 
 let failedSharedReadRecoveryPromise = null;
@@ -3482,6 +3487,7 @@ function bindEvents() {
     void refreshSharedWeeklyUsageForDisplay();
     void refreshWeeklyOrderTracking();
     void refreshDashboardStaffPrepPlan();
+    scheduleAutomaticWeeklyUsageRecovery();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
@@ -3489,8 +3495,12 @@ function bindEvents() {
     void refreshSharedWeeklyUsageForDisplay();
     void refreshWeeklyOrderTracking();
     void refreshDashboardStaffPrepPlan();
+    scheduleAutomaticWeeklyUsageRecovery();
   });
-  window.addEventListener("online", () => { void retryFailedSharedReads(); });
+  window.addEventListener("online", () => {
+    void retryFailedSharedReads();
+    scheduleAutomaticWeeklyUsageRecovery({ immediate: true });
+  });
   void refreshTapRepairBriefing();
   window.setInterval(() => {
     if (document.visibilityState !== "visible") return;
@@ -3498,6 +3508,7 @@ function bindEvents() {
     void refreshDashboardStaffPrepPlan();
     void retryFailedSharedReads();
     void refreshSharedWeeklyUsageForDisplay();
+    scheduleAutomaticWeeklyUsageRecovery();
   }, DASHBOARD_BACKGROUND_REFRESH_MS);
 }
 
@@ -6365,8 +6376,22 @@ function getLatestPriceTimestamp() {
 }
 
 function getWeeklyPlanMissingInventoryCount() {
-  return getInventoryCountSections(inventoryItems, inventoryCountedItemsAt)
+  return getAutomaticInventoryCountSections()
     .reduce((total, section) => total + section.missing.length, 0);
+}
+
+function getAutomaticInventoryCountSections(now = new Date()) {
+  return getInventoryCountSections(inventoryItems, inventoryCountedItemsAt, now, {
+    allowTrackedBalances: true,
+    inventoryContributions,
+    contributionShortfalls: inventoryContributionShortfalls,
+  });
+}
+
+function getInventorySnapshotFreshness(now = new Date()) {
+  return getAutomaticInventoryCountSections(now).some((section) => section.tracked.length > 0)
+    ? "tracked"
+    : "current";
 }
 
 function getWeeklyPlanFreshness(plan) {
@@ -6419,7 +6444,7 @@ function getWeeklyPlanFreshness(plan) {
     inventorySaveError: lockedSnapshot ? "" : inventorySharedSaveError || (!inventoryFieldOutboxDurable || !inventoryActionOutboxDurable ? "Pending Inventory changes could not be stored durably in this browser." : ""),
     missingInventoryCount: lockedSnapshot ? 0 : getWeeklyPlanMissingInventoryCount(),
     heldLineCount: plan.summary.heldLineCount,
-    excludedLineCount: plan.summary.excludedLineCount,
+    excludedLineCount: plan.summary.heldInventoryRuleCount,
     missingPriceCount: plan.summary.missingPriceCount,
     lockedForWeek: lockedSnapshot,
   });
@@ -6680,7 +6705,7 @@ function getMondayRunModel(plan, freshness) {
     || Object.keys(inventoryFieldOutbox).length > 0
     || inventoryActionOutbox.length > 0);
   const mondaySnapshotSaved = Boolean(getCurrentMondayInventorySnapshot(inventoryHistory, new Date()));
-  const countSections = planLocked ? [] : getInventoryCountSections(inventoryItems, inventoryCountedItemsAt);
+  const countSections = planLocked ? [] : getAutomaticInventoryCountSections();
   const inventoryMissingSections = countSections.filter((section) => !section.complete).map((section) => section.name);
   const inventoryCountedThisWeek = planLocked || (countSections.length > 0 && inventoryMissingSections.length === 0);
   const weeklyUsageCaptured = freshness.latestCompletedUsageSaved === true && !weeklyUsageSharedSaveError;
@@ -10258,6 +10283,20 @@ async function refreshSharedWeeklyUsageBeforeMondaySnapshot() {
 
 let mondayWeeklyUsageSyncPromise = null;
 
+function scheduleAutomaticWeeklyUsageRecovery({ immediate = false } = {}) {
+  if (isEmployeeDashboard || automaticWeeklyUsageReviewRequired || automaticWeeklyUsageRecoveryTimer
+    || weeklyUsageSyncLoading || !weeklyUsageSharedInitialized || !getPmbSyncWeekStarts().length) return;
+  automaticWeeklyUsageRecoveryTimer = window.setTimeout(async () => {
+    automaticWeeklyUsageRecoveryTimer = null;
+    if (document.visibilityState !== "visible" || weeklyUsageSharedOutbox || weeklyUsageSharedSaving) {
+      scheduleAutomaticWeeklyUsageRecovery();
+      return;
+    }
+    const result = await runPmbWeeklyUsageSync({ automatic: true });
+    if (!result?.ok && !result?.reviewRequired) scheduleAutomaticWeeklyUsageRecovery();
+  }, immediate ? 0 : DASHBOARD_BACKGROUND_REFRESH_MS);
+}
+
 function runPmbWeeklyUsageSync(options = {}) {
   if (mondayWeeklyUsageSyncPromise) return mondayWeeklyUsageSyncPromise;
   mondayWeeklyUsageSyncPromise = runPmbWeeklyUsageSyncAttempt(options).finally(() => {
@@ -10273,6 +10312,9 @@ async function runPmbWeeklyUsageSyncAttempt({ automatic = false } = {}) {
 
   const weekStarts = getPmbSyncWeekStarts();
   if (!weekStarts.length) {
+    automaticWeeklyUsageReviewRequired = false;
+    if (automaticWeeklyUsageRecoveryTimer) window.clearTimeout(automaticWeeklyUsageRecoveryTimer);
+    automaticWeeklyUsageRecoveryTimer = null;
     weeklyUsageSyncMessage = `${automatic ? "Automatic PMB check complete. " : ""}All recent completed Monday-Sunday weeks are already saved.`;
     renderWeeklyUsage();
     return { ok: true, checkedWeeks: 0, matched: 0, alreadyCurrent: true };
@@ -10325,6 +10367,7 @@ async function runPmbWeeklyUsageSyncAttempt({ automatic = false } = {}) {
         });
         const overallReason = clean(result.reviewReason || result.reason || result.error);
         if (automatic) {
+          automaticWeeklyUsageReviewRequired = true;
           weeklyUsageSyncError = "The PMB weekly report needs owner attention.";
           weeklyUsageSyncAttempted = false;
           weeklyUsageSyncMessage = [
@@ -10373,6 +10416,7 @@ async function runPmbWeeklyUsageSyncAttempt({ automatic = false } = {}) {
       )),
     };
     const applied = applyPmbWeeklyUsageSync(combinedResult);
+    automaticWeeklyUsageReviewRequired = false;
     weeklyUsageLastSyncAt = latestResult.updatedAt || new Date().toISOString();
     saveWeeklyUsageLastSyncAt();
     const successPrefix = automatic ? "Automatic PMB check complete. " : "";
@@ -14337,6 +14381,8 @@ function applySharedInventoryState(state, { rebuild = false } = {}) {
   inventoryHistory = Array.isArray(state.snapshots) ? state.snapshots : [];
   inventorySharedUpdatedAt = state.current?.updatedAt || "";
   inventoryCountedItemsAt = { ...(state.current?.countedItemsAt || {}) };
+  inventoryContributions = { ...(state.current?.inventoryContributions || {}) };
+  inventoryContributionShortfalls = { ...(state.current?.contributionShortfalls || {}) };
   saveInventoryOnHandOverrides();
   saveInventoryParOverrides();
   saveCustomInventoryItems();
@@ -14470,6 +14516,8 @@ function queueInventoryActionSync(operationId) {
       inventorySharedRevision = Number(state.revision) || inventorySharedRevision;
       inventorySharedUpdatedAt = state.current?.updatedAt || inventorySharedUpdatedAt;
       inventoryCountedItemsAt = { ...(state.current?.countedItemsAt || {}) };
+      inventoryContributions = { ...(state.current?.inventoryContributions || {}) };
+      inventoryContributionShortfalls = { ...(state.current?.contributionShortfalls || {}) };
       inventoryActionOutbox = inventoryActionOutbox.filter((entry) => entry.id !== activeEntry.id);
       inventoryActionOutbox = inventoryActionOutbox.map((entry) => rebaseOperationalOutboxAfterOwnCommit(entry, {
         committedBaseRevision: activeEntry.baseRevision,
@@ -14584,6 +14632,8 @@ function queueInventoryFieldSync(key, payload) {
       inventorySharedRevision = Number(state.revision) || inventorySharedRevision;
       inventorySharedUpdatedAt = state.current?.updatedAt || inventorySharedUpdatedAt;
       inventoryCountedItemsAt = { ...(state.current?.countedItemsAt || {}) };
+      inventoryContributions = { ...(state.current?.inventoryContributions || {}) };
+      inventoryContributionShortfalls = { ...(state.current?.contributionShortfalls || {}) };
       if (inventoryFieldOutbox[key]?.id === activeEntry.id) delete inventoryFieldOutbox[key];
       else {
         inventoryFieldOutbox[key] = rebaseOperationalOutboxAfterOwnCommit(inventoryFieldOutbox[key], {
@@ -14706,6 +14756,8 @@ async function refreshInventoryRevisionForSnapshot() {
   inventorySharedRevision = Number(state.revision);
   inventorySharedUpdatedAt = state.current.updatedAt || "";
   inventoryCountedItemsAt = { ...(state.current?.countedItemsAt || {}) };
+  inventoryContributions = { ...(state.current?.inventoryContributions || {}) };
+  inventoryContributionShortfalls = { ...(state.current?.contributionShortfalls || {}) };
   return state;
 }
 
@@ -16384,7 +16436,7 @@ async function saveInventorySnapshotAttempt({ replaceExisting = false, snapshotB
   let calculationBaseState;
   try {
     calculationBaseState = snapshotBaseState || await refreshInventoryRevisionForSnapshot();
-    const missingSections = getInventoryCountSections(inventoryItems, inventoryCountedItemsAt)
+    const missingSections = getAutomaticInventoryCountSections(now)
       .filter((section) => !section.complete);
     if (missingSections.length) {
       await failCapture(`This week's counts are still needed for: ${missingSections.map((section) => section.name).join(", ")}.`, "INVENTORY_COUNTS_NOT_CURRENT");
@@ -16479,7 +16531,7 @@ async function saveInventorySnapshotAttempt({ replaceExisting = false, snapshotB
       captureMetadata: {
         outsideMondayReason,
         sourceFreshness: {
-          inventory: "current",
+          inventory: getInventorySnapshotFreshness(now),
           weeklyUsage: "current",
           pmb: "verified",
           pricing: "current",

@@ -4,6 +4,8 @@ export async function register() {
     startDashboardBackupRuntime();
     const { startInventoryRecoveryRuntime } = await import("./lib/inventory-recovery-runtime.mjs");
     startInventoryRecoveryRuntime();
+    const { startWeeklyUsageRecoveryRuntime } = await import("./lib/weekly-usage-recovery-runtime.mjs");
+    startWeeklyUsageRecoveryRuntime();
     const { startLiveParRuntime } = await import("./lib/live-par-runtime.mjs");
     await startLiveParRuntime();
   }

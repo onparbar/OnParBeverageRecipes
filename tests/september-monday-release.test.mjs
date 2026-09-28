@@ -81,6 +81,40 @@ test("section completion needs this week's item inputs, not an old baseline or a
   assert.ok(getInventoryCountSections(inventory, all, new Date("2026-09-14T14:00:00Z")).every((section) => !section.complete));
 });
 
+test("a complete movement ledger rolls prior physical counts forward without relabeling them", () => {
+  const prior = {
+    vodka: "2026-09-07T14:00:00Z",
+    gin: "2026-09-07T14:00:00Z",
+    lime: "2026-09-07T14:00:00Z",
+    garnish: "2026-09-07T14:00:00Z",
+  };
+  const ledger = {
+    allowTrackedBalances: true,
+    contributionShortfalls: {},
+    inventoryContributions: {
+      "prep::vodka": { itemId: "vodka", balanceVersion: 1 },
+    },
+  };
+  const sections = getInventoryCountSections(inventory, prior, new Date("2026-09-14T14:00:00Z"), ledger);
+  assert.ok(sections.every((section) => section.complete));
+  assert.equal(prior.vodka, "2026-09-07T14:00:00Z", "physical evidence must retain its original date");
+  assert.equal(sections[0].tracked.length, 2);
+});
+
+test("ledger rollover fails closed for missing baselines, shortages, invalid balances, and legacy movements", () => {
+  const prior = Object.fromEntries(inventory.map((item) => [item.id, "2026-09-07T14:00:00Z"]));
+  const unsafe = inventory.map((item) => ({ ...item }));
+  unsafe.find((item) => item.id === "garnish").onHandDisplay = "";
+  delete prior.lime;
+  const sections = getInventoryCountSections(unsafe, prior, new Date("2026-09-14T14:00:00Z"), {
+    allowTrackedBalances: true,
+    contributionShortfalls: { gin: 1 },
+    inventoryContributions: { "prep::vodka": { itemId: "vodka", balanceVersion: 0 } },
+  });
+  assert.deepEqual(sections.flatMap((section) => section.missing.map((item) => item.id)).sort(),
+    ["garnish", "gin", "lime", "vodka"]);
+});
+
 test("submitting a cabinet zeros unmentioned items only in submitted sections", () => {
   const countedItemsAt = {};
   const complete = load("buildCompletedInventorySectionChanges", { inventoryItems: inventory,
