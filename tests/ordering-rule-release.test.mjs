@@ -54,8 +54,9 @@ test("reserve display returns a copy without changing the standing reserves", ()
   assert.equal(getRollingCocktailReserves()["tito-s"], 12);
 });
 
-test("Brooke and Alexis have administrator access while other staff remain staff", () => {
+test("designated managers have administrator access while other staff remain staff", () => {
   assert.equal(getDashboardIdentityById("brooke-swallows").role, "owner");
   assert.equal(getDashboardIdentityById("alexis-younker").role, "owner");
+  assert.equal(getDashboardIdentityById("cameron-reilly").role, "owner");
   assert.equal(getDashboardIdentityById("adrian-reed").role, "employee");
 });
