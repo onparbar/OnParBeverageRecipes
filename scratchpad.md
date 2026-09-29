@@ -867,3 +867,10 @@ curl -I 'https://onparbev.com/dashboard.js?v=check'
 - The snapshot commit receives a 20-second browser deadline instead of racing the storage layer's own 8-second deadline. The normal snapshot workflow now reuses its initial verified inventory state through calculation and relies on the server's atomic revision check at commit, removing two redundant full shared-inventory reads.
 - Added regressions for a lost response after commit, stable browser recovery IDs, the longer commit deadline, and the single-read save path. Fourteen focused reliability/store tests and five applicable Monday capture tests pass; scoped lint, production build, and whitespace checks pass. The broader 113-test inventory/weekly group has 111 passes and the same two pre-existing dirty-worktree NA-beer policy assertion failures noted above. Local only; not deployed.
 - Follow-up regression coverage for weekly usage and prior-week action carry-forward raised the focused total to 59 passing tests.
+
+### PMB keg-change percentage verification — September 28, 2026
+
+- Investigated incorrect automatic backup deductions for Vodka Cran 1, Busch Light 1, and Garage Beer Lime 1. The estimator treated any newer PMB `Tapped On` timestamp as a physical keg replacement even though PMB can refresh that timestamp when staff correct a false-empty level.
+- Automatic deductions now require both the newer PMB timestamp and a corroborating level change: the current reading must be at least 70% and at least 50 percentage points above the preceding complete snapshot. Missing evidence and low-percentage corrections are recorded as `keg-change-unconfirmed` without changing cooler stock.
+- Added regression coverage for 0% to 10.9%, 35.7% to 10.9%, an insufficient 20% to 60% rise, missing prior evidence, verified low-to-full replacements, unmatched-product recovery, and delivery clocks.
+- Full release gate passed: 1,242 tests, zero-warning lint, production build, and whitespace checks. `npm audit --omit=dev` reports existing Next.js/sharp/undici advisories; no forced dependency update was included in this operational fix.

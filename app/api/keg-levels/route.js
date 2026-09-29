@@ -306,9 +306,15 @@ export async function GET(request) {
     const inventoryObservations = items.map((item) => {
       const matches = inventoryTaps.filter((tap) => Number(tap.tapNumber) === Number(item.tapNumber));
       const tap = matches.length === 1 ? matches[0] : null;
+      const previousLevel = lastCompleteSnapshot?.items?.find((saved) => (
+        Number(saved.tapNumber) === Number(item.tapNumber)
+        && Number(saved.deviceId) === Number(item.deviceId)
+        && Number(saved.lineNum) === Number(item.lineNum)
+      ));
       const number = Number(item.tapNumber);
       const liquor = (number >= 1 && number <= 20) || (number >= 83 && number <= 92);
-      return { ...item, ...(tap ? { inventoryReference: { key: tap.key, wall: tap.wall,
+      return { ...item, previousFillLevelPercent: previousLevel?.fillLevelPercent ?? null,
+        ...(tap ? { inventoryReference: { key: tap.key, wall: tap.wall,
         name: item.name, plu: item.plu, isLiquorTap: liquor,
         isKegTap: !liquor && String(tap.type).toLowerCase() !== "shots" } } : {}) };
     });

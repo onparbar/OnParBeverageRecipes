@@ -6,7 +6,8 @@ const key = "main-39-breakfast-stout-1";
 const start = "2026-09-17T14:00:00Z";
 const later = "2026-09-17T16:00:00Z";
 const item = { tapNumber: 39, deviceId: 123, lineNum: 2, plu: 187456,
-  name: "Guinness Draught 1", levelAvailable: true, tappedOn: "09/17/2026 11:50:20" };
+  name: "Guinness Draught 1", levelAvailable: true, fillLevelPercent: 96,
+  previousFillLevelPercent: 4, tappedOn: "09/17/2026 11:50:20" };
 const reference = { key, wall: "Main", name: item.name, plu: item.plu, isKegTap: true, isLiquorTap: false };
 function initial() {
   return applyCoolerEstimateObservations({ onHandOverrides: { [key]: "1" }, recommendations: { items: [] } },

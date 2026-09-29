@@ -16,7 +16,8 @@ const rec = (extra = {}) => ({ key: "main-21", tapNumber: 21, wall: "Main", name
 const base = () => ({ onHandOverrides: { "main-21": "3", "karaoke-73": "4" }, onDeckOverrides: {}, parOverrides: {},
   settings: { kegCountWeek: "2026-09-14" }, recommendations: { generatedAt, items: [rec()] } });
 const observation = (tappedOn = "09/13/2026 10:00:00", extra = {}) => ({ tapNumber: 21, deviceId: 1, lineNum: 1, plu: 100,
-  name: "Test Beer 1", levelAvailable: true, tappedOn, tappedOnCached: false, tappedOnError: "", ...extra });
+  name: "Test Beer 1", levelAvailable: true, fillLevelPercent: 95, previousFillLevelPercent: 8,
+  tappedOn, tappedOnCached: false, tappedOnError: "", ...extra });
 const observe = (data, item, observedAt = later) => applyCoolerEstimateObservations(data, [item], { observedAt, fallbackAt: "2026-09-14T11:00:00.000Z" });
 const seeded = () => observe(base(), observation(), start);
 const destination = (extra = {}) => beerDeliveryDestination(rec(extra));
@@ -54,6 +55,20 @@ test("a fresh PMB event deducts once and leaves the other cooler alone", () => {
   assert.equal(next.coolerEstimateState.events[0].estimated, true);
   assert.deepEqual(observe(next, observation("09/14/2026 08:45:00")), next);
   assert.deepEqual(observe(next, observation("09/14/2026 08:30:00")), next);
+});
+
+test("a refreshed PMB timestamp without a near-full level jump does not consume a backup", () => {
+  for (const levels of [
+    { previousFillLevelPercent: 0, fillLevelPercent: 10.9 },
+    { previousFillLevelPercent: 35.7, fillLevelPercent: 10.9 },
+    { previousFillLevelPercent: 20, fillLevelPercent: 60 },
+    { previousFillLevelPercent: null, fillLevelPercent: 100 },
+  ]) {
+    const next = observe(seeded(), observation("09/14/2026 08:45:00", levels));
+    assert.equal(next.onHandOverrides["main-21"], "3");
+    assert.equal(next.coolerEstimateState.events[0].deduction, 0);
+    assert.equal(next.coolerEstimateState.events[0].outcome, "keg-change-unconfirmed");
+  }
 });
 
 test("cached, unavailable, future, and unknown-product readings do not reduce counts", () => {

@@ -35,7 +35,8 @@ test("liquor refills do not create finished cocktail kegs", () => {
 });
 
 test("a delivery clock does not hide an earlier newly observed keg replacement", () => {
-  const item = { tapNumber: 61, deviceId: 1, lineNum: 1, plu: 100, name: "Test Cocktail 1", levelAvailable: true };
+  const item = { tapNumber: 61, deviceId: 1, lineNum: 1, plu: 100, name: "Test Cocktail 1", levelAvailable: true,
+    fillLevelPercent: 95, previousFillLevelPercent: 5 };
   const state = applyCoolerEstimateObservations(fixture(), [{ ...item, tappedOn: "09/13/2026 08:00:00" }], { observedAt: start, fallbackAt: start });
   const delivered = preserveKegInputEditHistory(state, { ...state, onHandOverrides: { main: "3" } }, {
     now: "2026-09-14T13:00:00.000Z", fallbackAt: start, role: "staff", revision: 2, physicalCount: false });
