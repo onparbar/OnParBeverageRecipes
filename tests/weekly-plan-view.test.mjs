@@ -72,6 +72,36 @@ test("sorts cocktail labels by tap and applies wall-specific display naming", ()
   assert.ok(html.indexOf("Apple Jack") < html.indexOf("Blue Dot"));
   assert.match(html, /Tap 55.*1,456 oz/);
   assert.match(html, /2 labels/);
+  assert.match(html, /data-prep-subtract="cocktail:apple%20jack%201"/);
+  assert.match(html, /aria-describedby="prep-subtract-status-1"/);
+  assert.match(html, /data-prep-subtract-status role="status" aria-live="polite"/);
+});
+
+test("completed cocktail prep explains how to change quantity without rendering an unusable remove control", () => {
+  const html = renderWeeklyPlanCocktailRows([{
+    name: "House Margarita 1",
+    displayName: "House Margarita",
+    quantity: 1,
+    tapNumbers: [47],
+    walls: ["Main"],
+    batchSizeOz: 1456,
+    completionItem: { id: "cocktail:house%20margarita%201", completed: true, actualQuantity: 1 },
+  }]);
+  assert.doesNotMatch(html, /data-prep-subtract=/);
+  assert.match(html, /Reopen completed prep before removing it\./);
+});
+
+test("an unlocked cocktail preview omits controls that require a saved Weekly Plan", () => {
+  const html = renderWeeklyPlanCocktailRows([{
+    name: "House Margarita 1",
+    displayName: "House Margarita",
+    quantity: 1,
+    tapNumbers: [47],
+    walls: ["Main"],
+    batchSizeOz: 1456,
+  }], { editable: false });
+  assert.match(html, /House Margarita/);
+  assert.doesNotMatch(html, /data-prep-tap-adder|data-prep-subtract=/);
 });
 
 test("renders liquor orders and staff refill instructions as separate concepts", () => {

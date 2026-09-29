@@ -6284,7 +6284,7 @@ function renderWeeklyPlanTapRows(items, { action, unit = "kegs" } = {}) {
   return renderWeeklyPlanTapRowsView(items.map(getWeeklyPlanProductViewItem), { action, unit });
 }
 
-function renderWeeklyPlanCocktailRows(items) {
+function renderWeeklyPlanCocktailRows(items, { editable = true } = {}) {
   const completionAvailable = dashboardStaffPrepPlan.available
     && Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date()))
     && clean(dashboardStaffPrepPlan.generatedAt) === clean(parAgentState?.recommendations?.generatedAt);
@@ -6297,7 +6297,7 @@ function renderWeeklyPlanCocktailRows(items) {
       : !entry.prepAdditionId && clean(entry.name).toLowerCase() === clean(item.name).toLowerCase()) : null,
     completionSaving: dashboardFinishWeekSaving,
   }));
-  return renderWeeklyPlanCocktailRowsView(viewItems);
+  return renderWeeklyPlanCocktailRowsView(viewItems, { editable });
 }
 
 function getWeeklySimpleSyrupNeed(cocktails = []) {
@@ -8842,7 +8842,7 @@ function renderWeeklyPlan() {
         <summary><span>Prep plan</span><strong>${escapeHtml(prepStatus)}</strong></summary>
         <section class="weekly-plan-column weekly-plan-column--prep">
           <div class="weekly-plan-column__header"><h2>Cocktails</h2></div>
-          ${renderWeeklyPlanCocktailRows(plan.prep.cocktails)}
+          ${renderWeeklyPlanCocktailRows(plan.prep.cocktails, { editable: planLocked })}
           <div class="weekly-plan-column__header"><h2>Liquor Tap Refills</h2></div>
           ${renderWeeklyPlanLiquorRefillRows(plan.orders.liquorTapBottles)}
         </section>
@@ -8882,6 +8882,7 @@ function renderWeeklyPlan() {
     </header>` : ""}
     ${weeklyPlanBody}
   `;
+  weeklyPlan.dataset.generatedAt = clean(recommendations?.generatedAt);
 
   globalThis.onParWeeklyPlanEstimatedPurchaseCost = toNumber(summary.estimatedKnownPurchaseCost);
   weeklyPlan.classList.toggle("weekly-plan--orders-complete", Boolean(orderStep?.complete));

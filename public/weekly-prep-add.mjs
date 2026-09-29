@@ -30,12 +30,23 @@ async function requestPrep(payload) {
     ...(payload ? { body: JSON.stringify(payload) } : {}),
   });
   const result = await response.json();
-  if (!response.ok) throw new Error(result?.error || "Cocktail prep could not be saved.");
+  if (!response.ok) {
+    const error = new Error(result?.error || "Cocktail prep could not be saved.");
+    error.status = response.status;
+    error.code = result?.code || "";
+    throw error;
+  }
   return result;
 }
 
-export function bindWeeklyPrepAdder(root, { documentRef = globalThis.document, onReturnToPlan } = {}) {
-  bindTapPrepControls(root, documentRef);
+export function bindWeeklyPrepAdder(root, {
+  documentRef = globalThis.document,
+  onReturnToPlan,
+  request = requestPrep,
+  createRequestId = () => globalThis.crypto.randomUUID(),
+  reload = () => globalThis.location.reload(),
+} = {}) {
+  bindTapPrepControls(root, documentRef, { request, createRequestId, reload });
   try {
     const message = globalThis.sessionStorage?.getItem(RETURN_MESSAGE_KEY);
     if (message) {
@@ -89,7 +100,7 @@ export function bindWeeklyPrepAdder(root, { documentRef = globalThis.document, o
     showMessage("Loading cocktails...");
     syncFields();
     try {
-      const result = await requestPrep();
+      const result = await request();
       if (!Array.isArray(result.cocktails)) throw new Error("Cocktail choices could not be loaded.");
       choices = result;
       const placeholder = documentRef.createElement("option");
@@ -150,13 +161,13 @@ export function bindWeeklyPrepAdder(root, { documentRef = globalThis.document, o
     syncFields();
     try {
       if (key !== requestKey) {
-        requestId = globalThis.crypto.randomUUID();
+        requestId = createRequestId();
         requestKey = key;
       }
-      const result = await requestPrep({ ...payload, requestId });
+      const result = await request({ ...payload, requestId });
       const message = result.message || "Cocktail added to this week's prep.";
       try { globalThis.sessionStorage?.setItem(RETURN_MESSAGE_KEY, message); } catch { /* Optional navigation state. */ }
-      globalThis.location.reload();
+      reload();
     } catch (error) {
       showMessage(error?.message || "Cocktail prep could not be saved.", true);
     } finally {
@@ -173,7 +184,7 @@ export function bindWeeklyPrepAdder(root, { documentRef = globalThis.document, o
   syncAction();
 }
 
-function bindTapPrepControls(root, documentRef) {
+function bindTapPrepControls(root, documentRef, { request, createRequestId, reload }) {
   const panel = root?.querySelector?.("[data-prep-tap-adder]");
   if (!panel || boundPanels.has(panel)) return;
   boundPanels.add(panel);
@@ -192,7 +203,7 @@ function bindTapPrepControls(root, documentRef) {
   select.addEventListener("change", syncCooler);
   let choices = null;
   let busy = false;
-  let pending = null;
+  const pendingByKey = new Map();
   const controls = [...panel.querySelectorAll("button, select"), ...root.querySelectorAll("[data-prep-subtract]")];
   const originalDisabled = new Map(controls.map(control => [control, control.disabled]));
   const setBusy = value => { busy = value; controls.forEach(control => { control.disabled = value || originalDisabled.get(control); }); };
@@ -206,7 +217,7 @@ function bindTapPrepControls(root, documentRef) {
     setBusy(true);
     status.textContent = "Loading taps...";
     try {
-      choices = await requestPrep();
+      choices = await request();
       select.replaceChildren(new Option("Choose cocktail", ""));
       for (const [label, items] of [["Saved cocktail taps", choices.tapCocktails], ["Other recipes", choices.cocktails]]) {
         const group = documentRef.createElement("optgroup");
@@ -248,28 +259,105 @@ function bindTapPrepControls(root, documentRef) {
     } catch (error) { status.textContent = error.message; }
     finally { setBusy(false); }
   });
-  async function save(action, itemId = "") {
+  async function save(action, itemId = "", {
+    button = null,
+    rowStatus = null,
+    expectedGeneratedAt = "",
+  } = {}) {
     if (busy) return;
     const tap = availableChoices().find(item => item.id === select.value);
     if (action === "add" && !tap) { status.textContent = "Choose a cocktail tap."; return; }
     const key = action + ":" + (itemId || `${tap.id}:${tap.wall || cooler.value}`);
-    setBusy(true);
-    status.textContent = "Saving prep...";
-    try {
-      if (!pending || pending.key !== key) {
-        const latest = await requestPrep();
-        pending = { key, payload: { action, generatedAt: latest.generatedAt, expectedRevision: latest.revision,
-          requestId: globalThis.crypto.randomUUID(), ...(action === "subtract" ? { itemId } : { cocktailId: tap.id, cooler: tap.wall || cooler.value, quantity: 1 }) } };
+    let pending = pendingByKey.get(key) || null;
+    const setOperationStatus = (message, error = false) => {
+      if (action === "subtract" && rowStatus) {
+        status.textContent = "";
+        rowStatus.textContent = message;
+        rowStatus.dataset.error = String(error);
+        return;
       }
-      const result = await requestPrep(pending.payload);
+      status.textContent = message;
+    };
+    setBusy(true);
+    setOperationStatus(action === "subtract" ? "Removing one planned keg..." : "Saving prep...");
+    if (button) {
+      button.setAttribute("aria-busy", "true");
+      button.textContent = "Removing...";
+    }
+    let succeeded = false;
+    let operationGeneratedAt = pending?.key === key ? String(pending.payload.generatedAt || "") : "";
+    let operationRequestId = pending?.key === key ? pending.payload.requestId : "";
+    try {
+      let result;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (!pending || pending.key !== key) {
+          const latest = await request();
+          const latestGeneratedAt = String(latest?.generatedAt || "");
+          if (action === "subtract" && ((expectedGeneratedAt && latestGeneratedAt !== expectedGeneratedAt)
+            || (operationGeneratedAt && latestGeneratedAt !== operationGeneratedAt))) {
+            const error = new Error("The weekly plan changed. Refresh the page before removing a cocktail.");
+            error.status = 409;
+            error.code = "WEEKLY_PREP_GENERATION_CHANGED";
+            throw error;
+          }
+          operationGeneratedAt ||= latestGeneratedAt;
+          pending = { key, payload: { action, generatedAt: latestGeneratedAt, expectedRevision: latest.revision,
+            requestId: operationRequestId ||= createRequestId(), ...(action === "subtract" ? { itemId } : { cocktailId: tap.id, cooler: tap.wall || cooler.value, quantity: 1 }) } };
+          pendingByKey.set(key, pending);
+        }
+        try {
+          result = await request(pending.payload);
+          break;
+        } catch (error) {
+          const revisionConflict = action === "subtract"
+            && error?.status === 409
+            && (error?.code === "WEEKLY_PREP_REVISION_CONFLICT"
+              || error?.code === "KEG_STATE_REVISION_CONFLICT"
+              || /^the plan changed\./i.test(error?.message || ""));
+          if (!revisionConflict || attempt > 0) throw error;
+          pending = null;
+          pendingByKey.delete(key);
+          setOperationStatus("Plan changed. Retrying removal...");
+        }
+      }
       pending = null;
+      pendingByKey.delete(key);
+      setOperationStatus(action === "subtract" ? "Removed. Refreshing the plan..." : "Saved. Refreshing the plan...");
+      if (button) {
+        button.textContent = "Removed";
+        button.setAttribute("aria-label", "One planned keg removed");
+        button.setAttribute("title", "One planned keg removed");
+      }
       try { globalThis.sessionStorage?.setItem(RETURN_MESSAGE_KEY, result.message); } catch { /* Optional. */ }
-      globalThis.location.reload();
-    } catch (error) { status.textContent = error.message; }
-    finally { setBusy(false); }
+      succeeded = true;
+      try {
+        reload();
+      } catch {
+        setOperationStatus(action === "subtract"
+          ? "Removed. Refresh the page to see the updated plan."
+          : "Saved. Refresh the page to see the updated plan.");
+      }
+    } catch (error) {
+      if (Number(error?.status) >= 400 && Number(error?.status) < 500) {
+        pending = null;
+        pendingByKey.delete(key);
+      }
+      const message = error?.message || "Cocktail prep could not be saved.";
+      setOperationStatus(message, true);
+    } finally {
+      if (button) {
+        button.removeAttribute("aria-busy");
+        if (!succeeded) button.textContent = "×";
+      }
+      if (!succeeded) setBusy(false);
+    }
   }
   panel.querySelector("[data-prep-tap-save]").addEventListener("click", () => save("add"));
   root.querySelectorAll("[data-prep-subtract]").forEach(button => {
-    button.addEventListener("click", () => save("subtract", button.dataset.prepSubtract));
+    button.addEventListener("click", () => save("subtract", button.dataset.prepSubtract, {
+      button,
+      rowStatus: button.closest(".weekly-plan-label-item")?.querySelector("[data-prep-subtract-status]"),
+      expectedGeneratedAt: root.dataset?.generatedAt || "",
+    }));
   });
 }

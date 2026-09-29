@@ -77,10 +77,22 @@ test("subtract removes only one unprepared batch and retries do not subtract twi
   assert.deepEqual(h.state().recommendations.weeklyPlanSnapshot.plan.orders, h.initialOrders);
 });
 
+test("subtract removes an ordinary planned cocktail", async () => {
+  const h = harness();
+  const planned = buildStaffPrepPlan(h.state().recommendations).items.find(i => !i.prepAdditionId);
+  await h.context.subtractWeeklyPrepCocktail(h.body({ itemId: planned.id }), h.identity);
+  assert.equal(h.writes(), 1);
+  assert.equal(buildStaffPrepPlan(h.state().recommendations).items.some(i => i.id === planned.id), false);
+  assert.deepEqual(h.state().recommendations.weeklyPlanSnapshot.plan.orders, h.initialOrders);
+});
+
 test("completed batches, mismatched coolers and stale revisions cannot be changed", async () => {
   const h = harness();
   await assert.rejects(h.context.addWeeklyPrepCocktail(h.body({ cooler: "Main" }), h.identity), /different cooler/);
-  await assert.rejects(h.context.addWeeklyPrepCocktail(h.body({ expectedRevision: 0 }), h.identity), /another session/);
+  await assert.rejects(
+    h.context.addWeeklyPrepCocktail(h.body({ expectedRevision: 0 }), h.identity),
+    error => error.code === "WEEKLY_PREP_REVISION_CONFLICT" && /another session/.test(error.message),
+  );
   const item = buildStaffPrepPlan(h.state().recommendations).items[0];
   h.state().recommendations = applyStaffPrepPlanUpdate(h.state().recommendations, { generatedAt: h.state().recommendations.generatedAt, itemId: item.id, completed: true, preparedBy: "Test" });
   await assert.rejects(h.context.subtractWeeklyPrepCocktail(h.body({ itemId: item.id }), h.identity), /already prepared/);
@@ -96,4 +108,25 @@ test("prep API denies staff and cross-site writes before changing the plan", asy
   role = "owner";
   assert.equal((await ctx.POST({ headers: { get: () => "cross-site" } })).status, 403);
   assert.equal(writes, 0);
+});
+
+test("prep API exposes conflict codes used by the safe removal retry", async () => {
+  const conflict = Object.assign(new Error("The plan changed."), {
+    status: 409,
+    code: "WEEKLY_PREP_REVISION_CONFLICT",
+  });
+  const ctx = vm.createContext({
+    NextResponse: { json: (body, options) => ({ body, ...options }) },
+    requireDashboardRequestIdentity: async () => ({ role: "owner" }),
+    readWeeklyPrepChoices: async () => ({}),
+    addWeeklyPrepCocktail: async () => ({}),
+    subtractWeeklyPrepCocktail: async () => { throw conflict; },
+  });
+  vm.runInContext(executable(route), ctx);
+  const response = await ctx.POST({
+    headers: { get: () => "same-origin" },
+    json: async () => ({ action: "subtract" }),
+  });
+  assert.equal(response.status, 409);
+  assert.equal(response.body.code, "WEEKLY_PREP_REVISION_CONFLICT");
 });

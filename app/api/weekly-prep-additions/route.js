@@ -36,6 +36,9 @@ export async function POST(request) {
     if (!body || typeof body !== "object" || Array.isArray(body)) return respond({ error: "The prep details are invalid." }, 400);
     return respond(await (body.action === "subtract" ? subtractWeeklyPrepCocktail(body, identity) : addWeeklyPrepCocktail(body, identity)));
   } catch (error) {
-    return respond({ error: error.message || "The cocktail could not be added." }, error.status || 500);
+    return respond({
+      error: error.message || "The cocktail prep change could not be saved.",
+      code: error.code || "WEEKLY_PREP_ADDITION_ERROR",
+    }, error.status || 500);
   }
 }
