@@ -76,6 +76,17 @@ function normalizeCocktail(value = {}) {
   };
 }
 
+function normalizeLiquorRefill(value = {}) {
+  const base = normalizeCocktail(value);
+  if (!base) return null;
+  return {
+    ...base,
+    actualQuantity: base.completed
+      ? Math.max(1, Math.round(amount(value.actualQuantity) || amount(value.quantity) || 1))
+      : Math.max(1, Math.round(amount(value.quantity) || 1)),
+  };
+}
+
 export function normalizeWeeklySnapshotCompletion(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const generatedAt = timestamp(value.generatedAt);
@@ -86,6 +97,8 @@ export function normalizeWeeklySnapshotCompletion(value) {
       .slice(0, 30).map(normalizeDelivery).filter(Boolean),
     cocktails: (Array.isArray(value.cocktails) ? value.cocktails : [])
       .slice(0, 300).map(normalizeCocktail).filter(Boolean),
+    liquorRefills: (Array.isArray(value.liquorRefills) ? value.liquorRefills : [])
+      .slice(0, 300).map(normalizeLiquorRefill).filter(Boolean),
     updatedAt: timestamp(value.updatedAt),
   };
 }
@@ -95,6 +108,7 @@ export function buildWeeklySnapshotCompletion({ generatedAt, tracking, prep, upd
     generatedAt,
     deliveries: Array.isArray(tracking?.vendors) ? tracking.vendors : [],
     cocktails: Array.isArray(prep?.items) ? prep.items : [],
+    liquorRefills: Array.isArray(prep?.liquorRefills) ? prep.liquorRefills : [],
     updatedAt,
   });
 }
@@ -103,11 +117,14 @@ export function summarizeWeeklySnapshotCompletion(value) {
   const completion = normalizeWeeklySnapshotCompletion(value);
   const deliveryItems = completion?.deliveries.flatMap((vendor) => vendor.items) || [];
   const cocktails = completion?.cocktails || [];
+  const liquorRefills = completion?.liquorRefills || [];
   return {
     deliveryChecked: deliveryItems.filter((item) => item.status !== "pending").length,
     deliveryTotal: deliveryItems.length,
     deliveryExceptions: deliveryItems.filter((item) => !["pending", "received", "extra"].includes(item.status)).length,
     cocktailCompleted: cocktails.filter((item) => item.completed).length,
     cocktailTotal: cocktails.length,
+    liquorRefillCompleted: liquorRefills.filter((item) => item.completed).length,
+    liquorRefillTotal: liquorRefills.length,
   };
 }

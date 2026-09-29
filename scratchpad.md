@@ -874,3 +874,10 @@ curl -I 'https://onparbev.com/dashboard.js?v=check'
 - Automatic deductions now require both the newer PMB timestamp and a corroborating level change: the current reading must be at least 70% and at least 50 percentage points above the preceding complete snapshot. Missing evidence and low-percentage corrections are recorded as `keg-change-unconfirmed` without changing cooler stock.
 - Added regression coverage for 0% to 10.9%, 35.7% to 10.9%, an insufficient 20% to 60% rise, missing prior evidence, verified low-to-full replacements, unmatched-product recovery, and delivery clocks.
 - Full release gate passed: 1,242 tests, zero-warning lint, production build, and whitespace checks. `npm audit --omit=dev` reports existing Next.js/sharp/undici advisories; no forced dependency update was included in this operational fix.
+
+### Weekly snapshot liquor-refill completion archive — September 28, 2026
+
+- Extended the permanent weekly completion record beyond deliveries and cocktails to include every planned liquor keg refill, its completed/not-checked status, actual bottles added, physical taps/walls, employee, and completion timestamp.
+- Added a separate Liquor keg refills section to Weekly Snapshots. Older snapshots fall back to their saved Monday liquor-refill plan and correctly show those entries as not checked when no historical completion evidence exists.
+- Fixed completion-only recovery so a direct-to-keg liquor refill is archived even when it intentionally has no cabinet inventory movement. Completion records remain queued and retryable through the existing inventory recovery path.
+- Verification: 1,244 tests, zero-warning lint, production build, and whitespace checks passed in the isolated release checkout.

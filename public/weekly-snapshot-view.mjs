@@ -10,7 +10,10 @@ export function getWeeklySnapshotCompletionSummary(snapshot) {
   const deliveryTotal = orders.reduce((total, order) => total + (Array.isArray(order.lines) ? order.lines.length : 0), 0);
   const cocktailTotal = (Array.isArray(snapshot?.kegPlanSnapshot?.items) ? snapshot.kegPlanSnapshot.items : [])
     .filter((item) => item?.actionType === "make").length;
-  return { deliveryChecked: 0, deliveryTotal, deliveryExceptions: 0, cocktailCompleted: 0, cocktailTotal };
+  const liquorRefillTotal = (Array.isArray(snapshot?.kegPlanSnapshot?.items) ? snapshot.kegPlanSnapshot.items : [])
+    .filter((item) => item?.isLiquorTap && Number(item.orderQty) > 0).length;
+  return { deliveryChecked: 0, deliveryTotal, deliveryExceptions: 0, cocktailCompleted: 0, cocktailTotal,
+    liquorRefillCompleted: 0, liquorRefillTotal };
 }
 
 // Historical views use only the selected snapshot, never current dashboard inputs.
@@ -51,10 +54,25 @@ export function renderSavedWeeklySnapshot(snapshot, helpers) {
         preparedBy: "",
         completedAt: "",
       }));
+  const liquorRefills = savedCompletion?.liquorRefills?.length
+    ? savedCompletion.liquorRefills
+    : (Array.isArray(plan?.items) ? plan.items : []).filter((item) => item.isLiquorTap && Number(item.orderQty) > 0).map((item) => ({
+        id: item.key,
+        name: item.orderProductName || item.name,
+        displayName: item.orderProductName || item.name,
+        quantity: item.orderQty,
+        actualQuantity: item.orderQty,
+        tapNumbers: [item.tapNumber],
+        walls: item.wall ? [item.wall] : [],
+        completed: false,
+        preparedBy: "",
+        completedAt: "",
+      }));
   const completionSummary = summarizeWeeklySnapshotCompletion({
     generatedAt: plan?.generatedAt || snapshot.savedAt,
     deliveries,
     cocktails,
+    liquorRefills,
   });
   const recordedNumber = (value) => value !== null && value !== undefined && String(value).trim() !== "" && Number.isFinite(Number(value));
   const quantity = (value) => recordedNumber(value) ? html(number(Number(value))) : "Not recorded";
@@ -94,6 +112,7 @@ export function renderSavedWeeklySnapshot(snapshot, helpers) {
     <tr class="inventory-group-row"><th scope="rowgroup" colspan="5">${html(delivery.vendor)}</th></tr>
     ${delivery.items.map((item) => `<tr><td><strong>${html(item.name)}</strong></td><td>${quantity(item.quantity)}</td><td>${item.status === "pending" ? "Not checked" : quantity(item.receivedQuantity)}</td><td>${html(deliveryStatus(item))}</td><td>${item.handledBy ? `${html(item.handledBy)}<span class="table-note">${html(formatUpdatedAt(item.updatedAt))}</span>` : "Not checked"}</td></tr>`).join("")}`).join("");
   const cocktailRows = cocktails.map((item) => `<tr><td><strong>${html(item.displayName || item.name)}</strong>${item.walls?.length ? `<span class="table-note">${html(item.walls.join(", "))}${item.tapNumbers?.length ? ` · Tap ${html(item.tapNumbers.join(", "))}` : ""}</span>` : ""}</td><td>${quantity(item.quantity)}</td><td>${item.completed ? "Prepared" : "Not checked"}</td><td>${item.completed ? `${html(item.preparedBy)}<span class="table-note">${html(formatUpdatedAt(item.completedAt))}</span>` : "Not checked"}</td></tr>`).join("");
+  const liquorRefillRows = liquorRefills.map((item) => `<tr><td><strong>${html(item.displayName || item.name)}</strong>${item.walls?.length ? `<span class="table-note">${html(item.walls.join(", "))}${item.tapNumbers?.length ? ` · Tap ${html(item.tapNumbers.join(", "))}` : ""}</span>` : ""}</td><td>${quantity(item.quantity)}</td><td>${item.completed ? `${quantity(item.actualQuantity)} bottle${Number(item.actualQuantity) === 1 ? "" : "s"} added` : "Not checked"}</td><td>${item.completed ? `${html(item.preparedBy)}<span class="table-note">${html(formatUpdatedAt(item.completedAt))}</span>` : "Not checked"}</td></tr>`).join("");
 
   return `<article class="weekly-snapshot-record" aria-label="Snapshot for ${html(dateLabel)}">
     <header class="weekly-snapshot-record__header">
@@ -129,6 +148,12 @@ export function renderSavedWeeklySnapshot(snapshot, helpers) {
       <summary><span>Cocktail prep</span><strong>${quantity(completionSummary.cocktailCompleted)} of ${quantity(completionSummary.cocktailTotal)} prepared</strong></summary>
       <div class="weekly-snapshot-section__body">
         ${cocktailRows ? table("Saved cocktail prep checkoffs", ["Cocktail", "Batches", "Status", "Prepared by"], cocktailRows) : '<p class="muted">No cocktail prep was required for this week.</p>'}
+      </div>
+    </details>
+    <details class="weekly-snapshot-section" data-snapshot-section="liquor-refills"${openSections.has("liquor-refills") ? " open" : ""}>
+      <summary><span>Liquor keg refills</span><strong>${quantity(completionSummary.liquorRefillCompleted)} of ${quantity(completionSummary.liquorRefillTotal)} completed</strong></summary>
+      <div class="weekly-snapshot-section__body">
+        ${liquorRefillRows ? table("Saved liquor keg refill checkoffs", ["Liquor", "Planned bottles", "Status", "Completed by"], liquorRefillRows) : '<p class="muted">No liquor keg refills were required for this week.</p>'}
       </div>
     </details>
   </article>`;

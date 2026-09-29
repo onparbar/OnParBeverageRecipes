@@ -70,7 +70,7 @@ test("weekly snapshots display saved levels and counts without replacing missing
   assert.equal(snapshot.items[0].unitCost, 10);
   assert.equal(snapshot.items[0].totalValue, 70);
   assert.equal(snapshot.kegPlanSnapshot.tapInputs[0].currentStockKegs, 0.5);
-  assert.equal((html.match(/data-snapshot-section=/g) || []).length, 4);
+  assert.equal((html.match(/data-snapshot-section=/g) || []).length, 5);
   assert.doesNotMatch(html, /data-snapshot-section="[^"]+" open/);
   assert.match(renderSavedWeeklySnapshot(snapshot, { ...helpers, openSections: ["kegs"] }), /data-snapshot-section="counts" open/);
   snapshot.kegPlanSnapshot.tapInputs[0].inventoryStateMissing = true;

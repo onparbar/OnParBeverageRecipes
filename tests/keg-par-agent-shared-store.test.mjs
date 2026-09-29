@@ -104,6 +104,22 @@ test("Keg Levels rejects unknown shared fields before writing anything", async (
   assert.deepEqual(fetchImpl.calls.map((call) => call.method), ["GET"]);
 });
 
+test("a completion-only inventory plan is queued for weekly snapshot archival", async () => {
+  const fetchImpl = fetchFor({ id: "keg-par-agent", revision: 4, initialized: true,
+    data: createEmptyKegParAgentData(), initialized_at: "2026-07-31T12:00:00.000Z",
+    updated_at: "2026-07-31T12:00:00.000Z", updated_by_role: "owner" });
+  const shared = store(fetchImpl);
+  const current = await shared.read();
+  const completion = { generatedAt: "2026-07-27T14:00:00.000Z", liquorRefills: [{
+    id: "liquor-refill:vodka:13", name: "Vodka", quantity: 2, actualQuantity: 2,
+    completed: true, preparedBy: "Cam", completedAt: "2026-07-31T16:00:00.000Z",
+  }] };
+  const saved = await shared.replace({ expectedRevision: current.revision, data: current.data },
+    "employee", { sources: [], unmatched: [], weeklySnapshotCompletion: completion });
+  assert.equal(saved.data.inventoryOutbox.pending.length, 1);
+  assert.deepEqual(saved.data.inventoryOutbox.pending[0].plan.weeklySnapshotCompletion, completion);
+});
+
 test("Keg Levels fails closed when shared storage is unavailable", async () => {
   const unavailableFetch = async () => response({ code: "PGRST205" }, 404);
   await assert.rejects(
