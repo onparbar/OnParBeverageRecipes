@@ -78,8 +78,7 @@ window.addEventListener("message", (event) => {
     return;
   }
 
-  chrome.runtime.sendMessage({ type: "START_VENDOR_CART", payload }, (response) => {
-    const error = chrome.runtime.lastError?.message;
+  const postResponse = (response, error = "") => {
     window.postMessage({
       source: EXTENSION_SOURCE,
       type: error || !response?.ok
@@ -88,7 +87,19 @@ window.addEventListener("message", (event) => {
       requestId: payload.requestId,
       message: error || response?.message || "The vendor cart builder is working.",
     }, window.location.origin);
-  });
+  };
+
+  try {
+    chrome.runtime.sendMessage({ type: "START_VENDOR_CART", payload }, (response) => {
+      try {
+        postResponse(response, chrome.runtime.lastError?.message);
+      } catch {
+        postResponse(null, "The cart builder was reloaded. Refresh this dashboard and try again.");
+      }
+    });
+  } catch {
+    postResponse(null, "The cart builder was reloaded. Refresh this dashboard and try again.");
+  }
 });
 
 chrome.runtime.onMessage.addListener((message) => {

@@ -8979,6 +8979,10 @@ function renderKegLevels() {
         ${wallFilterOptions.map(([key, label, count]) => `<button class="${key === activeKegWallFilter ? "is-active" : ""}" type="button" data-keg-wall-filter="${escapeHtml(key)}" aria-pressed="${key === activeKegWallFilter}"><span>${escapeHtml(label)}</span>${key === "all" ? "" : `<span class="keg-wall-filter__option-count">${formatNumber(count)}</span>`}</button>`).join("")}
       </nav>
     </details>
+    <p class="keg-count-verification-note">
+      <strong>Verify the saved counts.</strong>
+      Check the full back up keg totals below and change only what is different. You do not need to count unchanged kegs again.
+    </p>
   `;
   const visibleWallBlocks = renderKegWallBlock(
     selectedWall || "All",
@@ -10891,7 +10895,7 @@ function renderKegWallBlock(wallName, items, { attentionOnly = false, hideHeader
               <th>Tap #</th>
               <th>Product</th>
               <th>Current level</th>
-              <th>On hand</th>
+              <th>Full back up kegs</th>
               <th>Order / make</th>
             </tr>
           </thead>
@@ -10922,7 +10926,7 @@ function renderKegWallBlock(wallName, items, { attentionOnly = false, hideHeader
                       <div class="keg-on-hand-stack">
                         ${isLiquorTap
                           ? '<span class="inventory-order-zero">-</span>'
-                          : `<input class="inventory-input keg-input keg-on-hand-input" data-keg-field="onHand" data-keg-key="${escapeHtml(itemKey)}" name="keg-on-hand-${escapeHtml(itemKey)}" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getKegOnHandEditorValue(onHand))}" placeholder="0" aria-label="On hand kegs for ${escapeHtml(displayBrand)}">`}
+                          : `<input class="inventory-input keg-input keg-on-hand-input" data-keg-field="onHand" data-keg-key="${escapeHtml(itemKey)}" name="keg-on-hand-${escapeHtml(itemKey)}" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getKegOnHandEditorValue(onHand))}" placeholder="0" aria-label="Full back up kegs for ${escapeHtml(displayBrand)}">`}
                         ${onDeck ? `
                           <label class="keg-on-deck-count">
                             <span>${isLiquorOnDeck ? "On Deck oz" : "On Deck"}</span>

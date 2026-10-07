@@ -64,6 +64,13 @@ test("vendor handoff uses extension-private storage and remains review-only", as
   assert.match(checkoutReview, /Keg pickup is checked\. Review the order and submit it yourself\./);
 });
 
+test("a reloaded extension tells the dashboard to refresh instead of throwing", async () => {
+  const dashboardBridge = await readFile(new URL("../chrome-extension/bees-cart-builder/dashboard-bridge.js", import.meta.url), "utf8");
+  assert.match(dashboardBridge, /The cart builder was reloaded\. Refresh this dashboard and try again\./);
+  assert.match(dashboardBridge, /try \{\s*chrome\.runtime\.sendMessage/s);
+  assert.match(dashboardBridge, /postResponse\(null, "The cart builder was reloaded/);
+});
+
 test("BEES waits for its exact keg-pickup choice and verifies a re-rendered control", async () => {
   const checkoutReview = await readFile(
     new URL("../chrome-extension/bees-cart-builder/checkout-review.js", import.meta.url),

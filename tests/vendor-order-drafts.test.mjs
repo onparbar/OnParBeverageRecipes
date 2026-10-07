@@ -139,6 +139,15 @@ test("recovers mapped OHLQ identity and pricing from physical tap product names"
     orders: {
       beerKegs: [],
       liquorTapBottles: [{
+        id: "patio-17-fireball",
+        name: "Fireball Cinnamon Whisky",
+        lineType: "Liquor tap bottle",
+        quantity: 2,
+        vendor: "OHLQ",
+        unitCost: 0,
+        estimatedCost: 0,
+        hasKnownPrice: false,
+      }, {
         id: "patio-19-jack-daniels",
         name: "Jack Daniel's Whiskey",
         lineType: "Liquor tap bottle",
@@ -160,8 +169,9 @@ test("recovers mapped OHLQ identity and pricing from physical tap product names"
   };
   const draft = buildVendorOrderDrafts(plan, options).drafts[0];
 
-  assert.deepEqual(draft.lines.map((line) => line.vendorSku), ["0066D", "9674D"]);
-  assert.deepEqual(draft.lines.map((line) => line.unitCost), [47, 66.74]);
+  assert.deepEqual(draft.lines.map((line) => line.vendorSku), ["3024D", "0066D", "9674D"]);
+  assert.deepEqual(draft.lines.map((line) => line.unitCost), [25.38, 47, 66.74]);
+  assert.deepEqual(draft.lines.map((line) => line.extendedCost), [50.76, 94, 133.48]);
   assert.equal(draft.canApprove, true);
 });
 

@@ -3,6 +3,8 @@ import { PROOF_PREP_LOOK_AHEAD_WEEKS } from "./proof-prep-replacements.mjs";
 
 const CONFIGURED_VENDORS = new Set(["Bonbright", "Heidelberg", "Proof", "OHLQ"]);
 const VENDOR_ORDER_IDENTITY_FALLBACKS = new Map([
+  ["ohlq|fireball", { vendorSku: "3024D", productName: "Fireball Cinnamon Whisky 1.75L", unitCost: 25.38 }],
+  ["ohlq|fireball-cinnamon-whisky", { vendorSku: "3024D", productName: "Fireball Cinnamon Whisky 1.75L", unitCost: 25.38 }],
   ["ohlq|jack-daniel-s", { vendorSku: "0066D", productName: "Jack Daniel's Old No. 7 1.75L", unitCost: 47 }],
   ["ohlq|jack-daniel-s-whiskey", { vendorSku: "0066D", productName: "Jack Daniel's Old No. 7 1.75L", unitCost: 47 }],
   ["ohlq|jack-daniel-s-fire", { vendorSku: "4982D", productName: "Jack Daniel's Tennessee Fire 1.75L", unitCost: 47 }],
@@ -223,11 +225,15 @@ export function resolveVendorOrderIdentity(item = {}, explicitVendor = "") {
   const fallback = names
     .map((name) => VENDOR_ORDER_IDENTITY_FALLBACKS.get(`${vendor.toLowerCase()}|${slug(name)}`))
     .find(Boolean) || {};
+  const configuredUnitCost = numberOrNull(item.unitCost);
+  const fallbackUnitCost = numberOrNull(fallback.unitCost);
   return {
     vendor,
     vendorSku: clean(item.vendorSku || item.preferredSku || fallback.vendorSku),
     productName: clean(item.vendorProductName || item.productName || fallback.productName || item.orderProductName || item.name),
-    unitCost: numberOrNull(item.unitCost ?? fallback.unitCost),
+    unitCost: configuredUnitCost !== null && configuredUnitCost > 0
+      ? configuredUnitCost
+      : fallbackUnitCost ?? configuredUnitCost,
   };
 }
 
@@ -373,8 +379,11 @@ function buildDraftLine(item, vendor, sourceDate) {
   const resolvedIdentity = resolveVendorOrderIdentity(item, vendor);
   const excludeFromOrderCost = Boolean(item.excludeFromOrderCost);
   const unitCost = excludeFromOrderCost ? 0 : resolvedIdentity.unitCost;
-  const extendedCost = excludeFromOrderCost ? 0 : numberOrNull(item.estimatedCost)
-    ?? (unitCost !== null && quantity > 0 ? unitCost * quantity : null);
+  const configuredExtendedCost = numberOrNull(item.estimatedCost);
+  const extendedCost = excludeFromOrderCost ? 0
+    : configuredExtendedCost !== null && configuredExtendedCost > 0
+      ? configuredExtendedCost
+      : unitCost !== null && unitCost > 0 && quantity > 0 ? unitCost * quantity : configuredExtendedCost;
   const internalId = clean(item.id || item.internalId);
   const vendorSku = resolvedIdentity.vendorSku;
   const productName = resolvedIdentity.productName;

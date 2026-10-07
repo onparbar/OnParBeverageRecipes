@@ -49,7 +49,7 @@ export function buildVendorCartRequest(view, { now = Date.now } = {}) {
 
 export function sendVendorCartRequest(view, {
   windowRef = globalThis.window,
-  timeoutMs = 1800,
+  timeoutMs = 5000,
   now = Date.now,
 } = {}) {
   if (!windowRef?.location?.origin) {

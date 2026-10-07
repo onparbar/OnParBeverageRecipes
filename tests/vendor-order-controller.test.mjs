@@ -120,6 +120,36 @@ test("vendor order controller fails closed without a document surface", () => {
   assert.equal(bindVendorOrderController({ documentRef: null }), false);
 });
 
+test("cart-builder failures are rendered instead of leaving the button silent", async () => {
+  const openButton = new FakeButton({ assistedOrderOpen: "ohlq" });
+  openButton.textContent = "Approve & open OHLQ";
+  const messages = [];
+  let renders = 0;
+  bindVendorOrderController({
+    documentRef: {
+      querySelector() { return null; },
+      querySelectorAll(selector) {
+        return selector === "[data-assisted-order-open]" ? [openButton] : [];
+      },
+    },
+    getDraftView: () => ({
+      order: { actionsEnabled: true, rehearsal: true, vendor: "OHLQ", vendorKey: "ohlq" },
+    }),
+    confirmLateVendorOrder: () => true,
+    canBuildVendorCart: () => true,
+    getVendorCartLabel: () => "OHLQ",
+    sendVendorCartRequest: async () => { throw new Error("The OHLQ cart helper did not respond."); },
+    setWeeklyOrderTrackingMessage: (message) => messages.push(message),
+    renderWeeklyPlan: () => { renders += 1; },
+  });
+
+  await openButton.dispatch("click");
+  assert.deepEqual(messages, ["The OHLQ cart helper did not respond."]);
+  assert.equal(renders, 1);
+  assert.equal(openButton.disabled, false);
+  assert.equal(openButton.textContent, "Approve & open OHLQ");
+});
+
 test("reopening sends the correct draft and quantity shortcut selects a real option", async () => {
   const reopen = new FakeButton({ orderDraftActor: "Sam" });
   const edit = new FakeButton();

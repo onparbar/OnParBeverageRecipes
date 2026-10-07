@@ -47,7 +47,9 @@ test("OHLQ also waits for delayed filter controls", async () => {
 });
 
 test("OHLQ rehearsal wakes the cart worker after navigation", () => {
-  assert.match(background, /waitForTabComplete\(focused\.tab\.id\)/);
+  assert.match(background, /async function wakeVendorCartWorker\(focused, state\)/);
+  assert.match(background, /void wakeVendorCartWorker\(focused, state\)/);
+  assert.match(background, /await waitForTabComplete\(focused\.tab\.id\)/);
   assert.match(background, /VENDOR_CART_START/);
   assert.match(background, /return temporaryStorage\.get\(ORDER_KEY\)/);
 });
@@ -60,7 +62,10 @@ test("OHLQ exact matches use the live purchased-product cards", () => {
 
 test("older verified OHLQ items use exact product pages without substitutions", () => {
   assert.match(vendorCart, /"0068B": "111805928192876"/);
+  assert.match(vendorCart, /"0461D": "212189145863496"/);
   assert.match(vendorCart, /"0893L": "180221973987424"/);
+  assert.match(vendorCart, /"2722D": "278129737420365"/);
+  assert.match(vendorCart, /"7984D": "208156176494832"/);
   assert.match(vendorCart, /"9674D": "103610807059918"/);
   assert.match(vendorCart, /state\.ohlqDirectQueue/);
   assert.match(vendorCart, /location\.assign\(ohlqProductUrl/);

@@ -108,6 +108,16 @@ async function broadcastResult(result) {
 
 let startingVendorCart = false;
 
+async function wakeVendorCartWorker(focused, state) {
+  if (!focused?.tab?.id) return;
+  await waitForTabComplete(focused.tab.id);
+  // Proof starts itself on page load. Sending another start after its first
+  // navigation can restart the worker on the departing page.
+  if (state.vendor !== "proof") {
+    await chrome.tabs.sendMessage(focused.tab.id, { type: "VENDOR_CART_START" }).catch(() => {});
+  }
+}
+
 function ownsProofWorker(state, sender) {
   return Boolean(state?.workerTabId && state.workerTabId === sender?.tab?.id
     && /^https:\/\/shop\.sgproof\.com\//i.test(sender.url || ""));
@@ -166,17 +176,16 @@ chrome.runtime.onMessage.addListener((message, sender) => {
       if (state.vendor !== "proof") await temporaryStorage.set({ [ORDER_KEY]: state });
       await temporaryStorage.remove(RESULT_KEY);
       const focused = await focusVendor(state.vendor, state);
-      if (focused.tab?.id) {
-        await waitForTabComplete(focused.tab.id);
-        // Proof starts itself on page load. Sending another start after its
-        // first navigation can restart the worker on the departing page.
-        if (state.vendor !== "proof") {
-          await chrome.tabs.sendMessage(focused.tab.id, { type: "VENDOR_CART_START" }).catch(() => {});
-        }
-      }
+      // Acknowledge the dashboard as soon as the vendor tab opens. Waiting for
+      // a slow supplier page here can close Chrome's response channel before
+      // the dashboard hears back, making the button appear to do nothing.
+      void wakeVendorCartWorker(focused, state)
+        .finally(() => { startingVendorCart = false; });
       return { ok: true, message: `${config.label} opened. The cart builder is working.` };
-    })().catch((error) => ({ ok: false, message: error.message }))
-      .finally(() => { startingVendorCart = false; });
+    })().catch((error) => {
+      startingVendorCart = false;
+      return { ok: false, message: error.message };
+    });
   }
 
   if (message?.type === "GET_VENDOR_CART_STATE") {

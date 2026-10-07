@@ -4334,6 +4334,21 @@ td {
   margin-bottom: 16px;
 }
 
+.keg-count-verification-note {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(47, 119, 99, 0.2);
+  border-radius: 12px;
+  background: rgba(47, 119, 99, 0.07);
+  color: var(--juniper-dark);
+  line-height: 1.45;
+}
+
+.keg-count-verification-note strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
 #keg-levels-panel .keg-summary {
   max-height: calc(100vh - 104px);
   overflow-y: auto;
@@ -11243,7 +11258,23 @@ tbody tr:hover {
   min-width: 0;
 }
 
+/* Keep the keg column labels visible while staff verify a long cooler list. */
+#keg-levels-panel .inventory-table-wrap {
+  max-height: max(360px, calc(100dvh - 270px));
+}
+
+#keg-levels-panel .keg-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  box-shadow: 0 1px 0 var(--ui-line);
+}
+
 @media (max-width: 900px) {
+  #keg-levels-panel .inventory-table-wrap {
+    max-height: max(320px, calc(100dvh - 230px));
+  }
+
   #keg-walls .keg-table > thead > tr > th,
   #keg-walls .keg-table > tbody > tr[data-keg-row-key] > td {
     padding: 12px clamp(4px, 1vw, 9px);

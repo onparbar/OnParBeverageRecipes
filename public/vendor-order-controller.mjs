@@ -122,7 +122,8 @@ export function bindVendorOrderController({
         } catch (error) {
           button.disabled = false;
           button.textContent = originalLabel;
-          setMessage(error.message);
+          setMessage(error?.message || `The ${vendorLabel} cart could not be opened.`);
+          renderWeeklyPlan?.();
         }
         return;
       }
