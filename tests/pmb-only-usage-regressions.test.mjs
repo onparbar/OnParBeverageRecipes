@@ -23,7 +23,7 @@ test('PMB wins the same week while valid CSV-only weeks remain available to dema
   assert.equal(result.recordedWeekCount, 2);
   assert.equal(result.allTime.top[0].totalOz, 1488);
   assert.equal(result.quality.ignoredEntryCount, 1);
-  assert.equal(getEightWeekPeakUsage(item, new Date('2026-09-17T12:00:00Z'), 1984).targetStock, 0.625);
+  assert.equal(getEightWeekPeakUsage(item, new Date('2026-09-17T12:00:00Z'), 1984).targetStock, 0.75);
   assert.equal(isUsableWeeklyUsageEntry({ ...pmb, source: undefined }), true, 'older exact PMB captures remain readable');
   const performance = buildWeeklyUsagePerformance([{ ...item, history: [pmb, { ...pmb, label: '9/14/26 - 12/31/26' }] }]);
   assert.equal(performance.latestLabel, label);

@@ -1,3 +1,4 @@
+import { MINIMUM_KEG_CUSHION } from "./keg-demand-policy.mjs";
 import { carryForwardPlannedProofPrep } from "./proof-planned-prep.mjs";
 
 export const PROOF_PREP_LOOK_AHEAD_WEEKS = 52;
@@ -228,8 +229,7 @@ function buildProofLookAheadContext(options) {
       unresolved = true;
       continue;
     }
-    const cushion = clean(tap.variabilityCushionPct) === ""
-      ? 0.1 : Math.min(0.5, Math.max(0, number(tap.variabilityCushionPct) / 100));
+    const cushion = MINIMUM_KEG_CUSHION;
     const preThursdayShare = clean(tap.preThursdayUsageSharePct) === ""
       ? 3 / 7 : Math.min(1, Math.max(0, number(tap.preThursdayUsageSharePct) / 100));
     let remaining = Math.max(0, stock - average * preThursdayShare);
@@ -238,7 +238,7 @@ function buildProofLookAheadContext(options) {
       // batch made in an earlier week remains available here, then expected
       // weekly usage is consumed below. This prevents the same prep action
       // from being recommended again in each future week.
-      const batches = Math.max(0, Math.ceil(average * (1 + cushion) - remaining - 1e-9));
+      const batches = Math.max(0, Math.ceil(average + cushion - remaining - 1e-9));
       if (batches) addRecipe(recipe, batches, week);
       remaining = Math.max(0, remaining + batches - average);
     }

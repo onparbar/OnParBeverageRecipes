@@ -48,7 +48,7 @@ test("uncertain zeros stay stored but do not become usage or affect averages", (
   assert.equal(JSON.stringify(uncertain), before);
 });
 
-test("eight-week demand uses the peak plus 25%, excludes missing and out-of-window readings", () => {
+test("eight-week demand uses the peak plus a quarter keg, excludes missing and out-of-window readings", () => {
   const item = { displayUnit: "kegs", history: [
     { source: "PMB", label, value: 0.5, volumeOz: 992 },
     { source: "PMB", label: "7/13/26 - 7/19/26", value: 1.2 },
@@ -61,10 +61,10 @@ test("eight-week demand uses the peak plus 25%, excludes missing and out-of-wind
   const result = getEightWeekPeakUsage(item, now, 1984);
   assert.equal(result.sampleWeeks, 2);
   assert.equal(result.peak, 1.2);
-  assert.equal(result.targetStock, 1.5);
+  assert.equal(result.targetStock, 1.45);
   assert.equal(getEightWeekPeakUsage({ history: [] }, now, 1984).targetStock, null);
   const ounceUsage = getEightWeekPeakUsage({ displayUnit: "oz", history: [{ source: "PMB", label, value: 2400 }] }, now, 2000);
-  assert.equal(ounceUsage.targetStock, 1.5);
+  assert.equal(ounceUsage.targetStock, 1.45);
 });
 
 test("beer and cocktail planners use the same target as the dashboard without double-counting forecasts", () => {
@@ -73,7 +73,7 @@ test("beer and cocktail planners use the same target as the dashboard without do
     const usage = { displayUnit: "kegs", history: [{ source: "PMB", label, value: 1.2 }, { source: "PMB", label: "8/24/26 - 8/30/26", value: 0.5 }] };
     const result = buildRawRecommendation(tap, { fillLevelPercent: 30, rawKegSize: 1984 }, [],
       { onHandOverrides: { tap: 1 }, onDeckOverrides: {} }, {}, usage, { now });
-    assert.equal(result.targetStockKegs, 1.5);
+    assert.equal(result.targetStockKegs, 1.45);
     assert.equal(result.currentStockKegs, 1.3);
     assert.equal(result.orderQty, 1);
     assert.equal(result.variabilityCushionPct, 25);

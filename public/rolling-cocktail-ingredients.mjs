@@ -1,3 +1,4 @@
+import { MINIMUM_KEG_CUSHION } from "./keg-demand-policy.mjs";
 import { normalizeLiquorTapProductName } from "./weekly-action-plan.mjs";
 import { applyInventoryCountPolicy, getUncountedInventoryAmount } from "./inventory-count-policy.mjs";
 import { getLiquorTapBottleBatch } from "./liquor-tap-order-policy.mjs";
@@ -47,12 +48,12 @@ export function buildRollingCocktailIngredientOrders({
       issues.push(`Tap ${n}: saved stock or weekly usage is missing.`);
       continue;
     }
-    const cushion = Math.min(50, nonnegative(tap.variabilityCushionPct) ?? 10) / 100;
+    const cushion = MINIMUM_KEG_CUSHION;
     const share = Math.min(100, nonnegative(tap.preThursdayUsageSharePct) ?? (300 / 7)) / 100;
     let remaining = Math.max(0, stock - average * share);
     const batches = [];
     for (let week = 0; week < 1; week += 1) {
-      batches[week] = Math.max(0, Math.ceil(average * (1 + cushion) - remaining - 1e-9));
+      batches[week] = Math.max(0, Math.ceil(average + cushion - remaining - 1e-9));
       remaining = Math.max(0, remaining + batches[week] - average);
     }
     if (!batches.some(Boolean)) continue;

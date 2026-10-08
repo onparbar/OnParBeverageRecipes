@@ -17,5 +17,5 @@ export function getEightWeekPeakUsage(item = {}, now = new Date(), fullOunces = 
   });
   const usage = getSixWeekUsage({ ...item, history }, now, KEG_DEMAND_WEEKS);
   const peak = usage.values.length ? Math.max(...usage.values) : null;
-  return { ...usage, peak, targetStock: peak === null ? null : peak * (1 + MINIMUM_KEG_CUSHION) };
+  return { ...usage, peak, targetStock: peak === null ? null : peak + MINIMUM_KEG_CUSHION };
 }

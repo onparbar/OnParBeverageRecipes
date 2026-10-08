@@ -5,7 +5,7 @@ import { buildWeeklyUsageSellerRankings } from "../public/weekly-usage-seller-ra
 import { buildProofPrepOrderContext } from "../public/proof-prep-replacements.mjs";
 
 const recipe = { title: "Example", ingredients: [{ name: "Tito's", oz: 6 }, { name: "Lime Juice", oz: 8 }] };
-const tap = { key: "main:57", tapNumber: 57, name: "Example", currentStockKegs: 0.5, avgWeeklyKegs: 0.3 };
+const tap = { key: "main:57", tapNumber: 57, name: "Example", currentStockKegs: 0.7, avgWeeklyKegs: 0.3 };
 const cabinet = [
   { id: "tito-s", name: "Tito's", group: "Liquor Cabinet", bottleOz: 1, onHand: 24, hasCurrentCount: true, unitCost: 10, packSize: 1 },
   { id: "lime-juice", name: "Lime Juice", group: "Mixer Cabinet", bottleOz: 1, onHand: 3, hasCurrentCount: true, unitCost: 5, packSize: 12, casePackaged: true },
@@ -28,7 +28,7 @@ test("Tito's order covers this Thursday and reserve without buying next week's p
     tapInputs: [
       { ...tap, key: "main:57", tapNumber: 57, currentStockKegs: 0.1 },
       { ...tap, key: "main:58", tapNumber: 58, currentStockKegs: 0.1 },
-      { ...tap, key: "main:59", tapNumber: 59, currentStockKegs: 0.5 },
+      { ...tap, key: "main:59", tapNumber: 59, currentStockKegs: 0.7 },
     ],
   });
   assert.deepEqual(items[0].rollingPrepWeeks, [12]);
@@ -62,7 +62,7 @@ test("unknown tap stock holds rolling purchases instead of treating it as zero",
 
 test("Proof looks beyond two weeks and subtracts inventory rather than old pars", () => {
   const context = buildProofPrepOrderContext({
-    tapInputs: [{ ...tap, currentStockKegs: 0.9 }], recipes: [recipe],
+    tapInputs: [{ ...tap, currentStockKegs: 1.1 }], recipes: [recipe],
     inventoryItems: [{ ...cabinet[1], vendor: "Proof", vendorSku: "lime", onHandDisplay: "3", parDisplay: "40" }],
   });
   assert.equal(context.requirement, "not-required");

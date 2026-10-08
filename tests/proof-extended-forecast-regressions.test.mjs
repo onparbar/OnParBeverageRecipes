@@ -52,7 +52,7 @@ test("Proof forecasts a full year so the next real need can satisfy its minimum"
   assert.equal(result.requirement, "not-required");
   const [candidate] = result.candidates;
   assert.equal(candidate.forecastDemands.length, 52);
-  assert.equal(candidate.forecastDemands.find(({ units }) => units > 0).week, 6);
+  assert.equal(candidate.forecastDemands.find(({ units }) => units > 0).week, 5);
   assert.ok(candidate.replacementNeedUnits > 12);
 });
 
@@ -62,7 +62,7 @@ test("each forecast week consumes expected usage after carrying forward the prio
   });
   assert.deepEqual(
     result.candidates[0].forecastDemands.slice(0, 8).map(({ units }) => units),
-    [12, 24, 24, 36, 36, 48, 60, 60],
+    [12, 24, 36, 36, 48, 48, 60, 72],
   );
 });
 
@@ -73,8 +73,8 @@ test("changing expected weekly usage changes the rolling ingredient forecast", (
   const faster = forecast({
     tapInputs: [{ ...tap, currentStockKegs: 1, avgWeeklyKegs: 0.6 }],
   });
-  assert.deepEqual(slower.candidates[0].forecastDemands.slice(0, 8).map(({ units }) => units), [0, 0, 0, 0, 0, 12, 12, 12]);
-  assert.deepEqual(faster.candidates[0].forecastDemands.slice(0, 8).map(({ units }) => units), [0, 12, 12, 24, 24, 36, 48, 48]);
+  assert.deepEqual(slower.candidates[0].forecastDemands.slice(0, 8).map(({ units }) => units), [0, 0, 0, 12, 12, 12, 12, 12]);
+  assert.deepEqual(faster.candidates[0].forecastDemands.slice(0, 8).map(({ units }) => units), [0, 12, 24, 24, 36, 36, 48, 60]);
 });
 
 test("saved order policy retains the full forecast horizon and rejects later weeks", () => {
@@ -176,7 +176,7 @@ test("tap deduplication and separate wall stock remain intact", () => {
   const duplicate = forecast({ tapInputs: [tap, { ...tap }] });
   assert.equal(duplicate.candidates[0].replacementNeedUnits, 144);
   const separate = forecast({ tapInputs: [tap, { ...tap, key: "karaoke:95", tapNumber: 95, wall: "Karaoke", currentStockKegs: 8 }] });
-  assert.equal(separate.candidates[0].replacementNeedUnits, 204);
+  assert.equal(separate.candidates[0].replacementNeedUnits, 216);
 });
 
 test("the one-year boundary does not invent purchases beyond the forecast", () => {

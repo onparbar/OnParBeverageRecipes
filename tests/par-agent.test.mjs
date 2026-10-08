@@ -114,11 +114,11 @@ async function pmbSnapshotFixture({ wallItems, tapRows, levelsBySlot = {}, tapCo
 
 test("uses each named cocktail recipe yield instead of the generic 12-gallon PMB size", () => {
   const fixtures = [
-    ["SPIKED STRAWBERRY LEMONADE (TITO'S) 1", 65, 535, 1379, 0.388, 0.48],
-    ["SPIKED STRAWBERRY LEMONADE (TITO'S) 2 ", 96, 58, 1379, 0.042, 0.05],
-    ["SPIKED CRANBERRY LEMONADE (TITO'S) 1", 63, 274, 1379, 0.199, 0.25],
-    ["SPIKED CRANBERRY LEMONADE (TITO'S) 2", 99, 96, 1379, 0.07, 0.09],
-    ["SPIKED ARNOLD PALMER (TITO'S) 1", 62, 223, 1507, 0.148, 0.18],
+    ["SPIKED STRAWBERRY LEMONADE (TITO'S) 1", 65, 535, 1379, 0.388, 0.64],
+    ["SPIKED STRAWBERRY LEMONADE (TITO'S) 2 ", 96, 58, 1379, 0.042, 0.29],
+    ["SPIKED CRANBERRY LEMONADE (TITO'S) 1", 63, 274, 1379, 0.199, 0.45],
+    ["SPIKED CRANBERRY LEMONADE (TITO'S) 2", 99, 96, 1379, 0.07, 0.32],
+    ["SPIKED ARNOLD PALMER (TITO'S) 1", 62, 223, 1507, 0.148, 0.4],
   ];
 
   fixtures.forEach(([name, tapNumber, volumeOz, expectedYield, expectedWeekly, expectedTarget]) => {
@@ -177,17 +177,17 @@ test("uses the 13.2-gallon Guinness size instead of PMB's generic beer-keg size"
   assert.equal(result.avgWeeklyKegs, 1);
 });
 
-test("uses current cocktail stock against the eight-week peak plus 25%", () => {
+test("uses current cocktail stock against the eight-week peak plus a quarter keg", () => {
   const result = recommendation("SPIKED STRAWBERRY LEMONADE (TITO'S) 1", 65, 535, 50);
   assert.equal(result.currentStockKegs, 0.5);
   assert.equal(result.avgWeeklyKegs, 0.388);
   assert.equal(result.preThursdayForecastKegs, 0);
   assert.equal(result.projectedThursdayStockKegs, 0.5);
-  assert.equal(result.targetStockKegs, 0.48);
+  assert.equal(result.targetStockKegs, 0.64);
   assert.equal(result.actionType, "make");
-  assert.equal(result.rawOrderQty, 0);
-  assert.equal(result.orderQty, 0);
-  assert.match(result.reason, /covers the 0\.48-keg target.*highest week.*25%/);
+  assert.equal(result.rawOrderQty, 1);
+  assert.equal(result.orderQty, 1);
+  assert.match(result.reason, /below the 0\.64-keg target.*highest week.*25%/);
 });
 
 test("uses built-in cocktails as saved On Deck make choices", () => {
@@ -333,9 +333,9 @@ test("orders beer against current stock without subtracting a Thursday forecast"
   assert.equal(belowTarget.avgWeeklyKegs, 0.5);
   assert.equal(belowTarget.preThursdayForecastKegs, 0);
   assert.equal(belowTarget.projectedThursdayStockKegs, 0.5);
-  assert.equal(belowTarget.targetStockKegs, 0.63);
+  assert.equal(belowTarget.targetStockKegs, 0.75);
   assert.equal(belowTarget.orderQty, 1);
-  assert.match(belowTarget.reason, /below the 0\.63-keg target: highest week 0\.5 kegs.*25%/);
+  assert.match(belowTarget.reason, /below the 0\.75-keg target: highest week 0\.5 kegs.*25%/);
 
   const atTarget = buildRawRecommendation(
     ...baseArgs,
@@ -345,10 +345,10 @@ test("orders beer against current stock without subtracting a Thursday forecast"
   assert.equal(atTarget.currentStockKegs, 0.8);
   assert.equal(atTarget.projectedThursdayStockKegs, 0.8);
   assert.equal(atTarget.orderQty, 0);
-  assert.match(atTarget.reason, /covers the 0\.63-keg target.*highest week.*25%/);
+  assert.match(atTarget.reason, /covers the 0\.75-keg target.*highest week.*25%/);
 });
 
-test("high-usage Main beer uses its peak week plus 25%", () => {
+test("high-usage Main beer uses its peak week plus a quarter keg", () => {
   const tap = {
     ...beerTap("MILLER LITE 1", 22),
     key: "main-22",
@@ -364,7 +364,7 @@ test("high-usage Main beer uses its peak week plus 25%", () => {
 
   assert.equal(result.currentStockKegs, 0.1);
   assert.equal(result.avgWeeklyKegs, 0.8);
-  assert.equal(result.targetStockKegs, 1);
+  assert.equal(result.targetStockKegs, 1.05);
   assert.equal(result.orderQty, 1);
   assert.match(result.reason, /highest week 0\.8 kegs.*25%/);
   assert.doesNotMatch(result.reason, /High-coverage/);
@@ -386,8 +386,8 @@ test("standard Main beer orders one keg when current stock is below target", () 
 
   assert.equal(result.currentStockKegs, 0.1);
   assert.equal(result.avgWeeklyKegs, 0.4);
-  assert.equal(result.targetStockKegs, 0.5);
-  assert.equal(result.gapKegs, 0.4);
+  assert.equal(result.targetStockKegs, 0.65);
+  assert.equal(result.gapKegs, 0.55);
   assert.equal(result.orderQty, 1);
 });
 
@@ -408,7 +408,7 @@ test("all Main beers use the same tap-specific formula", () => {
 
     assert.equal(result.avgWeeklyKegs, 0.4);
     assert.equal(result.currentStockKegs, 1.5);
-    assert.equal(result.targetStockKegs, 0.5);
+    assert.equal(result.targetStockKegs, 0.65);
     assert.equal(result.orderQty, 0);
     assert.doesNotMatch(result.reason, /High-coverage/);
   });
@@ -442,9 +442,9 @@ test("includes the seventh week in the eight-week peak instead of the stored ave
   );
 
   assert.equal(result.avgWeeklyKegs, 1.167);
-  assert.equal(result.targetStockKegs, 6.25);
+  assert.equal(result.targetStockKegs, 5.25);
   assert.equal(result.variabilityCushionPct, 25);
-  assert.equal(result.orderQty, 6);
+  assert.equal(result.orderQty, 5);
 });
 
 test("does not double-count pre-Thursday usage on top of the peak reserve", () => {
@@ -495,7 +495,7 @@ test("Guinness uses the same lean Main beer formula", () => {
 
   assert.equal(result.currentStockKegs, 3);
   assert.equal(result.avgWeeklyKegs, 0.47);
-  assert.equal(result.targetStockKegs, 0.59);
+  assert.equal(result.targetStockKegs, 0.72);
   assert.equal(result.orderQty, 0);
   assert.doesNotMatch(result.reason, /keep 2 unopened backup kegs/);
 });
@@ -546,7 +546,7 @@ test("uses the latest saved Weekly Usage values instead of the stored all-histor
   );
 
   assert.equal(result.avgWeeklyKegs, 0.213);
-  assert.equal(result.targetStockKegs, 0.31);
+  assert.equal(result.targetStockKegs, 0.5);
   assert.deepEqual(result.weeklyKegs, [0.23, 0.25, 0.16]);
 });
 
@@ -558,17 +558,17 @@ test("avoids an unnecessary karaoke cocktail batch when current stock covers the
   };
   const result = buildRawRecommendation(
     tap,
-    { fillLevelPercent: 30, rawKegSize: 1536, rawKegSizeDp: 0 },
+    { fillLevelPercent: 40, rawKegSize: 1536, rawKegSizeDp: 0 },
     [{ volumeOz: 153.6 }],
     { onHandOverrides: {}, onDeckOverrides: {} },
     {},
   );
 
-  assert.equal(result.currentStockKegs, 0.3);
+  assert.equal(result.currentStockKegs, 0.4);
   assert.equal(result.avgWeeklyKegs, 0.1);
   assert.equal(result.preThursdayForecastKegs, 0);
-  assert.equal(result.projectedThursdayStockKegs, 0.3);
-  assert.equal(result.targetStockKegs, 0.12);
+  assert.equal(result.projectedThursdayStockKegs, 0.4);
+  assert.equal(result.targetStockKegs, 0.35);
   assert.equal(result.orderQty, 0);
 });
 
@@ -786,8 +786,8 @@ test("makes enough cocktail kegs to cover the complete calculated gap", () => {
   );
 
   assert.equal(result.currentStockKegs, 0.1);
-  assert.equal(result.targetStockKegs, 3);
-  assert.equal(result.gapKegs, 2.9);
+  assert.equal(result.targetStockKegs, 2.65);
+  assert.equal(result.gapKegs, 2.55);
   assert.equal(result.orderQty, 3);
 });
 
@@ -813,4 +813,14 @@ test("flags large beer orders without reducing the full shortage coverage", () =
   assert.equal(result.orderCapApplied, false);
   assert.match(result.reason, /exceeds the 2-keg review threshold/);
   assert.match(result.reason, /full rounded quantity is retained/);
+});
+
+test("karaoke Strawberry Senorita with 10.6% remaining needs prep with a fixed quarter-keg reserve", () => {
+  const tap = { ...cocktailTap("STRAWBERRY SENORITA (JOSE CUERVO) 2", 102), wall: "Karaoke" };
+  const result = buildRawRecommendation(tap,
+    { fillLevelPercent: 10.6, rawKegSize: 1536 }, [],
+    { onHandOverrides: {}, onDeckOverrides: {} }, {},
+    { displayUnit: "kegs", history: [{ value: 0.07654 }] });
+  assert.equal(result.targetStockKegs, 0.33);
+  assert.equal(result.orderQty, 1);
 });

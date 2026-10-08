@@ -8,6 +8,7 @@ test("future prep names identify Main and Karaoke without doubling suffixes", ()
   const start = source.indexOf("function buildPrepLookahead(");
   const end = source.indexOf("export async function addWeeklyPrepCocktail", start);
   const build = vm.runInNewContext(`${source.slice(start, end)}; buildPrepLookahead`, {
+    MINIMUM_KEG_CUSHION: 0.25,
     clean: value => String(value || "").trim(),
   });
   const choices = [
