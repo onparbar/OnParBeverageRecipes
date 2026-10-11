@@ -149,6 +149,8 @@ async function initStaffRecipes() {
       return;
     }
 
+    staffPrepBatchName = clean(session.name || session.user?.name);
+
     bindStaffSectionEvents();
     applyStaffDemoContext();
 
@@ -354,7 +356,7 @@ if (isStaffRehearsalMode()) {
     const prepHelp = document.querySelector("#staff-prep-help");
     const liquorHelp = document.querySelector("#staff-liquor-help");
     const orderHelp = document.querySelector("#staff-order-help");
-    if (prepHelp) prepHelp.textContent = "Select several cocktails, enter a name once, and save the rehearsal batch.";
+    if (prepHelp) prepHelp.textContent = "Select completed cocktails and save the rehearsal batch under your signed-in name.";
     if (liquorHelp) liquorHelp.textContent = "Enter the bottles actually added, select the refills, and save the rehearsal batch.";
     if (orderHelp) orderHelp.textContent = "Try a full delivery or an exception. Reloading resets this rehearsal checklist.";
   }
@@ -905,17 +907,11 @@ function createStaffPrepBatchControls(kind = "cocktail") {
   hint.textContent = "Select completed items below.";
   copy.append(title, hint);
 
-  const nameField = document.createElement("label");
-  nameField.className = "staff-prep-name-field";
-  const nameLabel = document.createElement("span");
-  nameLabel.textContent = "Completed by";
-  const nameInput = document.createElement("input");
-  nameInput.type = "text";
-  nameInput.maxLength = 80;
-  nameInput.autoComplete = "name";
-  nameInput.placeholder = "Employee name";
-  nameInput.value = staffPrepBatchName;
-  nameField.append(nameLabel, nameInput);
+  const completedBy = document.createElement("p");
+  completedBy.className = "staff-prep-name-field";
+  completedBy.textContent = staffPrepBatchName
+    ? `Completed by ${staffPrepBatchName}`
+    : "Completion is recorded under your signed-in account.";
 
   const saveButton = document.createElement("button");
   saveButton.className = "primary-button staff-prep-batch__save";
@@ -927,16 +923,10 @@ function createStaffPrepBatchControls(kind = "cocktail") {
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
 
-  const view = { form, nameInput, saveButton, status, kind };
+  const view = { form, saveButton, status, kind };
   staffPrepBatchViews.push(view);
-  nameInput.addEventListener("input", () => {
-    staffPrepBatchName = nameInput.value;
-    staffPrepBatchViews.forEach((otherView) => {
-      if (otherView.nameInput !== nameInput) otherView.nameInput.value = nameInput.value;
-    });
-  });
   form.addEventListener("submit", saveStaffPrepBatch);
-  form.append(copy, nameField, saveButton, status);
+  form.append(copy, completedBy, saveButton, status);
   return form;
 }
 
@@ -945,7 +935,6 @@ function updateStaffPrepBatchControls({ message = "", state = "", kind = "" } = 
     const count = getStaffPrepDraftsForKind(view.kind).length;
     const showMessage = !kind || kind === view.kind;
     view.form.setAttribute("aria-busy", String(staffPrepBatchSaving));
-    view.nameInput.disabled = staffPrepBatchSaving;
     view.saveButton.disabled = staffPrepBatchSaving || count === 0;
     view.saveButton.textContent = staffPrepBatchSaving
       ? "Saving..."
@@ -971,12 +960,6 @@ async function saveStaffPrepBatch(event) {
   const updates = getStaffPrepDraftsForKind(batchKind);
   if (staffPrepBatchSaving || updates.length === 0) return;
   const preparedBy = clean(staffPrepBatchName);
-  if (!preparedBy) {
-    updateStaffPrepBatchControls({ message: "Enter your name before saving the selected items.", state: "error", kind: batchKind });
-    event.currentTarget.querySelector("input[type='text']")?.focus();
-    return;
-  }
-
   const invalidLiquor = updates.find((update) => update.completed
     && update.actualQuantity !== undefined
     && (!Number.isInteger(update.actualQuantity) || update.actualQuantity < 1 || update.actualQuantity > 99));

@@ -92,7 +92,7 @@ export default async function StaffRecipePage() {
             <div>
               <h2 id="staff-prep-title">Cocktails to make</h2>
             </div>
-            <p id="staff-prep-help" className="sr-only">Check completed cocktails, enter your name, and save.</p>
+            <p id="staff-prep-help" className="sr-only">Check completed cocktails and save. Your signed-in name is recorded automatically.</p>
           </div>
           <div id="staff-prep-status" className="staff-recipe-status" role="status" aria-live="polite">
             Loading this week&apos;s prep checklist...
@@ -252,7 +252,7 @@ export default async function StaffRecipePage() {
             `,
           }}
         />
-        <Script type="module" src="/staff-dashboard.js?v=20260914-staff-simple" strategy="afterInteractive" />
+        <Script type="module" src="/staff-dashboard.js?v=20261011-prep-session-name" strategy="afterInteractive" />
     </div>
   );
 }

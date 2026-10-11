@@ -326,3 +326,24 @@ test("pending receiving lines require an explicit user choice", async () => {
   assert.match(source, /window\.confirm\(`Confirm these/);
   assert.match(source, /if \(!count\.value\.trim\(\)/);
 });
+
+
+test("legacy cocktail labels map to live inventory and retain explicit bottle counts", () => {
+  const catalog = [
+    { id: "ketel-one-cucumber-vodka", name: "Ketel One Cucumber Vodka", baseline: 12 },
+    { id: "kettle-one-cucumber", name: "Kettle One Cucumber", baseline: 12 },
+    { id: "bulleit-bourbon", name: "Bulleit Bourbon", baseline: 16 },
+    { id: "crown-apple", name: "Crown Apple", baseline: 6 },
+  ];
+  const recipe = { ingredients: [
+    { name: "Kettle One Cucumber Vodka", raw: "Kettle One Cucumber Vodka =12 bottles (1L)", oz: 406 },
+    { name: "Bulleit Bourbon", raw: "Bulleit Bourbon=16 (1.75L btls)", oz: 947 },
+    { name: "Crown Apple", raw: "Crown Apple 6-1.75l", oz: 355 },
+    { name: "Gallons Lemonade", raw: "8 Gallons Lemonade", oz: 1024 },
+  ] };
+  assert.deepEqual(buildRecipeInventoryContributions(recipe, catalog), [
+    { id: "ketel-one-cucumber-vodka", quantity: -12, baseline: 12 },
+    { id: "bulleit-bourbon", quantity: -16, baseline: 16 },
+    { id: "crown-apple", quantity: -6, baseline: 6 },
+  ]);
+});
