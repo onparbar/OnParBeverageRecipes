@@ -1,3 +1,4 @@
+import { getTapOrderProductName } from "./tap-order-product.mjs";
 import { mountProductDuplicator, pmbCatalogProductKind } from "./product-duplicate.mjs";
 import { validateRecipeSetup } from "./recipe-setup.mjs";
 import { completeCoolerCount, hasCompletedCoolerCount } from "./weekly-run-progress.mjs";
@@ -5699,6 +5700,15 @@ function getCurrentMondayKegPlanSnapshot(now = new Date()) {
   return getCurrentMondayInventorySnapshot(inventoryHistory, now)?.kegPlanSnapshot || null;
 }
 
+function getWeeklyPlanLiquorBottleCost(ingredientId, productName) {
+  const inventoryItem = inventoryItems.find((item) => normalizeIngredientAlias(item.name) === productName);
+  const ingredient = ingredients.find((item) => item.id === ingredientId);
+  return toNumber(priceOverrides[ingredientId]?.bottlePrice)
+    || toNumber(inventoryItem?.unitCost)
+    || (ingredient ? getIngredientBottleCost(ingredient) : 0)
+    || toNumber(getVendorMapping(ingredientId)?.unitPrice);
+}
+
 function getWeeklyPlanRecommendations({ live = false } = {}) {
   const frozenKegPlan = getCurrentMondayKegPlanSnapshot();
   const sourceItems = live && liveParRecommendations?.items
@@ -5719,8 +5729,7 @@ function getWeeklyPlanRecommendations({ live = false } = {}) {
         normalizeIngredientAlias(candidate.name) === orderProductName
       ));
       const vendorMapping = getVendorMapping(ingredientId);
-      const unitCost = toNumber(priceOverrides[ingredientId]?.bottlePrice)
-        || toNumber(inventoryItem?.unitCost);
+      const unitCost = getWeeklyPlanLiquorBottleCost(ingredientId, orderProductName);
       return {
         ...item,
         internalId: ingredientId,
@@ -5732,16 +5741,20 @@ function getWeeklyPlanRecommendations({ live = false } = {}) {
       };
     }
     if (!item.isKegTap || item.actionType !== "order") return item;
-    const pricingItem = getKegPricingItem(item.orderProductName || item.name);
+    const orderProductName = getTapOrderProductName(item,
+      weeklyUsageItems.find((entry) => toNumber(entry.tapNumber) === toNumber(item.tapNumber)),
+      item.onDeckProduct);
+    const pricingItem = getKegPricingItem(orderProductName);
     const vendorCatalogProduct = getKegVendorCatalogProduct(
       pricingItem?.id,
       pricingItem?.name,
-      item.orderProductName,
+      orderProductName,
       item.name,
     );
     const unitCost = vendorCatalogProduct?.currentPrice ?? (pricingItem ? getKegPrice(pricingItem) : 0);
     return {
       ...item,
+      orderProductName,
       internalId: pricingItem?.id || item.key,
       vendor: vendorCatalogProduct?.vendor || pricingItem?.vendor || "",
       vendorSku: vendorCatalogProduct?.vendorSku || getOrderingSku(pricingItem?.vendorProduct) || pricingItem?.preferredSku || "",
@@ -5801,7 +5814,7 @@ function hydrateWeeklyPlanLiquorTapPricing(plan) {
     if (item.hasKnownPrice !== false && toNumber(item.estimatedCost) > 0) return item;
     const ingredientId = slugify(normalizeIngredientAlias(item.name));
     const vendorMapping = getVendorMapping(ingredientId);
-    const unitCost = toNumber(priceOverrides[ingredientId]?.bottlePrice || vendorMapping?.unitPrice);
+    const unitCost = getWeeklyPlanLiquorBottleCost(ingredientId, normalizeIngredientAlias(item.name));
     if (!unitCost) return item;
     if (item.hasKnownPrice === false) resolvedMissingPriceCount += 1;
     return {
@@ -13673,6 +13686,9 @@ function getKegNeedCalculation(item) {
         : { onHand: toNumber(getKegOnHandDisplay(item)) }),
     });
   }
+
+  if (isPricingPlaceholder(displayBrand)
+    && !getTapOrderProductName({ ...item, name: displayBrand }, usageItem, onDeck)) return null;
 
   const peakUsage = getEightWeekPeakUsage(usageItem || {}, new Date(), getKegFullOunces(liveRow, item));
   if (!peakUsage.sampleWeeks) return null;

@@ -1,3 +1,4 @@
+import { isPricingPlaceholder } from "./pricing-placeholders.mjs";
 import {
   getCocktailRecipeYieldOz,
   normalizeCocktailRecipeName,
@@ -540,7 +541,10 @@ export function buildWeeklyActionPlan({ inventoryItems = [], recommendations = [
     orderingInventoryItems.filter((item) => !clean(item.orderHoldReason || item.exclusionReason)),
   );
   const excludedInventory = normalizeExcludedInventory(orderingInventoryItems);
-  const activeRecommendations = recommendations.filter((item) => number(item.orderQty) > 0);
+  const activeRecommendations = recommendations.filter((item) => (
+    number(item.orderQty) > 0
+    && !(item.actionType === "order" && isPricingPlaceholder(item.orderProductName || item.name))
+  ));
   const beerKegs = aggregateTapActions(
     activeRecommendations.filter((item) => item.actionType === "order" && item.isKegTap),
     "beer-kegs",
