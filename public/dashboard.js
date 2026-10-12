@@ -20247,6 +20247,7 @@ function normalizeIngredientAlias(name) {
   ) return "Crown Apple";
   if (/^jack daniel'?s fire(?: whiskey)?$/.test(normalized)) return "Jack Daniel's Fire";
   if (/^jack daniel'?s(?: whiskey)?$/.test(normalized)) return "Jack Daniel's";
+  if (/^buffalo trace(?: bourbon)?$/.test(normalized)) return "Buffalo Trace";
   if (/^woodford reserve(?: bourbon)?$/.test(normalized)) return "Woodford Reserve";
   if (/^fireball(\s+cinnamon)?(\s+whisk(e)?y)?$/.test(normalized)) return "Fireball Cinnamon Whisky";
   if (/^svedka$/.test(normalized) || /^\d+\s+svedka blue raspberry$/.test(normalized) || /^svedka blue raspberry$/.test(normalized)) return "Svedka Blue Raspberry Vodka";

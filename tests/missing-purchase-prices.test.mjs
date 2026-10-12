@@ -146,3 +146,20 @@ test("retention cannot revive an older beer after a real replacement or cross ph
   assert.equal(getTapOrderProductName(replacement, archivedOctoberfest), "Winter White Ale");
   assert.equal(getTapOrderProductName(tap, archivedOctoberfest, { name: "Winter White Ale" }), "Winter White Ale");
 });
+
+test("a newly needed Buffalo Trace Bourbon tap matches the saved Buffalo Trace bottle price", () => {
+  const scope = pricingScope();
+  scope.normalizeIngredientAlias = load("normalizeIngredientAlias", {
+    clean: value => String(value || "").trim(), getPreparedIngredientCanonicalName: () => "",
+    titleCaseIngredientName: value => value,
+  });
+  scope.normalizeLiquorTapProductName = value => value.replace(/\s+[123]$/, "");
+  scope.slugify = value => value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  scope.ingredients = [];
+  scope.getVendorMapping = id => id === "buffalo-trace" ? { unitPrice: 34.78, vendor: "OHLQ", preferredSku: "1499L" } : null;
+  scope.liveParRecommendations.items = [{ name: "Buffalo Trace Bourbon 3", isLiquorTap: true, orderQty: 3, actionType: "order" }];
+  const result = load("getWeeklyPlanRecommendations", scope)({ live: true });
+  assert.equal(result[0].orderProductName, "Buffalo Trace");
+  assert.equal(result[0].unitCost, 34.78);
+  assert.equal(buildWeeklyActionPlan({ recommendations: result }).summary.missingPriceCount, 0);
+});
