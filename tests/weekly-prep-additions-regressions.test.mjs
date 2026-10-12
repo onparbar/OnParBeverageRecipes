@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { buildStaffPrepPlan, applyStaffPrepPlanUpdate } from "../lib/staff-prep-plan.mjs";
 import { buildWeeklyActionPlan } from "../public/weekly-action-plan.mjs";
 import { getCocktailRecipeYieldOz, normalizeCocktailRecipeName } from "../public/cocktail-recipe-yields.mjs";
+import { applyPrepKegCounts } from "../lib/prep-keg-counts.mjs";
 
 const source = readFileSync(new URL("../lib/weekly-prep-additions.mjs", import.meta.url), "utf8");
 const route = readFileSync(new URL("../app/api/weekly-prep-additions/route.js", import.meta.url), "utf8");
@@ -13,8 +14,8 @@ const executable = s => s.replace(/^import[\s\S]*?;\n/gm, "").replace(/^export /
 function harness() {
   const generatedAt = "2026-09-14T15:00:00.000Z";
   const items = [
-    { name: "House Special 1", tapNumber: 47, wall: "Main", actionType: "make", orderQty: 1, batchSizeOz: 777 },
-    { name: "House Special 2", tapNumber: 93, wall: "Karaoke", actionType: "make", orderQty: 0, batchSizeOz: 777 },
+    { key: "main-47-house-special-1", name: "House Special 1", tapNumber: 47, wall: "Main", actionType: "make", orderQty: 1, batchSizeOz: 777 },
+    { key: "karaoke-93-house-special-2", name: "House Special 2", tapNumber: 93, wall: "Karaoke", actionType: "make", orderQty: 0, batchSizeOz: 777 },
   ];
   let state = { initialized: true, revision: 2, recommendations: { generatedAt, items, prepChecklist: {}, weeklyPlanSnapshot: { generatedAt, plan: buildWeeklyActionPlan({ recommendations: items }) } } };
   const initialOrders = structuredClone(state.recommendations.weeklyPlanSnapshot.plan.orders);
@@ -64,6 +65,20 @@ test("extra batches do not inherit completion from the original cocktail", async
   const items = buildStaffPrepPlan(h.state().recommendations).items;
   assert.equal(items.find(i => i.id === original.id).completed, true);
   assert.equal(items.find(i => i.prepAdditionId).completed, false);
+});
+
+test("adding then completing prep carries its cooler key separately from its checklist key", async () => {
+  const h = harness();
+  await h.context.addWeeklyPrepCocktail(h.body({ quantity: 2 }), h.identity);
+  const state = h.state();
+  const row = state.recommendations.items.find(item => item.prepAdditionId);
+  assert.equal(row.inventoryKey, "karaoke-93-house-special-2");
+  assert.match(row.key, /^prep-addition:/);
+  const target = buildStaffPrepPlan(state.recommendations).items.find(item => item.prepAdditionId);
+  const update = { itemId: target.id, generatedAt: state.recommendations.generatedAt, completed: true, preparedBy: "Molly" };
+  const next = applyPrepKegCounts(state, applyStaffPrepPlanUpdate(state.recommendations, update), [{ target, update }]);
+  assert.equal(next.onHandOverrides[row.inventoryKey], "2");
+  assert.equal(next.onHandOverrides[row.key], undefined);
 });
 
 test("subtract removes only one unprepared batch and retries do not subtract twice", async () => {
