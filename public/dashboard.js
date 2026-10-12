@@ -7127,6 +7127,11 @@ function renderDashboardOverview() {
       orders: weeklyOrderTracking,
       tapReplacementOverrides,
       comingSoonItems,
+      currentTapAssignments: kegWallItems.map((item) => {
+        const tap = { ...item, name: getKegDisplayBrand(item) };
+        const saved = getSavedTapOrderProduct(tap, weeklyUsageItems, weeklyUsageArchivedItems);
+        return { tapNumber: item.tapNumber, name: getTapOrderProductName(tap, saved) || tap.name };
+      }),
       tapPrintSheets: buildTapWallPrintSheets(),
     });
     const visibleKpis = overview.kpis.filter((kpi) => (
@@ -8640,9 +8645,12 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
           const placed = !orderRehearsalMode && vendor?.ordered === true;
           const workflow = getVendorWorkflowState(draft, saved, vendor);
           const manager = clean(globalThis.onParDashboardIdentity?.name || dashboardFinishWeekActor || saved.approvedBy || saved.createdBy);
+          const kegOrder = draft.lines.length > 0 && draft.lines.every((line) => line.lineType === "Beer keg");
+          const orderCount = kegOrder ? sum(draft.lines.map((line) => toNumber(line.requestedUnits))) : draft.lineCount;
+          const orderUnit = kegOrder ? "keg" : "item";
           return `
             <section class="vendor-order-draft-card vendor-order-draft-card--${placed ? "approved vendor-order-draft-card--placed" : draft.status}">
-              <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(draft.lineCount)} items · ${money(draft.estimatedTotal)}</p></div><span title="${escapeHtml(workflow.label)}">${placed ? escapeHtml(workflow.label) : draft.blockers.length ? "Needs attention" : "Ready"}</span></header>
+              <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(orderCount)} ${orderUnit}${orderCount === 1 ? "" : "s"} · ${money(draft.estimatedTotal)}</p></div><span title="${escapeHtml(workflow.label)}">${placed ? escapeHtml(workflow.label) : draft.blockers.length ? "Needs attention" : "Ready"}</span></header>
               ${placed ? `<details><summary>${workflow.label === "Received" ? "View received order" : "View order and receive delivery"}</summary>` : ""}
               <div class="vendor-order-draft-lines vendor-order-draft-lines--inline">
                 ${placed ? renderFinishWeekDeliveries({ available: true, vendors: [vendor] }, { showVendor: false, saving: dashboardFinishWeekSaving }) : draft.lines.map((line) => {

@@ -1,3 +1,5 @@
+import { isPricingPlaceholder } from "./pricing-placeholders.mjs";
+
 function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
@@ -354,6 +356,19 @@ function homePolishBriefingItems(items, sourceArgs) {
       continue;
     }
     polished.push(item);
+  }
+
+  // Current assignments supersede historical changeovers and cached warning text.
+  const currentTaps = sourceArgs[0]?.currentTapAssignments;
+  if (Array.isArray(currentTaps)) {
+    const historical = new Map(comingSoonTaps);
+    comingSoonTaps.clear();
+    for (const tap of currentTaps) {
+      const tapNumber = Number(tap.tapNumber);
+      if (tapNumber > 0 && isPricingPlaceholder(tap.name)) {
+        comingSoonTaps.set(tapNumber, historical.get(tapNumber) || { changedAt: "", onDeck: "" });
+      }
+    }
   }
 
   const taps = [...comingSoonTaps.entries()].sort((left, right) => left[0] - right[0]);
