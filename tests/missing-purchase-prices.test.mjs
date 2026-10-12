@@ -4,7 +4,7 @@ import vm from "node:vm";
 import { readFileSync } from "node:fs";
 import { buildRawRecommendation } from "../lib/par-agent.mjs";
 import { buildWeeklyActionPlan } from "../public/weekly-action-plan.mjs";
-import { getTapOrderProductName } from "../public/tap-order-product.mjs";
+import { getSavedTapOrderProduct, getTapOrderProductName } from "../public/tap-order-product.mjs";
 import { isPricingPlaceholder } from "../public/pricing-placeholders.mjs";
 
 const source = readFileSync(new URL("../public/dashboard.js", import.meta.url), "utf8");
@@ -105,6 +105,8 @@ test("cached Tap 28 placeholder resolves to the saved Octoberfest keg price with
   scope.liveParRecommendations.items = [{ ...tap, isKegTap: true, orderQty: 1, actionType: "order", orderProductName: "Coming Soon!" }];
   scope.weeklyUsageItems = [{ tapNumber: 28, name: "Octoberfest" }];
   scope.getTapOrderProductName = getTapOrderProductName;
+  scope.getSavedTapOrderProduct = getSavedTapOrderProduct;
+  scope.weeklyUsageArchivedItems = [];
   scope.getKegPricingItem = name => name === "Octoberfest" ? { id: "octoberfest", name, vendor: "Heidelberg" } : null;
   scope.getKegVendorCatalogProduct = () => null;
   scope.getKegPrice = () => 182;
@@ -114,4 +116,33 @@ test("cached Tap 28 placeholder resolves to the saved Octoberfest keg price with
   assert.equal(result[0].orderQty, 1);
   assert.equal(result[0].unitCost, 182);
   assert.equal(buildWeeklyActionPlan({ recommendations: result }).summary.missingPriceCount, 0);
+});
+
+const archivedOctoberfest = {
+  tapNumber: 28, name: "Octoberfest", replacedAt: "2026-10-12T15:08:14.581Z", replacedBy: "Coming Soon!",
+  history: [{ label: "9/28/2026 - 10/4/2026", source: "PMB", hasValue: true, volumeOz: 960.56 }],
+};
+test("a weekly refresh preserves the archived Octoberfest identity and usage for ordering", () => {
+  const active = [{ ...tap, history: [{ label: "10/5/2026 - 10/11/2026", hasValue: false, volumeOz: 0 }] }];
+  const archived = [
+    { ...archivedOctoberfest, name: "Summer Ale 1", replacedAt: "2026-09-28T21:32:03.534Z", replacedBy: "Octoberfest" },
+    archivedOctoberfest,
+  ];
+  const saved = getSavedTapOrderProduct(tap, active, archived);
+  assert.equal(saved, archivedOctoberfest);
+  const result = recommend({}, saved);
+  assert.equal(result.orderProductName, "Octoberfest");
+  assert.equal(result.orderQty, 1);
+  assert.ok(result.avgWeeklyKegs > 0);
+  const scope = { isPricingPlaceholder, getSavedTapOrderProduct, weeklyUsageItems: active, weeklyUsageArchivedItems: archived };
+  assert.equal(load("getWeeklyUsageForKegItem", scope)(tap, tap.name), archivedOctoberfest);
+});
+test("retention cannot revive an older beer after a real replacement or cross physical taps", () => {
+  const active = [{ ...tap }];
+  assert.equal(getSavedTapOrderProduct(tap, active, [{ ...archivedOctoberfest, tapNumber: 29 }]), active[0]);
+  assert.equal(getSavedTapOrderProduct(tap, active, [{ ...archivedOctoberfest, replacedBy: "Winter White Ale" }]), active[0]);
+  const replacement = { ...tap, name: "Winter White Ale" };
+  assert.equal(getSavedTapOrderProduct(replacement, [replacement], [archivedOctoberfest]), replacement);
+  assert.equal(getTapOrderProductName(replacement, archivedOctoberfest), "Winter White Ale");
+  assert.equal(getTapOrderProductName(tap, archivedOctoberfest, { name: "Winter White Ale" }), "Winter White Ale");
 });

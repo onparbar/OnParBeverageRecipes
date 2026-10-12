@@ -1,4 +1,4 @@
-import { getTapOrderProductName } from "./tap-order-product.mjs";
+import { getSavedTapOrderProduct, getTapOrderProductName } from "./tap-order-product.mjs";
 import { mountProductDuplicator, pmbCatalogProductKind } from "./product-duplicate.mjs";
 import { validateRecipeSetup } from "./recipe-setup.mjs";
 import { completeCoolerCount, hasCompletedCoolerCount } from "./weekly-run-progress.mjs";
@@ -5742,7 +5742,7 @@ function getWeeklyPlanRecommendations({ live = false } = {}) {
     }
     if (!item.isKegTap || item.actionType !== "order") return item;
     const orderProductName = getTapOrderProductName(item,
-      weeklyUsageItems.find((entry) => toNumber(entry.tapNumber) === toNumber(item.tapNumber)),
+      getSavedTapOrderProduct(item, weeklyUsageItems, weeklyUsageArchivedItems),
       item.onDeckProduct);
     const pricingItem = getKegPricingItem(orderProductName);
     const vendorCatalogProduct = getKegVendorCatalogProduct(
@@ -11147,6 +11147,10 @@ function getUnmappedKegWallPricing(livePrice) {
 }
 
 function getWeeklyUsageForKegItem(item, displayBrand = item?.brand) {
+  if (isPricingPlaceholder(displayBrand)) {
+    const retained = getSavedTapOrderProduct({ ...item, name: displayBrand }, weeklyUsageItems, weeklyUsageArchivedItems);
+    if (retained?.name && !isPricingPlaceholder(retained.name)) return retained;
+  }
   const tapNumber = toNumber(item?.tapNumber);
   const tapMatch = weeklyUsageItems.find((entry) => toNumber(entry.tapNumber) === tapNumber);
   const liveRow = getKegLiveRow(item);
