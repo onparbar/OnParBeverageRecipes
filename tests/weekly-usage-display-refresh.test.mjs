@@ -10,7 +10,7 @@ const refreshSource = source.slice(source.indexOf('let weeklyUsageDisplayRefresh
 function setup(overrides = {}) {
   const calls = { reads: 0, applies: 0, recoveries: 0 };
   const context = vm.createContext({
-    isEmployeeDashboard: false, weeklyUsageSharedInitialized: true,
+    isEmployeeDashboard: false, weeklyUsageSharedInitialized: true, weeklyUsageJournalLoaded: true,
     weeklyUsageSharedOutbox: null, weeklyUsageSharedSaving: false,
     weeklyUsageSharedPendingWrites: 0, weeklyUsageSharedSaveTimer: null,
     weeklyUsageSyncLoading: false, weeklyUsageApplyingSharedState: false,

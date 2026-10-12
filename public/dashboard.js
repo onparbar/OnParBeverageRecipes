@@ -1,3 +1,4 @@
+import { createWeeklyUsageJournal } from "./weekly-usage-journal.mjs";
 import { getSavedTapOrderProduct, getTapOrderProductName } from "./tap-order-product.mjs";
 import { mountProductDuplicator, pmbCatalogProductKind } from "./product-duplicate.mjs";
 import { validateRecipeSetup } from "./recipe-setup.mjs";
@@ -1094,6 +1095,10 @@ let weeklyUsageSharedPendingWrites = 0;
 let weeklyUsageSharedWriteQueue = Promise.resolve();
 let weeklyUsageSharedOutbox = loadWeeklyUsageSharedOutbox();
 let weeklyUsageSharedOutboxDurable = true;
+const weeklyUsageJournal = createWeeklyUsageJournal();
+let weeklyUsagePersistedOutboxId = weeklyUsageSharedOutbox?.id || "";
+let weeklyUsageRecoveryEntries = [];
+let weeklyUsageJournalLoaded = false;
 let kegPricingItems = [];
 let priceOverrides = loadOverrides();
 let kegPriceOverrides = loadKegPriceOverrides();
@@ -9870,19 +9875,55 @@ function loadWeeklyUsageSharedOutbox() {
   }
 }
 
-function saveWeeklyUsageSharedOutbox() {
+async function saveWeeklyUsageSharedOutbox() {
+  const entry = weeklyUsageSharedOutbox;
+  const previousId = weeklyUsagePersistedOutboxId;
+  weeklyUsagePersistedOutboxId = entry?.id || "";
+  weeklyUsageSharedOutboxDurable = !entry;
   try {
-    if (weeklyUsageSharedOutbox) {
-      localStorage.setItem(WEEKLY_USAGE_OUTBOX_STORAGE_KEY, JSON.stringify(weeklyUsageSharedOutbox));
-    } else {
-      localStorage.removeItem(WEEKLY_USAGE_OUTBOX_STORAGE_KEY);
-    }
-    weeklyUsageSharedOutboxDurable = true;
+    if (entry) await weeklyUsageJournal.put(entry, previousId);
+    else if (previousId) await weeklyUsageJournal.remove(previousId);
+    // Migrate the legacy record only after its replacement transaction commits.
+    try {
+      const legacy = loadWeeklyUsageSharedOutbox();
+      if (legacy && (legacy.id === previousId || legacy.id === entry?.id)) {
+        localStorage.removeItem(WEEKLY_USAGE_OUTBOX_STORAGE_KEY);
+      }
+    } catch { /* A saved server report does not depend on browser cache cleanup. */ }
+    if (weeklyUsageSharedOutbox?.id === entry?.id) weeklyUsageSharedOutboxDurable = true;
     return true;
-  } catch {
-    weeklyUsageSharedOutboxDurable = false;
-    weeklyUsageSharedSaveError = "This browser could not preserve the pending Weekly Usage recovery copy. Keep this page open and do not order from the plan.";
+  } catch (error) {
+    console.warn("Weekly Usage recovery storage failed:", error?.name, error?.message);
+    if (weeklyUsageSharedOutbox?.id === entry?.id && entry) {
+      weeklyUsageSharedOutboxDurable = false;
+      weeklyUsageSharedSaveError = "This browser could not keep an offline recovery copy. Trying to save to the server; keep this page open until saving finishes.";
+    }
     return false;
+  }
+}
+
+async function loadWeeklyUsageJournal() {
+  if (weeklyUsageJournalLoaded) return;
+  const entries = (await weeklyUsageJournal.list()).map(normalizeOperationalOutboxEntry).filter(Boolean);
+  const legacy = weeklyUsageSharedOutbox;
+  if (legacy && !entries.some(entry => entry.id === legacy.id)) {
+    await weeklyUsageJournal.put(legacy);
+    entries.push(legacy);
+  }
+  // Oldest first preserves edits from separate tabs; each goes through the
+  // server's revision check and three-way reconciliation before acknowledgement.
+  entries.sort((a, b) => a.clientOrder - b.clientOrder);
+  weeklyUsageRecoveryEntries = entries;
+  weeklyUsageSharedOutbox = weeklyUsageRecoveryEntries.shift() || legacy;
+  weeklyUsagePersistedOutboxId = weeklyUsageSharedOutbox?.id || "";
+  weeklyUsageJournalLoaded = true;
+}
+
+function advanceWeeklyUsageRecovery() {
+  if (!weeklyUsageSharedOutbox && weeklyUsageRecoveryEntries.length) {
+    weeklyUsageSharedOutbox = weeklyUsageRecoveryEntries.shift();
+    weeklyUsagePersistedOutboxId = weeklyUsageSharedOutbox.id;
+    restoreWeeklyUsageFromOutbox();
   }
 }
 
@@ -9981,6 +10022,12 @@ let weeklyUsageDisplayRefreshPromise = null;
 
 function refreshSharedWeeklyUsageForDisplay() {
   if (weeklyUsageDisplayRefreshPromise) return weeklyUsageDisplayRefreshPromise;
+  if (!isEmployeeDashboard && !weeklyUsageJournalLoaded) {
+    weeklyUsageDisplayRefreshPromise = loadSharedWeeklyUsageState().finally(() => {
+      weeklyUsageDisplayRefreshPromise = null;
+    });
+    return weeklyUsageDisplayRefreshPromise;
+  }
   // Retry both network failures and conflicts. Any pending report otherwise
   // blocks reads indefinitely. The queue preserves edits with revision checks.
   if (!isEmployeeDashboard && weeklyUsageSharedInitialized && weeklyUsageSharedOutbox
@@ -10034,6 +10081,14 @@ function refreshSharedWeeklyUsageForDisplay() {
 
 async function loadSharedWeeklyUsageState() {
   try {
+    await loadWeeklyUsageJournal();
+  } catch (error) {
+    weeklyUsageSharedSaveError = "Could not read browser recovery storage. Keep this page open while recovery retries.";
+    console.warn("Weekly Usage recovery read failed:", error?.name, error?.message);
+    // Preserve the legacy/in-memory report and do not silently declare it saved.
+    if (!weeklyUsageSharedOutbox) return;
+  }
+  try {
     const state = await requestSharedWeeklyUsage();
     weeklyUsageSharedProvisioned = true;
     weeklyUsageSharedInitialized = Boolean(state.initialized);
@@ -10042,21 +10097,24 @@ async function loadSharedWeeklyUsageState() {
       if (weeklyUsageSharedOutbox) {
         if (areDashboardStateValuesEqual(weeklyUsageSharedOutbox.payload?.data, state.data)) {
           weeklyUsageSharedOutbox = null;
-          saveWeeklyUsageSharedOutbox();
+          const acknowledged = saveWeeklyUsageSharedOutbox();
           applySharedWeeklyUsageState(state);
           weeklyUsageSharedSaveError = "";
           weeklyUsageSharedMessage = "The pending Weekly Usage report was already saved by another dashboard tab.";
+          advanceWeeklyUsageRecovery();
+          await acknowledged;
+          if (weeklyUsageSharedOutbox) return loadSharedWeeklyUsageState();
           return;
         }
         restoreWeeklyUsageFromOutbox();
         if (canSafelyRetryOperationalOutbox(weeklyUsageSharedOutbox, state.revision)) {
           weeklyUsageSharedOutbox = markOperationalOutboxFailure(weeklyUsageSharedOutbox);
-          saveWeeklyUsageSharedOutbox();
+          await saveWeeklyUsageSharedOutbox();
           weeklyUsageSharedMessage = "Recovering a Weekly Usage change that did not finish saving...";
           const recovered = await queueSharedWeeklyUsageSave();
           if (recovered) return;
         } else {
-          if (tryRebaseWeeklyUsageOutbox(state)) {
+          if (await tryRebaseWeeklyUsageOutbox(state)) {
             if (!weeklyUsageSharedOutbox || await queueSharedWeeklyUsageSave()) return;
           }
         }
@@ -10111,15 +10169,17 @@ function scheduleSharedWeeklyUsageSave() {
   renderWeeklyPlan();
 }
 
-function tryRebaseWeeklyUsageOutbox(state) {
+async function tryRebaseWeeklyUsageOutbox(state) {
   const entry = normalizeOperationalOutboxEntry(weeklyUsageSharedOutbox);
   if (!entry || !state?.initialized) return false;
   if (areDashboardStateValuesEqual(entry.payload.data, state.data)) {
     weeklyUsageSharedOutbox = null;
-    saveWeeklyUsageSharedOutbox();
+    const acknowledged = saveWeeklyUsageSharedOutbox();
     applySharedWeeklyUsageState(state);
     weeklyUsageSharedSaveError = "";
     weeklyUsageSharedMessage = "The pending Weekly Usage report was already saved by another dashboard tab.";
+    advanceWeeklyUsageRecovery();
+    await acknowledged;
     return true;
   }
   const merged = entry.baseRevision === Number(state.revision)
@@ -10131,7 +10191,7 @@ function tryRebaseWeeklyUsageOutbox(state) {
     weeklyUsageSharedOutbox = markOperationalOutboxFailure(entry, {
       conflict: true, currentRevision: state.revision, message: weeklyUsageSharedSaveError,
     });
-    saveWeeklyUsageSharedOutbox();
+    await saveWeeklyUsageSharedOutbox();
     return false;
   }
   weeklyUsageSharedOutbox = {
@@ -10143,7 +10203,8 @@ function tryRebaseWeeklyUsageOutbox(state) {
   weeklyUsageSharedBaseline = cloneWeeklyUsageValue(state.data);
   weeklyUsageSharedSaveError = "";
   restoreWeeklyUsageFromOutbox();
-  return saveWeeklyUsageSharedOutbox();
+  await saveWeeklyUsageSharedOutbox();
+  return true;
 }
 
 function queueSharedWeeklyUsageSave() {
@@ -10152,14 +10213,15 @@ function queueSharedWeeklyUsageSave() {
   if (!initialEntry) return Promise.resolve(false);
   let activeEntry = initialEntry;
   weeklyUsageSharedPendingWrites += 1;
-  weeklyUsageSharedWriteQueue = weeklyUsageSharedWriteQueue.then(async () => {
+  weeklyUsageSharedWriteQueue = weeklyUsageSharedWriteQueue.catch(() => {}).then(async () => {
     try {
       // A preceding queued save may already have acknowledged this report.
       if (!weeklyUsageSharedOutbox) return true;
+      await saveWeeklyUsageSharedOutbox();
       activeEntry = normalizeOperationalOutboxEntry(weeklyUsageSharedOutbox);
       if (activeEntry.conflict) {
         const latest = await requestSharedWeeklyUsage();
-        if (!tryRebaseWeeklyUsageOutbox(latest)) return false;
+        if (!(await tryRebaseWeeklyUsageOutbox(latest))) return false;
         if (!weeklyUsageSharedOutbox) return true;
         activeEntry = normalizeOperationalOutboxEntry(weeklyUsageSharedOutbox);
       }
@@ -10172,24 +10234,26 @@ function queueSharedWeeklyUsageSave() {
       } catch (error) {
         if (error.code !== "WEEKLY_USAGE_STATE_REVISION_CONFLICT") throw error;
         const latest = await requestSharedWeeklyUsage();
-        if (!tryRebaseWeeklyUsageOutbox(latest)) return false;
+        if (!(await tryRebaseWeeklyUsageOutbox(latest))) return false;
         if (!weeklyUsageSharedOutbox) return true;
         activeEntry = normalizeOperationalOutboxEntry(weeklyUsageSharedOutbox);
         state = await write();
       }
       if (weeklyUsageSharedOutbox?.id === activeEntry.id) {
         weeklyUsageSharedOutbox = null;
-        saveWeeklyUsageSharedOutbox();
+        const acknowledged = saveWeeklyUsageSharedOutbox();
         applySharedWeeklyUsageState(state);
         weeklyUsageSharedSaveError = "";
         weeklyUsageSharedMessage = "Shared Weekly Usage saved.";
+        advanceWeeklyUsageRecovery();
+        await acknowledged;
       } else {
         weeklyUsageSharedOutbox.payload.baseData = cloneWeeklyUsageValue(state.data);
         weeklyUsageSharedOutbox = rebaseOperationalOutboxAfterOwnCommit(weeklyUsageSharedOutbox, {
           committedBaseRevision: activeEntry.baseRevision,
           nextRevision: state.revision,
         });
-        saveWeeklyUsageSharedOutbox();
+        await saveWeeklyUsageSharedOutbox();
         weeklyUsageSharedRevision = Number(state.revision) || weeklyUsageSharedRevision;
         weeklyUsageSharedBaseline = cloneWeeklyUsageValue(state.data);
         weeklyUsageSharedMessage = "An earlier Weekly Usage save completed; a newer local edit is still pending.";
@@ -10202,10 +10266,12 @@ function queueSharedWeeklyUsageSave() {
         currentRevision: error.currentRevision,
         conflict: error.code === "WEEKLY_USAGE_STATE_REVISION_CONFLICT",
       });
-      saveWeeklyUsageSharedOutbox();
+      await saveWeeklyUsageSharedOutbox();
       weeklyUsageSharedMessage = error.code === "WEEKLY_USAGE_STATE_REVISION_CONFLICT"
         ? "Another manager changed Weekly Usage first. This browser kept the complete local report for explicit review and will not retry it against a different revision."
-        : `Could not save shared Weekly Usage. This browser preserved the pending report for a safe retry: ${error.message}`;
+        : weeklyUsageSharedOutboxDurable
+          ? `Could not save shared Weekly Usage. Pending changes are saved in this browser for retry: ${error.message}`
+          : `Could not save shared Weekly Usage. Pending changes are only in this open page; keep it open while saving retries: ${error.message}`;
       return false;
     } finally {
       weeklyUsageSharedPendingWrites = Math.max(0, weeklyUsageSharedPendingWrites - 1);
@@ -10362,7 +10428,42 @@ function runPmbWeeklyUsageSync(options = {}) {
   return mondayWeeklyUsageSyncPromise;
 }
 
+async function refreshWeeklyUsageOnServer() {
+  if (!(await flushPendingSharedWeeklyUsageSave())) {
+    return { ok: false, error: weeklyUsageSharedSaveError || "Weekly Usage changes are still saving." };
+  }
+  weeklyUsageSyncLoading = true;
+  weeklyUsageSyncMessage = "Checking saved Weekly Usage on the service computer...";
+  renderWeeklyUsage();
+  try {
+    const revisionAtStart = weeklyUsageSharedRevision;
+    const { response, result } = await requestOperationalSharedJson("/api/weekly-usage-refresh", {
+      method: "POST", headers: { Accept: "application/json" },
+    }, 45_000);
+    if (!response.ok || !result.initialized) throw new Error(result.error || "Shared Weekly Usage is not available yet.");
+    // A response must not replace a manual edit made while the request ran.
+    if (!weeklyUsageSharedOutbox && !weeklyUsageSharedPendingWrites && !weeklyUsageSharedSaveTimer
+      && weeklyUsageSharedRevision === revisionAtStart) {
+      applySharedWeeklyUsageState(result);
+    }
+    const pending = result.recovery?.status === "pending";
+    weeklyUsageSyncError = pending ? result.recovery.message : "";
+    weeklyUsageSyncMessage = pending ? result.recovery.message : "Weekly Usage is saved on the server.";
+    return { ok: !pending, serverSaved: !pending };
+  } catch (error) {
+    weeklyUsageSyncError = error.message;
+    weeklyUsageSyncMessage = "The service computer will retry Weekly Usage. Your saved history is unchanged.";
+    return { ok: false, error: error.message };
+  } finally {
+    weeklyUsageSyncLoading = false;
+    renderWeeklyUsage();
+    renderWeeklyPlan();
+    renderDashboardOverview();
+  }
+}
+
 async function runPmbWeeklyUsageSyncAttempt({ automatic = false } = {}) {
+  if (automatic) return refreshWeeklyUsageOnServer();
   if (weeklyUsageSyncLoading) return { ok: false, error: "Weekly Usage is already refreshing." };
   weeklyUsageSyncError = "";
   weeklyUsageSyncAttempted = true;
@@ -20908,7 +21009,11 @@ function loadWeeklyUsageCurrentOverrides() {
 }
 
 function saveWeeklyUsageCurrentOverrides() {
-  localStorage.setItem(WEEKLY_USAGE_CURRENT_STORAGE_KEY, JSON.stringify(weeklyUsageCurrentOverrides));
+  // Shared history and the recovery journal are authoritative. Legacy caches
+  // are best effort and are no longer duplicated after shared setup.
+  if (!weeklyUsageSharedInitialized) {
+    try { localStorage.setItem(WEEKLY_USAGE_CURRENT_STORAGE_KEY, JSON.stringify(weeklyUsageCurrentOverrides)); } catch { /* The full pending report is saved separately. */ }
+  }
   scheduleSharedWeeklyUsageSave();
 }
 
@@ -20921,7 +21026,11 @@ function loadWeeklyUsageHistoryOverrides() {
 }
 
 function saveWeeklyUsageHistoryOverrides() {
-  localStorage.setItem(WEEKLY_USAGE_HISTORY_STORAGE_KEY, JSON.stringify(weeklyUsageHistoryOverrides));
+  // Shared history and the recovery journal are authoritative. Legacy caches
+  // are best effort and are no longer duplicated after shared setup.
+  if (!weeklyUsageSharedInitialized) {
+    try { localStorage.setItem(WEEKLY_USAGE_HISTORY_STORAGE_KEY, JSON.stringify(weeklyUsageHistoryOverrides)); } catch { /* The full pending report is saved separately. */ }
+  }
   scheduleSharedWeeklyUsageSave();
 }
 
@@ -20934,7 +21043,11 @@ function loadWeeklyUsageArchivedItems() {
 }
 
 function saveWeeklyUsageArchivedItems() {
-  localStorage.setItem(WEEKLY_USAGE_ARCHIVE_STORAGE_KEY, JSON.stringify(weeklyUsageArchivedItems));
+  // Shared history and the recovery journal are authoritative. Legacy caches
+  // are best effort and are no longer duplicated after shared setup.
+  if (!weeklyUsageSharedInitialized) {
+    try { localStorage.setItem(WEEKLY_USAGE_ARCHIVE_STORAGE_KEY, JSON.stringify(weeklyUsageArchivedItems)); } catch { /* The full pending report is saved separately. */ }
+  }
   scheduleSharedWeeklyUsageSave();
 }
 
@@ -20943,7 +21056,11 @@ function loadWeeklyUsageLastSyncAt() {
 }
 
 function saveWeeklyUsageLastSyncAt() {
-  localStorage.setItem(WEEKLY_USAGE_LAST_SYNC_STORAGE_KEY, weeklyUsageLastSyncAt);
+  // Shared history and the recovery journal are authoritative. Legacy caches
+  // are best effort and are no longer duplicated after shared setup.
+  if (!weeklyUsageSharedInitialized) {
+    try { localStorage.setItem(WEEKLY_USAGE_LAST_SYNC_STORAGE_KEY, weeklyUsageLastSyncAt); } catch { /* The full pending report is saved separately. */ }
+  }
   scheduleSharedWeeklyUsageSave();
 }
 

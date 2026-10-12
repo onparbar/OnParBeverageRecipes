@@ -1,0 +1,54 @@
+<!doctype html><meta charset="utf-8"><title>Weekly Usage recovery verification</title>
+<h1>Weekly Usage recovery verification</h1><ul id="results"></ul><p id="status">Running…</p>
+<script type="module">
+import { createWeeklyUsageJournal } from '../../public/weekly-usage-journal.mjs';
+const name = 'onpar-weekly-usage-test';
+const journal = createWeeklyUsageJournal({name});
+const output = document.querySelector('#results');
+const assert = (value, message) => { if (!value) throw new Error(message); };
+async function test(name, run) {
+  await run(); const item = document.createElement('li'); item.textContent = `PASS: ${name}`; output.append(item);
+}
+try {
+  const phase = new URL(location.href).searchParams.get('phase');
+  if (phase === 'reopen') {
+    await test('Large pending report survives a full page reopen', async () => {
+      const rows = await journal.list();
+      assert(rows.some(x=>x.id==='large' && x.payload.data.length===8*1024*1024),'Missing or truncated report');
+    });
+    await test('A second tab’s pending change survives another acknowledgement', async () => {
+      const second = createWeeklyUsageJournal({name});
+      await Promise.all([journal.put({id:'tab-a',payload:{value:3}}),second.put({id:'tab-b',payload:{value:4}})]);
+      await journal.remove('tab-a');
+      assert((await second.list()).some(x=>x.id==='tab-b' && x.payload.value===4),'Other tab was erased');
+    });
+    await test('Replacing a pending record is atomic and preserves other tabs', async () => {
+      await journal.put({id:'newer',payload:{value:5}},'large');
+      const rows=await journal.list(); assert(!rows.some(x=>x.id==='large') && rows.some(x=>x.id==='newer') && rows.some(x=>x.id==='tab-b'),'Atomic replacement failed');
+    });
+    await test('A failed storage operation does not prevent the next retry', async () => {
+      const broken = createWeeklyUsageJournal({indexedDB:null,name});
+      let failed=false;try {await broken.put({id:'broken'});}catch {failed=true;}assert(failed,'Unavailable storage must fail');
+      await journal.put({id:'retry',payload:{value:6}});assert((await journal.list()).some(x=>x.id==='retry'),'Retry failed');
+    });
+    await test('A failed replacement cannot leave an old edit to replay after acknowledgement', async () => {
+      await journal.put({id:'old-edit',payload:{value:1}});
+      try {await journal.put({id:{invalid:true},payload:{value:2}},'old-edit');}catch {}
+      assert((await journal.list()).some(x=>x.id==='old-edit'),'Failure lost the old recovery copy');
+      await journal.put({id:'replacement',payload:{value:3}},'unsaved-id');
+      await journal.remove('replacement');
+      assert(!(await journal.list()).some(x=>x.id==='old-edit'),'Acknowledged lineage left behind');
+    });
+    for(const row of await journal.list()) await journal.remove(row.id);
+    document.querySelector('#status').textContent='All browser recovery checks passed.';
+  } else {
+    for(const row of await journal.list()) await journal.remove(row.id);
+    await test('An 8 MB pending report saves without localStorage', async () => {
+      await journal.put({id:'large',payload:{data:'x'.repeat(8*1024*1024)}});
+      assert((await journal.list())[0].payload.data.length===8*1024*1024,'Large report failed');
+    });
+    document.querySelector('#status').textContent='Saved. Reopen the page to verify recovery.';
+    const link=document.createElement('a');link.href='?phase=reopen';link.textContent='Reopen recovery test';document.body.append(link);
+  }
+} catch(error) {document.querySelector('#status').textContent=`FAIL: ${error.message}`;}
+</script>

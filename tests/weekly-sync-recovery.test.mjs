@@ -79,7 +79,7 @@ function usageQueueContext(conflict = false) {
     weeklyUsageSharedPendingWrites: 0, weeklyUsageSharedSaving: false,
     weeklyUsageSharedSaveTimer: null, weeklyUsageSharedSaveError: "", weeklyUsageSharedMessage: "",
     weeklyUsageSharedWriteQueue: Promise.resolve(), weeklyUsageSharedRevision: 1,
-    stageWeeklyUsageSharedOutbox() {}, normalizeOperationalOutboxEntry: (value) => value,
+    advanceWeeklyUsageRecovery() {}, stageWeeklyUsageSharedOutbox() {}, normalizeOperationalOutboxEntry: (value) => value,
     tryRebaseWeeklyUsageOutbox: () => false,
     async requestSharedWeeklyUsage(body) { if (body) writes += 1; return { initialized: true, revision: 2, data: { activeItems: [] } }; },
     saveWeeklyUsageSharedOutbox() {}, applySharedWeeklyUsageState() {}, renderWeeklyUsage() {}, renderWeeklyPlan() {}, renderDashboardOverview() {},

@@ -106,7 +106,10 @@ function consolidateReadinessAlerts(alerts, readiness = {}, mondayRun = {}) {
   };
   for (const alert of alerts) {
     const id = clean(alert?.id);
-    const messages = cleanList([alert?.message, ...cleanList(alert?.details)]);
+    const details = cleanList(alert?.details);
+    // Readiness summaries concatenate these same reasons. Prefer the individual
+    // reasons so the summary is not displayed again as an additional bullet.
+    const messages = details.length ? details : cleanList([alert?.message]);
     if (/^pmb-(?:keg-levels|pricing|connection)-/.test(id)
       || /^(?:Live PMB keg levels are unavailable|Tap pricing is offline|PMB data unavailable|PMB connection|PMB refresh)/i.test(clean(alert?.title))) {
       add("pmb", alert, [alert.title, ...messages]);
