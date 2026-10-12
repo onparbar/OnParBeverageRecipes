@@ -603,7 +603,7 @@ export function buildVendorOrderDrafts(plan = {}, {
     return { group, vendor, lines };
   });
   const deferredOrders = [];
-  const activeGroups = groups.filter(({ vendor, lines }) => {
+  const activeGroups = groups.filter(({ group, vendor, lines }) => {
     if (vendor !== "Proof" || proofPrepRequirement !== "not-required") return true;
     const estimatedTotal = lines.reduce((total, line) => total + (numberOrNull(line.extendedCost) || 0), 0);
     const hasUnresolvedLine = lines.some((line) => line.blockers.length > 0);
@@ -614,7 +614,8 @@ export function buildVendorOrderDrafts(plan = {}, {
         && clean(item.catalogId) === clean(adjustment?.catalogId)
       ))
     ));
-    if (hasUnresolvedLine || hasRequestedProofOrder) return true;
+    const hasConfirmedPrepShortage = group.items.some(item => Number(item.cocktailPrepShortageUnits) > 0);
+    if (hasUnresolvedLine || hasRequestedProofOrder || hasConfirmedPrepShortage) return true;
     deferredOrders.push({
       vendor,
       lineCount: lines.length,

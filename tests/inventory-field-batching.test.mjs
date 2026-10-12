@@ -62,9 +62,9 @@ test("pending inventory fields collapse into one durable atomic save", () => {
   assert.equal(batch.payload.action, "batch-update-fields");
   assert.equal(batch.payload.source, "field-auto-save");
   assert.deepEqual(batch.payload.changes.map(change => ({ ...change })), [
-    { id: "vodka", field: "onHand", value: "4" },
-    { id: "gin", field: "onHand", value: "5" },
-    { id: "vodka", field: "par", value: "8" },
+    { id: "vodka", field: "onHand", value: "4", countedAt: "2026-09-22T12:00:00.000Z" },
+    { id: "gin", field: "onHand", value: "5", countedAt: "2026-09-22T12:00:00.000Z" },
+    { id: "vodka", field: "par", value: "8", countedAt: "2026-09-22T12:00:00.000Z" },
   ]);
   assert.equal(scope.inventoryActionOutbox.length, 1);
   assert.equal(Object.keys(scope.inventoryFieldOutbox).length, 0);

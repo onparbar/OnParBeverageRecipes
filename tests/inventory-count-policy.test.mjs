@@ -5,7 +5,7 @@ import { buildRollingCocktailIngredientOrders } from "../public/rolling-cocktail
 import { buildRecipeInventoryContributions } from "../lib/inventory-contributions.mjs";
 
 test("uncounted mixers use fixed units despite blank, zero, or stale saved counts", () => {
-  for (const [name, amount] of [["Sour Mix", 16], ["Sweet and Sour", 16], ["Cold Brew", 3], ["Cold Brew Concentrate", 3], ["Vanilla Syrup", 2]]) {
+  for (const [name, amount] of [["Sour Mix", 16], ["Sweet and Sour", 16]]) {
     for (const saved of ["", "0", "99"]) {
       const original = { name, group: "Mixer Cabinet", onHandDisplay: saved, onHand: Number(saved), hasCurrentCount: false };
       const result = applyInventoryCountPolicy(original);
@@ -26,12 +26,13 @@ test("vanilla liquor and other counted inventory are not treated as uncounted sy
   }
 });
 
-test("weekly planning reapplies assumptions to old inventory snapshots", () => {
+test("weekly planning removes old vanilla assumptions from inventory snapshots", () => {
   const result = buildRollingCocktailIngredientOrders({
     inventoryItems: [{ id: "vanilla", name: "Vanilla Syrup", group: "Other", onHand: 0, hasCurrentCount: false, bottleOz: 25 }],
     tapInputs: [{ tapNumber: 47, name: "Example", currentStockKegs: 1, avgWeeklyKegs: 0 }],
   });
-  assert.equal(result[0].onHand, 2);
+  assert.equal(result[0].onHand, null);
+  assert.equal(result[0].countSource, "kitchen");
   assert.equal(result[0].orderHoldReason, "");
   assert.equal(result[0].orderUnits, 0);
 });

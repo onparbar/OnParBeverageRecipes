@@ -187,6 +187,7 @@ export function answerLocalBeverageQuestion(raw, context) {
     const matched = select(items, query).items;
     if (!matched.length) return question("Which inventory item should I explain? Try 'Why do we need to order Tito's?'");
     const rows = matched.filter((item) => nameTerms(query) || item.orderHoldReason || positive(item.orderUnits)).map((item) => {
+      if (item.kitchenManaged) return { name: item.name, text: "Kitchen managed; excluded from beverage counts and ordering." };
       const current = !item.physicalCountRequired || isRecommendationForOperatingWeek(countedAt[item.id]);
       return { name: item.name, text: !current ? "Held: this week's physical count has not been received." : item.orderHoldReason ? `Held: ${item.orderHoldReason}` : !known(item.orderUnits) ? "A current order calculation is unavailable." : `${fmt(item.orderUnits)} units${positive(item.unitCost) ? `; ${money(item.orderUnits * item.unitCost)} estimated item cost` : "; cost unavailable"}. ${item.orderReason || ""}` };
     });

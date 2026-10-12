@@ -1,6 +1,6 @@
 import { normalizeDashboardQuestion, searchDashboardItems } from "./global-dashboard-search.mjs";
 import { isRecommendationForOperatingWeek } from "./weekly-action-plan.mjs";
-import { getUncountedInventoryAmount } from "./inventory-count-policy.mjs";
+import { getUncountedInventoryAmount, isKitchenManagedInventoryItem } from "./inventory-count-policy.mjs";
 
 export function answerLocalInventoryQuestion(question, items = [], countedItemsAt = {}, now = new Date()) {
   const query = normalizeDashboardQuestion(question);
@@ -23,6 +23,7 @@ export function answerLocalInventoryQuestion(question, items = [], countedItemsA
     : "Which product or cabinet would you like the count for?", rows: [] };
   const format = (value) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
   const rows = matches.map((item) => {
+    if (isKitchenManagedInventoryItem(item)) return { name: item.name, text: "Kitchen managed; excluded from beverage inventory counts and ordering." };
     const assumed = getUncountedInventoryAmount(item);
     const value = assumed ?? Number(String(item.onHandDisplay ?? "").trim() || 0);
     const current = isRecommendationForOperatingWeek(countedItemsAt[item.id], now);

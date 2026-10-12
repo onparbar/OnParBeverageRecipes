@@ -1,6 +1,7 @@
+import { findPlanningCocktailRecipe } from "./planning-cocktail-recipe.mjs";
 import { MINIMUM_KEG_CUSHION } from "./keg-demand-policy.mjs";
 import { normalizeLiquorTapProductName } from "./weekly-action-plan.mjs";
-import { applyInventoryCountPolicy, getUncountedInventoryAmount } from "./inventory-count-policy.mjs";
+import { applyInventoryCountPolicy, getUncountedInventoryAmount, isKitchenManagedInventoryItem } from "./inventory-count-policy.mjs";
 import { getLiquorTapBottleBatch } from "./liquor-tap-order-policy.mjs";
 
 const RESERVES = Object.freeze({
@@ -22,6 +23,7 @@ function nonnegative(value) {
   return Number.isFinite(result) && result >= 0 ? result : null;
 }
 function managed(item) {
+  if (isKitchenManagedInventoryItem(item)) return false;
   return /^(Liquor|Mixer) Cabinet$/i.test(item.group || "") || ["simple-syrup", "vanilla"].includes(item.id)
     || getUncountedInventoryAmount(item) !== null;
 }
@@ -57,11 +59,7 @@ export function buildRollingCocktailIngredientOrders({
       remaining = Math.max(0, remaining + batches[week] - average);
     }
     if (!batches.some(Boolean)) continue;
-    const names = [tap.name, tap.recipeName, tap.recipeId].map(key).filter(Boolean);
-    for (const [name, title] of Object.entries(recipeAliases)) {
-      if (names.includes(key(name))) names.push(key(title));
-    }
-    const recipe = recipes.find((r) => [r.id, r.title, r.name, r.sourceTitle].some((name) => name && names.includes(key(name))));
+    const recipe = findPlanningCocktailRecipe(tap, recipes, recipeAliases);
     if (!recipe) { issues.push(`Tap ${n}: recipe for ${tap.name} is missing.`); continue; }
     for (const ingredient of recipe.ingredients || []) {
       const ounces = nonnegative(ingredient.oz);

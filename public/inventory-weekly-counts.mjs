@@ -1,5 +1,5 @@
 import { isRecommendationForOperatingWeek } from "./weekly-action-plan.mjs";
-import { getUncountedInventoryAmount, isWeeklyCountOnlyInventoryItem } from "./inventory-count-policy.mjs";
+import { isInventoryCountExcluded, isWeeklyCountOnlyInventoryItem } from "./inventory-count-policy.mjs";
 
 function hasTrackedBalance(item, countedItemsAt, now, ledger) {
   if (!ledger?.allowTrackedBalances || isWeeklyCountOnlyInventoryItem(item)) return false;
@@ -17,7 +17,7 @@ function hasTrackedBalance(item, countedItemsAt, now, ledger) {
 export function getInventoryCountSections(items = [], countedItemsAt = {}, now = new Date(), ledger = {}) {
   const groups = new Map(["Liquor Cabinet", "Mixer Cabinet", "Other"].map((name) => [name, []]));
   for (const item of items) {
-    if (!item?.id || getUncountedInventoryAmount(item) !== null) continue;
+    if (!item?.id || isInventoryCountExcluded(item)) continue;
     const group = groups.has(item.group) ? item.group : "Other";
     groups.get(group).push(item);
   }

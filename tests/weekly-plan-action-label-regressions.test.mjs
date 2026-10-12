@@ -12,17 +12,17 @@ const ready = {
 for (const [view, render] of [["compact", renderMondayRunCompact], ["expanded", renderMondayRun]]) {
   test(`${view} weekly plan starts after reset even when background work is complete`, () => {
     const run = buildMondayRunModel({ ...ready, inventoryCountedThisWeek: false });
-    assert.match(render(run), /class="primary-button"[^>]*>Start<\/button>/);
+    assert.match(render(run), /class="primary-button"[^>]*>Start Count<\/button>/);
   });
 
   test(`${view} weekly plan keeps Start while step one is incomplete`, () => {
     const run = buildMondayRunModel({ ...ready, inventoryCountedThisWeek: true, inventoryMissingCount: 1 });
-    assert.match(render(run), /class="primary-button"[^>]*>Start<\/button>/);
+    assert.match(render(run), /class="primary-button"[^>]*>Start Count<\/button>/);
   });
 
   test(`${view} weekly plan waits for inventory to finish saving`, () => {
     const run = buildMondayRunModel({ ...ready, inventoryCountedThisWeek: true, inventorySaving: true });
-    assert.match(render(run), /class="primary-button"[^>]*>Start<\/button>/);
+    assert.match(render(run), /class="primary-button"[^>]*>Start Count<\/button>/);
   });
 
   test(`${view} weekly plan continues once step one is complete`, () => {
@@ -37,7 +37,7 @@ for (const [view, render] of [["compact", renderMondayRunCompact], ["expanded", 
 
   test(`${view} weekly plan starts at keg levels and retains later destinations`, () => {
     const start = buildMondayRunModel({ ...ready, inventoryCountedThisWeek: false });
-    assert.match(render(start), /data-dashboard-target="keg-levels">Start<\/button>/);
+    assert.match(render(start), /data-dashboard-target="keg-levels">Start Count<\/button>/);
     const next = buildMondayRunModel({ ...ready, coolerCountComplete: true, inventoryCountedThisWeek: true });
     assert.match(render(next), view === "compact" ? /class="monday-run__card-link"[^>]*data-dashboard-target="inventory"/ : /data-dashboard-target="inventory">Continue<\/button>/);
   });

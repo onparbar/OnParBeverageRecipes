@@ -8,7 +8,7 @@ import { findExactLastKnownKegLevel } from "../public/keg-level-fallback.mjs";
 import { selectPmbCurrentTapSnapshot } from "../public/pmb-current-tap-snapshot.mjs";
 import { classifyPmbLevelState } from "../public/operations-truth-model.mjs";
 import { getInventoryCountSections } from "../public/inventory-weekly-counts.mjs";
-import { getUncountedInventoryAmount, isWeeklyCountOnlyInventoryItem } from "../public/inventory-count-policy.mjs";
+import { isInventoryCountExcluded, isWeeklyCountOnlyInventoryItem } from "../public/inventory-count-policy.mjs";
 import { inventorySnapshotBaseMatches } from "../lib/inventory-snapshot-guard.mjs";
 import { createEmptyInventoryState, applyInventoryStateAction } from "../lib/inventory-store.mjs";
 import { normalizeDashboardQuestion, getConversationalItemQuery } from "../public/global-dashboard-search.mjs";
@@ -118,7 +118,7 @@ test("ledger rollover fails closed for missing baselines, shortages, invalid bal
 test("submitting a cabinet zeros unmentioned items only in submitted sections", () => {
   const countedItemsAt = {};
   const complete = load("buildCompletedInventorySectionChanges", { inventoryItems: inventory,
-    inventoryCountedItemsAt: countedItemsAt, getInventoryCountSections, getUncountedInventoryAmount,
+    inventoryCountedItemsAt: countedItemsAt, getInventoryCountSections, isInventoryCountExcluded,
     isWeeklyCountOnlyInventoryItem });
   const liquor = complete("Liquor Cabinet", [{ id: "vodka", target: "inventory", value: "3" }]);
   assert.deepEqual(Array.from(liquor, ({ id, value }) => [id, value]), [["vodka", "3"], ["gin", "0"]]);

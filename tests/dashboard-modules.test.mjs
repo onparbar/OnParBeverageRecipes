@@ -113,14 +113,14 @@ test("finish-week views preserve shared checklist controls and escaped labels", 
   assert.match(panel, /Saving\.\.\./);
 });
 
-test("Monday Run has three steps and only completes when all orders are placed", () => {
+test("Monday Run has four steps and only completes when all orders are placed", () => {
   const run = buildMondayRunModel({ coolerCountComplete: true, inventorySharedInitialized: true, inventoryCountedThisWeek: true });
-  assert.deepEqual(run.steps.map((step) => step.id), ["cooler", "inventory", "orders"]);
-  assert.equal(run.completedCount, 1);
+  assert.deepEqual(run.steps.map((step) => step.id), ["cooler", "karaoke", "inventory", "orders"]);
+  assert.equal(run.completedCount, 2);
   assert.equal(run.nextStep.id, "inventory");
   const locked = buildMondayRunModel({ planLocked: true, inventorySaveError: "live count retry", kegCountSaveError: "live count retry", weeklyOrderTrackingAvailable: true, vendorOrders: [{ ordered: true }], orderLineCount: 3, now: new Date("2026-09-14T15:00:00Z") });
   assert.equal(locked.complete, true);
-  assert.equal(locked.steps[2].status, "All placed");
+  assert.equal(locked.steps[3].status, "All placed");
   assert.match(renderMondayRun(locked), />Complete</);
   assert.match(renderMondayRun(locked), /Sep 14 - 20/);
   assert.doesNotMatch(renderMondayRun(locked), /monday-run-steps|Save needs retry|>Continue</);
@@ -131,8 +131,8 @@ test("Monday Run has three steps and only completes when all orders are placed",
   assert.match(renderMondayRun(pending), /data-monday-run-step="orders" data-dashboard-target="weekly-plan"/);
   const snapshotOnly = buildMondayRunModel({ mondaySnapshotSaved: true, inventorySharedInitialized: true });
   assert.equal(snapshotOnly.steps[0].complete, true);
-  assert.equal(snapshotOnly.steps[1].complete, false);
-  assert.equal(snapshotOnly.steps[1].status, "Submit to finish saving");
+  assert.equal(snapshotOnly.steps[2].complete, false);
+  assert.equal(snapshotOnly.steps[2].status, "Verify to finish saving");
 });
 
 test("Monday Run renderers route verified cooler counts to inventory", () => {
@@ -141,7 +141,7 @@ test("Monday Run renderers route verified cooler counts to inventory", () => {
   const compact = renderMondayRunCompact(run);
   assert.match(full, /data-monday-run-step="inventory"/);
   assert.match(full, /aria-current="step"/);
-  assert.match(full, /Step 2 of 3/);
-  assert.match(compact, /Step 2 of 3/);
-  assert.match(compact, /Next:<\/span> <strong>Inventory/);
+  assert.match(full, /Step 3 of 4/);
+  assert.match(compact, /Step 3 of 4/);
+  assert.match(compact, /Next:<\/span> <strong>Bottle Inventory/);
 });

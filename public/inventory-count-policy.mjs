@@ -2,12 +2,23 @@
 const ASSUMED_UNITS = Object.freeze({
   "sour-mix": 16,
   "sweet-and-sour": 16,
-  "cold-brew": 3,
-  "cold-brew-concentrate": 3,
-  "cold-brew-coffee": 3,
-  vanilla: 2,
-  "vanilla-syrup": 2,
 });
+
+const KITCHEN_ITEMS = new Set(["cold-brew", "cold-brew-concentrate", "cold-brew-coffee", "vanilla", "vanilla-syrup"]);
+
+function inventoryPolicyKeys(item) {
+  const names = typeof item === "string" ? [item] : [item?.name, item?.id];
+  return names.map(name => String(name ?? "").trim().toLowerCase()
+    .replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""));
+}
+
+export function isKitchenManagedInventoryItem(item) {
+  return inventoryPolicyKeys(item).some(key => KITCHEN_ITEMS.has(key));
+}
+
+export function isInventoryCountExcluded(item) {
+  return isKitchenManagedInventoryItem(item) || getUncountedInventoryAmount(item) !== null;
+}
 
 export function isWeeklyCountOnlyInventoryItem(item) {
   return item?.id === "non-alcoholic-beer"
@@ -15,16 +26,23 @@ export function isWeeklyCountOnlyInventoryItem(item) {
 }
 
 export function getUncountedInventoryAmount(item) {
-  const names = typeof item === "string" ? [item] : [item?.name, item?.id];
-  for (const name of names) {
-    const key = String(name ?? "").trim().toLowerCase()
-      .replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  for (const key of inventoryPolicyKeys(item)) {
     if (Object.hasOwn(ASSUMED_UNITS, key)) return ASSUMED_UNITS[key];
   }
   return null;
 }
 
 export function applyInventoryCountPolicy(item) {
+  if (isKitchenManagedInventoryItem(item)) return {
+    ...item,
+    group: "Other", kitchenManaged: true, notCounted: true, countSource: "kitchen",
+    assumedOnHand: null, onHand: null, onHandDisplay: "", hasCurrentCount: false,
+    par: 0, parDisplay: "", orderQuantity: 0, orderUnits: 0, orderDisplay: "0", shortageDisplay: "0",
+    totalValue: 0, estimatedCost: 0, excludeFromInventoryValue: true, excludeFromOrderList: true, excludeFromOrderCost: true,
+    cocktailPrepRequiredBottles: 0, cocktailPrepShortageUnits: 0, rollingReserveUnits: 0,
+    rollingIngredientVersion: 0, rollingPrepWeeks: [], rollingPrepTapNumbers: [],
+    orderHoldReason: "", rollingPlanReason: "Kitchen managed; excluded from beverage counts and ordering.",
+  };
   const amount = getUncountedInventoryAmount(item);
   return amount === null ? item : {
     ...item,

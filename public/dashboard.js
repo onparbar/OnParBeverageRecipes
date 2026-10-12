@@ -2,12 +2,12 @@ import { createWeeklyUsageJournal } from "./weekly-usage-journal.mjs";
 import { getSavedTapOrderProduct, getTapOrderProductName } from "./tap-order-product.mjs";
 import { mountProductDuplicator, pmbCatalogProductKind } from "./product-duplicate.mjs";
 import { validateRecipeSetup } from "./recipe-setup.mjs";
-import { completeCoolerCount, hasCompletedCoolerCount } from "./weekly-run-progress.mjs";
+import { completeCoolerWallCount, hasCompletedCoolerWallCount } from "./weekly-run-progress.mjs";
 import { observePackagePrice, createSupplierMapping, supplierSetupIssues } from "./vendor-pricing-state.mjs";
 import { getPmbWeeklyUsageRange } from "./pmb-weekly-usage-policy.mjs";
 import { isUsableWeeklyUsageEntry, retainWeeklyUsageItems, retainWeeklyUsageOverrides, selectWeeklyUsageHistory, mergeWeeklyUsageCsvFallbackData } from "./weekly-usage-evidence.mjs";
 import { MINIMUM_KEG_CUSHION, getEightWeekPeakUsage } from "./keg-demand-policy.mjs";
-import { applyInventoryCountPolicy, getUncountedInventoryAmount, isWeeklyCountOnlyInventoryItem } from "./inventory-count-policy.mjs";
+import { applyInventoryCountPolicy, getUncountedInventoryAmount, isWeeklyCountOnlyInventoryItem, isInventoryCountExcluded, isKitchenManagedInventoryItem } from "./inventory-count-policy.mjs";
 import { getInventoryCountSections } from "./inventory-weekly-counts.mjs";
 import { answerLocalInventoryQuestion } from "./local-inventory-questions.mjs";
 import { answerLocalBeverageQuestion, BEVERAGE_QUESTION_EXAMPLES } from "./local-beverage-answers.mjs";
@@ -997,6 +997,7 @@ const customInventoryCancelButton = document.querySelector("#custom-inventory-ca
 const inventoryTable = document.querySelector("#inventory-table");
 const inventorySubmitCountButton = document.querySelector("#inventory-submit-count");
 let inventoryCountSubmitting = false;
+const inventorySnapshotRecoveryJournal = createWeeklyUsageJournal({ name: "onpar-inventory-snapshot-recovery" });
 const inventoryOrderTable = document.querySelector("#inventory-order-table");
 const inventorySummary = document.querySelector("#inventory-summary");
 const inventoryHistoryList = document.querySelector("#inventory-history-list");
@@ -1245,6 +1246,8 @@ let dashboardStaffPrepPlan = { available: false, generatedAt: "", items: [], com
 let dashboardStaffPrepRefreshRunning = false;
 let activeKegAdjustKey = "";
 let activeKegWallFilter = "all";
+let coolerCountVerifying = false;
+let coolerCountVerificationMessage = "";
 let pmbProductSaving = false;
 let liquorProductSaving = false;
 let activePmbQueuePublishId = "";
@@ -3957,7 +3960,7 @@ function getLocalBeverageQuestionContext() {
       state: getInventorySharedOverviewSource(),
       items: getVisibleInventoryItems().map((item) => ({
         ...item,
-        physicalCountRequired: getUncountedInventoryAmount(item) === null,
+        physicalCountRequired: !isInventoryCountExcluded(item),
         orderUnits: item.orderingPlan ? getInventoryRoundedOrderQuantity(item) : null,
         orderReason: getInventoryOrderingReason(item),
       })),
@@ -5660,7 +5663,7 @@ function getWeeklyPlanInventoryItems({ live = false } = {}) {
     .filter((snapshotItem) => {
       const currentItem = inventoryItems.find((item) => item.id === snapshotItem.id)
         || inventoryItems.find((item) => item.name === snapshotItem.name);
-      return !currentItem?.excludeFromOrderList
+      return !isKitchenManagedInventoryItem(snapshotItem) && !currentItem?.excludeFromOrderList
         && !isFoodDepartmentOrderedInventoryItem(snapshotItem.name);
     })
     .map((snapshotItem) => {
@@ -6744,20 +6747,17 @@ function getMondayRunModel(plan, freshness) {
   const vendorOrders = Array.isArray(weeklyOrderTracking.vendors) ? weeklyOrderTracking.vendors : [];
   const orderModel = getVendorOrderDraftModel(plan, freshness);
   const orderLineCount = orderModel.drafts.reduce((total, draft) => total + toNumber(draft.lineCount), 0);
-  const coolerButton = document.getElementById("cooler-count-continue");
-  if (coolerButton) {
-    coolerButton.hidden = planLocked;
-    coolerButton.disabled = !parAgentState?.initialized || Boolean(parAgentStateOutbox);
-  }
+  renderCoolerCountVerification();
   const reasonField = document.getElementById("inventory-snapshot-reason-field");
   if (reasonField) reasonField.hidden = isEasternMonday() || planLocked;
   if (inventorySubmitCountButton && !inventoryCountSubmitting) {
     inventorySubmitCountButton.hidden = planLocked;
-    inventorySubmitCountButton.textContent = "Submit inventory";
+    inventorySubmitCountButton.textContent = "Bottle inventory verified";
   }
   const tapSheets = buildTapWallPrintSheets();
   return buildMondayRunModelView({
-    coolerCountComplete: planLocked || hasCompletedCoolerCount(),
+    mainCoolerCountComplete: planLocked || hasCompletedCoolerWallCount("main"),
+    karaokeCoolerCountComplete: planLocked || hasCompletedCoolerWallCount("karaoke"),
     coolerCountSaving: !planLocked && Boolean(parAgentStateOutbox),
     kegFeed,
     pricingFeed,
@@ -6802,7 +6802,28 @@ function openMondayRunStep(stepId, target) {
     return;
   }
   const targetTab = clean(target) || "weekly-plan";
+  if (stepId === "cooler" || stepId === "karaoke") {
+    openCoolerCountWall(stepId === "karaoke" ? "karaoke" : "main");
+    return;
+  }
+  if (stepId === "inventory") {
+    const filter = document.querySelector("#inventory-group-filter");
+    if (filter) {
+      filter.dataset.group = "all";
+      filter.open = false;
+      filter.querySelector(".keg-wall-filter__title").textContent = "Current Inventory";
+      filter.querySelectorAll("[data-inventory-group-filter]").forEach(option => {
+        const active = option.dataset.inventoryGroupFilter === "all";
+        option.classList.toggle("is-active", active);
+        option.setAttribute("aria-pressed", String(active));
+      });
+    }
+    renderInventory();
+  }
   switchTab(targetTab);
+  if (targetTab === "inventory") {
+    requestAnimationFrame(() => document.querySelector("#inventory-panel")?.scrollIntoView({ block: "start", behavior: "smooth" }));
+  }
   if (targetTab !== "weekly-plan") return;
 
   const selector = {
@@ -6840,13 +6861,68 @@ function openMondayRunStep(stepId, target) {
   });
 }
 
+function openCoolerCountWall(wall) {
+  activeKegWallFilter = wall === "karaoke" ? "karaoke" : "main";
+  inventorySpeechKegScope = activeKegWallFilter;
+  coolerCountVerificationMessage = "";
+  switchTab("keg-levels");
+  renderKegLevels();
+  requestAnimationFrame(() => {
+    const heading = kegWalls?.querySelector(".keg-wall-filter > summary");
+    heading?.scrollIntoView({ block: "start", behavior: "smooth" });
+    heading?.focus({ preventScroll: true });
+  });
+}
+
+function renderCoolerCountVerification() {
+  const button = document.getElementById("cooler-count-continue");
+  if (!button) return;
+  const countWall = ["main", "karaoke"].includes(activeKegWallFilter);
+  button.hidden = hasPublishedWeeklyPlanRecommendations();
+  button.disabled = coolerCountVerifying || !parAgentState?.initialized;
+  button.textContent = coolerCountVerifying ? "Saving cooler counts..."
+    : !countWall ? "Start Count"
+      : activeKegWallFilter === "main" ? "Main Cooler Count Verified" : "Karaoke Cooler Count Verified";
+  const feedback = document.getElementById("cooler-count-feedback");
+  if (feedback) {
+    feedback.textContent = coolerCountVerificationMessage;
+    feedback.hidden = !feedback.textContent;
+  }
+}
+
+async function verifyCoolerCountAndContinue() {
+  if (coolerCountVerifying || !parAgentState?.initialized || hasPublishedWeeklyPlanRecommendations()) return;
+  const wall = activeKegWallFilter;
+  if (!["main", "karaoke"].includes(wall)) {
+    openCoolerCountWall("main");
+    return;
+  }
+  coolerCountVerifying = true;
+  coolerCountVerificationMessage = "Saving cooler counts...";
+  renderCoolerCountVerification();
+  try {
+    if (!await flushPendingParAgentStateSync()) {
+      throw new Error(parAgentError || "Cooler counts have not finished saving. Your entries are preserved; press the verification button to retry.");
+    }
+    coolerCountVerificationMessage = "";
+    completeCoolerWallCount(wall);
+    if (wall === "main") openCoolerCountWall("karaoke");
+    else if (!hasCompletedCoolerWallCount("main")) openCoolerCountWall("main");
+    else openMondayRunStep("inventory", "inventory");
+  } catch (error) {
+    coolerCountVerificationMessage = error.message || "Cooler counts could not be saved. Your entries remain here.";
+  } finally {
+    coolerCountVerifying = false;
+    renderCoolerCountVerification();
+    renderWeeklyPlan();
+    renderDashboardOverview();
+  }
+}
+
 document.addEventListener("click", (event) => {
   const button = event.target?.closest?.("#cooler-count-continue");
-  if (!button || button.disabled || parAgentStateOutbox) return;
-  completeCoolerCount();
-  switchTab("inventory");
-  renderWeeklyPlan();
-  renderDashboardOverview();
+  if (!button || button.disabled) return;
+  void verifyCoolerCountAndContinue();
 });
 
 let tapRepairBriefing = { items: [], unavailable: false };
@@ -8839,7 +8915,7 @@ function renderWeeklyPlan() {
     ` : ""}
     ${planLocked
       ? ""
-      : `<button class="primary-button" type="button" data-monday-run-step="inventory" data-dashboard-target="inventory"${parAgentRunning || weeklyPlanUpdating ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Saving snapshot..." : "Count inventory"}</button>`}
+      : `<button class="primary-button" type="button" data-monday-run-step="${escapeHtml(mondayRun.nextStep.id)}" data-dashboard-target="${escapeHtml(mondayRun.nextStep.target)}"${parAgentRunning || weeklyPlanUpdating ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Saving snapshot..." : mondayRun.nextStep.id === "cooler" ? "Start Count" : "Continue Count"}</button>`}
   `;
   const liveWeeklyPlanBody = `
     <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(getWeeklyPlanManagerMessage(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : "")))}</p>
@@ -8950,6 +9026,7 @@ function renderWeeklyPlan() {
 function renderKegLevels() {
   if (dashboardRenderCoordinator.defer("keg-levels", renderKegLevels)) return;
   if (!kegSummary || !kegWalls) return;
+  renderCoolerCountVerification();
 
   const wallNames = ["Main", "Karaoke", "Patio"];
   const totalTaps = kegWallItems.length;
@@ -13298,7 +13375,7 @@ async function runWeeklyPlanUpdate() {
     lockedSuccessfully = true;
   } catch (error) {
     parAgentError = error.message || "Weekly Plan update failed.";
-    weeklyPlanRefreshMessage = `Snapshot save did not finish: ${parAgentError} Submit inventory again to retry.`;
+    weeklyPlanRefreshMessage = `Snapshot save did not finish: ${parAgentError} Press Bottle inventory verified again to retry.`;
   } finally {
     weeklyPlanUpdating = false;
     inventorySharedSaving = inventoryFieldSyncPendingCount > 0 || inventoryFieldSyncTimers.size > 0;
@@ -14279,6 +14356,7 @@ function stageInventoryFieldBatchOutbox() {
     id: clean(entry.payload.id),
     field: clean(entry.payload.field),
     value: clean(entry.payload.value),
+    countedAt: entry.payload.countedAt || entry.updatedAt,
   }));
   if (changes.some((change) => !change.id || !["onHand", "par"].includes(change.field))) return null;
   const entry = createOperationalOutboxEntry({
@@ -14346,6 +14424,7 @@ function canAutoRecoverInventoryOperation(kind, entry, currentRevision) {
   const action = clean(entry?.payload?.action);
   return kind === "field"
     || action === "batch-update-fields"
+    || action === "reorder-items"
     || canSafelyRetryOperationalOutbox(entry, currentRevision);
 }
 
@@ -14886,6 +14965,8 @@ async function flushPendingInventorySyncs() {
   inventoryFieldSyncTimers.clear();
   timers.forEach((timer) => clearTimeout(timer));
   inventoryFieldSyncFailures.clear();
+  if (!await retireRejectedInventorySnapshots()) return false;
+  if (!recoverRoutineInventoryConflicts()) return false;
   stageInventoryFieldBatchOutbox();
   const operations = getPendingInventoryOperations();
   const conflictEntry = operations.find(({ entry }) => entry?.conflict)?.entry;
@@ -14944,6 +15025,33 @@ async function refreshInventoryRevisionForSnapshot() {
   return state;
 }
 
+function recoverRoutineInventoryConflicts() {
+  // Fields and arrangement changes merge on the server. A stale browser-wide
+  // revision must not strand these operations behind an obsolete conflict flag.
+  const recover = (kind, entry) => entry.conflict
+    && canAutoRecoverInventoryOperation(kind, entry, inventorySharedRevision)
+    ? markOperationalOutboxFailure(entry) : entry;
+  inventoryFieldOutbox = Object.fromEntries(Object.entries(inventoryFieldOutbox)
+    .map(([key, entry]) => [key, recover("field", entry)]));
+  inventoryActionOutbox = inventoryActionOutbox.map(entry => recover("action", entry));
+  return saveInventoryFieldOutbox() && saveInventoryActionOutbox();
+}
+
+async function refreshInventoryForSubmit() {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (!await flushPendingInventorySyncs()) {
+      throw new Error("The entered counts have not finished saving. They are preserved for retry.");
+    }
+    const latest = await requestSharedInventory();
+    if (!latest.initialized) throw new Error("Inventory is still connecting. Your entries remain preserved.");
+    // Keep any edit entered while this read was in flight, then save it first.
+    if (getPendingInventoryOperations().length || inventoryFieldSyncPendingCount || inventoryFieldSyncTimers.size) continue;
+    applySharedInventoryState(latest, { rebuild: true });
+    return;
+  }
+  throw new Error("Counts are still being entered. Finish the count, then submit again.");
+}
+
 async function reconcileInventorySnapshotConflict() {
   if (inventorySharedSaving) return;
   const pending = getPendingInventoryOperations();
@@ -14957,14 +15065,12 @@ async function reconcileInventorySnapshotConflict() {
     const state = await refreshInventoryRevisionForSnapshot();
     // Preserve the failed capture for recovery, but never replay stale PMB,
     // pricing, or weekly-plan inputs against a newer inventory revision.
-    localStorage.setItem(`onpar-inventory-snapshot-recovery-${Date.now()}`, JSON.stringify({
-      recoveredAt: new Date().toISOString(),
-      sharedRevision: state.revision,
-      inventory: getLocalInventorySnapshotInputs(),
-      operations: pending,
-    }));
+    await Promise.all(pending.map(({ entry }) => inventorySnapshotRecoveryJournal.put({
+      ...entry, archivedAt: new Date().toISOString(), sharedRevision: state.revision,
+    })));
     const previousOutbox = inventoryActionOutbox;
-    inventoryActionOutbox = [];
+    const recoveredIds = new Set(pending.map(({ entry }) => entry.id));
+    inventoryActionOutbox = inventoryActionOutbox.filter(entry => !recoveredIds.has(entry.id));
     if (!saveInventoryActionOutbox()) {
       inventoryActionOutbox = previousOutbox;
       throw new Error("The browser could not persist the recovery. The blocked attempt and your counts are preserved.");
@@ -14972,6 +15078,7 @@ async function reconcileInventorySnapshotConflict() {
     inventorySharedSaveError = "";
     inventoryFieldSyncFailures.clear();
     applySharedInventoryState(state, { rebuild: true });
+    overlayInventoryOutboxes();
     inventorySharedMessage = "Your counts match saved inventory. The blocked snapshot attempt was backed up and removed. Use Save & Lock Plan to capture a fresh plan; existing snapshots were not changed.";
   } catch (error) {
     inventorySharedSaveError = error.message || "Snapshot recovery could not finish.";
@@ -14995,6 +15102,11 @@ function renderInventorySummary() {
   const needsSetup = inventorySharedProvisioned && !inventorySharedInitialized;
   const needsRecovery = inventoryActionOutbox.some((entry) => entry.conflict && entry.payload.action === "save-snapshot");
   const message = inventorySharedSaveError || inventorySharedMessage;
+  const feedback = document.querySelector("#inventory-submit-feedback");
+  if (feedback) {
+    feedback.textContent = message;
+    feedback.hidden = !feedback.textContent;
+  }
   inventorySummary.hidden = !needsSetup && !needsRecovery && !message;
   inventorySummary.innerHTML = `
     <div class="sync-panel inventory-actions-panel">
@@ -15018,7 +15130,7 @@ function bindInventorySummaryEvents() {
 }
 
 async function clearAllInventoryOnHand() {
-  const countedItems = inventoryItems.filter((item) => getUncountedInventoryAmount(item) === null);
+  const countedItems = inventoryItems.filter((item) => !isInventoryCountExcluded(item));
   const changes = countedItems.map((item) => ({ id: item.id, field: "onHand", value: "" }));
   const populatedCount = countedItems.filter((item) => clean(item.onHandDisplay) !== "").length;
   if (!changes.length || !confirmDashboardAction(
@@ -15065,7 +15177,7 @@ function speechProposalNeedsReview(proposal) {
 }
 
 function getInventorySpeechSourceItems() {
-  const inventorySources = inventoryItems.filter((item) => getUncountedInventoryAmount(item) === null).map((item) => ({
+  const inventorySources = inventoryItems.filter((item) => !isInventoryCountExcluded(item)).map((item) => ({
     id: item.id,
     name: item.name,
     target: "inventory",
@@ -15462,7 +15574,7 @@ function stopInventorySpeechRecognition({ review = null } = {}) {
 function buildCompletedInventorySectionChanges(group, submittedChanges) {
   const changes = new Map(submittedChanges.map((change) => [change.id, change]));
   inventoryItems.forEach((item) => {
-    if (item.group !== group || getUncountedInventoryAmount(item) !== null || changes.has(item.id)) return;
+    if (item.group !== group || isInventoryCountExcluded(item) || changes.has(item.id)) return;
     changes.set(item.id, { id: item.id, target: "inventory", value: "0" });
   });
   const submittedAt = new Date().toISOString();
@@ -15481,7 +15593,15 @@ function buildCompletedInventorySectionChanges(group, submittedChanges) {
 }
 
 async function submitInventoryCount() {
-  if (inventoryCountSubmitting || weeklyPlanUpdating || parAgentRunning || !inventorySharedInitialized) return;
+  if (inventoryCountSubmitting) return;
+  if (weeklyPlanUpdating || parAgentRunning || !inventorySharedInitialized) {
+    inventorySharedSaveError = "";
+    inventorySharedMessage = !inventorySharedInitialized
+      ? "Inventory is still connecting. Your counts remain here; retry when loading finishes."
+      : "The dashboard is still updating the plan. Wait for it to finish, then press Bottle inventory verified again.";
+    renderInventorySummary();
+    return;
+  }
   if (getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date())) {
     openMondayRunStep("orders", "weekly-plan");
     return;
@@ -15507,24 +15627,22 @@ async function submitInventoryCount() {
     const retryingSavedSnapshot = Boolean(getCurrentMondayInventorySnapshot(inventoryHistory, new Date()))
       && !clean(parAgentState?.recommendations?.weeklyPlanRecalledAt);
     if (!retryingSavedSnapshot) {
-      if (!(await flushPendingInventorySyncs())) {
-        throw new Error("The entered counts have not finished saving. They are preserved for retry.");
-      }
+      await refreshInventoryForSubmit();
       const changes = inventoryItems
-        .filter((item) => getUncountedInventoryAmount(item) === null)
+        .filter((item) => !isInventoryCountExcluded(item))
         .map((item) => ({ id: item.id, value: clean(item.onHandDisplay) }));
-      if (!changes.length) return;
+      if (!changes.length) throw new Error("Enter inventory counts before submitting.");
       if (changes.some((change) => change.value === "" || !Number.isFinite(Number(change.value)) || Number(change.value) < 0)) {
         throw new Error("Enter a valid on-hand count for each counted item before submitting. Existing counts are preserved.");
       }
       const saved = await runSharedInventoryAction({
         action: "batch-update-fields", source: "section-count",
-        changes: changes.map((change) => ({ id: change.id, field: "onHand", value: change.value })),
+        changes: changes.map((change) => ({ id: change.id, field: "onHand", value: change.value, expectedValue: clean(inventoryOnHandOverrides[change.id]) })),
       }, { successMessage: "Counts saved. Saving weekly snapshot...", rebuild: true });
       if (!saved) throw new Error("The inventory count could not be saved. It is preserved for retry.");
     }
     const published = await runWeeklyPlanUpdate();
-    if (!published) throw new Error(weeklyPlanRefreshMessage || "Counts are saved, but the weekly snapshot needs a retry. Submit inventory again.");
+    if (!published) throw new Error(weeklyPlanRefreshMessage || "Counts are saved, but the weekly snapshot needs a retry. Press Bottle inventory verified again.");
     inventorySharedMessage = "Cooler and inventory counts saved to the weekly snapshot.";
   } catch (error) {
     inventorySharedMessage = error.message;
@@ -15621,7 +15739,7 @@ function renderInventoryStockTable(groupedItems) {
   inventoryTable.innerHTML = "";
   if (inventorySubmitCountButton) {
     inventorySubmitCountButton.disabled = inventoryCountSubmitting || !inventorySharedInitialized;
-    inventorySubmitCountButton.textContent = inventoryCountSubmitting ? "Submitting..." : "Submit inventory";
+    inventorySubmitCountButton.textContent = inventoryCountSubmitting ? "Saving verified inventory..." : "Bottle inventory verified";
     inventorySubmitCountButton.onclick = () => void submitInventoryCount();
   }
   const filter = document.querySelector("#inventory-group-filter");
@@ -15999,7 +16117,7 @@ function getInventoryVendorTotals(items) {
 
 function createInventoryRow(item, mode) {
   const row = document.createElement("tr");
-  const assumedOnHand = getUncountedInventoryAmount(item);
+  const notCounted = isInventoryCountExcluded(item);
   row.dataset.inventoryId = item.id;
   if (mode === "stock") row.dataset.globalSearchKey = `inventory:${item.id}`;
   const orderQuantityForMode = mode === "order" ? getInventoryRoundedOrderQuantity(item) : item.orderQuantity;
@@ -16017,7 +16135,7 @@ function createInventoryRow(item, mode) {
   const twoWeekNeed = rollingPlan && !item.orderHoldReason
     ? formatInventoryQuantity(item.orderingPlan.cocktailPrepRequiredBottles)
     : '<span class="inventory-order-zero">-</span>';
-  const fallbackSetting = mode === "stock" && !rollingPlan ? `
+  const fallbackSetting = mode === "stock" && !rollingPlan && !isKitchenManagedInventoryItem(item) ? `
     <label class="ordering-fallback-setting"><span>Fallback stock target (units)</span>
       <input class="inventory-input inventory-input--par" data-field="par" name="inventory-par-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" value="${escapeHtml(item.parDisplay)}" aria-label="Fallback stock target for ${escapeHtml(item.name)}" ${isRowEditing ? "" : "readonly"}>
     </label>` : "";
@@ -16044,7 +16162,7 @@ function createInventoryRow(item, mode) {
     <td><strong ${mode === "stock" ? 'class="inventory-item-drag-target" draggable="true" tabindex="0" title="Drag to reorder; use arrow keys when focused"' : ""}>${escapeHtml(item.name)}</strong>${isRowEditing && item.note ? `<span class="table-note">${escapeHtml(item.note)}</span>` : ""}${linkedNotes.join("")}
       ${isRowEditing ? fallbackSetting : ""}
     </td>
-    <td>${assumedOnHand !== null ? '<span class="inventory-not-counted">Not counted</span>' : mode === "stock" ? `<input class="inventory-input" data-field="onHand" name="inventory-on-hand-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" pattern="${item.allowsDecimal ? "[0-9]*[.]?[0-9]*" : "[0-9]*"}" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getInventoryDisplayValue(item, "onHand"))}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>
+    <td>${notCounted ? `<span class="inventory-not-counted">${isKitchenManagedInventoryItem(item) ? "Kitchen managed" : "Not counted"}</span>` : mode === "stock" ? `<input class="inventory-input" data-field="onHand" name="inventory-on-hand-${escapeHtml(item.id)}" type="text" inputmode="${inputMode}" pattern="${item.allowsDecimal ? "[0-9]*[.]?[0-9]*" : "[0-9]*"}" autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-form-type="other" value="${escapeHtml(getInventoryDisplayValue(item, "onHand"))}" aria-label="On hand for ${escapeHtml(item.name)}">` : formatInventoryQuantity(item.onHandDisplay)}</td>
     ${mode === "order" ? `<td data-cell="two-week-need">${twoWeekNeed}</td>
     <td data-cell="order" class="${item.orderQuantity > 0 ? "inventory-order-flag" : "muted"}">${orderCell}</td>
     <td>${escapeHtml(packLabel)}</td>
@@ -16182,7 +16300,7 @@ function reorderInventoryItemBefore(sourceId, targetId, after = false) {
 
 function applyInventoryCabinetMove({ id, group }) {
   if (!id || !["Liquor Cabinet", "Mixer Cabinet", "Other"].includes(group)) return;
-  if (getUncountedInventoryAmount(findInventoryItem(id)) !== null) group = "Other";
+  if (isInventoryCountExcluded(findInventoryItem(id))) group = "Other";
   inventoryGroupOverrides[id] = group;
   inventoryItems = inventoryItems.map((item) => item.id === id ? { ...item, group } : item);
   writeDashboardLocalStorageValue("onpar-inventory-group-overrides", inventoryGroupOverrides);
@@ -16386,7 +16504,8 @@ function getInventoryDisplayValue(item, field) {
 }
 
 function persistInventoryField(id, field, value) {
-  if (field === "onHand" && getUncountedInventoryAmount(findInventoryItem(id)) !== null) return;
+  if (isKitchenManagedInventoryItem(findInventoryItem(id))) return;
+  if (field === "onHand" && isInventoryCountExcluded(findInventoryItem(id))) return;
   if (field === "par") {
     persistInventoryOverride(inventoryParOverrides, saveInventoryParOverrides, id, value);
   } else {
@@ -16417,6 +16536,7 @@ function normalizeInventoryInputValue(value, allowsDecimal) {
 
 function recalculateInventoryItem(item) {
   Object.assign(item, applyInventoryCountPolicy(item));
+  if (isKitchenManagedInventoryItem(item)) return;
   item.onHand = toNumber(item.onHandDisplay);
   item.par = toNumber(item.parDisplay);
   item.totalValue = item.onHand * item.unitCost;
@@ -16441,7 +16561,7 @@ function getInventoryRealityUsageItems() {
 
 function getInventoryRealityCheckModel() {
   return buildInventoryRealityCheck({
-    currentItems: inventoryItems,
+    currentItems: inventoryItems.filter(item => !isKitchenManagedInventoryItem(item)),
     previousSnapshot: inventoryHistory[0] || null,
     receipts: weeklyOrderTracking.available
       ? weeklyOrderTracking.vendors.flatMap((vendor) => vendor.items || [])
@@ -16512,25 +16632,33 @@ function toggleInventoryRowEdit(id) {
   renderInventory();
 }
 
+async function retireRejectedInventorySnapshots() {
+  const rejected = inventoryActionOutbox.filter(entry => entry.conflict && entry.payload?.action === "save-snapshot");
+  if (!rejected.length) return true;
+  try {
+    // These captures cannot be reused with new inputs. Archive each independently
+    // before retiring it; never remove an unacknowledged network-only attempt.
+    await Promise.all(rejected.map(entry => inventorySnapshotRecoveryJournal.put({
+      ...entry, archivedAt: new Date().toISOString(),
+    })));
+    const rejectedIds = new Set(rejected.map(entry => entry.id));
+    const previous = inventoryActionOutbox;
+    inventoryActionOutbox = inventoryActionOutbox.filter(entry => !rejectedIds.has(entry.id));
+    if (!saveInventoryActionOutbox()) {
+      inventoryActionOutbox = previous;
+      return false;
+    }
+    if (!getPendingInventoryOperations().length) inventorySharedSaveError = "";
+    return true;
+  } catch (error) {
+    inventorySharedSaveError = `Inventory recovery could not finish: ${error.message}. Your entries remain here.`;
+    return false;
+  }
+}
+
 async function saveInventorySnapshot(options = {}) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    // Only discard attempts the server explicitly rejected, never a save with
-    // an uncertain network outcome. Keep a durable copy for recovery.
-    const rejected = inventoryActionOutbox.filter((entry) => entry.conflict && entry.payload?.action === "save-snapshot");
-    if (rejected.length) {
-      localStorage.setItem(`onpar-inventory-snapshot-recovery-${Date.now()}`, JSON.stringify({
-        recoveredAt: new Date().toISOString(),
-        operations: rejected,
-      }));
-      const previous = inventoryActionOutbox;
-      const rejectedIds = new Set(rejected.map((entry) => entry.id));
-      inventoryActionOutbox = inventoryActionOutbox.filter((entry) => !rejectedIds.has(entry.id));
-      if (!saveInventoryActionOutbox()) {
-        inventoryActionOutbox = previous;
-        return false;
-      }
-      if (!getPendingInventoryOperations().length) inventorySharedSaveError = "";
-    }
+    if (!await retireRejectedInventorySnapshots()) return false;
     if ((getPendingInventoryOperations().length || inventoryFieldSyncPendingCount || inventoryFieldSyncTimers.size)
       && !await flushPendingInventorySyncs()) return false;
     const latest = await requestSharedInventory();
@@ -16781,7 +16909,7 @@ function getInventorySnapshotSummary() {
 }
 
 function getInventorySnapshotItems() {
-  return groupInventoryForDisplay([...inventoryItems]).flatMap(([, items]) => items).map((item) => ({
+  return groupInventoryForDisplay(inventoryItems.filter(item => !isKitchenManagedInventoryItem(item))).flatMap(([, items]) => items).map((item) => ({
     id: item.id,
     name: item.name,
     group: item.group,
@@ -16793,7 +16921,7 @@ function getInventorySnapshotItems() {
     casePackaged: item.casePackaged,
     unitCost: item.unitCost,
     totalValue: item.totalValue,
-    note: getUncountedInventoryAmount(item) === null ? item.note
+    note: !isInventoryCountExcluded(item) ? item.note
       : `Not counted; assumes ${getUncountedInventoryAmount(item)} units on hand.`,
   }));
 }

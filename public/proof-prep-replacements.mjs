@@ -1,3 +1,5 @@
+import { findPlanningCocktailRecipe } from "./planning-cocktail-recipe.mjs";
+import { isKitchenManagedInventoryItem } from "./inventory-count-policy.mjs";
 import { MINIMUM_KEG_CUSHION } from "./keg-demand-policy.mjs";
 import { carryForwardPlannedProofPrep } from "./proof-planned-prep.mjs";
 
@@ -44,27 +46,14 @@ function key(value) {
     .trim();
 }
 
-function getRecipe(cocktail, recipes, recipeAliases = {}) {
-  const cocktailKeys = [cocktail?.recipeId, cocktail?.recipeName, cocktail?.name]
-    .map(key)
-    .filter(Boolean);
-  if (!cocktailKeys.length) return null;
-  const aliasKeys = Object.entries(recipeAliases).flatMap(([productName, recipeName]) => (
-    cocktailKeys.includes(key(productName)) ? [key(recipeName)] : []
-  ));
-  const matchingKeys = new Set([...cocktailKeys, ...aliasKeys]);
-  return recipes.find((recipe) => (
-    matchingKeys.has(key(recipe?.id))
-    || matchingKeys.has(key(recipe?.title || recipe?.name))
-  )) || null;
-}
 
 function getProofInventoryItem(ingredient, inventoryItems) {
+  if (isKitchenManagedInventoryItem(ingredient)) return null;
   const ingredientKey = key(ingredient?.inventoryId || ingredient?.name);
   if (!ingredientKey) return null;
   return inventoryItems.find((item) => {
     const vendor = clean(item?.vendor || item?.vendorProduct?.vendor || item?.vendorProduct?.syncVendor);
-    if (vendor.toLowerCase() !== "proof") return false;
+    if (vendor.toLowerCase() !== "proof" || isKitchenManagedInventoryItem(item)) return false;
     return [item?.id, item?.name, item?.vendorProduct?.productName].some((value) => key(value) === ingredientKey);
   }) || null;
 }
@@ -109,7 +98,7 @@ function getProjectedProofUsage({
   let unresolvedRecipe = false;
   (Array.isArray(cocktails) ? cocktails : []).forEach((cocktail) => {
     const batches = Math.max(0, Math.floor(number(cocktail?.quantity)));
-    const recipe = batches ? getRecipe(cocktail, Array.isArray(recipes) ? recipes : [], recipeAliases) : null;
+    const recipe = batches ? findPlanningCocktailRecipe(cocktail, Array.isArray(recipes) ? recipes : [], recipeAliases) : null;
     if (batches && !recipe) unresolvedRecipe = true;
     if (!recipe) return;
     (Array.isArray(recipe.ingredients) ? recipe.ingredients : []).forEach((ingredient) => {
@@ -220,7 +209,7 @@ function buildProofLookAheadContext(options) {
     const identity = clean(tap.key) || `${clean(tap.wall)}:${tapNumber}`;
     if (seen.has(identity)) continue;
     seen.add(identity);
-    const recipe = getRecipe(tap, recipes, options.recipeAliases);
+    const recipe = findPlanningCocktailRecipe(tap, recipes, options.recipeAliases);
     const average = Number(tap.avgWeeklyKegs);
     const stock = Number(tap.currentStockKegs);
     if (!recipe || tap.inventoryStateMissing

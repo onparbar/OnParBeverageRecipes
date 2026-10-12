@@ -1,4 +1,4 @@
-import { getUncountedInventoryAmount } from "./inventory-count-policy.mjs";
+import { isInventoryCountExcluded } from "./inventory-count-policy.mjs";
 
 // Validate setup, never interpret a missing inventory link as zero usage.
 export function validateRecipeSetup(recipe, { inventory = [], normalize, mappingFor }) {
@@ -8,12 +8,12 @@ export function validateRecipeSetup(recipe, { inventory = [], normalize, mapping
   for (const ingredient of ingredients) {
     const name = String(ingredient.name || "").trim();
     // Operating-assumption ingredients do not require stock or supplier setup.
-    if (getUncountedInventoryAmount(ingredient) !== null) continue;
+    if (isInventoryCountExcluded(ingredient)) continue;
     const explicitId = ingredient.inventoryItemId || ingredient.inventoryId || ingredient.itemId;
     const matches = inventory.filter(item => explicitId
       ? item.id === explicitId
       : normalize(item.name) === normalize(name));
-    if (matches.length === 1 && (matches[0].notCounted === true || getUncountedInventoryAmount(matches[0]) !== null)) {
+    if (matches.length === 1 && (matches[0].notCounted === true || isInventoryCountExcluded(matches[0]))) {
       ingredient.inventoryItemId = matches[0].id;
       continue;
     }

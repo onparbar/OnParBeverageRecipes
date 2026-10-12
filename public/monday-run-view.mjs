@@ -3,6 +3,8 @@ import { formatOperatingWeekLabel } from "./weekly-action-plan.mjs";
 
 export function buildMondayRunModel({
   coolerCountComplete = false,
+  mainCoolerCountComplete = coolerCountComplete,
+  karaokeCoolerCountComplete = coolerCountComplete,
   coolerCountSaving = false,
   kegCountSaveError = "",
   inventoryMissingCount = 0,
@@ -19,8 +21,10 @@ export function buildMondayRunModel({
   orderingBlocked = false,
   now = new Date(),
 } = {}) {
+  const mainComplete = planLocked || mondaySnapshotSaved
+    || (mainCoolerCountComplete && !coolerCountSaving && !kegCountSaveError);
   const coolerComplete = planLocked || mondaySnapshotSaved
-    || (coolerCountComplete && !coolerCountSaving && !kegCountSaveError);
+    || (mainComplete && karaokeCoolerCountComplete && !coolerCountSaving && !kegCountSaveError);
   const lineCount = Math.max(0, toNumber(orderLineCount));
   const remainingVendors = vendorOrders.filter((vendor) => vendor?.ordered !== true).length;
   const trackingMatches = expectedVendorCount == null || vendorOrders.length === expectedVendorCount;
@@ -32,32 +36,39 @@ export function buildMondayRunModel({
   const steps = [
     {
       id: "cooler",
-      label: "Cooler Count",
+      label: "Main Cooler",
+      target: "keg-levels",
+      complete: mainComplete,
+      status: mainComplete ? "Verified" : kegCountSaveError ? "Save needs retry" : coolerCountSaving ? "Saving" : "Verify Main cooler counts",
+    },
+    {
+      id: "karaoke",
+      label: "Karaoke Cooler",
       target: "keg-levels",
       complete: coolerComplete,
-      status: coolerComplete ? "Done" : kegCountSaveError ? "Save needs retry" : coolerCountSaving ? "Saving" : "Count coolers",
+      status: coolerComplete ? "Verified" : !mainComplete ? "After Main cooler" : kegCountSaveError ? "Save needs retry" : coolerCountSaving ? "Saving" : "Verify Karaoke cooler counts",
     },
     {
       id: "inventory",
-      label: "Inventory",
+      label: "Bottle Inventory",
       target: "inventory",
       complete: planLocked,
       status: planLocked ? "Snapshot saved"
         : inventorySaving ? "Saving snapshot"
           : inventorySharedSaveError ? "Save needs retry"
-            : mondaySnapshotSaved ? "Submit to finish saving"
+            : mondaySnapshotSaved ? "Verify to finish saving"
               : !coolerComplete ? "After cooler count"
                 : !inventorySharedInitialized ? "Set up inventory"
-                  : inventoryCountedThisWeek && inventoryMissingCount === 0 ? "Ready to submit"
-                    : inventoryMissingCount > 0 ? `${formatNumber(inventoryMissingCount)} left` : "Count inventory",
+                  : inventoryCountedThisWeek && inventoryMissingCount === 0 ? "Ready to verify"
+                    : inventoryMissingCount > 0 ? `${formatNumber(inventoryMissingCount)} left` : "Verify bottle inventory",
     },
     {
       id: "orders",
-      label: "Order",
+      label: "Weekly Plan",
       target: "weekly-plan",
       complete: ordersComplete,
       status: ordersComplete ? lineCount > 0 ? "All placed" : "None needed"
-        : !planLocked ? "After inventory submit"
+        : !planLocked ? "After bottle inventory"
           : !weeklyOrderTrackingAvailable || !trackingMatches ? "Loading orders"
             : orderingBlocked ? "Review order issues"
               : remainingVendors > 0 ? `${formatNumber(remainingVendors)} left` : "Review orders",
@@ -76,7 +87,7 @@ export function buildMondayRunModel({
 }
 
 function actionLabel(run) {
-  return run.nextIndex === 0 ? "Start" : "Continue";
+  return run.nextIndex === 0 ? "Start Count" : "Continue";
 }
 
 function actionButton(run) {

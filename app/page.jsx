@@ -362,7 +362,8 @@ export default function DashboardPage() {
             <div className="keg-walls" id="keg-walls"></div>
           </div>
           <div className="inventory-submit-actions">
-            <button className="primary-button" id="cooler-count-continue" type="button">Continue to Inventory</button>
+            <p id="cooler-count-feedback" className="sync-status" role="status" aria-live="polite" hidden></p>
+            <button className="primary-button" id="cooler-count-continue" type="button">Start Count</button>
           </div>
         </section>
 
@@ -805,7 +806,8 @@ export default function DashboardPage() {
                     <span>Reason for submitting after Monday</span>
                     <input id="inventory-snapshot-reason" type="text" maxLength="240" autoComplete="off" />
                   </label>
-                  <button className="primary-button" id="inventory-submit-count" type="button" aria-label="Submit all inventory counts" disabled>Submit inventory</button>
+                  <p id="inventory-submit-feedback" className="sync-status" role="status" aria-live="polite" hidden></p>
+                  <button className="primary-button" id="inventory-submit-count" type="button" disabled>Bottle inventory verified</button>
                 </div>
 
               </section>

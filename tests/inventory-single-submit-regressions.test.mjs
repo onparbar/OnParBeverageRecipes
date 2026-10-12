@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { getInventoryCountSections } from "../public/inventory-weekly-counts.mjs";
-import { getUncountedInventoryAmount, isWeeklyCountOnlyInventoryItem } from "../public/inventory-count-policy.mjs";
+import { isInventoryCountExcluded, isWeeklyCountOnlyInventoryItem } from "../public/inventory-count-policy.mjs";
 
 const source = readFileSync(new URL("../public/dashboard.js", import.meta.url), "utf8");
 const page = readFileSync(new URL("../app/page.jsx", import.meta.url), "utf8");
@@ -25,6 +25,11 @@ function makeHarness(overrides = {}) {
   const scope = {
     inventorySharedInitialized: true,
     inventoryCountSubmitting: false,
+    getPendingInventoryOperations: () => [],
+    renderInventorySummary: () => {},
+    inventoryFieldSyncPendingCount: 0, inventoryFieldSyncTimers: new Map(),
+    requestSharedInventory: async () => ({ initialized: true }),
+    applySharedInventoryState: () => {},
     weeklyPlanUpdating: false, parAgentRunning: false, parAgentState: {},
     getCurrentWeeklyPlanSnapshot: () => null,
     openMondayRunStep: () => {},
@@ -35,6 +40,7 @@ function makeHarness(overrides = {}) {
     renderDashboardOverview: () => {},
     inventorySubmitCountButton: { disabled: false, textContent: "Submit inventory" },
     inventorySharedMessage: "",
+    inventoryOnHandOverrides: { vodka: "3", gin: "4", lime: "5", garnish: "2", "na-beer": "45" },
     inventoryItems: [
       { id: "vodka", name: "Vodka", group: "Liquor Cabinet", onHandDisplay: "3" },
       { id: "gin", name: "Gin", group: "Liquor Cabinet", onHandDisplay: "4" },
@@ -47,7 +53,7 @@ function makeHarness(overrides = {}) {
     inventoryCountedItemsAt: { vodka: stamp, lime: stamp, "na-beer": stamp, gin: "2026-09-06T15:00:00.000Z" },
     clean: (value) => String(value ?? "").trim(),
     isRecommendationForOperatingWeek: (value) => value === stamp,
-    getUncountedInventoryAmount,
+    isInventoryCountExcluded,
     isWeeklyCountOnlyInventoryItem,
     getInventoryCountSections: (items, counts) => getInventoryCountSections(items, counts, now),
     Date: class extends Date {
@@ -61,7 +67,7 @@ function makeHarness(overrides = {}) {
     ...overrides,
   };
   const context = vm.createContext(scope);
-  vm.runInContext(`${functionSource("buildCompletedInventorySectionChanges")}\n${functionSource("submitInventoryCount")}`, context);
+  vm.runInContext(`${functionSource("buildCompletedInventorySectionChanges")}\n${functionSource("refreshInventoryForSubmit")}\n${functionSource("submitInventoryCount")}`, context);
   return { scope, writes, confirmations, submit: () => scope.submitInventoryCount() };
 }
 
@@ -185,4 +191,39 @@ test("a snapshot failure keeps verified counts and permits a snapshot-only retry
   assert.equal(h.writes.length, 1);
   assert.equal(publications, 2);
   assert.match(h.scope.inventorySharedMessage, /saved to the weekly snapshot/);
+});
+
+
+test("submission refreshes shared counts before confirming instead of overwriting a newer count", async () => {
+  const h = makeHarness();
+  h.scope.applySharedInventoryState = () => { h.scope.inventoryItems[0].onHandDisplay = "10"; h.scope.inventoryOnHandOverrides.vodka = "10"; };
+  await h.submit();
+  assert.equal(h.writes[0].changes[0].value, "10");
+  assert.equal(h.writes[0].changes[0].expectedValue, "10");
+});
+
+test("an edit during refresh is flushed before the next shared read", async () => {
+  const events = [];
+  let pending = false;
+  let reads = 0;
+  const h = makeHarness({
+    flushPendingInventorySyncs: async () => { events.push("flush"); pending = false; return true; },
+    requestSharedInventory: async () => { events.push("read"); if (++reads === 1) pending = true; return { initialized: true }; },
+    getPendingInventoryOperations: () => pending ? [{}] : [],
+    applySharedInventoryState: () => events.push("apply"),
+  });
+  await h.submit();
+  assert.deepEqual(events, ["flush", "read", "flush", "read", "apply"]);
+  assert.equal(h.writes.length, 1);
+});
+
+test("busy and disconnected submit clicks show feedback instead of silently returning", async () => {
+  for (const flag of ["weeklyPlanUpdating", "parAgentRunning", "inventorySharedInitialized"]) {
+    let renders = 0;
+    const h = makeHarness({ [flag]: flag !== "inventorySharedInitialized", renderInventorySummary: () => renders++ });
+    await h.submit();
+    assert.match(h.scope.inventorySharedMessage, /still/);
+    assert.equal(renders, 1);
+    assert.equal(h.writes.length, 0);
+  }
 });

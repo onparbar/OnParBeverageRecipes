@@ -277,11 +277,10 @@ test("a recovered batch of reviewed counts merges without replacing unrelated fi
   assert.equal(saved.current.onHandOverrides.gin, "4");
 });
 
-test("every recovered inventory mutation fails closed at a stale base revision", async () => {
+test("destructive and snapshot mutations retain their stale revision safeguards", async () => {
   const mutations = [
     ["upsert-custom", { item: { id: "tonic", name: "Tonic", group: "Mixer Cabinet" } }],
     ["delete-custom", { id: "tonic" }],
-    ["reorder-items", { itemOrder: ["vodka", "gin"] }],
     ["save-snapshot", { items: [{ id: "vodka", name: "Vodka" }], summary: { tapCount: 1, liveTapCount: 1 } }],
     ["delete-snapshot", { id: "inventory-2026-08-10" }],
     ["restore-snapshot", { id: "inventory-2026-08-10" }],
@@ -369,4 +368,18 @@ test("maps a missing inventory table to a typed unavailable error", async () => 
     store.read(),
     (error) => assertStoreError(error, "INVENTORY_STATE_UNAVAILABLE", 503),
   );
+});
+
+
+test("rearranging items merges across count revisions and preserves newly added items", async () => {
+  const state = createEmptyInventoryState();
+  state.initialized = true;
+  state.current.itemOrder = ["gin", "vodka", "new-tonic"];
+  state.current.onHandOverrides = { gin: "10" };
+  const fetchImpl = createSupabaseFetch(makeRow({ revision: 8, initialized: true, data: { current: state.current, snapshots: [] } }));
+  const shared = createSharedInventoryStore({ env: makeEnvironment(), fetchImpl });
+  const saved = await shared.mutate("reorder-items", { itemOrder: ["vodka", "gin"], movedItem: { id: "gin", group: "Liquor Cabinet" } }, "owner", { expectedRevision: 2 });
+  assert.deepEqual(saved.current.itemOrder, ["vodka", "gin", "new-tonic"]);
+  assert.equal(saved.current.onHandOverrides.gin, "10");
+  assert.equal(saved.current.groupOverrides.gin, "Liquor Cabinet");
 });
