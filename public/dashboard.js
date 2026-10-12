@@ -1,3 +1,4 @@
+import { buildPriorWeekWorkAlert } from "./prep-carry-forward.mjs";
 import { createWeeklyUsageJournal } from "./weekly-usage-journal.mjs";
 import { getSavedTapOrderProduct, getTapOrderProductName } from "./tap-order-product.mjs";
 import { mountProductDuplicator, pmbCatalogProductKind } from "./product-duplicate.mjs";
@@ -330,6 +331,7 @@ const SHARED_DASHBOARD_FIELD_PATHS = Object.freeze([
   "products.tapReplacementOverrides",
   "monitoring.ohioComplianceAcknowledgement",
   "monitoring.comingSoonFollowUps",
+    "monitoring.prepCarryForwards",
 ]);
 const SHARED_DASHBOARD_IMPORT_PHRASE = "IMPORT FROM SERVICE COMPUTER";
 const INVENTORY_SHARED_IMPORT_PHRASE = "IMPORT INVENTORY FROM SERVICE COMPUTER";
@@ -1164,6 +1166,7 @@ let dashboardSharedState = {
   monitoring: {
     ohioComplianceAcknowledgement: {},
     comingSoonFollowUps: {},
+    prepCarryForwards: {},
   },
 };
 let dashboardSharedSyncStatus = "loading";
@@ -1302,6 +1305,7 @@ let beverageNewsPayload = null;
 let beverageNewsLoading = false;
 let ohioComplianceAcknowledgement = {};
 let comingSoonFollowUps = {};
+let prepCarryForwards = {};
 let tapWallPrintAcknowledgements = {};
 let activeTapPrintWall = "main";
 let sellerRankingWall = "main";
@@ -1728,6 +1732,8 @@ function normalizeDashboardSharedState(state = {}) {
       ohioComplianceAcknowledgement: isPlainDashboardRecord(monitoring.ohioComplianceAcknowledgement)
         ? cloneDashboardStateValue(monitoring.ohioComplianceAcknowledgement)
         : {},
+      prepCarryForwards: isPlainDashboardRecord(monitoring.prepCarryForwards)
+        ? cloneDashboardStateValue(monitoring.prepCarryForwards) : {},
       comingSoonFollowUps: isPlainDashboardRecord(monitoring.comingSoonFollowUps)
         ? cloneDashboardStateValue(monitoring.comingSoonFollowUps)
         : {},
@@ -1865,6 +1871,7 @@ function getSharedDashboardImportSnapshot() {
     monitoring: {
       ohioComplianceAcknowledgement: {},
       comingSoonFollowUps: {},
+    prepCarryForwards: {},
     },
   };
 }
@@ -1943,6 +1950,7 @@ function getSharedDashboardConfigSnapshot() {
         tapWallPrints: cloneDashboardStateValue(tapWallPrintAcknowledgements),
       },
       comingSoonFollowUps: cloneDashboardStateValue(comingSoonFollowUps),
+      prepCarryForwards: cloneDashboardStateValue(prepCarryForwards),
     },
   };
 }
@@ -2297,6 +2305,7 @@ function applySharedDashboardState(rawState) {
   ohioComplianceAcknowledgement = cloneDashboardStateValue(
     effectiveState.monitoring?.ohioComplianceAcknowledgement || {},
   );
+  prepCarryForwards = cloneDashboardStateValue(effectiveState.monitoring?.prepCarryForwards || {});
   comingSoonFollowUps = cloneDashboardStateValue(
     effectiveState.monitoring?.comingSoonFollowUps || {},
   );
@@ -2648,6 +2657,7 @@ function getDashboardSharedFieldLabel(path) {
     "products.tapReplacementOverrides": "tap replacements",
     "monitoring.ohioComplianceAcknowledgement": "Ohio compliance review status",
     "monitoring.comingSoonFollowUps": "Coming Soon follow-up status",
+    "monitoring.prepCarryForwards": "Prep moved to the current week",
   }[path] || path;
 }
 
@@ -3043,6 +3053,7 @@ function scheduleSharedDashboardStateSync(...slices) {
       "products.tapReplacementOverrides",
       "monitoring.ohioComplianceAcknowledgement",
       "monitoring.comingSoonFollowUps",
+    "monitoring.prepCarryForwards",
     ].includes(slice))
     .forEach((slice) => dashboardSharedPendingSlices.add(slice));
   if (dashboardSharedPatchScheduled) return;
@@ -3332,6 +3343,19 @@ function bindEvents() {
     if (!target) return;
     const comingSoonContact = clean(target.dataset.dashboardTarget)
       .match(/^coming-soon-contact:(\d+)$/i);
+    if (clean(target.dataset.dashboardTarget).startsWith("prep-carried-forward:")) {
+      const snapshotId = decodeURIComponent(target.dataset.dashboardTarget.slice("prep-carried-forward:".length));
+      const current = getCurrentMondayInventorySnapshot(inventoryHistory, new Date());
+      if (!current?.id || current.id === snapshotId) return;
+      prepCarryForwards = { ...prepCarryForwards, [snapshotId]: {
+        fromSnapshotId: snapshotId, toSnapshotId: current.id,
+        acknowledgedAt: new Date().toISOString(),
+        acknowledgedBy: clean(globalThis.onParDashboardIdentity?.name) || "Manager",
+      } };
+      scheduleSharedDashboardStateSync("monitoring.prepCarryForwards");
+      renderDashboardOverview();
+      return;
+    }
     if (comingSoonContact) {
       acknowledgeComingSoonStarkDraftContact(comingSoonContact[1]);
       return;
@@ -7091,23 +7115,8 @@ function renderDashboardOverview() {
     .filter((snapshot) => snapshot?.completion && snapshot.id !== currentSnapshot?.id)
     .sort((left, right) => String(right.weekOf || "").localeCompare(String(left.weekOf || "")))[0];
   const priorCompletion = priorSnapshot ? getWeeklySnapshotCompletionSummary(priorSnapshot) : null;
-  const priorWeekAlerts = priorCompletion && (
-    priorCompletion.deliveryChecked < priorCompletion.deliveryTotal
-    || priorCompletion.cocktailCompleted < priorCompletion.cocktailTotal
-  ) ? [{
-    id: "prior-week-checkoffs-incomplete",
-    severity: "warning",
-    priority: 57,
-    title: "Last week still has unchecked work",
-    message: [
-      priorCompletion.deliveryChecked < priorCompletion.deliveryTotal
-        ? `Deliveries: ${formatNumber(priorCompletion.deliveryChecked)} of ${formatNumber(priorCompletion.deliveryTotal)} checked.` : "",
-      priorCompletion.cocktailCompleted < priorCompletion.cocktailTotal
-        ? `Cocktails: ${formatNumber(priorCompletion.cocktailCompleted)} of ${formatNumber(priorCompletion.cocktailTotal)} prepared.` : "",
-    ].filter(Boolean).join(" "),
-    details: [],
-    action: { label: "Open Weekly Snapshots", target: "weekly-snapshots" },
-  }] : [];
+  const priorAlert = buildPriorWeekWorkAlert(priorSnapshot, priorCompletion, currentSnapshot, prepCarryForwards);
+  const priorWeekAlerts = priorAlert ? [priorAlert] : [];
   overview.alerts = sortDashboardOverviewAlerts([
     ...tapPrintAlerts,
     ...missingPriceAlerts,

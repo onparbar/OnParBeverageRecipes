@@ -169,6 +169,7 @@ function buildThirtySecondBriefingRaw({
       detail: getBriefingDetail(alert),
       target: clean(alert.action?.target),
       reviewAction: alert.reviewAction,
+      actionLabel: alert.actionLabel,
       ...(bullets.length ? { bullets } : {}),
     });
   } else if (nextStep) {
@@ -199,6 +200,7 @@ function buildThirtySecondBriefingRaw({
       detail: getBriefingDetail(alert),
       target: clean(alert.action?.target),
       reviewAction: alert.reviewAction,
+      actionLabel: alert.actionLabel,
       ...(bullets.length ? { bullets } : {}),
     });
   });
