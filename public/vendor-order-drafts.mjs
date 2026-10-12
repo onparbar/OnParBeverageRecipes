@@ -1,3 +1,4 @@
+import { isInHousePrepIngredient } from "./in-house-ingredient-prep.mjs";
 import { groupWeeklyPlanOrdersByVendor } from "./weekly-action-plan.mjs";
 import { PROOF_PREP_LOOK_AHEAD_WEEKS } from "./proof-prep-replacements.mjs";
 
@@ -587,7 +588,7 @@ export function buildVendorOrderDrafts(plan = {}, {
     .map((adjustment) => manualCatalog.find((item) => (
       clean(item.catalogId) === clean(adjustment.catalogId)
     ))).filter(Boolean);
-  const allowedProofCandidates = proofMinimumCandidates.filter((candidate) => !adjustedProducts.some((item) => (
+  const allowedProofCandidates = proofMinimumCandidates.filter((candidate) => !isInHousePrepIngredient(candidate) && !adjustedProducts.some((item) => (
     normalizeVendor(item.vendor) === "Proof" && (
       clean(item.internalId || item.id) === clean(candidate.id)
       || (clean(item.vendorSku) && clean(item.vendorSku) === clean(candidate.vendorSku))

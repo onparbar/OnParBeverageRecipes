@@ -1,3 +1,5 @@
+import { applyPurchasePackPolicy } from "./purchase-pack-policy.mjs";
+import { isInHousePrepIngredient, buildInHouseIngredientPrep, moveInHouseOrdersToPrep } from "./in-house-ingredient-prep.mjs";
 import { isPricingPlaceholder } from "./pricing-placeholders.mjs";
 import {
   getCocktailRecipeYieldOz,
@@ -197,11 +199,13 @@ function normalizeInventoryOrders(items) {
           : [],
       };
     })
+    .map(applyPurchasePackPolicy)
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function normalizeInventoryOrderCatalog(items) {
   return items
+    .filter((item) => !isInHousePrepIngredient(item))
     .map((item) => {
       const group = clean(item.group);
       const orderCategory = group === "Liquor Cabinet"
@@ -224,6 +228,7 @@ function normalizeInventoryOrderCatalog(items) {
         excludeFromOrderCost: Boolean(item.excludeFromOrderCost),
       };
     })
+    .map(applyPurchasePackPolicy)
     .filter((item) => item.id && item.name && item.vendor)
     .sort((a, b) => a.vendor.localeCompare(b.vendor) || a.name.localeCompare(b.name));
 }
@@ -532,10 +537,10 @@ export function evaluateWeeklyPlanReadiness({
 
 export function buildWeeklyActionPlan({ inventoryItems = [], recommendations = [] } = {}) {
   const orderingInventoryItems = inventoryItems.filter((item) => (
-    item.rollingIngredientVersion === 1
+    !isInHousePrepIngredient(item) && (item.rollingIngredientVersion === 1
     || !Object.hasOwn(item || {}, "par")
     || number(item.par) > 0
-    || number(item.cocktailPrepShortageUnits) > 0
+    || number(item.cocktailPrepShortageUnits) > 0)
   ));
   const inventoryOrders = normalizeInventoryOrders(
     orderingInventoryItems.filter((item) => !clean(item.orderHoldReason || item.exclusionReason)),
@@ -577,7 +582,7 @@ export function buildWeeklyActionPlan({ inventoryItems = [], recommendations = [
     ...inventoryOrders.filter((item) => !item.hasKnownPrice),
   ].length;
   const estimatedBeerCost = beerKegs.reduce((total, item) => total + item.estimatedCost, 0);
-  const estimatedLiquorTapCost = liquorTapBottles.reduce((total, item) => total + item.estimatedCost, 0);
+  const estimatedLiquorTapCost = liquorTapBottles.map(applyPurchasePackPolicy).reduce((total, item) => total + item.estimatedCost, 0);
   const estimatedInventoryCost = inventoryOrders.reduce((total, item) => total + item.estimatedCost, 0);
 
   return {
@@ -588,7 +593,7 @@ export function buildWeeklyActionPlan({ inventoryItems = [], recommendations = [
       mixers,
       supplies,
     },
-    prep: { cocktails },
+    prep: { cocktails, ingredients: buildInHouseIngredientPrep(inventoryItems) },
     review: {
       heldRecommendations,
       deferredLiquorRefills: [],
@@ -605,7 +610,7 @@ export function buildWeeklyActionPlan({ inventoryItems = [], recommendations = [
       missingPriceCount,
       estimatedPurchaseCostComplete: missingPriceCount === 0,
       beerKegTotal: beerKegs.reduce((total, item) => total + item.quantity, 0),
-      liquorTapBottleTotal: liquorTapBottles.reduce((total, item) => total + item.quantity, 0),
+      liquorTapBottleTotal: liquorTapBottles.map(applyPurchasePackPolicy).reduce((total, item) => total + item.quantity, 0),
       liquorTapBottleLineCount: liquorTapBottles.length,
       liquorRefillTotal: 0,
       deferredLiquorRefillLineCount: 0,
@@ -624,6 +629,7 @@ export function refreshWeeklyPlanMetadata(plan, {
   excludeInventoryReview = () => false,
 } = {}) {
   if (!plan || typeof plan !== "object") return plan;
+  plan = moveInHouseOrdersToPrep(plan);
 
   const beerKegs = (plan?.orders?.beerKegs || []).map((item) => {
     const metadata = resolveBeerOrder(item);
@@ -650,7 +656,7 @@ export function refreshWeeklyPlanMetadata(plan, {
     ...(plan?.orders?.liquor || []),
     ...(plan?.orders?.mixers || []),
     ...(plan?.orders?.supplies || []),
-  ];
+  ].map(applyPurchasePackPolicy);
   const excludedInventory = (plan?.review?.excludedInventory || [])
     .filter((item) => !excludeInventoryReview(item));
   const purchaseLines = [...beerKegs, ...liquorTapBottles, ...inventoryOrders];
@@ -659,7 +665,7 @@ export function refreshWeeklyPlanMetadata(plan, {
     || (item.hasKnownPrice === undefined && number(item.estimatedCost) <= 0)
   )).length;
   const estimatedBeerCost = beerKegs.reduce((total, item) => total + number(item.estimatedCost), 0);
-  const estimatedLiquorTapCost = liquorTapBottles.reduce((total, item) => total + number(item.estimatedCost), 0);
+  const estimatedLiquorTapCost = liquorTapBottles.map(applyPurchasePackPolicy).reduce((total, item) => total + number(item.estimatedCost), 0);
   const estimatedInventoryCost = inventoryOrders.reduce((total, item) => total + number(item.estimatedCost), 0);
 
   return {
@@ -668,6 +674,10 @@ export function refreshWeeklyPlanMetadata(plan, {
     review: { ...plan.review, excludedInventory },
     summary: {
       ...plan.summary,
+      liquorTapBottleTotal: liquorTapBottles.map(applyPurchasePackPolicy).reduce((total, item) => total + number(item.quantity), 0),
+      orderLineCount: purchaseLines.length,
+      inventoryLineCount: inventoryOrders.length,
+      inventoryUnitTotal: inventoryOrders.reduce((total, item) => total + number(item.quantity), 0),
       estimatedBeerCost,
       estimatedLiquorTapCost,
       estimatedInventoryCost,
@@ -729,7 +739,7 @@ function upgradeLegacyWeeklyPlanSnapshot(snapshot) {
       summary: {
         ...summary,
         orderLineCount: number(summary.orderLineCount) + liquorTapBottles.length,
-        liquorTapBottleTotal: liquorTapBottles.reduce((total, item) => total + item.quantity, 0),
+        liquorTapBottleTotal: liquorTapBottles.map(applyPurchasePackPolicy).reduce((total, item) => total + item.quantity, 0),
         liquorTapBottleLineCount: liquorTapBottles.length,
         liquorRefillTotal: 0,
         deferredLiquorRefillLineCount: 0,
@@ -825,7 +835,7 @@ export function groupWeeklyPlanOrdersByVendor(plan = {}) {
     ...(plan?.orders?.supplies || []).map((item) => ({ ...item, lineType: "Supply" })),
   ];
   const grouped = new Map();
-  lines.forEach((item) => {
+  lines.filter((item) => !isInHousePrepIngredient(item)).map(applyPurchasePackPolicy).forEach((item) => {
     const vendor = clean(item.vendor) || "Needs vendor";
     if (!grouped.has(vendor)) grouped.set(vendor, []);
     grouped.get(vendor).push(item);

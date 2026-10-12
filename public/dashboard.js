@@ -244,6 +244,7 @@ import {
   normalizeWeeklyOrderTracking,
 } from "./weekly-handoff-state.mjs";
 import {
+  renderWeeklyIngredientPrep,
   getWeeklyPlanTapContext as getWeeklyPlanTapContextView,
   renderWeeklyPlanCocktailRows as renderWeeklyPlanCocktailRowsView,
   renderWeeklyPlanGroup as renderWeeklyPlanGroupView,
@@ -8924,6 +8925,7 @@ function renderWeeklyPlan() {
     ${currentWeekPlanAvailable ? `
     ${priceNote ? `<p class="weekly-plan-cost-note">${escapeHtml(priceNote)}</p>` : ""}
     ${renderWeeklyPlanReview(plan)}
+    ${renderWeeklyIngredientPrep(plan.prep.ingredients)}
     ${planLocked
       ? `<details class="weekly-plan-phase weekly-plan-phase--orders" id="weekly-plan-orders"${orderStep?.complete ? "" : " open"}><summary><span>${orderStep?.complete ? "Placed orders" : "Place orders"}</span><strong>${escapeHtml(orderStep?.status || "Review")}</strong></summary>${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)}${renderWeeklyPlanFinishWeek(planLocked, Boolean(orderStep?.complete), "deliveries")}</details>`
       : ""}

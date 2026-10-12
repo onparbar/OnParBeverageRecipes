@@ -13124,3 +13124,17 @@ details.custom-inventory-editor[open] > summary {
 #weekly-usage-summary ~ * {
   grid-column: 1 / -1;
 }
+
+.weekly-ingredient-prep {
+  margin: 1rem 0;
+  padding: 1.25rem 1.5rem;
+  border: 2px solid #a96017;
+  border-left-width: 8px;
+  border-radius: 16px;
+  background: #fff3d6;
+  color: #3d2b14;
+}
+.weekly-ingredient-prep h2 { margin: 0 0 .75rem; font-size: 1.25rem; }
+.weekly-ingredient-prep h3 { margin: 0 0 .5rem; font-size: 1.15rem; }
+.weekly-ingredient-prep p { margin: .35rem 0 0; }
+.weekly-ingredient-prep strong { font-size: 1.2rem; }

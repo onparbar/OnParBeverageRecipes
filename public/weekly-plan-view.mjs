@@ -1,3 +1,4 @@
+import { applyPurchasePackPolicy } from "./purchase-pack-policy.mjs";
 import {
   clean,
   escapeHtml,
@@ -96,6 +97,7 @@ export function renderWeeklyPlanCocktailRows(items, { editable = true } = {}) {
 }
 
 export function renderWeeklyPlanLiquorTapRows(items) {
+  items = items.map(applyPurchasePackPolicy);
   if (!items.length) return '<p class="weekly-plan-empty">No liquor-tap bottle orders this week.</p>';
   return `<div class="weekly-plan-list">${items.map((item) => `
     <div class="weekly-plan-item">
@@ -134,4 +136,17 @@ export function renderWeeklyPlanGroup(title, count, content, accent = "") {
       ${content}
     </section>
   `;
+}
+
+export function renderWeeklyIngredientPrep(items = []) {
+  if (!items.length) return "";
+  return `<section class="weekly-ingredient-prep" aria-labelledby="weekly-ingredient-prep-title">
+    <h2 id="weekly-ingredient-prep-title">Prep required before cocktail batching</h2>
+    ${items.map(item => `<div class="weekly-ingredient-prep__item">
+      <h3>${escapeHtml(item.name)}</h3>
+      ${item.holdReason
+        ? `<p>${escapeHtml(item.holdReason)}</p>`
+        : `<p><strong>Prep ${formatNumber(item.quantity)} gallon${item.quantity === 1 ? "" : "s"} of ${escapeHtml(item.name)}.</strong></p><p>Have it ready before making this week's cocktails.</p>`}
+    </div>`).join("")}
+  </section>`;
 }
