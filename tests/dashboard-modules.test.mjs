@@ -135,13 +135,14 @@ test("Monday Run has four steps and only completes when all orders are placed", 
   assert.equal(snapshotOnly.steps[2].status, "Verify to finish saving");
 });
 
-test("Monday Run renderers route verified cooler counts to inventory", () => {
+test("Monday Run counting links enter the separate Weekly Order module", () => {
   const run = buildMondayRunModel({ coolerCountComplete: true, inventorySharedInitialized: true, inventoryCountedThisWeek: true });
   const full = renderMondayRun(run);
   const compact = renderMondayRunCompact(run);
-  assert.match(full, /data-monday-run-step="inventory"/);
+  assert.match(full, /data-monday-run-step="inventory" data-dashboard-target="weekly-order"/);
   assert.match(full, /aria-current="step"/);
   assert.match(full, /Step 3 of 4/);
-  assert.match(compact, /Step 3 of 4/);
-  assert.match(compact, /Next:<\/span> <strong>Bottle Inventory/);
+  assert.match(compact, /WEEKLY ORDER — START HERE/);
+  assert.match(compact, /data-dashboard-target="weekly-order"/);
+  assert.doesNotMatch(compact, /data-dashboard-target="inventory"/);
 });

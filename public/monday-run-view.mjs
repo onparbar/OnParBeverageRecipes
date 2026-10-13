@@ -92,7 +92,8 @@ function actionLabel(run) {
 
 function actionButton(run) {
   if (run.complete) return '<button class="primary-button" type="button" data-dashboard-target="weekly-plan">View plan</button>';
-  return `<button class="primary-button" type="button" data-monday-run-step="${escapeHtml(run.nextStep.id)}" data-dashboard-target="${escapeHtml(run.nextStep.target)}">${actionLabel(run)}</button>`;
+  const target = run.nextStep.id === "orders" ? run.nextStep.target : "weekly-order";
+  return `<button class="primary-button" type="button" data-monday-run-step="${escapeHtml(run.nextStep.id)}" data-dashboard-target="${escapeHtml(target)}">${actionLabel(run)}</button>`;
 }
 
 function weekBadge(run) {
@@ -114,7 +115,7 @@ export function renderMondayRun(run) {
         <summary><span>${number}</span><span><small>${run.complete ? "Completed" : "Current step"}</small>${run.complete ? "" : `<strong>${escapeHtml(run.nextStep.label)}</strong><b>${escapeHtml(run.nextStep.status)}</b>`}</span><span class="monday-run__chevron" aria-hidden="true">&#8250;</span></summary>
         <ol class="monday-run__steps">${run.steps.map((step, index) => `
           <li class="monday-run__step${step.complete ? " monday-run__step--done" : index === run.nextIndex ? " monday-run__step--current" : ""}">
-            <button type="button" data-monday-run-step="${escapeHtml(step.id)}" data-dashboard-target="${escapeHtml(step.target)}"${index === run.nextIndex ? ' aria-current="step"' : ""}>
+            <button type="button" data-monday-run-step="${escapeHtml(step.id)}" data-dashboard-target="${escapeHtml(step.id === "orders" ? step.target : "weekly-order")}"${index === run.nextIndex ? ' aria-current="step"' : ""}>
               <span>${index + 1}</span><strong>${escapeHtml(step.label)}</strong><small>${escapeHtml(step.complete ? "Done" : step.status)}</small>
             </button>
           </li>`).join("")}</ol>
@@ -123,14 +124,12 @@ export function renderMondayRun(run) {
 }
 
 export function renderMondayRunCompact(run) {
-  const progress = Math.round(run.completedCount / run.steps.length * 100);
-  const target = run.complete ? "weekly-plan" : run.nextStep.target;
-  const navigationLabel = run.complete ? "View weekly plan" : `Open weekly plan: ${run.nextStep.label}`;
+  const navigationLabel = run.planLocked ? "Open this week's order" : "Weekly Order — Start here";
   return `
-    <section class="monday-run monday-run--compact${run.complete ? " is-complete" : ""}" aria-label="Weekly Plan">
-      <button class="monday-run__card-link" type="button" data-dashboard-target="${escapeHtml(target)}"${run.complete ? "" : ` data-monday-run-step="${escapeHtml(run.nextStep.id)}"`} aria-label="${escapeHtml(navigationLabel)}"></button>
-      <header class="monday-run__header"><div><div class="monday-run__title-week"><h2>Weekly Plan</h2>${weekBadge(run)}</div><span>${run.complete ? "Complete" : `Step ${run.nextIndex + 1} of ${run.steps.length}`}</span></div>${!run.complete && run.nextIndex === 0 ? `<div class="monday-run__header-actions monday-run__start-action">${actionButton(run)}</div>` : ""}</header>
-      ${run.complete ? "" : `<p class="monday-run__current-step"><span>Next:</span> <strong>${escapeHtml(run.nextStep.label)}</strong></p>`}
-      <div class="monday-run__progress" role="progressbar" aria-label="Weekly Plan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="--monday-run-progress: ${progress}%"></span></div>
+    <section class="monday-run monday-run--compact${run.complete ? " is-complete" : ""}" aria-label="Weekly Order">
+      <button class="monday-run__card-link" type="button" data-dashboard-target="weekly-order" aria-label="${escapeHtml(navigationLabel)}"></button>
+      <header class="monday-run__header"><div><div class="monday-run__title-week"><h2>${run.planLocked ? "Weekly Order" : "WEEKLY ORDER — START HERE"}</h2>${weekBadge(run)}</div><span>${run.planLocked ? run.complete ? "All orders placed" : "Your weekly plan is saved" : "Check five areas. Then review your weekly plan."}</span></div>
+        <div class="monday-run__header-actions monday-run__start-action"><button class="primary-button" type="button" data-dashboard-target="weekly-order">${run.planLocked ? "Open weekly order" : "Start here"}</button></div>
+      </header>
     </section>`;
 }

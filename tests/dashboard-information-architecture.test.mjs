@@ -26,7 +26,10 @@ test("the owner dashboard is the initial page and recipes appear later in naviga
   assert.match(pageSource, /data-menu-tab="add"/);
   assert.match(pageSource, /data-menu-tab="pricing"/);
   assert.match(pageSource, /data-menu-tab="ingredients"/);
-  assert.match(pageSource, /\["keg-levels", "Keg Levels"\],[\s\S]*\["inventory", "Inventory"\],[\s\S]*\["weekly-plan", "Weekly Plan"\]/);
+  assert.match(pageSource, /\["keg-levels", "Keg Levels"\],[\s\S]*\["inventory", "Inventory"\]/);
+  assert.doesNotMatch(pageSource, /\["weekly-plan", "Weekly Plan"\]/);
+  assert.match(pageSource, /data-tab="weekly-order"[^>]*>Weekly Order<\/button>/);
+  assert.match(pageSource, /id="weekly-order-panel"/);
   assert.match(pageSource, /data-tab="dashboard"[^>]*>Home<\/button>/);
   assert.doesNotMatch(pageSource, /\["insights", "Insights"\]/);
   assert.match(pageSource, /className="panel is-active" id="dashboard-panel"/);

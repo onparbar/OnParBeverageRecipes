@@ -1,4 +1,8 @@
 import { buildPriorWeekWorkAlert } from "./prep-carry-forward.mjs";
+import { createWeeklyOrderController } from "./weekly-order-controller.mjs";
+import { WEEKLY_ORDER_STEPS } from "./weekly-order-view.mjs";
+import { formatOperatingWeekLabel } from "./weekly-action-plan.mjs";
+import { buildWeeklyOrderInventoryRows, buildWeeklyOrderCoolerRows, weeklyOrderRowsChanged } from "./weekly-order-data.mjs";
 import { createWeeklyUsageJournal } from "./weekly-usage-journal.mjs";
 import { getSavedTapOrderProduct, getTapOrderProductName } from "./tap-order-product.mjs";
 import { mountProductDuplicator, pmbCatalogProductKind } from "./product-duplicate.mjs";
@@ -256,6 +260,7 @@ import {
 } from "./weekly-plan-view.mjs";
 import { bindWeeklyPlanController } from "./weekly-plan-controller.mjs";
 import { bindVendorOrderController } from "./vendor-order-controller.mjs";
+import { createSupplierOrderFlow, renderSupplierOrderFlow } from "./weekly-order-supplier-flow.mjs";
 import {
   canBuildVendorCart,
   getVendorCartLabel,
@@ -901,7 +906,7 @@ const MENU_ORDER = [
   ["WASHINGTON APPLE (CROWN ROYAL APPLE)", "Washington Apple (Whiskey)"],
   ["WHISKEY SOUR (JACK DANIELS)", "Whiskey Sour (Whiskey)"],
 ];
-const OPERATION_TAB_NAMES = ["keg-levels", "inventory", "weekly-plan"];
+const OPERATION_TAB_NAMES = ["keg-levels", "inventory"];
 const MENU_TAB_NAMES = ["weekly-snapshots", "performance", "weekly-usage", "recipes", "add", "pricing", "ingredients", "print"];
 const NEW_RECIPE_ORDER = [
   ["Bacardi Sunset", "Bacardi Sunset"],
@@ -1317,6 +1322,8 @@ let sellerRankingPeriod = "six-weeks";
 let sellerRankingListSize = 5;
 let sellerRankingIncludeOldTaps = false;
 let activeOperationsTab = "keg-levels";
+let weeklyOrderController = null;
+const supplierOrderFlow = createSupplierOrderFlow({ onExit: () => switchTab("weekly-order") });
 let activeRecipeView = "current";
 let activeAddProductType = "cocktail";
 let globalSearchItems = [];
@@ -3246,6 +3253,7 @@ async function persistSharedDashboardPatch(patch, touchedFields, baseValues, gen
 }
 
 function bindEvents() {
+  document.querySelector("#weekly-order-overview")?.addEventListener("click", () => switchTab("weekly-order"));
   bindGlobalSearchEvents();
   bindDashboardDataSearchEvents();
   document.querySelectorAll(".tab-button").forEach((button) => {
@@ -3618,7 +3626,8 @@ function switchTab(tabName) {
   }
 
   document.querySelectorAll(".tab-button").forEach((button) => {
-    const isActive = isOperationTab ? button.dataset.tab === "operations" : button.dataset.tab === requestedTab;
+    const isActive = isOperationTab ? button.dataset.tab === "operations"
+      : requestedTab === "weekly-plan" ? button.dataset.tab === "weekly-order" : button.dataset.tab === requestedTab;
     button.classList.toggle("is-active", isActive);
   });
 
@@ -3644,13 +3653,14 @@ function switchTab(tabName) {
   if (!isEmployeeDashboard && ["weekly-usage", "performance", "insights"].includes(requestedTab) && !weeklyUsageSyncAttempted) {
     runPmbWeeklyUsageSync({ automatic: true });
   }
-  if (!isEmployeeDashboard && ["weekly-plan", "keg-levels", "ingredients", "inventory"].includes(requestedTab) && !kegSyncAttempted) {
+  if (!isEmployeeDashboard && ["weekly-order", "weekly-plan", "keg-levels", "ingredients", "inventory"].includes(requestedTab) && !kegSyncAttempted) {
     runKegLevelSync();
   }
   if (!isEmployeeDashboard && ["keg-levels", "pricing", "ingredients"].includes(requestedTab) && !tapPricingSyncAttempted) {
     runTapPricingSync();
   }
   if (requestedTab === "dashboard") renderDashboardOverview();
+  if (requestedTab === "weekly-order") openWeeklyOrder();
   if (requestedTab === "insights") renderDashboardBeveragePulse();
   if (requestedTab === "print") renderTapPrintWorkspace();
 }
@@ -6821,7 +6831,135 @@ function renderMondayRunCompact(run) {
   return renderMondayRunCompactView(run);
 }
 
+function openWeeklyOrder() {
+  if (!weeklyOrderController) {
+    weeklyOrderController = createWeeklyOrderController({
+      root: document.querySelector("#weekly-order"),
+      getContext: () => ({
+        weekLabel: formatOperatingWeekLabel(),
+        planLocked: Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date())),
+        needsReason: !isEasternMonday(),
+        ready: Boolean(parAgentState?.initialized && inventorySharedInitialized && kegWallItems.length && inventoryItems.length),
+      }),
+      getRows: getWeeklyOrderRows,
+      saveStep: saveWeeklyOrderStep,
+      savePlan: saveWeeklyOrderPlan,
+      openPlan: () => openMondayRunStep("orders", "weekly-plan"),
+      exit: () => switchTab("dashboard"),
+    });
+  }
+  weeklyOrderController.open();
+}
+
+function getWeeklyOrderRows(stepId) {
+  const step = WEEKLY_ORDER_STEPS.find((entry) => entry.id === stepId);
+  if (!step) return [];
+  const items = groupInventoryForDisplay(inventoryItems).flatMap(([, rows]) => rows);
+  if (step.type === "inventory") {
+    return buildWeeklyOrderInventoryRows(items, step.group, inventoryOnHandOverrides);
+  }
+  const rows = buildWeeklyOrderCoolerRows(kegWallItems.map((item) => {
+    const name = getKegDisplayBrand(item, getKegLiveRow(item));
+    const key = getKegItemKey(item);
+    return {
+      key, wall: item.wall, tapNumber: item.tapNumber,
+      name: getTapOrderProductName({ ...item, name }, getSavedTapOrderProduct({ ...item, name }, weeklyUsageItems, weeklyUsageArchivedItems)),
+      isLiquorTap: isLiquorOunceTap(toNumber(item.tapNumber)),
+      onHand: kegOnHandOverrides[key],
+      onDeck: getKegOnDeckItem(item),
+    };
+  }), step.wall);
+  if (step.id === "karaoke") {
+    rows.push(...buildWeeklyOrderInventoryRows(items, "Karaoke Cooler", inventoryOnHandOverrides));
+  }
+  return rows;
+}
+
+function weeklyOrderCountsChangedError(stepId) {
+  const error = new Error("Saved counts changed while this screen was open. Check the highlighted numbers, then choose Next again.");
+  error.code = "WEEKLY_ORDER_COUNTS_CHANGED";
+  error.latestRows = getWeeklyOrderRows(stepId);
+  return error;
+}
+
+async function saveWeeklyOrderStep(stepId, rows) {
+  const verifiedAt = new Date();
+  const step = WEEKLY_ORDER_STEPS.find((entry) => entry.id === stepId);
+  if (!step || hasPublishedWeeklyPlanRecommendations()) throw new Error("This week's plan is already saved. Open the weekly plan to continue.");
+  const coolerRows = step.type === "cooler" ? rows.filter((row) => row.kind !== "inventory") : [];
+  const inventoryRows = step.type === "cooler" ? rows.filter((row) => row.kind === "inventory") : rows;
+  // Karaoke includes Simple Syrup. Refresh both stores before writing either,
+  // including when syrup was added after this screen was first opened.
+  const checksInventory = step.type === "inventory" || step.id === "karaoke";
+  if (step.type === "cooler") {
+    if (!parAgentState?.initialized) throw new Error("Cooler counts are still loading. Please try again.");
+    if (!await flushPendingParAgentStateSync()) throw new Error("The cooler counts have not finished saving. Your numbers are still here. Choose Next to try again.");
+    const latest = await requestParAgentState();
+    if (!latest.initialized) throw new Error("Cooler counts could not be loaded. Your numbers are still here.");
+    applyParAgentState(latest);
+  }
+  if (checksInventory) await refreshInventoryForSubmit();
+  if (hasPublishedWeeklyPlanRecommendations()) throw new Error("This week's plan was saved on another screen. Open the weekly plan to continue.");
+  if (weeklyOrderRowsChanged(rows, getWeeklyOrderRows(stepId))) throw weeklyOrderCountsChangedError(stepId);
+  const inventoryChanges = inventoryRows.map((row) => ({
+    id: row.id, field: "onHand", value: row.value, expectedValue: clean(inventoryOnHandOverrides[row.id]),
+  }));
+  if (step.type === "cooler") {
+    coolerRows.forEach((row) => {
+      if (row.kind === "on-deck") {
+        const saved = kegOnDeckOverrides[row.key];
+        kegOnDeckOverrides[row.key] = {
+          ...(typeof saved === "object" ? saved : getKegOnDeckItem(row.key)),
+          onHand: row.value, updatedAt: new Date().toISOString(),
+        };
+      } else {
+        kegOnHandOverrides[row.key] = row.value;
+      }
+    });
+    saveKegOnHandOverrides();
+    saveKegOnDeckOverrides();
+    scheduleParAgentStateSync({ immediate: true });
+    if (!await flushPendingParAgentStateSync()) throw new Error("The cooler counts have not finished saving. Your numbers are still here. Choose Next to try again.");
+  }
+  if (inventoryRows.length) {
+    if (weeklyOrderRowsChanged(rows, getWeeklyOrderRows(stepId))) throw weeklyOrderCountsChangedError(stepId);
+    const saved = await runSharedInventoryAction({
+      action: "batch-update-fields", source: "section-count",
+      changes: inventoryChanges,
+    }, { successMessage: `${step.label} counts saved.`, rebuild: true });
+    if (!saved) throw new Error("The inventory counts have not finished saving. Your numbers are still here. Choose Next to try again.");
+  }
+  // A mixed cooler stop is verified only after both stores accept its counts.
+  // Inventory can preserve a newer field without reporting a failed request.
+  const savedRows = new Map(getWeeklyOrderRows(stepId).map((row) => [row.id, row]));
+  if (savedRows.size !== rows.length || rows.some((row) => savedRows.get(row.id)?.value !== row.value || savedRows.get(row.id)?.identity !== row.identity)) {
+    throw weeklyOrderCountsChangedError(stepId);
+  }
+  if (step.type === "cooler") {
+    completeCoolerWallCount(step.wall, verifiedAt);
+    renderKegLevels();
+  }
+  if (checksInventory) renderInventory();
+  renderDashboardOverview();
+}
+
+async function saveWeeklyOrderPlan(reason) {
+  weeklyPlanOutsideMondayReason = clean(reason);
+  weeklyPlanRefreshMessage = "";
+  inventorySharedMessage = "";
+  const reasonInput = document.querySelector("#inventory-snapshot-reason");
+  if (reasonInput) reasonInput.value = weeklyPlanOutsideMondayReason;
+  await submitInventoryCount();
+  if (!getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date())) {
+    throw new Error(weeklyPlanRefreshMessage || inventorySharedMessage || "Your counts are saved. Choose Save weekly plan to try again.");
+  }
+}
+
 function openMondayRunStep(stepId, target) {
+  if (target === "weekly-order") {
+    switchTab("weekly-order");
+    return;
+  }
   if (stepId === "pmb") {
     void runUnifiedPmbRefresh();
     return;
@@ -6850,6 +6988,13 @@ function openMondayRunStep(stepId, target) {
     requestAnimationFrame(() => document.querySelector("#inventory-panel")?.scrollIntoView({ block: "start", behavior: "smooth" }));
   }
   if (targetTab !== "weekly-plan") return;
+
+  if (weeklyPlan?.querySelector("[data-supplier-order-flow]")) {
+    if (stepId === "orders") supplierOrderFlow.show("orders");
+    else if (stepId === "prep") supplierOrderFlow.show("prep");
+    else if (stepId === "finish") supplierOrderFlow.show(getFinishWeekProgress().sections[0]?.complete ? "prep" : "orders");
+    return;
+  }
 
   const selector = {
     orders: "#weekly-plan-orders",
@@ -8631,20 +8776,20 @@ function findDraftLineAdjustmentCatalogItem(line, vendor) {
   )) || null;
 }
 
-function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) {
+function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null, { guided = false } = {}) {
   const model = providedModel || getVendorOrderDraftModel(plan, freshness);
   currentVendorOrderDraftViews = new Map();
   const savedDrafts = orderRehearsalMode ? model.savedDrafts : weeklyOrderTracking.drafts;
   const savedById = new Map((savedDrafts || []).map((draft) => [draft.id, draft]));
   const vendorsByName = new Map((orderRehearsalMode ? [] : weeklyOrderTracking.vendors || []).map((vendor) => [vendor.vendor, vendor]));
-  if (!model.drafts.length) return renderVendorOrderAdjustments();
+  if (!model.drafts.length) return `${weeklyOrderTrackingMessage ? `<p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage)}</p>` : ""}${renderVendorOrderAdjustments()}`;
   const allOrdersPlaced = !orderRehearsalMode && model.drafts.every((draft) => vendorsByName.get(draft.vendor)?.ordered === true);
   return `
-    <section class="vendor-order-drafts" aria-labelledby="vendor-order-drafts-title">
-      <header class="vendor-order-drafts__header">
+    <section class="vendor-order-drafts" ${guided ? 'aria-label="Supplier order"' : 'aria-labelledby="vendor-order-drafts-title"'}>
+      ${guided ? "" : `<header class="vendor-order-drafts__header">
         <div><h2 id="vendor-order-drafts-title">${allOrdersPlaced ? "Placed orders" : "Order"}</h2></div>
         <div><strong>${formatNumber(model.drafts.reduce((total, draft) => total + draft.lineCount, 0))} items</strong><span>${money(model.weeklyTotal)}</span></div>
-      </header>
+      </header>`}
       ${weeklyOrderTrackingMessage ? `<p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage)}</p>` : ""}
       ${renderVendorOrderAdjustments()}
       <div class="vendor-order-drafts__grid">
@@ -8658,8 +8803,8 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
           const orderCount = kegOrder ? sum(draft.lines.map((line) => toNumber(line.requestedUnits))) : draft.lineCount;
           const orderUnit = kegOrder ? "keg" : "item";
           return `
-            <section class="vendor-order-draft-card vendor-order-draft-card--${placed ? "approved vendor-order-draft-card--placed" : draft.status}">
-              <header><div><h3>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(orderCount)} ${orderUnit}${orderCount === 1 ? "" : "s"} · ${money(draft.estimatedTotal)}</p></div><span title="${escapeHtml(workflow.label)}">${placed ? escapeHtml(workflow.label) : draft.blockers.length ? "Needs attention" : "Ready"}</span></header>
+            <section class="vendor-order-draft-card vendor-order-draft-card--${placed ? "approved vendor-order-draft-card--placed" : draft.status}" data-vendor-order-draft-id="${escapeHtml(draft.vendor)}"${guided ? ` data-supplier-order-card="${escapeHtml(draft.vendor)}" data-supplier-order-placed="${placed}" hidden` : ""}>
+              <header><div><h3${guided ? ' class="supplier-order-card-title"' : ""}>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(orderCount)} ${orderUnit}${orderCount === 1 ? "" : "s"} · ${money(draft.estimatedTotal)}</p></div><span title="${escapeHtml(workflow.label)}">${placed ? escapeHtml(workflow.label) : draft.blockers.length ? "Needs attention" : "Ready"}</span></header>
               ${placed ? `<details><summary>${workflow.label === "Received" ? "View received order" : "View order and receive delivery"}</summary>` : ""}
               <div class="vendor-order-draft-lines vendor-order-draft-lines--inline">
                 ${placed ? renderFinishWeekDeliveries({ available: true, vendors: [vendor] }, { showVendor: false, saving: dashboardFinishWeekSaving }) : draft.lines.map((line) => {
@@ -8681,6 +8826,7 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null) 
             </section>`;
         }).join("")}
       </div>
+      ${guided ? `<p class="weekly-plan-cost-note">Weekly order total: ${money(model.weeklyTotal)}</p>` : ""}
     </section>`;
 }
 
@@ -8891,6 +9037,7 @@ function bindBossDemoEvents() {
 
 function renderWeeklyPlan() {
   if (dashboardRenderCoordinator.defer("weekly-plan", renderWeeklyPlan)) return;
+  weeklyOrderController?.refresh();
   if (!weeklyPlan) return;
   const recommendations = parAgentState?.recommendations;
   const plan = getWeeklyPlanModel();
@@ -8933,35 +9080,40 @@ function renderWeeklyPlan() {
     ` : ""}
     ${planLocked
       ? ""
-      : `<button class="primary-button" type="button" data-monday-run-step="${escapeHtml(mondayRun.nextStep.id)}" data-dashboard-target="${escapeHtml(mondayRun.nextStep.target)}"${parAgentRunning || weeklyPlanUpdating ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Saving snapshot..." : mondayRun.nextStep.id === "cooler" ? "Start Count" : "Continue Count"}</button>`}
+      : `<button class="primary-button" type="button" data-monday-run-step="start" data-dashboard-target="weekly-order"${parAgentRunning || weeklyPlanUpdating ? " disabled" : ""}>${parAgentRunning || weeklyPlanUpdating ? "Saving snapshot..." : "Weekly Order — Start here"}</button>`}
+  `;
+  const prepWorkspace = `
+    ${renderWeeklyIngredientPrep(plan.prep.ingredients)}
+    <section class="weekly-plan-column weekly-plan-column--prep">
+      <div class="weekly-plan-column__header"><h2>Cocktails</h2></div>
+      ${renderWeeklyPlanCocktailRows(plan.prep.cocktails, { editable: planLocked })}
+      <div class="weekly-plan-column__header"><h2>Liquor Tap Refills</h2></div>
+      ${renderWeeklyPlanLiquorRefillRows(plan.orders.liquorTapBottles)}
+    </section>
+    ${renderWeeklyPlanFinishWeek(planLocked, Boolean(orderStep?.complete), "prep")}
   `;
   const liveWeeklyPlanBody = `
     <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(getWeeklyPlanManagerMessage(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : "")))}</p>
-    ${renderMondayRun(mondayRun)}
+    ${planLocked ? "" : renderMondayRun(mondayRun)}
     ${renderWeeklyPlanReadiness(freshness.readiness)}
     ${currentWeekPlanAvailable ? `
     ${priceNote ? `<p class="weekly-plan-cost-note">${escapeHtml(priceNote)}</p>` : ""}
     ${renderWeeklyPlanReview(plan)}
-    ${renderWeeklyIngredientPrep(plan.prep.ingredients)}
     ${planLocked
-      ? `<details class="weekly-plan-phase weekly-plan-phase--orders" id="weekly-plan-orders"${orderStep?.complete ? "" : " open"}><summary><span>${orderStep?.complete ? "Placed orders" : "Place orders"}</span><strong>${escapeHtml(orderStep?.status || "Review")}</strong></summary>${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel)}${renderWeeklyPlanFinishWeek(planLocked, Boolean(orderStep?.complete), "deliveries")}</details>`
-      : ""}
-    <div class="weekly-plan-columns${planLocked ? " weekly-plan-columns--locked" : ""}">
-      ${planLocked ? "" : `<section class="weekly-plan-column">
+      ? renderSupplierOrderFlow({
+        ordersHtml: `<section id="weekly-plan-orders">${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel, { guided: true })}${renderWeeklyPlanFinishWeek(planLocked, Boolean(orderStep?.complete), "deliveries")}</section>`,
+        prepHtml: prepWorkspace,
+      })
+      : `<div class="weekly-plan-columns">
+      <section class="weekly-plan-column">
         <div class="weekly-plan-column__header"><h2>Order This Week</h2></div>
         ${renderWeeklyPlanByVendor(plan, vendorOrderModel.deferredOrders)}
-      </section>`}
-      <details class="weekly-plan-phase weekly-plan-phase--prep"${planLocked ? "" : " open"}>
+      </section>
+      <details class="weekly-plan-phase weekly-plan-phase--prep" open>
         <summary><span>Prep plan</span><strong>${escapeHtml(prepStatus)}</strong></summary>
-        <section class="weekly-plan-column weekly-plan-column--prep">
-          <div class="weekly-plan-column__header"><h2>Cocktails</h2></div>
-          ${renderWeeklyPlanCocktailRows(plan.prep.cocktails, { editable: planLocked })}
-          <div class="weekly-plan-column__header"><h2>Liquor Tap Refills</h2></div>
-          ${renderWeeklyPlanLiquorRefillRows(plan.orders.liquorTapBottles)}
-        </section>
-        ${renderWeeklyPlanFinishWeek(planLocked, Boolean(orderStep?.complete), "prep")}
+        ${prepWorkspace}
       </details>
-    </div>
+    </div>`}
     ` : `<section class="weekly-plan-empty" role="status"><h2>Start with Cooler Count</h2><p>Submit inventory after counting to save this week's plan.</p></section>`}
   `;
   let weeklyPlanBody = liveWeeklyPlanBody;
@@ -9039,6 +9191,7 @@ function renderWeeklyPlan() {
     },
     renderWeeklyPlan,
   });
+  if (!orderRehearsalMode) supplierOrderFlow.bind({ root: weeklyPlan, scope: `live:${clean(recommendations?.generatedAt)}` });
   bindBossDemoEvents();
 }
 

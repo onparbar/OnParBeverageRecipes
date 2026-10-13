@@ -20,13 +20,12 @@ function DashboardBrand() {
 const operationSections = [
   ["keg-levels", "Keg Levels"],
   ["inventory", "Inventory"],
-  ["weekly-plan", "Weekly Plan"],
 ];
 
 function OperationsBar({ context }) {
   return (
     <div className="operations-bar">
-      <div className="operation-tabs operation-tabs--three" role="tablist" aria-label="Beverage operations sections">
+      <div className="operation-tabs" role="tablist" aria-label="Beverage operations sections">
         {operationSections.map(([id, label]) => (
           <button
             className={`operation-tab${id === "keg-levels" ? " is-active" : ""}`}
@@ -130,6 +129,7 @@ export default function DashboardPage() {
     <div className="shell" data-dashboard-role={sessionRole}>
       <link rel="stylesheet" href="/inventory-reality-check.css" />
       <link rel="stylesheet" href="/tap-performance.css" />
+      <link rel="stylesheet" href="/weekly-order.css" />
       <header className="topbar">
         <div className="topbar-title-row topbar-title-row--branded">
           <DashboardBrand />
@@ -168,6 +168,7 @@ export default function DashboardPage() {
         <div className="topbar-actions">
           <div className="top-actions dashboard-owner-only" aria-label="Dashboard sections">
             <button className="tab-button is-active" id="dashboard-tab" data-tab="dashboard" type="button">Home</button>
+            <button className="tab-button" id="weekly-order-tab" data-tab="weekly-order" type="button">Weekly Order</button>
             <button className="tab-button" id="operations-tab" data-tab="operations" type="button">Beverage Ops</button>
           </div>
           <details className="dashboard-menu dashboard-owner-only">
@@ -367,8 +368,14 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        <section className="panel" id="weekly-plan-panel" role="tabpanel" aria-label="Weekly Plan">
-          <OperationsBar context="weekly-plan" />
+        <section className="panel" id="weekly-order-panel" role="tabpanel" aria-labelledby="weekly-order-tab">
+          <div id="weekly-order" className="weekly-order"></div>
+        </section>
+
+        <section className="panel" id="weekly-plan-panel" role="tabpanel" aria-label="Weekly Order — saved plan">
+          <div className="weekly-order-plan-nav">
+            <button className="ghost-button" id="weekly-order-overview" type="button">Weekly Order overview</button>
+          </div>
           <div id="weekly-plan" className="weekly-plan"></div>
         </section>
 
