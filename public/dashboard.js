@@ -1,3 +1,4 @@
+import { mountDashboardSessionRecovery } from "./dashboard-session.mjs";
 import { buildPriorWeekWorkAlert } from "./prep-carry-forward.mjs";
 import { createWeeklyOrderController } from "./weekly-order-controller.mjs";
 import { WEEKLY_ORDER_STEPS } from "./weekly-order-view.mjs";
@@ -1332,6 +1333,8 @@ let activeGlobalSearchResultIndex = -1;
 let ownerLoginSyncStarted = false;
 let dashboardBriefingInitialLoadPending = true;
 const DASHBOARD_BACKGROUND_REFRESH_MS = 120_000;
+
+const dashboardSession = mountDashboardSessionRecovery();
 
 init().finally(() => {
   dashboardBriefingInitialLoadPending = false;
@@ -3543,6 +3546,15 @@ function bindEvents() {
   window.addEventListener("online", () => {
     void retryFailedSharedReads();
     scheduleAutomaticWeeklyUsageRecovery({ immediate: true });
+  });
+  window.addEventListener("onpar:session-restored", () => {
+    void retryFailedSharedReads();
+    void refreshSharedWeeklyUsageForDisplay();
+    void refreshWeeklyOrderTracking();
+    void refreshDashboardStaffPrepPlan();
+    void runKegLevelSync();
+    void runTapPricingSync();
+    void refreshTapRepairBriefing();
   });
   void refreshTapRepairBriefing();
   window.setInterval(() => {
@@ -13698,8 +13710,25 @@ async function runKegLevelSyncAttempt() {
   return succeeded;
 }
 
+let tapPricingReadRetryTimer = null;
+
+function scheduleTapPricingReadRetry() {
+  window.clearTimeout(tapPricingReadRetryTimer);
+  if (dashboardSession.isBlocked()) return;
+  tapPricingReadRetryTimer = window.setTimeout(() => {
+    tapPricingReadRetryTimer = null;
+    if (document.visibilityState !== "visible" || unifiedPmbRefreshRunning || kegConfigUpdateRunning || tapPricingSyncLoading) {
+      scheduleTapPricingReadRetry();
+      return;
+    }
+    void runTapPricingSync();
+  }, 30_000);
+}
+
 async function runTapPricingSync() {
-  if (tapPricingSyncLoading) return false;
+  if (tapPricingSyncLoading || dashboardSession.isBlocked()) return false;
+  window.clearTimeout(tapPricingReadRetryTimer);
+  tapPricingReadRetryTimer = null;
   tapPricingSyncAttempted = true;
   tapPricingSyncLoading = true;
   liveTapPricingMessage = "Checking Pour My Beer for current tap prices...";
@@ -13709,8 +13738,10 @@ async function runTapPricingSync() {
 
   try {
     const { response, result } = await fetchPmbJsonWithRetry({
-      fetcher: () => fetch("/api/tap-pricing", { cache: "no-store" }),
+      fetcher: () => fetch("/api/tap-pricing", { cache: "no-store", signal: AbortSignal.timeout(60_000) }),
       parseResponse: parseJsonResponse,
+      timeoutMs: 61_000,
+      shouldRetryResult: (result) => result?.stale === true || result?.degraded === true,
     });
     if (!response.ok) {
       throw new Error(result?.error || "Could not load tap pricing.");
@@ -13761,6 +13792,7 @@ async function runTapPricingSync() {
     renderKegLevels();
   } finally {
     tapPricingSyncLoading = false;
+    if (!succeeded) scheduleTapPricingReadRetry();
     renderPricingSummary();
     renderDashboardOverview();
   }

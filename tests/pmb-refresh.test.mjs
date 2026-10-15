@@ -104,3 +104,15 @@ test("does not retry login errors or loop forever on repeated gateway failures",
   assert.equal(gateway.attempts, 2);
   assert.equal(gateway.response.status, 520);
 });
+
+test("saved pricing recovers on the next live response without accepting it as verified", async () => {
+  const prices = [{ degraded: true, items: [{ price: 1 }] }, { items: [{ price: 2 }] }];
+  const result = await fetchPmbJsonWithRetry({
+    fetcher: async () => response(200),
+    parseResponse: async () => prices.shift(),
+    shouldRetryResult: value => value?.stale === true || value?.degraded === true,
+    sleep: async () => {},
+  });
+  assert.equal(result.attempts, 2);
+  assert.deepEqual(result.result.items, [{ price: 2 }]);
+});

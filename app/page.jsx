@@ -64,6 +64,9 @@ export default function DashboardPage() {
           window.location.replace("/staff");
           return;
         }
+        // Retain the verified identity before dashboard requests can expire.
+        // Recovery must never attach this tab's drafts to a different account.
+        if (result?.user) window.onParDashboardIdentity = result.user;
         if (isMounted) setSessionRole("owner");
       } catch {
         window.location.assign("/login");
@@ -130,6 +133,7 @@ export default function DashboardPage() {
       <link rel="stylesheet" href="/inventory-reality-check.css" />
       <link rel="stylesheet" href="/tap-performance.css" />
       <link rel="stylesheet" href="/weekly-order.css" />
+      <link rel="stylesheet" href="/dashboard-session.css" />
       <header className="topbar">
         <div className="topbar-title-row topbar-title-row--branded">
           <DashboardBrand />

@@ -1,0 +1,16 @@
+.dashboard-session-dialog {
+  width: min(420px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 28px;
+  border: 1px solid #ccd8d0;
+  border-radius: 16px;
+  color: #173b29;
+  background: #fff;
+}
+.dashboard-session-dialog::backdrop { background: #10251ccc; }
+.dashboard-session-dialog h2 { margin: 0 0 12px; }
+.dashboard-session-dialog p { line-height: 1.5; }
+.dashboard-session-dialog label { display: grid; gap: 8px; }
+.dashboard-session-dialog input { width: 100%; box-sizing: border-box; margin-bottom: 16px; }
+.dashboard-session-dialog button { width: 100%; }
+.dashboard-session-dialog [role="status"] { margin-bottom: 0; }

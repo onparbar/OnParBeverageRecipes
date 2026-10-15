@@ -1,0 +1,32 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard sign-in recovery test</title><link rel="stylesheet" href="/dashboard-session.css">
+<style>body{font:17px system-ui;background:#f1f5f2;color:#173b29;margin:32px auto;max-width:720px;padding:16px}label{display:grid;gap:8px}input,button{font:inherit;padding:12px;border:1px solid #97b5a3;border-radius:8px}button{margin:10px 0;background:#e0ede5}pre{white-space:pre-wrap}.primary-button{color:white;background:#214d36}</style>
+<h1>Dashboard sign-in recovery</h1><p>Local test using sample data. Test clock-in: 1111. Wrong account: 2222.</p>
+<label>Unsaved cooler count<input id="draft" value="7"></label>
+<button id="expire">Simulate expired sign-in</button><button id="save">Try saving</button>
+<p id="status" role="status">Signed in</p><pre id="evidence"></pre>
+<script type="module">
+import { mountDashboardSessionRecovery } from '/dashboard-session.mjs';
+const owner={id:'fixture-owner',name:'Test Manager',role:'owner'};
+window.onParDashboardIdentity=owner;
+let session=owner,reads=0,writes=0,restores=0;
+const json=(data,status=200)=>Response.json(data,{status});
+window.fetch=async(path,options={})=>{
+ if(path==='/api/login'){
+  const password=JSON.parse(options.body).password;
+  if(password==='1111') session=owner;
+  else if(password==='2222') session={...owner,id:'another-owner'};
+  else return json({error:'Clock-in number not recognized.'},401);
+  return json({user:session});
+ }
+ if(path==='/api/session') return session?json({user:session}):json({error:'Login required.'},401);
+ if(options.method==='POST')writes++;else reads++;
+ return session?json({ok:true}):json({error:'Login required.'},401);
+};
+const guard=mountDashboardSessionRecovery();
+const evidence=()=>document.querySelector('#evidence').textContent=JSON.stringify({reads,writes,restores,blocked:guard.isBlocked(),draft:document.querySelector('#draft').value});
+document.querySelector('#expire').onclick=async()=>{session=null;await fetch('/api/pmb-repair-queue');await fetch('/api/save',{method:'POST'});evidence();};
+document.querySelector('#save').onclick=async()=>{await fetch('/api/save',{method:'POST'});evidence();};
+window.addEventListener('onpar:session-restored',async()=>{restores++;await fetch('/api/keg-levels');document.querySelector('#status').textContent='Reconnected. Your count is still here.';evidence();});
+evidence();
+</script></html>
