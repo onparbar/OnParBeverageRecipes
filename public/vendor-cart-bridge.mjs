@@ -27,6 +27,40 @@ function getVendorCartLineName(vendorKey, line) {
 
 export function buildVendorCartRequest(view, { now = Date.now } = {}) {
   const order = view?.order;
+  const lines = [];
+  const products = new Map();
+  for (const line of order.lines || []) {
+    const next = {
+      internalItemId: line.internalItemId,
+      name: getVendorCartLineName(order.vendorKey, line),
+      vendorSku: line.vendorSku,
+      packSize: line.packSize,
+      requestedCases: line.requestedCases,
+      requestedUnits: line.requestedUnits,
+    };
+    const sku = String(line.vendorSku || "").trim().toUpperCase();
+    const existing = order.vendorKey === "ohlq" && sku ? products.get(sku) : null;
+    if (existing) {
+      if (!(Number(next.packSize) > 0) || Number(existing.packSize) !== Number(next.packSize)) {
+        throw new Error(`${next.name}: duplicate supplier lines disagree on pack size. Review them before building the cart.`);
+      }
+      const units = Number(next.requestedUnits);
+      const totalUnits = Number(existing.requestedUnits) + units;
+      if (!Number.isSafeInteger(units) || units <= 0 || !Number.isSafeInteger(Number(existing.requestedUnits))
+        || Number(existing.requestedUnits) <= 0 || !Number.isSafeInteger(totalUnits)) {
+        throw new Error(`${next.name}: duplicate supplier lines have an invalid bottle quantity.`);
+      }
+      // OHLQ has one quantity control per SKU. Sending separate prep and tap
+      // lines overwrites the earlier amount; preserve their combined units.
+      existing.requestedUnits = totalUnits;
+      existing.requestedCases = Number(existing.requestedCases) > 0 && Number(next.requestedCases) > 0
+        ? Number(existing.requestedCases) + Number(next.requestedCases) : null;
+      existing.internalItemId = [existing.internalItemId, next.internalItemId].filter(Boolean).join(",");
+    } else {
+      lines.push(next);
+      if (sku) products.set(sku, next);
+    }
+  }
   return {
     requestId: `${order.id}:${now()}`,
     orderId: order.id,
@@ -35,15 +69,8 @@ export function buildVendorCartRequest(view, { now = Date.now } = {}) {
     rehearsal: order.rehearsal === true,
     operatingWeekReference: order.operatingWeekReference,
     expectedTotal: order.expectedTotal,
-    lineCount: order.lineCount,
-    lines: (order.lines || []).map((line) => ({
-      internalItemId: line.internalItemId,
-      name: getVendorCartLineName(order.vendorKey, line),
-      vendorSku: line.vendorSku,
-      packSize: line.packSize,
-      requestedCases: line.requestedCases,
-      requestedUnits: line.requestedUnits,
-    })),
+    lineCount: lines.length,
+    lines,
   };
 }
 

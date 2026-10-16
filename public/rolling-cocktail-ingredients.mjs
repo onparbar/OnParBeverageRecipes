@@ -13,9 +13,10 @@ export function getRollingCocktailReserves() {
   return { ...RESERVES };
 }
 function key(value) {
-  return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  const normalized = String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase().replace(/['\u2019]/g, "").replace(/\s+[123]$/, "")
     .replace(/\([^)]*\)/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
+  return /^bacardi(?: superior(?: traveler)?(?: rum)?)?$/.test(normalized) ? "bacardi superior" : normalized;
 }
 function nonnegative(value) {
   if (value == null || String(value).trim() === "") return null;
@@ -26,6 +27,25 @@ function managed(item) {
   if (isKitchenManagedInventoryItem(item)) return false;
   return /^(Liquor|Mixer) Cabinet$/i.test(item.group || "") || ["simple-syrup", "vanilla"].includes(item.id)
     || getUncountedInventoryAmount(item) !== null;
+}
+
+function ingredientUnits(ingredient, unitOz) {
+  const ounces = nonnegative(ingredient.oz) || 0;
+  const raw = String(ingredient.raw || "");
+  const bottles = raw.match(/(\d+(?:\.\d+)?)\s*(?:\([^)]*\)\s*)?(?:bottles?|btls?)\b/i);
+  const count = nonnegative(ingredient.packageCount) || Number(bottles?.[1]) || 0;
+  if (count > 0 && (bottles || /^bottles?$/i.test(ingredient.packageUnit || ""))) {
+    const size = raw.match(/\b(\d+(?:\.\d+)?)\s*(ml|l|liters?|oz)\b/i);
+    const sizeUnit = size?.[2].toLowerCase();
+    const declaredOz = nonnegative(ingredient.packageSizeOz) || (size
+      ? Number(size[1]) * (sizeUnit === "oz" ? 1 : sizeUnit === "ml" ? 0.033814 : 33.814)
+      : 0);
+    // Use the recipe's stated bottles; legacy ounces are rounded. Convert
+    // explicitly when the recipe and purchased bottle sizes differ.
+    if (declaredOz > 0) return Math.abs(declaredOz - unitOz) <= 0.05 ? count : count * declaredOz / unitOz;
+    if (Math.abs(ounces / count - unitOz) <= 0.05) return count;
+  }
+  return ounces / unitOz;
 }
 
 // Stock stays assigned to its tap. Sum ingredients only after forecasting whole
@@ -71,7 +91,8 @@ export function buildRollingCocktailIngredientOrders({
       const unitOz = nonnegative(item.bottleOz);
       if (!(unitOz > 0)) { issues.push(`${item.name}: inventory package size is missing.`); continue; }
       const entry = demand.get(item.id) || { units: [0], taps: new Set() };
-      batches.forEach((count, week) => { entry.units[week] += ounces * count / unitOz; });
+      const units = ingredientUnits(ingredient, unitOz);
+      batches.forEach((count, week) => { entry.units[week] += units * count; });
       entry.taps.add(n);
       demand.set(item.id, entry);
     }
