@@ -225,6 +225,7 @@ import {
   clean,
   cssEscape,
   escapeHtml,
+  formatCalendarDate,
   formatContainerSizeLabel,
   formatInventoryQuantity,
   formatInventorySnapshotLabel,
@@ -6666,6 +6667,8 @@ function getDashboardCompletedPrepItems() {
 }
 
 function formatDashboardPrepTime(value) {
+  const calendarDate = formatCalendarDate(value);
+  if (calendarDate) return calendarDate;
   const completedAt = new Date(value);
   if (Number.isNaN(completedAt.getTime())) return "Time unavailable";
   return completedAt.toLocaleString([], {

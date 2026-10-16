@@ -1,4 +1,5 @@
 import { parseSmartReceivingTranscript } from "./smart-receiving.mjs";
+import { formatCalendarDate } from "./dashboard-formatters.mjs";
 import { kegDestination } from "./keg-destination.mjs";
 import { renderStaffReceiving } from "./staff-receiving-view.mjs";
 import "./staff-resilience.mjs";
@@ -1302,6 +1303,8 @@ function formatPlanWeek(value) {
 }
 
 function formatCompletionTime(value) {
+  const calendarDate = formatCalendarDate(value);
+  if (calendarDate) return calendarDate;
   const date = new Date(value || "");
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleString("en-US", {

@@ -49,8 +49,21 @@ export function formatContainerSizeLabel(size, unit) {
   return `${formatNumber(size)} ${unit}`;
 }
 
+// A backdated completion may have a known day without a known clock time.
+// Keep that calendar date stable across time zones and omit a fabricated time.
+export function formatCalendarDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return "";
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) return "";
+  return date.toLocaleDateString("en-US", {
+    timeZone: "UTC", month: "short", day: "numeric", year: "numeric",
+  });
+}
+
 export function formatUpdatedAt(value) {
   if (!value) return "Not updated";
+  const calendarDate = formatCalendarDate(value);
+  if (calendarDate) return calendarDate;
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Not updated";
