@@ -13,8 +13,8 @@ test("Home omits the nonalcoholic beer cost warning without hiding other missing
     { id: "lime", name: "Lime Juice", par: 12, unitCost: 0 },
     { id: "titos", name: "Tito's", par: 12, unitCost: 20 },
   ];
-  const getAlerts = new Function("kegWallItems", "getWeeklyPlanInventoryItems", "clean", "normalizeProductPriceKey", "isPricingPlaceholder", "toNumber", "formatMissingCostMessage", `${alertFunction}; return getMissingPriceAlerts;`)(
-    [], () => inventory, value => String(value || "").trim(), value => value.toLowerCase(), () => false, Number, items => items.join(", "),
+  const getAlerts = new Function("getCurrentTapPricingCoverage", "kegWallItems", "getWeeklyPlanInventoryItems", "clean", "normalizeProductPriceKey", "isPricingPlaceholder", "toNumber", "formatMissingCostMessage", `${alertFunction}; return getMissingPriceAlerts;`)(
+    () => null, [], () => inventory, value => String(value || "").trim(), value => value.toLowerCase(), () => false, Number, items => items.join(", "),
   );
   const alerts = getAlerts();
   assert.equal(alerts.length, 1);

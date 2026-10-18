@@ -1,4 +1,5 @@
 import { mountDashboardSessionRecovery } from "./dashboard-session.mjs";
+import { getTapPricingCoverage } from "./tap-pricing-coverage.mjs";
 import { buildPriorWeekWorkAlert } from "./prep-carry-forward.mjs";
 import { createWeeklyOrderController } from "./weekly-order-controller.mjs";
 import { WEEKLY_ORDER_STEPS } from "./weekly-order-view.mjs";
@@ -1290,6 +1291,7 @@ let selectedUntappdBeer = null;
 let selectedUntappdLiquor = null;
 let liveTapPrices = new Map();
 let liveTapPriceItems = [];
+let liveTapPricingAssignments = [];
 let liveTapPricingMessage = "Open Tap Pricing on the work network to load current Pour My Beer prices.";
 let liveTapPricingUpdatedAt = "";
 let tapPricingSyncAttempted = false;
@@ -6633,14 +6635,24 @@ function getPmbKegLevelOverviewFeed() {
   };
 }
 
+function getCurrentTapPricingCoverage() {
+  return getTapPricingCoverage({
+    assignments: liveTapPricingAssignments,
+    priceItems: liveTapPriceItems,
+    expectedTapNumbers: kegWallItems.map(item => toNumber(item.tapNumber)),
+    updatedAt: liveTapPricingUpdatedAt,
+  });
+}
+
 function getPmbPricingOverviewFeed() {
+  const coverage = getCurrentTapPricingCoverage();
   const pricedTapCount = kegWallItems.filter((item) => {
     const liveItem = kegLiveLevels.get(`tap:${toNumber(item?.tapNumber)}`);
     const currentName = clean(liveItem?.name || item?.brand);
     return !/^coming soon!?$/i.test(currentName);
   }).length;
-  const expectedCount = pricedTapCount || liveTapPriceItems.length;
-  const capturedCount = liveTapPriceItems.length;
+  const expectedCount = coverage?.expectedCount ?? (pricedTapCount || liveTapPriceItems.length);
+  const capturedCount = coverage?.capturedCount ?? liveTapPriceItems.length;
   const status = tapPricingSyncLoading
     ? "loading"
     : liveTapPricingUpdatedAt
@@ -6708,11 +6720,20 @@ function renderDashboardCompletedPrep() {
 }
 
 function getMissingPriceAlerts() {
+  const pricingCoverage = getCurrentTapPricingCoverage();
   const missingTapPrices = [];
   const missingCosts = [];
   const seenTapPrices = new Set();
   const seenCosts = new Set();
+  for (const assignment of pricingCoverage?.missingAssignments || []) {
+    const item = kegWallItems.find(row => Number(row.tapNumber) === Number(assignment.tapNumber));
+    const product = clean(assignment.product);
+    if (seenTapPrices.has(product.toLowerCase())) continue;
+    seenTapPrices.add(product.toLowerCase());
+    missingTapPrices.push(`${product} · ${item?.wall || "Wall"} tap ${assignment.tapNumber}`);
+  }
   kegWallItems.forEach((item) => {
+    if (pricingCoverage?.placeholderTapNumbers.includes(Number(item.tapNumber))) return;
     const liveRow = getKegLiveRow(item);
     const resolution = getKegCanonicalResolution(item, liveRow);
     const product = String(resolution.product?.name || "").trim();
@@ -6724,7 +6745,8 @@ function getMissingPriceAlerts() {
       seenCosts.add(productKey);
       missingCosts.push(`${product} · ${location}`);
     }
-    if (liveTapPricingUpdatedAt && liveRow && pricing.chargeAvailable !== true && !seenTapPrices.has(productKey)) {
+    if (!pricingCoverage && !kegLiveLevelsStale && liveTapPricingUpdatedAt && liveRow
+      && pricing.chargeAvailable !== true && !seenTapPrices.has(productKey)) {
       seenTapPrices.add(productKey);
       missingTapPrices.push(`${product} · ${location}`);
     }
@@ -13752,6 +13774,7 @@ async function runTapPricingSync() {
 
     liveTapPriceItems = filterCurrentTapPricingItems(result.items);
     const stalePricing = result.stale === true || result.degraded === true;
+    liveTapPricingAssignments = stalePricing ? [] : (result.tapAssignments || []);
     shotPricingCapability = stalePricing
       ? {
           writeAvailable: false,
@@ -13785,6 +13808,7 @@ async function runTapPricingSync() {
     succeeded = !stalePricing;
   } catch (error) {
     liveTapPricingUpdatedAt = "";
+    liveTapPricingAssignments = [];
     shotPricingCapability = {
       writeAvailable: false,
       code: "PMB_PRICING_REFRESH_FAILED",

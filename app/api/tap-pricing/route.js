@@ -19,6 +19,7 @@ import {
   getTapPricingRepresentativeAssignment,
 } from "../../../lib/tap-pricing-assignments.mjs";
 import { filterCurrentTapPricingItems } from "../../../public/keg-pricing-scope.mjs";
+import { buildVerifiedKegSlotMap } from "../../../lib/pmb-keg-safety.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -253,6 +254,7 @@ export async function GET() {
     const pricing = await readCurrentPmbPricing(config);
     const tapLookup = await getTapLookup();
     const tapConfigRows = pricing.tapConfigRows;
+    const tapAssignments = [...buildVerifiedKegSlotMap(tapConfigRows).values()];
     const previousPricing = pricing.itemPricesAvailable ? null : await readLatestPmbDataBackup("tap-pricing").catch(() => null);
     const rawItemRows = pricing.itemlist;
     const discoveredPortionSchema = resolvePmbPortionSchema(rawItemRows);
@@ -342,6 +344,7 @@ export async function GET() {
     const payload = {
       updatedAt,
       items,
+      tapAssignments,
       pricingSource: pricing.source,
       pricingConnection: { productPricesLive: true, portionPricesLive: pricing.itemPricesAvailable, sourceErrors: pricing.sourceErrors },
       portionPricing: {
