@@ -6,7 +6,7 @@ import {
 import { getTapConfigRows, getKegTappedOnRows } from "../../../lib/pmb-tap-config.mjs";
 import {
   buildVerifiedKegSlotMap,
-  buildVerifiedPmbProductMap,
+  buildVerifiedKegProductCatalog,
   PmbKegSafetyError,
   requireSuccessfulKegLevelResponse,
 } from "../../../lib/pmb-keg-safety.mjs";
@@ -167,6 +167,7 @@ export async function GET(request) {
     }
 
     const verifiedSlots = [...buildVerifiedKegSlotMap(tapConfigRows).values()];
+    const { productByPlu, catalogIssues } = buildVerifiedKegProductCatalog(products.json.productlist, verifiedSlots);
     check.expect(verifiedSlots);
     check.stage("controller-readings");
     const lastCompleteSnapshot = await readPmbLevelSnapshot().catch(() => null);
@@ -256,7 +257,6 @@ export async function GET(request) {
       levels.sort((a, b) => a.lineNum - b.lineNum);
     });
 
-    const productByPlu = buildVerifiedPmbProductMap(products.json.productlist);
     let items = verifiedSlots.map((slot) => {
       const product = productByPlu.get(slot.plu) || {};
       const level = levelBySlot.get(`${slot.deviceId}:${slot.lineNum}`) || {};
@@ -347,6 +347,7 @@ export async function GET(request) {
       expectedCount: verifiedSlots.length,
       configUpdateRecommended: partial,
       unreachableTaps,
+      catalogIssues,
       sharedSnapshotSaved,
       coolerEstimate,
     });
