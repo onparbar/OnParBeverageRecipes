@@ -513,6 +513,16 @@
   display: none;
 }
 
+.supplier-order-flow .vendor-order-adjustments__fields {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+}
+
+.supplier-order-flow .vendor-order-adjustments__fields label,
+.supplier-order-flow .vendor-order-adjustments__fields input,
+.supplier-order-flow .vendor-order-adjustments__fields select {
+  min-width: 0;
+}
+
 @media print {
   .supplier-order-flow {
     width: 100%;
