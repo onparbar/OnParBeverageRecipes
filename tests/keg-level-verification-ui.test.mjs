@@ -2,14 +2,16 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [dashboardSource, css] = await Promise.all([
+const [dashboardSource, css, pageSource] = await Promise.all([
   readFile(new URL("../public/dashboard.js", import.meta.url), "utf8"),
   readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  readFile(new URL("../app/page.jsx", import.meta.url), "utf8"),
 ]);
 
-test("keg levels asks staff to verify saved backup counts", () => {
-  assert.match(dashboardSource, /Verify the saved counts\./);
-  assert.match(dashboardSource, /change only what is different/i);
+test("keg levels shows backup stock without a separate weekly counting workflow", () => {
+  assert.doesNotMatch(dashboardSource, /Verify the saved counts\.|change only what is different/i);
+  assert.doesNotMatch(pageSource, /id="cooler-count-continue"|id="cooler-count-feedback"/);
+  assert.doesNotMatch(dashboardSource, /id="keg-speech-assistant"/);
   assert.match(dashboardSource, /<th>Full back up kegs<\/th>/);
   assert.match(dashboardSource, /aria-label="Full back up kegs for/);
 });

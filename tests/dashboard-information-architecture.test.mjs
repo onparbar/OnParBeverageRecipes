@@ -12,11 +12,11 @@ const [pageSource, dashboardSource, inventorySource, staffDashboardSource, bever
 
 test("the owner dashboard is the initial page and recipes appear later in navigation", () => {
   const dashboardTab = pageSource.indexOf('data-tab="dashboard"');
-  const operationsTab = pageSource.indexOf('data-tab="operations"');
+  const kegLevelsTab = pageSource.indexOf('data-tab="keg-levels"');
   const searchTab = pageSource.indexOf('data-tab="search"');
 
   assert.ok(dashboardTab >= 0);
-  assert.ok(dashboardTab < operationsTab);
+  assert.ok(dashboardTab < kegLevelsTab);
   assert.equal(searchTab, -1);
   assert.match(pageSource, /className="header-search dashboard-owner-only"/);
   assert.match(pageSource, /className="dashboard-menu dashboard-owner-only"/);
@@ -26,7 +26,9 @@ test("the owner dashboard is the initial page and recipes appear later in naviga
   assert.match(pageSource, /data-menu-tab="add"/);
   assert.match(pageSource, /data-menu-tab="pricing"/);
   assert.match(pageSource, /data-menu-tab="ingredients"/);
-  assert.match(pageSource, /\["keg-levels", "Keg Levels"\],[\s\S]*\["inventory", "Inventory"\]/);
+  assert.match(pageSource, /data-tab="keg-levels"[^>]*>Keg Levels<\/button>/);
+  assert.match(pageSource, /data-menu-tab="inventory"[^>]*>Inventory<\/button>/);
+  assert.doesNotMatch(pageSource, /Beverage Ops|OperationsBar|data-operation-tab/);
   assert.doesNotMatch(pageSource, /\["weekly-plan", "Weekly Plan"\]/);
   assert.match(pageSource, /data-tab="weekly-order"[^>]*>Weekly Order<\/button>/);
   assert.match(pageSource, /id="weekly-order-panel"/);

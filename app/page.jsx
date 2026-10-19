@@ -17,35 +17,6 @@ function DashboardBrand() {
   );
 }
 
-const operationSections = [
-  ["keg-levels", "Keg Levels"],
-  ["inventory", "Inventory"],
-];
-
-function OperationsBar({ context }) {
-  return (
-    <div className="operations-bar">
-      <div className="operation-tabs" role="tablist" aria-label="Beverage operations sections">
-        {operationSections.map(([id, label]) => (
-          <button
-            className={`operation-tab${id === "keg-levels" ? " is-active" : ""}`}
-            id={`${context}-${id}-tab`}
-            data-operation-tab={id}
-            type="button"
-            role="tab"
-            aria-controls={`${id}-panel`}
-            aria-selected={id === "keg-levels" ? "true" : "false"}
-            tabIndex={id === "keg-levels" ? 0 : -1}
-            key={id}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export default function DashboardPage() {
   const [isReady, setIsReady] = useState(false);
   const [sessionRole, setSessionRole] = useState("");
@@ -173,7 +144,7 @@ export default function DashboardPage() {
           <div className="top-actions dashboard-owner-only" aria-label="Dashboard sections">
             <button className="tab-button is-active" id="dashboard-tab" data-tab="dashboard" type="button">Home</button>
             <button className="tab-button" id="weekly-order-tab" data-tab="weekly-order" type="button">Weekly Order</button>
-            <button className="tab-button" id="operations-tab" data-tab="operations" type="button">Beverage Ops</button>
+            <button className="tab-button" id="keg-levels-tab" data-tab="keg-levels" type="button">Keg Levels</button>
           </div>
           <details className="dashboard-menu dashboard-owner-only">
             <summary className="dashboard-menu-trigger" aria-label="Menu">
@@ -181,6 +152,7 @@ export default function DashboardPage() {
               <span className="dashboard-menu-icon" aria-hidden="true"><i></i><i></i><i></i></span>
             </summary>
             <div className="dashboard-menu-popover">
+              <button className="dashboard-menu-item" data-menu-tab="inventory" type="button">Inventory</button>
               <button className="dashboard-menu-item" data-menu-tab="weekly-snapshots" type="button">Weekly Snapshots</button>
                       <button className="dashboard-menu-item" id="weekly-usage-tab" data-menu-tab="weekly-usage" type="button">Weekly Usage</button>
               <button className="dashboard-menu-item" data-menu-tab="pricing" type="button">Tap Pricing</button>
@@ -360,15 +332,10 @@ export default function DashboardPage() {
 
         </section>
 
-        <section className="panel" id="keg-levels-panel" role="tabpanel" aria-label="Keg Levels">
-          <OperationsBar context="keg-levels" />
+        <section className="panel" id="keg-levels-panel" role="tabpanel" aria-labelledby="keg-levels-tab">
           <div className="keg-layout">
             <aside className="keg-summary" id="keg-summary"></aside>
             <div className="keg-walls" id="keg-walls"></div>
-          </div>
-          <div className="inventory-submit-actions">
-            <p id="cooler-count-feedback" className="sync-status" role="status" aria-live="polite" hidden></p>
-            <button className="primary-button" id="cooler-count-continue" type="button">Start Count</button>
           </div>
         </section>
 
@@ -743,7 +710,6 @@ export default function DashboardPage() {
         </section>
 
         <section className="panel" id="inventory-panel" role="tabpanel" aria-label="Inventory">
-          <OperationsBar context="inventory" />
 
           <div className="inventory-layout dashboard-layout--full-width">
             <div className="inventory-sections">

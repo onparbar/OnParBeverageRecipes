@@ -909,8 +909,7 @@ const MENU_ORDER = [
   ["WASHINGTON APPLE (CROWN ROYAL APPLE)", "Washington Apple (Whiskey)"],
   ["WHISKEY SOUR (JACK DANIELS)", "Whiskey Sour (Whiskey)"],
 ];
-const OPERATION_TAB_NAMES = ["keg-levels", "inventory"];
-const MENU_TAB_NAMES = ["weekly-snapshots", "performance", "weekly-usage", "recipes", "add", "pricing", "ingredients", "print"];
+const MENU_TAB_NAMES = ["inventory", "weekly-snapshots", "performance", "weekly-usage", "recipes", "add", "pricing", "ingredients", "print"];
 const NEW_RECIPE_ORDER = [
   ["Bacardi Sunset", "Bacardi Sunset"],
   ["Whiskey Smash", "Whiskey Smash"],
@@ -1325,7 +1324,6 @@ let sellerRankingMetric = "volume";
 let sellerRankingPeriod = "six-weeks";
 let sellerRankingListSize = 5;
 let sellerRankingIncludeOldTaps = false;
-let activeOperationsTab = "keg-levels";
 let weeklyOrderController = null;
 const supplierOrderFlow = createSupplierOrderFlow({ onExit: () => switchTab("weekly-order") });
 let activeRecipeView = "current";
@@ -3415,24 +3413,6 @@ function bindEvents() {
   dashboardOverview?.addEventListener("change", handleDashboardPulseChange);
   document.querySelector("#dashboard-guest-favorites")?.addEventListener("change", handleDashboardPulseChange);
   document.querySelector("#dashboard-beverage-pulse")?.addEventListener("change", handleDashboardPulseChange);
-  document.querySelectorAll(".operation-tab").forEach((button) => {
-    button.addEventListener("click", () => switchTab(button.dataset.operationTab));
-    button.addEventListener("keydown", (event) => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-      const tabs = [...button.closest('[role="tablist"]')?.querySelectorAll('[role="tab"]') || []];
-      if (!tabs.length) return;
-      event.preventDefault();
-      const currentIndex = tabs.indexOf(button);
-      const nextIndex = event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? tabs.length - 1
-          : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
-      const nextTab = tabs[nextIndex];
-      switchTab(nextTab.dataset.operationTab);
-      nextTab.focus();
-    });
-  });
   addProductTypeButtons.forEach((button) => {
     button.addEventListener("click", () => switchAddProductType(button.dataset.addProductType));
     button.addEventListener("keydown", (event) => {
@@ -3633,16 +3613,11 @@ function switchTab(tabName) {
     dashboardDataSearchInput?.focus();
     return;
   }
-  const requestedTab = tabName === "operations" ? activeOperationsTab : tabName;
-  const isOperationTab = OPERATION_TAB_NAMES.includes(requestedTab);
+  const requestedTab = tabName === "operations" ? "keg-levels" : tabName;
   const isMenuTab = MENU_TAB_NAMES.includes(requestedTab);
-  if (isOperationTab) {
-    activeOperationsTab = requestedTab;
-  }
 
   document.querySelectorAll(".tab-button").forEach((button) => {
-    const isActive = isOperationTab ? button.dataset.tab === "operations"
-      : requestedTab === "weekly-plan" ? button.dataset.tab === "weekly-order" : button.dataset.tab === requestedTab;
+    const isActive = requestedTab === "weekly-plan" ? button.dataset.tab === "weekly-order" : button.dataset.tab === requestedTab;
     button.classList.toggle("is-active", isActive);
   });
 
@@ -3656,13 +3631,6 @@ function switchTab(tabName) {
 
   document.querySelectorAll(".panel").forEach((panel) => {
     panel.classList.toggle("is-active", panel.id === `${requestedTab}-panel`);
-  });
-
-  document.querySelectorAll(".operation-tab").forEach((button) => {
-    const isActive = button.dataset.operationTab === activeOperationsTab;
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-selected", String(isActive));
-    button.tabIndex = isActive ? 0 : -1;
   });
 
   if (!isEmployeeDashboard && ["weekly-usage", "performance", "insights"].includes(requestedTab) && !weeklyUsageSyncAttempted) {
@@ -9283,10 +9251,6 @@ function renderKegLevels() {
         ${wallFilterOptions.map(([key, label, count]) => `<button class="${key === activeKegWallFilter ? "is-active" : ""}" type="button" data-keg-wall-filter="${escapeHtml(key)}" aria-pressed="${key === activeKegWallFilter}"><span>${escapeHtml(label)}</span>${key === "all" ? "" : `<span class="keg-wall-filter__option-count">${formatNumber(count)}</span>`}</button>`).join("")}
       </nav>
     </details>
-    <p class="keg-count-verification-note">
-      <strong>Verify the saved counts.</strong>
-      Check the full back up keg totals below and change only what is different. You do not need to count unchanged kegs again.
-    </p>
   `;
   const visibleWallBlocks = renderKegWallBlock(
     selectedWall || "All",
@@ -9295,7 +9259,6 @@ function renderKegLevels() {
   );
   kegWalls.dataset.activeWallFilter = activeKegWallFilter;
   kegWalls.innerHTML = `
-    <details class="inventory-speech" id="keg-speech-assistant"></details>
     ${visibleWallBlocks}
     <details class="keg-coming-soon">
       <summary>Coming Soon · ${formatNumber(activeComingSoonCount)}</summary>
@@ -9316,7 +9279,6 @@ function renderKegLevels() {
     event.currentTarget.querySelector("summary")?.focus({ preventScroll: true });
   });
 
-  renderInventorySpeechAssistant();
   kegWalls.querySelectorAll(".tap-product-detail").forEach((detail) => {
     detail.addEventListener("pointerenter", (event) => {
       if (event.pointerType === "mouse") detail.open = true;
