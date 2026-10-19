@@ -134,7 +134,7 @@ test("a weekly refresh preserves the archived Octoberfest identity and usage for
   assert.equal(result.orderProductName, "Octoberfest");
   assert.equal(result.orderQty, 1);
   assert.ok(result.avgWeeklyKegs > 0);
-  const scope = { isPricingPlaceholder, getSavedTapOrderProduct, weeklyUsageItems: active, weeklyUsageArchivedItems: archived };
+  const scope = { isPricingPlaceholder, getSavedTapOrderProduct, getKegLiveRow: () => tap, weeklyUsageItems: active, weeklyUsageArchivedItems: archived };
   assert.equal(load("getWeeklyUsageForKegItem", scope)(tap, tap.name), archivedOctoberfest);
 });
 test("retention cannot revive an older beer after a real replacement or cross physical taps", () => {

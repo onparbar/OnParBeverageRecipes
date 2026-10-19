@@ -11544,13 +11544,15 @@ function getUnmappedKegWallPricing(livePrice) {
 }
 
 function getWeeklyUsageForKegItem(item, displayBrand = item?.brand) {
-  if (isPricingPlaceholder(displayBrand)) {
-    const retained = getSavedTapOrderProduct({ ...item, name: displayBrand }, weeklyUsageItems, weeklyUsageArchivedItems);
+  const liveRow = getKegLiveRow(item);
+  // Pricing can supply an older display name while the physical tap is Coming Soon.
+  const currentName = liveRow?.name || liveRow?.tapProduct || displayBrand;
+  if (isPricingPlaceholder(currentName)) {
+    const retained = getSavedTapOrderProduct({ ...item, name: currentName }, weeklyUsageItems, weeklyUsageArchivedItems);
     if (retained?.name && !isPricingPlaceholder(retained.name)) return retained;
   }
   const tapNumber = toNumber(item?.tapNumber);
   const tapMatch = weeklyUsageItems.find((entry) => toNumber(entry.tapNumber) === tapNumber);
-  const liveRow = getKegLiveRow(item);
   const liveName = liveRow?.name || liveRow?.tapProduct || "";
   const sameLiveProduct = getWeeklyUsageNameKeys(liveName, { stripWallNumber: true })
     .some((key) => getWeeklyUsageNameKeys(displayBrand, { stripWallNumber: true }).includes(key));
@@ -14066,7 +14068,8 @@ function setKegOnDeckItem(key, comingSoonId) {
 function getKegNeedCalculation(item) {
   const liveRow = getKegLiveRow(item);
   const displayBrand = getKegDisplayBrand(item, liveRow);
-  const placeholder = isPricingPlaceholder(displayBrand);
+  const currentName = liveRow?.name || liveRow?.tapProduct || displayBrand;
+  const placeholder = isPricingPlaceholder(currentName);
   const liveFraction = placeholder ? 0 : getKegCurrentFraction(item, liveRow);
   if (liveFraction === null) return null;
   const usageItem = getWeeklyUsageForKegItem(item, displayBrand);
@@ -14097,7 +14100,7 @@ function getKegNeedCalculation(item) {
 
   const onDeck = getKegOnDeckItem(item);
   const intendedCocktailName = clean(onDeck?.name || item.brand || item.tapProduct);
-  const isComingSoonCocktail = isPricingPlaceholder(displayBrand)
+  const isComingSoonCocktail = placeholder
     && intendedCocktailName
     && !isPricingPlaceholder(intendedCocktailName)
     && (normalizeTitle(item.type) === "cocktail"
@@ -14111,8 +14114,8 @@ function getKegNeedCalculation(item) {
     });
   }
 
-  if (isPricingPlaceholder(displayBrand)
-    && !getTapOrderProductName({ ...item, name: displayBrand }, usageItem, onDeck)) return null;
+  if (placeholder
+    && !getTapOrderProductName({ ...item, name: currentName }, usageItem, onDeck)) return null;
 
   const fullOunces = placeholder
     ? getKegSizeOverrideOz(usageItem) || STANDARD_BEER_KEG_OZ
@@ -14142,7 +14145,10 @@ function renderKegNeedCell(item, need) {
   const usageItem = getWeeklyUsageForKegItem(item, displayBrand);
   const calculation = getKegNeedCalculation(item);
   const unit = isLiquorOunceTap(toNumber(item.tapNumber)) ? "oz" : "kegs";
-  const fullOunces = getKegFullOunces(liveRow, item);
+  const placeholder = isPricingPlaceholder(liveRow?.name || liveRow?.tapProduct || displayBrand);
+  const fullOunces = placeholder
+    ? getKegSizeOverrideOz(usageItem) || STANDARD_BEER_KEG_OZ
+    : getKegFullOunces(liveRow, item);
   const peakUsage = getEightWeekPeakUsage(usageItem || {}, new Date(), fullOunces);
   const usage = unit === "kegs"
     ? peakUsage

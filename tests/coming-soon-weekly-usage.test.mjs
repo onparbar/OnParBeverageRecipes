@@ -10,6 +10,9 @@ import { buildRawRecommendation } from "../lib/par-agent.mjs";
 import { isPricingPlaceholder } from "../public/pricing-placeholders.mjs";
 import { getKnownBeerKegSizeOz } from "../public/beer-keg-pricing.mjs";
 import { buildInventoryPosition, buildStockGapRecommendation } from "../public/operations-truth-model.mjs";
+import { getCurrentTapUsage } from "../public/current-tap-usage.mjs";
+import { getEightWeekPeakUsage } from "../public/keg-demand-policy.mjs";
+import { resolveCanonicalTap, getCanonicalTapDisplayName } from "../public/canonical-tap-resolution.mjs";
 
 const previous = [
   { tapNumber: 38, plu: 59321, name: "Stella Artois 1", type: "Import", wall: "Main" },
@@ -153,6 +156,58 @@ test("dashboard ordering excludes placeholder percentages, honors cooler stock, 
   assert.equal(calculate(taps[2]).orderQuantity, 0, "real connected beer still counts");
   fraction = null;
   assert.equal(calculate(taps[2]), null, "failed active readings still block calculation");
+});
+
+test("Keg Levels retains physical-tap usage when a cached pricing name hides Coming Soon", () => {
+  const now = new Date("2026-10-19T18:00:00Z");
+  for (const tapNumber of [44, 77]) {
+    const tap = taps.find(item => item.tapNumber === tapNumber);
+    const saved = previous.find(item => item.tapNumber === tapNumber);
+    const archived = { ...saved, replacedAt: now.toISOString(), replacedBy: "Coming Soon!" };
+    let liveRow = { ...tap, fillLevelPercent: 87.1, rawKegSize: 1690, rawKegSizeDp: 0 };
+    let backups = 0;
+    const scope = {
+      Date: class extends Date { constructor(...args) { super(...(args.length ? args : [now])); } },
+      getKegLiveRow: () => liveRow,
+      getKegItemKey: item => item.key,
+      tapReplacementOverrides: {}, liveTapPricingUpdatedAt: now.toISOString(),
+      getLiveTapPriceForKegWallItem: () => ({ name: tapNumber === 77 ? "Busch Light 1" : "Triple Jam Cider 2", plu: 999, chargePerOz: 0.33 }),
+      getLiveTapPortions: () => [], resolveCanonicalTap, getCanonicalTapDisplayName,
+      getSavedTapOrderProduct, getTapOrderProductName, isPricingPlaceholder,
+      weeklyUsageItems: [{ ...tap, history: [{ label: "10/12/26 - 10/18/26", hasValue: false, value: 0 }] }],
+      weeklyUsageArchivedItems: [archived], getCurrentTapUsage,
+      getWeeklyUsageNameKeys: name => [String(name || "").toLowerCase().replace(/\s+[123]$/, "")],
+      getKegCurrentFraction: () => liveRow.levelAvailable === false ? null : liveRow.fillLevelPercent / 100,
+      getSixWeekUsage: () => ({}), isLiquorOunceTap: () => false, toNumber: Number,
+      getKegOnDeckItem: () => null, clean: value => String(value || "").trim(),
+      normalizeTitle: value => String(value || "").toLowerCase(),
+      getKegSizeOverrideOz: getKnownBeerKegSizeOz, STANDARD_BEER_KEG_OZ: 1984,
+      getKegFullOunces: () => 1690, getEightWeekPeakUsage,
+      getKegOnHandDisplay: () => backups, buildInventoryPosition, buildStockGapRecommendation,
+      getParAgentRecommendation: () => ({ orderProductName: saved.name, actionType: "order" }),
+      getCanonicalProductDisplayName: String, formatNumber: String, escapeHtml: String,
+    };
+    for (const name of ["getKegCanonicalResolution", "getKegDisplayBrand", "getWeeklyUsageForKegItem", "getKegNeedCalculation", "getKegNeed", "renderKegNeedValue", "renderKegNeedCell"]) {
+      scope[name] = dashboardFunction(name, scope);
+    }
+    const displayName = scope.getKegDisplayBrand(tap, liveRow);
+    assert.notEqual(displayName, "Coming Soon!", "reproduce the cached pricing display name");
+    assert.equal(scope.getWeeklyUsageForKegItem(tap, displayName), archived);
+    const recommendation = buildRawRecommendation(tap, liveRow, [], { onHandOverrides: { [tap.key]: 0 } }, {}, archived, { now });
+    assert.equal(scope.getKegNeed(tap), recommendation.orderQty);
+    assert.equal(scope.getKegNeed(tap), 1);
+    const html = scope.renderKegNeedCell(tap, scope.getKegNeed(tap));
+    assert.match(html, />Order 1</);
+    const target = getEightWeekPeakUsage(archived, now, 1984).targetStock;
+    assert.match(html, new RegExp(`<strong>${target} kegs</strong>`));
+    assert.doesNotMatch(html, /Not available/);
+    backups = 1;
+    assert.equal(scope.getKegNeed(tap), 0, "the current cooler count still updates the live calculation");
+    backups = 0;
+    liveRow = { ...liveRow, name: "New Beer", plu: 12345, levelAvailable: false };
+    assert.equal(scope.getKegNeed(tap), null, "a failed reading of a real replacement remains unknown");
+    assert.notEqual(scope.getWeeklyUsageForKegItem(tap, "New Beer"), archived, "real replacements cannot revive the old beer history");
+  }
 });
 
 test("browser archiving conserves unassigned ounces and reuses the shared recovery archive", () => {
