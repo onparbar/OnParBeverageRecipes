@@ -410,7 +410,7 @@ function buildWeeklyReport(range, transactions, preThursdayTransactions, product
       const preThursdayVolumeOz = Math.round(
         Number(preThursdayItemsByKey.get(getWeeklyUsageItemKey(item))?.volumeOz || 0) * 100,
       ) / 100;
-      if (item.tapNumber) {
+      if (item.tapNumber || item.tapAssignmentUnknown) {
         return {
           ...item,
           volumeOz: Math.round(item.volumeOz * 100) / 100,

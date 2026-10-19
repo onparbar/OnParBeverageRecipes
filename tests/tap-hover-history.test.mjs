@@ -143,6 +143,7 @@ test("Coming Soon uses the tap's intended cocktail when On Deck is empty", () =>
 
 test("liquor targets use the shared refill batch and preserve missing readings", () => {
   const scope = {
+    isPricingPlaceholder,
     getKegLiveRow: () => ({}), getKegCurrentFraction: () => 0.5, getKegItemKey: () => "21",
     toNumber: Number, isLiquorOunceTap: () => true, getKegCurrentLevelOz: () => 110,
     getKegDisplayBrand: () => "Test liquor", getWeeklyUsageForKegItem: () => ({ displayUnit: "oz" }),

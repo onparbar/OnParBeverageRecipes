@@ -11109,8 +11109,13 @@ function archivePmbWeeklyUsageReportItem(reportItem, label) {
   if (!name || !volumeOz) return false;
 
   const tapNumber = toNumber(reportItem.tapNumber);
-  const id = slugify(`${tapNumber || "pmb"}-${name}`);
-  const displayUnit = getWeeklyUsageDisplayUnitForTap({
+  const unassignedPlaceholder = reportItem.tapAssignmentUnknown === true && !tapNumber;
+  const savedUnassigned = unassignedPlaceholder && weeklyUsageArchivedItems.find((item) => (
+    !toNumber(item.tapNumber) && toNumber(item.plu) === toNumber(reportItem.plu)
+    && clean(item.name) === name
+  ));
+  const id = savedUnassigned?.archiveId || savedUnassigned?.id || slugify(`${tapNumber || "pmb"}-${name}`);
+  const displayUnit = unassignedPlaceholder ? "oz" : getWeeklyUsageDisplayUnitForTap({
     tapNumber,
     type: reportItem.type,
     name,
@@ -11124,7 +11129,11 @@ function archivePmbWeeklyUsageReportItem(reportItem, label) {
   if (!Number.isFinite(value) || value <= 0) return false;
 
   const existing = weeklyUsageArchivedItems.find((item) => (item.archiveId || item.id) === id);
+  const assignmentEvidence = unassignedPlaceholder
+    ? { tapAssignmentUnknown: true, candidateTapNumbers: reportItem.candidateTapNumbers || [] }
+    : {};
   const historyEntry = {
+    ...assignmentEvidence,
     label,
     value: roundWeeklyUsageValue(value, displayUnit),
     hasValue: true,
@@ -11150,6 +11159,7 @@ function archivePmbWeeklyUsageReportItem(reportItem, label) {
 
   upsertWeeklyUsageArchive({
     ...(existing || {}),
+    ...assignmentEvidence,
     id,
     archiveId: id,
     tapNumber,
@@ -14055,9 +14065,10 @@ function setKegOnDeckItem(key, comingSoonId) {
 
 function getKegNeedCalculation(item) {
   const liveRow = getKegLiveRow(item);
-  const liveFraction = getKegCurrentFraction(item, liveRow);
-  if (liveFraction === null) return null;
   const displayBrand = getKegDisplayBrand(item, liveRow);
+  const placeholder = isPricingPlaceholder(displayBrand);
+  const liveFraction = placeholder ? 0 : getKegCurrentFraction(item, liveRow);
+  if (liveFraction === null) return null;
   const usageItem = getWeeklyUsageForKegItem(item, displayBrand);
   const recentUsage = getSixWeekUsage(usageItem || {});
   if (isLiquorOunceTap(toNumber(item.tapNumber))) {
@@ -14103,7 +14114,10 @@ function getKegNeedCalculation(item) {
   if (isPricingPlaceholder(displayBrand)
     && !getTapOrderProductName({ ...item, name: displayBrand }, usageItem, onDeck)) return null;
 
-  const peakUsage = getEightWeekPeakUsage(usageItem || {}, new Date(), getKegFullOunces(liveRow, item));
+  const fullOunces = placeholder
+    ? getKegSizeOverrideOz(usageItem) || STANDARD_BEER_KEG_OZ
+    : getKegFullOunces(liveRow, item);
+  const peakUsage = getEightWeekPeakUsage(usageItem || {}, new Date(), fullOunces);
   if (!peakUsage.sampleWeeks) return null;
   const bufferedTarget = peakUsage.targetStock;
   const position = buildInventoryPosition({

@@ -294,7 +294,7 @@ function parseTime(value) {
 }
 
 export function findWeeklyUsageIdentityMatch(item, reportItems = [], isCandidate = () => true) {
-  const eligible = reportItems.filter((reportItem) => isCandidate(reportItem));
+  const eligible = reportItems.filter((reportItem) => !reportItem.tapAssignmentUnknown && isCandidate(reportItem));
   const tapNumber = number(item?.tapNumber);
   const plu = number(item?.plu);
   if (tapNumber) {
@@ -327,10 +327,11 @@ export function hasWeeklyUsagePhysicalIdentityConflict(item, reportItems = [], i
 }
 
 export function isWeeklyUsageNameFallbackEligible(reportItem) {
-  return number(reportItem?.tapNumber) <= 0;
+  return !reportItem?.tapAssignmentUnknown && number(reportItem?.tapNumber) <= 0;
 }
 
 export function canReuseWeeklyUsageHistory(sourceItem, targetItem, matchingPluSourceCount = 0) {
+  if (sourceItem?.tapAssignmentUnknown && number(targetItem?.tapNumber)) return false;
   const sourceTapNumber = number(sourceItem?.tapNumber);
   const targetTapNumber = number(targetItem?.tapNumber);
   if (sourceTapNumber || targetTapNumber) {
