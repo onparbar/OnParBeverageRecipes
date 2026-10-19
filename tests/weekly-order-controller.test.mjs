@@ -93,7 +93,7 @@ test("counts require finite nonnegative numbers and reject fractional whole unit
   assert.equal(isValidWeeklyOrderCount("-0.5", true), false);
 });
 
-test("five successful saves reach review; final save opens the existing plan", async () => {
+test("six successful saves reach review; final save opens the existing plan", async () => {
   const h = harness();
   h.controller.open();
   assert.equal(h.controller.getState().screen, "landing");
@@ -160,7 +160,7 @@ test("Back preserves drafts without saving or verifying them, and Start retains 
   assert.equal(h.controller.getState().drafts.main[0].value, "9");
 });
 
-test("edits invalidate verification and final saving requires all five completed steps", async () => {
+test("edits invalidate verification and final saving requires all six completed steps", async () => {
   const h = harness();
   await h.controller.act("start");
   assert.equal(await h.controller.act("save"), false);
@@ -223,6 +223,35 @@ test("an old saved week resets without being restamped into the current week", a
   await h.controller.act("start");
   assert.equal(h.controller.getState().drafts.main[0].value, "2");
   assert.equal(JSON.parse(h.storage.getItem(KEY)).updatedAt, NEXT_MONDAY);
+});
+
+test("an in-progress old route moves the entered Korbel count to Patio without losing verification elsewhere", async () => {
+  const storage = memoryStorage();
+  const oldIds = ids.filter((id) => id !== "patio");
+  const korbel = { id: "custom-korbel", name: "Champagne (Korbel Brut)", identity: "custom-korbel:Korbel Brut:Other:bottles",
+    unit: "bottles", value: "7", expectedValue: "2" };
+  const drafts = Object.fromEntries(oldIds.map((id) => [id, [{ id: `${id}-item`, name: `${id} item`, value: "3", expectedValue: "3" }]]));
+  drafts.other.push(korbel);
+  storage.setItem(KEY, JSON.stringify({ version: 1, updatedAt: MONDAY, lastScreen: "review", completed: oldIds, drafts }));
+  const h = harness({ storage });
+  const loaded = h.controller.getState();
+  assert.deepEqual(loaded.drafts.patio, [korbel]);
+  assert.deepEqual(loaded.drafts.other.map((row) => row.id), ["other-item"]);
+  assert.deepEqual(loaded.completed, oldIds);
+  assert.equal(loaded.drafts.liquor[0].value, "3");
+  assert.equal(await h.controller.act("save"), false);
+  assert.equal(h.plans.length, 0);
+  await h.controller.act("resume");
+  assert.equal(h.controller.getState().screen, "patio");
+  assert.equal(h.saves.length, 0, "moving the draft must not write stock or verify the location");
+  await h.controller.act("next");
+  assert.equal(h.saves[0].id, "patio");
+  assert.equal(h.saves[0].rows[0].value, "7");
+  assert.equal(h.saves[0].rows[0].expectedValue, "2", "preserve conflict protection from the original count");
+  assert.deepEqual(h.controller.getState().completed, ids);
+  const reopened = harness({ storage });
+  assert.equal(reopened.controller.getState().drafts.patio[0].value, "7");
+  assert.equal(reopened.controller.getState().drafts.other.some((row) => row.id === korbel.id), false);
 });
 
 test("a successful old-week save cannot verify or advance a new week's count", async () => {

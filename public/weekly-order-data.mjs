@@ -2,14 +2,15 @@ import { isInventoryCountExcluded, isWeeklyCountOnlyInventoryItem } from "./inve
 
 const text = (value) => String(value ?? "").trim();
 const isSimpleSyrup = (item) => item.id === "simple-syrup" || /^simple\s+syrup$/i.test(text(item.name));
-const isKorbelBrut = (item) => item.id === "korbel-brut" || /^korbel\s+brut\b/i.test(text(item.name));
+export const isKorbelBrut = (item) => item.id === "korbel-brut" || /^(?:champagne\s*\(\s*)?korbel\s+brut\b/i.test(text(item.name));
 
 export function buildWeeklyOrderInventoryRows(items, group, overrides = {}) {
   return items.filter((item) => {
     if (isInventoryCountExcluded(item)) return false;
     // Physical count stops do not change the inventory's accounting group.
     if (isSimpleSyrup(item)) return group === "Karaoke Cooler";
-    if (group === "Karaoke Cooler") return false;
+    if (isKorbelBrut(item)) return group === "Patio Cooler";
+    if (["Karaoke Cooler", "Patio Cooler"].includes(group)) return false;
     return group === "Other" ? !["Liquor Cabinet", "Mixer Cabinet"].includes(item.group) : item.group === group;
   })
     .map((item) => {

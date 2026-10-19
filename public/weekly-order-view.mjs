@@ -3,6 +3,7 @@ import { escapeHtml } from "./dashboard-formatters.mjs";
 export const WEEKLY_ORDER_STEPS = Object.freeze([
   { id: "main", label: "Main cooler", title: "Verify main cooler", type: "cooler", wall: "main" },
   { id: "karaoke", label: "Karaoke cooler", title: "Verify karaoke cooler", type: "cooler", wall: "karaoke" },
+  { id: "patio", label: "Patio cooler", title: "Verify patio cooler", type: "inventory", group: "Patio Cooler", hint: "Go to the patio cooler. Count the Korbel Brut bottles and enter 0 if none." },
   { id: "liquor", label: "Liquor cabinet", title: "Verify liquor cabinet", type: "inventory", group: "Liquor Cabinet" },
   { id: "mixers", label: "Mixer cabinet", title: "Verify mixer cabinet", type: "inventory", group: "Mixer Cabinet" },
   { id: "other", label: "Non-alcoholic beer", title: "Verify non-alcoholic beer", type: "inventory", group: "Other" },
@@ -18,10 +19,11 @@ function feedback(model) {
 }
 
 function header(model, stepNumber, title) {
+  const totalSteps = WEEKLY_ORDER_STEPS.length + 1;
   return `<header class="weekly-order-header">
     <div class="weekly-order-eyebrow"><span>Weekly order</span>${model.weekLabel ? `<span class="weekly-order-week">${escapeHtml(model.weekLabel)}</span>` : ""}</div>
-    <div class="weekly-order-progress-copy"><span>Step ${stepNumber} of 6</span></div>
-    <div class="weekly-order-progress" role="progressbar" aria-label="Weekly order steps" aria-valuemin="1" aria-valuemax="6" aria-valuenow="${stepNumber}"><span style="--weekly-order-progress: ${stepNumber / 6 * 100}%"></span></div>
+    <div class="weekly-order-progress-copy"><span>Step ${stepNumber} of ${totalSteps}</span></div>
+    <div class="weekly-order-progress" role="progressbar" aria-label="Weekly order steps" aria-valuemin="1" aria-valuemax="${totalSteps}" aria-valuenow="${stepNumber}"><span style="--weekly-order-progress: ${stepNumber / totalSteps * 100}%"></span></div>
     <h2 class="weekly-order-title" tabindex="-1">${escapeHtml(title)}</h2>
   </header>`;
 }
@@ -63,7 +65,7 @@ function countRows(model) {
 
 function countScreen(model, step, stepIndex) {
   return `${header(model, stepIndex + 1, step.title)}
-    <p class="weekly-order-count-hint">Check counts. Enter 0 for none.</p>
+    <p class="weekly-order-count-hint">${escapeHtml(step.hint || "Check counts. Enter 0 for none.")}</p>
     ${countRows(model)}
     ${feedback(model)}
     <footer class="weekly-order-footer"><div class="weekly-order-footer-buttons">${button("back", "Back", { disabled: model.busy })}${button("next", model.busy ? "Saving…" : "Next", { primary: true, disabled: model.busy || model.ready === false })}${button("plan", "Open weekly plan", { primary: true, disabled: model.busy, hidden: true })}</div></footer>`;
@@ -71,7 +73,7 @@ function countScreen(model, step, stepIndex) {
 
 function review(model, completed) {
   const allComplete = WEEKLY_ORDER_STEPS.every((step) => completed.has(step.id));
-  return `${header(model, 6, "Review your weekly order")}
+  return `${header(model, WEEKLY_ORDER_STEPS.length + 1, "Review your weekly order")}
     ${allComplete ? "" : '<p class="weekly-order-review-intro">Check the remaining areas.</p>'}
     <ul class="weekly-order-checklist">${WEEKLY_ORDER_STEPS.map((step) => `<li>
       <span class="weekly-order-checkmark${completed.has(step.id) ? " is-complete" : ""}" aria-hidden="true">${completed.has(step.id) ? "✓" : "·"}</span>

@@ -1,5 +1,6 @@
 import { isRecommendationForOperatingWeek } from "./weekly-action-plan.mjs";
 import { WEEKLY_ORDER_STEPS, renderWeeklyOrderView } from "./weekly-order-view.mjs";
+import { isKorbelBrut } from "./weekly-order-data.mjs";
 
 const STORAGE_KEY = "onpar-weekly-order-wizard-v1";
 const STEP_IDS = WEEKLY_ORDER_STEPS.map(({ id }) => id);
@@ -49,6 +50,20 @@ export function createWeeklyOrderController({
       };
       // Completion without the verified row snapshot cannot be safely resumed.
       state.completed = state.completed.filter((id) => Object.hasOwn(state.drafts, id));
+      // Preserve counts already entered before Korbel got its own physical stop.
+      // The new stop still needs a person to verify it in the patio cooler.
+      const moved = [];
+      for (const id of ["liquor", "mixers", "other"]) {
+        if (!state.drafts[id]) continue;
+        moved.push(...state.drafts[id].filter(isKorbelBrut));
+        state.drafts[id] = state.drafts[id].filter((row) => !isKorbelBrut(row));
+      }
+      if (moved.length) {
+        const patio = state.drafts.patio || [];
+        state.drafts.patio = [...patio, ...moved.filter((row) => !patio.some((savedRow) => savedRow.id === row.id))];
+        state.completed = state.completed.filter((id) => id !== "patio");
+        if (["main", "karaoke"].every((id) => state.completed.includes(id))) state.lastScreen = "patio";
+      }
     }
   } catch { /* Browser progress is optional; shared count saves remain authoritative. */ }
 
@@ -277,7 +292,7 @@ export function createWeeklyOrderController({
     if (current.planLocked) { openPlan(); return false; }
     if (!current.ready) return showError("Wait for the saved counts to load, then save your weekly order.");
     if (state.screen !== "review" || STEP_IDS.some((id) => !state.completed.includes(id))) {
-      return showError("Verify all five places before saving your weekly order.");
+      return showError("Verify every location before saving your weekly order.");
     }
     if (current.needsReason && !text(state.reason)) {
       showError("Enter why you are saving after Monday.");

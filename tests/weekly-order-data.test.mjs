@@ -18,7 +18,7 @@ test("all countable inventory appears exactly once, including custom items and r
     { id: "vanilla", name: "Vanilla Syrup", group: "Other" },
     { id: "cold-brew", name: "Cold Brew", group: "Mixer Cabinet" },
   ];
-  const rows = ["Karaoke Cooler", "Liquor Cabinet", "Mixer Cabinet", "Other"].flatMap((group) => buildWeeklyOrderInventoryRows(items, group, { vodka: "2" }));
+  const rows = ["Karaoke Cooler", "Liquor Cabinet", "Mixer Cabinet", "Other", "Patio Cooler"].flatMap((group) => buildWeeklyOrderInventoryRows(items, group, { vodka: "2" }));
   assert.deepEqual(rows.map((row) => row.id), ["simple-syrup", "vodka", "lime", "non-alcoholic-beer", "custom", "custom-korbel"]);
   assert.ok(rows.every((row) => row.kind === "inventory"));
   assert.equal(rows[0].unit, "1-gallon containers");
@@ -46,6 +46,26 @@ test("Simple Syrup uses the Karaoke count stop regardless of its saved cabinet g
     assert.deepEqual(buildWeeklyOrderInventoryRows(items, group).map((row) => row.id), ["flavored-syrup"]);
   }
   assert.deepEqual(buildWeeklyOrderInventoryRows([], "Other"), [], "a missing champagne record is not recreated");
+});
+
+test("Korbel is counted only at Patio regardless of accounting group and retains its saved field identity", () => {
+  for (const group of ["Liquor Cabinet", "Mixer Cabinet", "Other", "Custom shelf"]) {
+    const items = [
+      { id: "custom-korbel", name: "Korbel Brut 750mL", group, onHandDisplay: "7", casePackaged: true, packSize: 12 },
+      { id: "other-wine", name: "Korbel Sweet Rosé", group, onHandDisplay: "2" },
+    ];
+    const patio = buildWeeklyOrderInventoryRows(items, "Patio Cooler", { "custom-korbel": "6" });
+    assert.equal(patio.length, 1);
+    assert.equal(patio[0].id, "custom-korbel");
+    assert.equal(patio[0].value, "7");
+    assert.equal(patio[0].expectedValue, "6");
+    assert.equal(patio[0].unit, "bottles");
+    assert.match(patio[0].detail, /12 bottles per case/);
+    assert.equal(patio[0].identity, `custom-korbel:Korbel Brut 750mL:${group}:bottles`);
+    for (const elsewhere of ["Karaoke Cooler", "Liquor Cabinet", "Mixer Cabinet", "Other"]) {
+      assert.ok(buildWeeklyOrderInventoryRows(items, elsewhere).every((row) => row.id !== "custom-korbel"));
+    }
+  }
 });
 
 test("cooler verification includes patio backups and On Deck stock with their existing units", () => {
@@ -145,7 +165,7 @@ test("weekly order routes syrup to Karaoke and labels existing patio champagne e
   const all = WEEKLY_ORDER_STEPS.flatMap((step) => context.getWeeklyOrderRows(step.id));
   assert.equal(all.filter((row) => row.id === "simple-syrup").length, 1);
   assert.equal(all.filter((row) => row.id === "custom-korbel").length, 1);
-  assert.match(context.getWeeklyOrderRows("other")[0].detail, /Patio cooler/);
+  assert.match(context.getWeeklyOrderRows("patio")[0].detail, /Patio cooler/);
 });
 
 test("Karaoke verifies only after keg and syrup counts both save through their own stores", async () => {

@@ -6,8 +6,8 @@ const completed = WEEKLY_ORDER_STEPS.map((step) => step.id);
 const action = (html, name) => html.match(new RegExp(`<button\\b[^>]*data-weekly-order-action="${name}"[^>]*>`))?.[0];
 
 test("weekly order starts immediately without an instruction list or route overview", () => {
-  assert.deepEqual(completed, ["main", "karaoke", "liquor", "mixers", "other"]);
-  assert.deepEqual(WEEKLY_ORDER_STEPS.map((step) => step.type), ["cooler", "cooler", "inventory", "inventory", "inventory"]);
+  assert.deepEqual(completed, ["main", "karaoke", "patio", "liquor", "mixers", "other"]);
+  assert.deepEqual(WEEKLY_ORDER_STEPS.map((step) => step.type), ["cooler", "cooler", "inventory", "inventory", "inventory", "inventory"]);
   const html = renderWeeklyOrderView({ screen: "start", weekLabel: "Week of October 12" });
   assert.match(html, /WEEKLY ORDER/);
   assert.match(html, /START HERE/);
@@ -32,7 +32,7 @@ test("completed counts can be resumed, while a locked week only opens the saved 
 test("every count screen shows its place in the route, one area, and a clear Next action", () => {
   for (const [index, step] of WEEKLY_ORDER_STEPS.entries()) {
     const html = renderWeeklyOrderView({ screen: step.id, rows: [{ id: "one", name: "One item", unit: "bottles", value: 2 }] });
-    assert.match(html, new RegExp(`Step ${index + 1} of 6`));
+    assert.match(html, new RegExp(`Step ${index + 1} of 7`));
     assert.ok(html.includes(step.title));
     assert.match(html, /class="weekly-order-title"[^>]*tabindex="-1"/);
     assert.ok(action(html, "back"));
@@ -104,16 +104,31 @@ test("inventory counts keep per-item units, decimals, and missing counts distinc
   assert.match(html, />bottles<|>\s*bottles\s*</);
 });
 
-test("review requires all five verified areas and explains that saving does not place orders", () => {
+test("review requires all six verified areas and explains that saving does not place orders", () => {
   const unfinished = renderWeeklyOrderView({ screen: "review", completed: ["main", "main", "karaoke", "liquor", "mixers", "unrelated"] });
   assert.match(action(unfinished, "save"), /disabled/);
   assert.match(unfinished, /Still needs checking/);
   const html = renderWeeklyOrderView({ screen: "review", completed });
   assert.doesNotMatch(action(html, "save"), /disabled/);
-  assert.match(html, /Step 6 of 6/);
+  assert.match(html, /Step 7 of 7/);
   for (const step of WEEKLY_ORDER_STEPS) assert.ok(html.includes(`data-weekly-order-step="${step.id}"`));
   assert.match(html, /Save weekly plan/);
   assert.match(html, /Saving does not place orders/);
+});
+
+test("Patio directs the person to Korbel bottles and remains required after the other locations are verified", () => {
+  const html = renderWeeklyOrderView({ screen: "patio", rows: [
+    { id: "korbel-brut", name: "Champagne (Korbel Brut)", unit: "bottles", value: "0" },
+  ] });
+  assert.match(html, /Verify patio cooler/);
+  assert.match(html, /Go to the patio cooler\. Count the Korbel Brut bottles and enter 0 if none\./);
+  assert.match(html, /Step 3 of 7/);
+  assert.match(html, /aria-valuemax="7"/);
+  assert.match(html, /data-weekly-order-count="korbel-brut"[^>]*value="0"/);
+  assert.doesNotMatch(html, /full backup kegs|Verify non-alcoholic beer/);
+  const review = renderWeeklyOrderView({ screen: "review", completed: completed.filter((id) => id !== "patio") });
+  assert.match(action(review, "save"), /disabled/);
+  assert.match(review, /data-weekly-order-step="patio"[^>]*>Check</);
 });
 
 test("busy prevents duplicate actions and changes while errors stay readable and retryable", () => {
