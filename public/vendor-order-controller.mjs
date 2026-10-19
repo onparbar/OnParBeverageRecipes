@@ -145,90 +145,104 @@ export function bindVendorOrderController({
 
   if (rehearsalMode) return true;
 
-  const adjustmentPanel = documentRef.querySelector("[data-order-adjustment-panel]");
-  const adjustmentAction = adjustmentPanel?.querySelector("[data-order-adjustment-action]");
-  const adjustmentVendor = adjustmentPanel?.querySelector("[data-order-adjustment-vendor-filter]");
-  const adjustmentProduct = adjustmentPanel?.querySelector("[data-order-adjustment-product]");
-  const adjustmentQuantity = adjustmentPanel?.querySelector("[data-order-adjustment-quantity-input]");
-  const adjustmentQuantityField = adjustmentPanel?.querySelector("[data-order-adjustment-quantity-field]");
-  const adjustmentReason = adjustmentPanel?.querySelector("[data-order-adjustment-reason-input]");
-  const adjustmentUnit = adjustmentPanel?.querySelector("[data-order-adjustment-unit-label]");
-  const adjustmentManager = adjustmentPanel?.querySelector("[data-order-adjustment-manager]");
+  const adjustmentBindings = new Map();
+  documentRef.querySelectorAll("[data-order-adjustment-panel]").forEach((adjustmentPanel) => {
+    const scopedVendor = adjustmentPanel.dataset?.orderAdjustmentVendor || "";
+    const adjustmentAction = adjustmentPanel?.querySelector("[data-order-adjustment-action]");
+    const adjustmentVendor = adjustmentPanel?.querySelector("[data-order-adjustment-vendor-filter]");
+    const adjustmentProduct = adjustmentPanel?.querySelector("[data-order-adjustment-product]");
+    const adjustmentQuantity = adjustmentPanel?.querySelector("[data-order-adjustment-quantity-input]");
+    const adjustmentQuantityField = adjustmentPanel?.querySelector("[data-order-adjustment-quantity-field]");
+    const adjustmentReason = adjustmentPanel?.querySelector("[data-order-adjustment-reason-input]");
+    const adjustmentUnit = adjustmentPanel?.querySelector("[data-order-adjustment-unit-label]");
+    const adjustmentManager = adjustmentPanel?.querySelector("[data-order-adjustment-manager]");
 
-  const syncAdjustmentFields = () => {
-    const option = adjustmentProduct?.selectedOptions?.[0];
-    if (!option) return;
-    if (adjustmentQuantity) adjustmentQuantity.value = option.dataset.orderAdjustmentDefaultQuantity || "1";
-    if (adjustmentReason) adjustmentReason.value = option.dataset.orderAdjustmentDefaultReason || "";
-    if (adjustmentUnit) adjustmentUnit.textContent = option.dataset.orderAdjustmentQuantityUnit || "units";
-    const removing = adjustmentAction?.value === "remove";
-    if (adjustmentQuantityField) adjustmentQuantityField.hidden = removing;
-    if (adjustmentQuantity) adjustmentQuantity.disabled = removing;
-  };
+    const syncAdjustmentFields = () => {
+      const option = adjustmentProduct?.selectedOptions?.[0];
+      if (!option) return;
+      if (adjustmentQuantity) adjustmentQuantity.value = option.dataset.orderAdjustmentDefaultQuantity || "1";
+      if (adjustmentReason) adjustmentReason.value = option.dataset.orderAdjustmentDefaultReason || "";
+      if (adjustmentUnit) adjustmentUnit.textContent = option.dataset.orderAdjustmentQuantityUnit || "units";
+      const removing = adjustmentAction?.value === "remove";
+      if (adjustmentQuantityField) adjustmentQuantityField.hidden = removing;
+      if (adjustmentQuantity) adjustmentQuantity.disabled = removing;
+    };
 
-  const syncAdjustmentProducts = () => {
-    if (!adjustmentProduct) return;
-    const selectedVendor = adjustmentVendor?.value || "";
-    const removing = adjustmentAction?.value === "remove";
-    const options = [...adjustmentProduct.options];
-    options.forEach((option) => {
-      const state = getVendorOrderAdjustmentOptionState({
-        optionVendor: option.dataset.orderAdjustmentVendor,
-        currentPlanQuantity: option.dataset.orderAdjustmentCurrentQuantity,
-        selectedVendor,
-        removing,
+    const syncAdjustmentProducts = () => {
+      if (!adjustmentProduct) return;
+      const selectedVendor = scopedVendor || adjustmentVendor?.value || "";
+      const removing = adjustmentAction?.value === "remove";
+      const options = [...adjustmentProduct.options];
+      options.forEach((option) => {
+        const state = getVendorOrderAdjustmentOptionState({
+          optionVendor: option.dataset.orderAdjustmentVendor,
+          currentPlanQuantity: option.dataset.orderAdjustmentCurrentQuantity,
+          selectedVendor,
+          removing,
+        });
+        option.hidden = state.hidden;
+        option.disabled = state.disabled;
       });
-      option.hidden = state.hidden;
-      option.disabled = state.disabled;
-    });
-    if (adjustmentProduct.selectedOptions[0]?.disabled) {
-      const firstAvailable = options.find((option) => !option.disabled);
-      if (firstAvailable) adjustmentProduct.value = firstAvailable.value;
-    }
-    syncAdjustmentFields();
-  };
+      if (adjustmentProduct.selectedOptions[0]?.disabled) {
+        const firstAvailable = options.find((option) => !option.disabled);
+        if (firstAvailable) adjustmentProduct.value = firstAvailable.value;
+      }
+      syncAdjustmentFields();
+    };
 
-  adjustmentAction?.addEventListener("change", syncAdjustmentProducts);
-  adjustmentVendor?.addEventListener("change", syncAdjustmentProducts);
-  adjustmentProduct?.addEventListener("change", syncAdjustmentFields);
-  syncAdjustmentProducts();
+    adjustmentAction?.addEventListener("change", syncAdjustmentProducts);
+    adjustmentVendor?.addEventListener("change", syncAdjustmentProducts);
+    adjustmentProduct?.addEventListener("change", syncAdjustmentFields);
+    syncAdjustmentProducts();
 
-  adjustmentPanel?.querySelector("[data-order-adjustment-save]")?.addEventListener("click", async () => {
-    if (adjustmentAction?.value === "add-prep") return;
-    const option = adjustmentProduct?.selectedOptions?.[0];
-    const adjustedBy = resolveActor(adjustmentManager?.value);
-    const reason = clean(adjustmentReason?.value);
-    const quantity = Number(adjustmentQuantity?.value);
-    const removing = adjustmentAction?.value === "remove";
-    if (!option || (!removing && (!Number.isInteger(quantity) || quantity <= 0)) || !reason || !adjustedBy) {
-      setMessage(`Choose a product and enter ${removing ? "the" : "its quantity,"} reason and manager.`);
-      renderWeeklyPlan?.();
-      return;
-    }
-    await saveVendorOrderDraftAction?.({
-      action: "set-order-adjustment",
-      catalogId: option.value,
-      vendor: option.dataset.orderAdjustmentVendor,
-      quantity: removing ? 0 : quantity,
-      reason,
-      adjustedBy,
-    });
-  });
-
-  adjustmentPanel?.querySelectorAll("[data-order-adjustment-remove]").forEach((button) => {
-    button.addEventListener("click", async () => {
+    adjustmentPanel?.querySelector("[data-order-adjustment-save]")?.addEventListener("click", async () => {
+      if (adjustmentAction?.value === "add-prep") return;
+      const option = adjustmentProduct?.selectedOptions?.[0];
       const adjustedBy = resolveActor(adjustmentManager?.value);
-      if (!adjustedBy) {
-        setMessage("Enter the manager removing this adjustment.");
+      const reason = clean(adjustmentReason?.value);
+      const quantity = Number(adjustmentQuantity?.value);
+      const removing = adjustmentAction?.value === "remove";
+      if (!option || option.disabled || (scopedVendor && option.dataset.orderAdjustmentVendor !== scopedVendor) || (!removing && (!Number.isInteger(quantity) || quantity <= 0)) || !reason || !adjustedBy) {
+        setMessage(`Choose a product and enter ${removing ? "the" : "its quantity,"} reason and manager.`);
         renderWeeklyPlan?.();
         return;
       }
       await saveVendorOrderDraftAction?.({
-        action: "remove-order-adjustment",
-        catalogId: button.dataset.orderAdjustmentRemove,
-        vendor: button.dataset.orderAdjustmentVendor,
+        action: "set-order-adjustment",
+        catalogId: option.value,
+        vendor: option.dataset.orderAdjustmentVendor,
+        quantity: removing ? 0 : quantity,
+        reason,
         adjustedBy,
       });
+    });
+
+    adjustmentPanel?.querySelectorAll("[data-order-adjustment-remove]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        if (scopedVendor && button.dataset.orderAdjustmentVendor !== scopedVendor) return;
+        const adjustedBy = resolveActor(adjustmentManager?.value);
+        if (!adjustedBy) {
+          setMessage("Enter the manager removing this adjustment.");
+          renderWeeklyPlan?.();
+          return;
+        }
+        await saveVendorOrderDraftAction?.({
+          action: "remove-order-adjustment",
+          catalogId: button.dataset.orderAdjustmentRemove,
+          vendor: button.dataset.orderAdjustmentVendor,
+          adjustedBy,
+        });
+      });
+    });
+    adjustmentBindings.set(scopedVendor, (vendor) => {
+      if (adjustmentVendor) adjustmentVendor.value = vendor;
+      if (adjustmentAction) adjustmentAction.value = "add";
+      syncAdjustmentProducts();
+      adjustmentPanel.open = true;
+      const details = adjustmentPanel.closest?.("details");
+      if (details) details.open = true;
+      adjustmentPanel.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      adjustmentProduct?.focus();
     });
   });
 
@@ -271,15 +285,8 @@ export function bindVendorOrderController({
       });
     });
     form.querySelector("[data-order-draft-edit-quantities]")?.addEventListener("click", () => {
-      if (!adjustmentPanel) return;
-      if (adjustmentVendor) adjustmentVendor.value = vendor;
-      if (adjustmentAction) adjustmentAction.value = "add";
-      syncAdjustmentProducts();
-      if ("open" in adjustmentPanel) adjustmentPanel.open = true;
-      const details = adjustmentPanel.closest?.("details");
-      if (details) details.open = true;
-      adjustmentPanel.scrollIntoView?.({ behavior: "smooth", block: "center" });
-      adjustmentProduct?.focus();
+      const openAdjustments = adjustmentBindings.get(vendor) || adjustmentBindings.get("");
+      openAdjustments?.(vendor);
     });
     managerInput?.addEventListener("change", () => {
       const manager = clean(managerInput.value);

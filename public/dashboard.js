@@ -8694,26 +8694,28 @@ function getVendorOrderDraftModel(plan, freshness) {
   return orderRehearsalMode ? buildOrderRehearsalModel(model) : model;
 }
 
-function renderVendorOrderAdjustments() {
+function renderVendorOrderAdjustments(vendorScope = "") {
   if (orderRehearsalMode) return "";
   const trackedVendors = weeklyOrderTracking.vendors || [];
   const placedVendors = new Set(trackedVendors.filter((vendor) => vendor.ordered === true).map((vendor) => vendor.vendor));
-  const catalog = weeklyOrderTracking.adjustmentCatalog.filter((item) => item.orderable && !placedVendors.has(item.vendor));
+  const catalog = weeklyOrderTracking.adjustmentCatalog.filter((item) => item.orderable
+    && !placedVendors.has(item.vendor) && (!vendorScope || item.vendor === vendorScope));
   if (!catalog.length) return "";
-  const editableAdjustments = weeklyOrderTracking.adjustments.filter((item) => !placedVendors.has(item.vendor));
+  const editableAdjustments = weeklyOrderTracking.adjustments.filter((item) => !placedVendors.has(item.vendor)
+    && (!vendorScope || item.vendor === vendorScope));
   const savedByCatalogId = new Map(weeklyOrderTracking.adjustments.map((item) => [item.catalogId, item]));
   const vendors = [...new Set(catalog.map((item) => item.vendor))].sort((left, right) => left.localeCompare(right));
   return `
-    <details class="vendor-order-adjustments" data-order-adjustment-panel>
+    <details class="vendor-order-adjustments" data-order-adjustment-panel data-order-adjustment-vendor="${escapeHtml(vendorScope)}">
       <summary>Adjust order</summary>
       <div class="vendor-order-adjustments__fields">
         <label><span>Change</span><select data-order-adjustment-action><option value="add">Add something</option><option value="remove">Remove something</option></select></label>
-        <label data-order-adjustment-only><span>Vendor</span><select data-order-adjustment-vendor-filter><option value="">All vendors</option>${vendors.map((vendor) => `<option value="${escapeHtml(vendor)}">${escapeHtml(vendor)}</option>`).join("")}</select></label>
+        ${vendorScope ? "" : `<label data-order-adjustment-only><span>Vendor</span><select data-order-adjustment-vendor-filter><option value="">All vendors</option>${vendors.map((vendor) => `<option value="${escapeHtml(vendor)}">${escapeHtml(vendor)}</option>`).join("")}</select></label>`}
         <label data-order-adjustment-only><span>Product</span><select data-order-adjustment-product>${catalog.map((item) => {
           const saved = savedByCatalogId.get(item.catalogId);
           const currentQuantity = saved?.quantity ?? item.currentPlanQuantity ?? 0;
           const defaultQuantity = currentQuantity > 0 ? currentQuantity : 1;
-          return `<option value="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}" data-order-adjustment-current-quantity="${formatNumber(currentQuantity)}" data-order-adjustment-default-quantity="${formatNumber(defaultQuantity)}" data-order-adjustment-default-reason="${escapeHtml(saved?.reason || "")}" data-order-adjustment-quantity-unit="${escapeHtml(item.quantityUnit)}">${escapeHtml(`${item.vendor} · ${item.name}`)}</option>`;
+          return `<option value="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}" data-order-adjustment-current-quantity="${formatNumber(currentQuantity)}" data-order-adjustment-default-quantity="${formatNumber(defaultQuantity)}" data-order-adjustment-default-reason="${escapeHtml(saved?.reason || "")}" data-order-adjustment-quantity-unit="${escapeHtml(item.quantityUnit)}">${escapeHtml(vendorScope ? item.name : `${item.vendor} · ${item.name}`)}</option>`;
         }).join("")}</select></label>
         <label data-order-adjustment-only data-order-adjustment-quantity-field><span>Order quantity</span><div class="vendor-order-adjustments__quantity"><input type="number" min="1" max="999" step="1" inputmode="numeric" data-order-adjustment-quantity-input><small data-order-adjustment-unit-label></small></div></label>
         <label data-order-adjustment-only><span>Reason</span><input type="text" maxlength="240" data-order-adjustment-reason-input placeholder="St. Patrick's Day"></label>
@@ -8796,7 +8798,7 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null, 
         <div><strong>${formatNumber(model.drafts.reduce((total, draft) => total + draft.lineCount, 0))} items</strong><span>${money(model.weeklyTotal)}</span></div>
       </header>`}
       ${weeklyOrderTrackingMessage ? `<p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage)}</p>` : ""}
-      ${renderVendorOrderAdjustments()}
+      ${guided ? "" : renderVendorOrderAdjustments()}
       <div class="vendor-order-drafts__grid">
         ${model.drafts.map((draft) => {
           const saved = savedById.get(draft.id) || {};
@@ -8810,6 +8812,7 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null, 
           return `
             <section class="vendor-order-draft-card vendor-order-draft-card--${placed ? "approved vendor-order-draft-card--placed" : draft.status}" data-vendor-order-draft-id="${escapeHtml(draft.vendor)}"${guided ? ` data-supplier-order-card="${escapeHtml(draft.vendor)}" data-supplier-order-placed="${placed}" hidden` : ""}>
               <header><div><h3${guided ? ' class="supplier-order-card-title"' : ""}>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(orderCount)} ${orderUnit}${orderCount === 1 ? "" : "s"} · ${money(draft.estimatedTotal)}</p></div><span title="${escapeHtml(workflow.label)}">${placed ? escapeHtml(workflow.label) : draft.blockers.length ? "Needs attention" : "Ready"}</span></header>
+              ${guided && !placed ? renderVendorOrderAdjustments(draft.vendor) : ""}
               ${placed ? `<details><summary>${workflow.label === "Received" ? "View received order" : "View order and receive delivery"}</summary>` : ""}
               <div class="vendor-order-draft-lines vendor-order-draft-lines--inline">
                 ${placed ? renderFinishWeekDeliveries({ available: true, vendors: [vendor] }, { showVendor: false, saving: dashboardFinishWeekSaving }) : draft.lines.map((line) => {

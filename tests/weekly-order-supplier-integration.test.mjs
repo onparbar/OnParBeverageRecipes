@@ -185,8 +185,8 @@ test("global adjustments retain absent suppliers and exclude placed suppliers", 
     ],
     adjustments: [{ catalogId: "new-ohlq", vendor: "OHLQ", name: "Vodka", quantity: 2, quantityUnit: "bottles", reason: "Event", adjustedBy: "Sam" }],
   } });
-  const html = f.render();
-  assert.ok(html.indexOf("data-order-adjustment-panel") < html.indexOf("data-supplier-order-card"));
+  const html = f.render(false);
+  assert.ok(html.indexOf("data-order-adjustment-panel") < html.indexOf("vendor-order-drafts__grid"));
   assert.equal(html.split("data-order-adjustment-panel").length - 1, 1);
   assert.match(html, /<option value="OHLQ">OHLQ<\/option>/);
   assert.match(html, /value="new-ohlq"[^>]*data-order-adjustment-current-quantity="2"/);
@@ -207,4 +207,27 @@ test("zero drafts preserve adjustments and status inside the supplier flow befor
   assert.match(html, /data-finish-prep-item="cocktail"/);
   assert.doesNotMatch(html, /data-supplier-order-card|data-weekly-order-place/);
   assert.equal(f.context.currentVendorOrderDraftViews.size, 0);
+});
+
+
+test("guided supplier adjustments contain only that supplier's products and saved changes", () => {
+  const vendors = ["Heidelberg", "Bonbright", "Proof"];
+  const catalog = vendors.map((vendor) => ({ catalogId: `${vendor}-item`, vendor, name: `${vendor} product`, orderable: true, quantityUnit: "kegs", currentPlanQuantity: 1 }));
+  catalog.push({ catalogId: "unavailable-heidelberg", vendor: "Heidelberg", name: "Missing price", orderable: false });
+  const adjustments = vendors.map((vendor) => ({ catalogId: `${vendor}-item`, vendor, name: `${vendor} product`, quantity: 2, quantityUnit: "kegs", reason: "Extra backup", adjustedBy: "Sam" }));
+  const f = fixture(vendors.map((vendor) => draft(vendor, [line(`${vendor} product`, 1)])), { tracking: { adjustmentCatalog: catalog, adjustments } });
+  const html = f.render();
+  assert.doesNotMatch(html.split(/(?=<section class="vendor-order-draft-card\s)/)[0], /data-order-adjustment-panel/);
+  for (const [index, card] of cards(html).entries()) {
+    const vendor = vendors[index];
+    assert.match(card, new RegExp(`data-order-adjustment-panel data-order-adjustment-vendor="${vendor}"`));
+    assert.match(card, new RegExp(`value="${vendor}-item"[^>]*data-order-adjustment-current-quantity="2"`));
+    assert.match(card, new RegExp(`data-order-adjustment-remove="${vendor}-item"`));
+    assert.doesNotMatch(card, /All vendors|data-order-adjustment-vendor-filter|unavailable-heidelberg/);
+    for (const other of vendors.filter((name) => name !== vendor)) {
+      assert.doesNotMatch(card, new RegExp(`(?:value|data-order-adjustment-remove)="${other}-item"`));
+    }
+  }
+  f.context.weeklyOrderTracking.vendors[0].ordered = true;
+  assert.doesNotMatch(cards(f.render())[0], /data-order-adjustment-panel/);
 });

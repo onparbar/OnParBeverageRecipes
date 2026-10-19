@@ -167,7 +167,7 @@ test("reopening sends the correct draft and quantity shortcut selects a real opt
   const panel = { open: false, querySelector: (selector) => ({ "[data-order-adjustment-action]": action, "[data-order-adjustment-vendor-filter]": vendor, "[data-order-adjustment-product]": product })[selector] || null, querySelectorAll: () => [] };
   const calls = [];
   bindVendorOrderController({
-    documentRef: { querySelector: () => panel, querySelectorAll: (selector) => selector === "[data-vendor-order-draft]" ? [form] : [] },
+    documentRef: { querySelector: () => panel, querySelectorAll: (selector) => selector === "[data-vendor-order-draft]" ? [form] : selector === "[data-order-adjustment-panel]" ? [panel] : [] },
     saveVendorOrderDraftAction: async (payload) => calls.push(payload),
   });
   await reopen.dispatch("click");
@@ -176,4 +176,47 @@ test("reopening sends the correct draft and quantity shortcut selects a real opt
   assert.equal(action.value, "add");
   assert.equal(vendor.value, "Proof");
   assert.equal(panel.open, true);
+});
+
+test("each supplier panel saves and undoes only its own adjustments", async () => {
+  function panel(vendor, productName) {
+    const fields = Object.fromEntries(["action", "product", "quantity-input", "reason-input", "manager", "save"].map((key) => [key, new FakeButton()]));
+    fields.action.value = "add";
+    fields.manager.value = "Sam";
+    const option = { value: productName, dataset: { orderAdjustmentVendor: vendor, orderAdjustmentCurrentQuantity: "2", orderAdjustmentDefaultQuantity: "2", orderAdjustmentQuantityUnit: "kegs" } };
+    fields.product.options = fields.product.selectedOptions = [option];
+    const undo = new FakeButton({ orderAdjustmentRemove: productName, orderAdjustmentVendor: vendor });
+    const root = { dataset: { orderAdjustmentVendor: vendor }, querySelector: (selector) => fields[selector.slice("[data-order-adjustment-".length, -1)] || null,
+      querySelectorAll: (selector) => selector === "[data-order-adjustment-remove]" ? [undo] : [] };
+    return { root, fields, option, undo };
+  }
+  const heidelberg = panel("Heidelberg", "angry-orchard");
+  const bonbright = panel("Bonbright", "miller-lite");
+  const panels = [heidelberg, bonbright];
+  const calls = [];
+  bindVendorOrderController({
+    documentRef: { querySelectorAll: (selector) => selector === "[data-order-adjustment-panel]" ? panels.map((p) => p.root) : [] },
+    saveVendorOrderDraftAction: async (payload) => calls.push(payload),
+  });
+  for (const p of panels) {
+    p.fields["quantity-input"].value = p === heidelberg ? "3" : "4";
+    p.fields["reason-input"].value = "Extra backup";
+    await p.fields.save.dispatch("click");
+    await p.undo.dispatch("click");
+  }
+  assert.deepEqual(calls.map(({action,vendor,catalogId,quantity}) => ({action,vendor,catalogId,quantity})), [
+    {action:"set-order-adjustment",vendor:"Heidelberg",catalogId:"angry-orchard",quantity:3},
+    {action:"remove-order-adjustment",vendor:"Heidelberg",catalogId:"angry-orchard",quantity:undefined},
+    {action:"set-order-adjustment",vendor:"Bonbright",catalogId:"miller-lite",quantity:4},
+    {action:"remove-order-adjustment",vendor:"Bonbright",catalogId:"miller-lite",quantity:undefined},
+  ]);
+  heidelberg.fields.product.selectedOptions = [bonbright.option];
+  await heidelberg.fields.save.dispatch("click");
+  assert.equal(calls.length, 4, "a foreign supplier selection cannot save through this panel");
+  bonbright.fields.action.value = "remove";
+  await bonbright.fields.action.dispatch("change");
+  bonbright.fields["reason-input"].value = "Already stocked";
+  await bonbright.fields.save.dispatch("click");
+  assert.equal(calls.at(-1).vendor, "Bonbright");
+  assert.equal(calls.at(-1).quantity, 0);
 });
