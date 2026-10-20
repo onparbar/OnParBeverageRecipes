@@ -33,6 +33,13 @@ export function buildMondayRunModel({
   const ordersComplete = planLocked && weeklyOrderTrackingAvailable && trackingMatches
     && (lineCount === 0 ? vendorOrders.length === 0 && !orderingBlocked
       : vendorOrders.length > 0 && remainingVendors === 0);
+  const deliveryItems = vendorOrders.flatMap((vendor) => vendor?.items || []);
+  const deliveryStatus = !ordersComplete ? ""
+    : vendorOrders.length === 0 ? "No orders needed"
+      : deliveryItems.some((item) => ["partial", "not-received"].includes(item.status)) ? "Delivery issue"
+        : vendorOrders.every((vendor) => vendor.items?.length > 0)
+          && deliveryItems.every((item) => item.status === "received") ? "Received"
+          : "Awaiting delivery";
   const steps = [
     {
       id: "cooler",
@@ -79,6 +86,7 @@ export function buildMondayRunModel({
     steps,
     weekLabel: formatOperatingWeekLabel(now),
     planLocked,
+    deliveryStatus,
     completedCount: steps.filter((step) => step.complete).length,
     nextIndex,
     nextStep: steps[nextIndex < 0 ? steps.length - 1 : nextIndex],
@@ -128,7 +136,7 @@ export function renderMondayRunCompact(run) {
   return `
     <section class="monday-run monday-run--compact${run.complete ? " is-complete" : ""}" aria-label="Weekly Order">
       <button class="monday-run__card-link" type="button" data-dashboard-target="weekly-order" aria-label="${escapeHtml(navigationLabel)}"></button>
-      <header class="monday-run__header"><div><div class="monday-run__title-week"><h2>${run.planLocked ? "Weekly Order" : "WEEKLY ORDER — START HERE"}</h2>${weekBadge(run)}</div><span>${run.planLocked ? run.complete ? "All orders placed" : "Your weekly plan is saved" : "Check five areas. Then review your weekly plan."}</span></div>
+      <header class="monday-run__header"><div class="monday-run__summary"><div class="monday-run__title-week"><h2>${run.planLocked ? "Weekly Order" : "WEEKLY ORDER — START HERE"}</h2>${weekBadge(run)}</div><p class="monday-run__order-status">${escapeHtml(run.planLocked ? run.deliveryStatus || "Your weekly plan is saved" : "Check five areas. Then review your weekly plan.")}</p></div>
         <div class="monday-run__header-actions monday-run__start-action"><button class="primary-button" type="button" data-dashboard-target="weekly-order">${run.planLocked ? "Open weekly order" : "Start here"}</button></div>
       </header>
     </section>`;

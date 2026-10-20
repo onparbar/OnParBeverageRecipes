@@ -49,3 +49,61 @@ test("locked weekly plans retain their existing actions", () => {
   assert.match(renderMondayRun(run), />Complete</);
   assert.doesNotMatch(renderMondayRun(run), /monday-run-steps/);
 });
+
+const placedOrders = {
+  planLocked: true,
+  weeklyOrderTrackingAvailable: true,
+  orderLineCount: 2,
+  expectedVendorCount: 2,
+};
+
+for (const [name, vendors, status] of [
+  ["placed orders waiting for both suppliers", [
+    { ordered: true, items: [{ status: "pending" }] },
+    { ordered: true, items: [{ status: "pending" }] },
+  ], "Awaiting delivery"],
+  ["one supplier still on the way", [
+    { ordered: true, items: [{ status: "received" }] },
+    { ordered: true, items: [{ status: "pending" }] },
+  ], "Awaiting delivery"],
+  ["all deliveries checked in", [
+    { ordered: true, items: [{ status: "received" }] },
+    { ordered: true, items: [{ status: "received" }] },
+  ], "Received"],
+  ["partial delivery", [
+    { ordered: true, items: [{ status: "partial" }] },
+    { ordered: true, items: [{ status: "pending" }] },
+  ], "Delivery issue"],
+  ["missing delivery", [
+    { ordered: true, items: [{ status: "not-received" }] },
+    { ordered: true, items: [{ status: "received" }] },
+  ], "Delivery issue"],
+  ["missing receipt details", [
+    { ordered: true, items: [{ status: "received" }] },
+    { ordered: true },
+  ], "Awaiting delivery"],
+]) {
+  test(`home weekly order reports ${name}`, () => {
+    const run = buildMondayRunModel({ ...placedOrders, vendorOrders: vendors });
+    assert.equal(run.complete, true);
+    assert.equal(run.deliveryStatus, status);
+    assert.ok(renderMondayRunCompact(run).includes(`>${status}</p>`));
+  });
+}
+
+test("home weekly order does not await delivery until every supplier order is placed", () => {
+  const run = buildMondayRunModel({ ...placedOrders, vendorOrders: [
+    { ordered: true, items: [{ status: "pending" }] },
+    { ordered: false, items: [{ status: "pending" }] },
+  ] });
+  assert.equal(run.complete, false);
+  assert.equal(run.deliveryStatus, "");
+  assert.match(renderMondayRunCompact(run), /Your weekly plan is saved/);
+});
+
+test("home weekly order distinguishes an empty order from a pending delivery", () => {
+  const run = buildMondayRunModel({ ...placedOrders, orderLineCount: 0, expectedVendorCount: 0 });
+  assert.equal(run.complete, true);
+  assert.equal(run.deliveryStatus, "No orders needed");
+  assert.match(renderMondayRunCompact(run), /No orders needed/);
+});
