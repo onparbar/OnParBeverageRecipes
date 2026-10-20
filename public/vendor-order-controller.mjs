@@ -157,15 +157,40 @@ export function bindVendorOrderController({
     const adjustmentUnit = adjustmentPanel?.querySelector("[data-order-adjustment-unit-label]");
     const adjustmentManager = adjustmentPanel?.querySelector("[data-order-adjustment-manager]");
 
+    const adjustmentSave = adjustmentPanel.querySelector("[data-order-adjustment-save]");
+    const directions = [...adjustmentPanel.querySelectorAll("[data-order-adjustment-direction]")];
+    let saving = false;
+    const syncQuantityControls = () => {
+      const option = adjustmentProduct?.selectedOptions?.[0];
+      const raw = clean(adjustmentQuantity?.value);
+      const quantity = Number(raw);
+      const valid = Boolean(raw) && Number.isInteger(quantity) && quantity >= 0 && quantity <= 999;
+      const removing = adjustmentAction?.value === "remove";
+      const changed = removing || quantity !== Number(option?.dataset.orderAdjustmentCurrentQuantity || 0);
+      if (adjustmentSave) adjustmentSave.disabled = saving || !option || option.disabled || !valid || !changed;
+      directions.forEach((button) => {
+        button.disabled = saving || !option || option.disabled || !valid
+          || (button.dataset.orderAdjustmentDirection === "remove" ? quantity <= 0 : quantity >= 999);
+      });
+    };
+    directions.forEach((button) => button.addEventListener("click", () => {
+      if (saving || button.disabled || !adjustmentQuantity) return;
+      adjustmentQuantity.value = String(Number(adjustmentQuantity.value)
+        + (button.dataset.orderAdjustmentDirection === "remove" ? -1 : 1));
+      syncQuantityControls();
+    }));
+    adjustmentQuantity?.addEventListener("input", syncQuantityControls);
+
     const syncAdjustmentFields = () => {
       const option = adjustmentProduct?.selectedOptions?.[0];
       if (!option) return;
-      if (adjustmentQuantity) adjustmentQuantity.value = option.dataset.orderAdjustmentDefaultQuantity || "1";
+      if (adjustmentQuantity) adjustmentQuantity.value = option.dataset.orderAdjustmentCurrentQuantity ?? option.dataset.orderAdjustmentDefaultQuantity ?? "0";
       if (adjustmentReason) adjustmentReason.value = option.dataset.orderAdjustmentDefaultReason || "";
       if (adjustmentUnit) adjustmentUnit.textContent = option.dataset.orderAdjustmentQuantityUnit || "units";
       const removing = adjustmentAction?.value === "remove";
       if (adjustmentQuantityField) adjustmentQuantityField.hidden = removing;
       if (adjustmentQuantity) adjustmentQuantity.disabled = removing;
+      syncQuantityControls();
     };
 
     const syncAdjustmentProducts = () => {
@@ -196,25 +221,36 @@ export function bindVendorOrderController({
     syncAdjustmentProducts();
 
     adjustmentPanel?.querySelector("[data-order-adjustment-save]")?.addEventListener("click", async () => {
-      if (adjustmentAction?.value === "add-prep") return;
+      if (saving || adjustmentAction?.value === "add-prep") return;
       const option = adjustmentProduct?.selectedOptions?.[0];
       const adjustedBy = resolveActor(adjustmentManager?.value);
-      const reason = clean(adjustmentReason?.value);
+      const reason = clean(adjustmentReason?.value) || "Quantity changed during weekly order review.";
       const quantity = Number(adjustmentQuantity?.value);
       const removing = adjustmentAction?.value === "remove";
-      if (!option || option.disabled || (scopedVendor && option.dataset.orderAdjustmentVendor !== scopedVendor) || (!removing && (!Number.isInteger(quantity) || quantity <= 0)) || !reason || !adjustedBy) {
-        setMessage(`Choose a product and enter ${removing ? "the" : "its quantity,"} reason and manager.`);
+      if (!option || option.disabled || (scopedVendor && option.dataset.orderAdjustmentVendor !== scopedVendor) || (!removing && (!clean(adjustmentQuantity?.value) || !Number.isInteger(quantity) || quantity < 0 || quantity > 999)) || !reason || !adjustedBy) {
+        setMessage("Choose a product, enter a whole quantity from 0 to 999, and identify the manager.");
         renderWeeklyPlan?.();
         return;
       }
-      await saveVendorOrderDraftAction?.({
-        action: "set-order-adjustment",
-        catalogId: option.value,
-        vendor: option.dataset.orderAdjustmentVendor,
-        quantity: removing ? 0 : quantity,
-        reason,
-        adjustedBy,
-      });
+      const total = removing ? 0 : quantity;
+      const expectedQuantity = Number(option.dataset.orderAdjustmentCurrentQuantity || 0);
+      if (total === expectedQuantity) return;
+      saving = true;
+      syncQuantityControls();
+      try {
+        await saveVendorOrderDraftAction?.({
+          action: "set-order-adjustment",
+          catalogId: option.value,
+          vendor: option.dataset.orderAdjustmentVendor,
+          quantity: total,
+          expectedQuantity,
+          reason,
+          adjustedBy,
+        });
+      } finally {
+        saving = false;
+        syncQuantityControls();
+      }
     });
 
     adjustmentPanel?.querySelectorAll("[data-order-adjustment-remove]").forEach((button) => {

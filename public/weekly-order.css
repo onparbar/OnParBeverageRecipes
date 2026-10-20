@@ -544,3 +544,42 @@
     display: none !important;
   }
 }
+
+.vendor-order-adjustments__counter {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  gap: 8px;
+  align-items: center;
+}
+
+.vendor-order-adjustments__counter button {
+  min-height: 48px;
+  padding: 8px;
+  border: 1px solid #8fa79f;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--juniper-dark, #16453d);
+  font: inherit;
+  font-size: 1.5rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.vendor-order-adjustments__counter button:disabled { opacity: 0.4; cursor: default; }
+.vendor-order-adjustments__counter input {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  text-align: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.vendor-order-adjustments__counter input::-webkit-inner-spin-button,
+.vendor-order-adjustments__counter input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.vendor-order-adjustments__counter small { grid-column: 1 / -1; text-align: center; }
+
+
+.vendor-order-adjustments__quantity-field { display: grid; gap: 4px; min-width: 0; }
+.vendor-order-adjustments__quantity-field > span { color: var(--muted); font-size: 0.72rem; font-weight: 700; }

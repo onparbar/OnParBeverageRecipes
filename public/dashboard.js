@@ -8709,16 +8709,22 @@ function renderVendorOrderAdjustments(vendorScope = "") {
     <details class="vendor-order-adjustments" data-order-adjustment-panel data-order-adjustment-vendor="${escapeHtml(vendorScope)}">
       <summary>Adjust order</summary>
       <div class="vendor-order-adjustments__fields">
-        <label><span>Change</span><select data-order-adjustment-action><option value="add">Add something</option><option value="remove">Remove something</option></select></label>
         ${vendorScope ? "" : `<label data-order-adjustment-only><span>Vendor</span><select data-order-adjustment-vendor-filter><option value="">All vendors</option>${vendors.map((vendor) => `<option value="${escapeHtml(vendor)}">${escapeHtml(vendor)}</option>`).join("")}</select></label>`}
         <label data-order-adjustment-only><span>Product</span><select data-order-adjustment-product>${catalog.map((item) => {
           const saved = savedByCatalogId.get(item.catalogId);
           const currentQuantity = saved?.quantity ?? item.currentPlanQuantity ?? 0;
-          const defaultQuantity = currentQuantity > 0 ? currentQuantity : 1;
+          const defaultQuantity = currentQuantity;
           return `<option value="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}" data-order-adjustment-current-quantity="${formatNumber(currentQuantity)}" data-order-adjustment-default-quantity="${formatNumber(defaultQuantity)}" data-order-adjustment-default-reason="${escapeHtml(saved?.reason || "")}" data-order-adjustment-quantity-unit="${escapeHtml(item.quantityUnit)}">${escapeHtml(vendorScope ? item.name : `${item.vendor} · ${item.name}`)}</option>`;
         }).join("")}</select></label>
-        <label data-order-adjustment-only data-order-adjustment-quantity-field><span>Order quantity</span><div class="vendor-order-adjustments__quantity"><input type="number" min="1" max="999" step="1" inputmode="numeric" data-order-adjustment-quantity-input><small data-order-adjustment-unit-label></small></div></label>
-        <label data-order-adjustment-only><span>Reason</span><input type="text" maxlength="240" data-order-adjustment-reason-input placeholder="St. Patrick's Day"></label>
+        <div class="vendor-order-adjustments__quantity-field" data-order-adjustment-quantity-field>
+          <span>Order quantity</span>
+          <div class="vendor-order-adjustments__counter" role="group" aria-label="Order quantity">
+            <button type="button" data-order-adjustment-direction="remove" aria-label="Decrease order quantity">−</button>
+            <input type="number" min="0" max="999" step="1" inputmode="numeric" aria-label="Order quantity" data-order-adjustment-quantity-input>
+            <button type="button" data-order-adjustment-direction="add" aria-label="Increase order quantity">+</button>
+            <small data-order-adjustment-unit-label></small>
+          </div>
+        </div>
         <label data-order-adjustment-only><span>Manager</span><input type="text" maxlength="80" autocomplete="name" data-order-adjustment-manager placeholder="Manager name"></label>
         <button class="primary-button" type="button" data-order-adjustment-save>Save changes</button>
       </div>

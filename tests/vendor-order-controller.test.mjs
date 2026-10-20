@@ -220,3 +220,62 @@ test("each supplier panel saves and undoes only its own adjustments", async () =
   assert.equal(calls.at(-1).vendor, "Bonbright");
   assert.equal(calls.at(-1).quantity, 0);
 });
+
+function quantityPanel(current = 21) {
+  const fields = Object.fromEntries(["product", "quantity-input", "manager", "save"].map(key => [key, new FakeButton()]));
+  fields.manager.value = "Sam";
+  const option = { value: "selected", dataset: { orderAdjustmentVendor: "OHLQ", orderAdjustmentCurrentQuantity: String(current), orderAdjustmentQuantityUnit: "units" } };
+  fields.product.options = fields.product.selectedOptions = [option];
+  const directions = ["remove", "add"].map(direction => new FakeButton({ orderAdjustmentDirection: direction }));
+  const root = { dataset: { orderAdjustmentVendor: "OHLQ" }, querySelector: selector => fields[selector.slice("[data-order-adjustment-".length, -1)] || null,
+    querySelectorAll: selector => selector === "[data-order-adjustment-direction]" ? directions : [] };
+  const calls = [];
+  const bind = (save = async payload => calls.push(payload)) => bindVendorOrderController({
+    documentRef: { querySelectorAll: selector => selector === "[data-order-adjustment-panel]" ? [root] : [] },
+    saveVendorOrderDraftAction: save,
+  });
+  return { fields, directions, option, calls, bind };
+}
+
+test("order counter starts at the saved total and submits that total without a reason field", async () => {
+  const f = quantityPanel(); f.bind();
+  assert.equal(f.fields["quantity-input"].value, "21");
+  assert.equal(f.fields.save.disabled, true);
+  await f.directions[0].dispatch("click");
+  assert.equal(f.fields["quantity-input"].value, "20");
+  await f.fields.save.dispatch("click");
+  assert.equal(f.calls[0].quantity, 20);
+  assert.equal(f.calls[0].expectedQuantity, 21);
+  assert.equal(f.calls[0].reason, "Quantity changed during weekly order review.");
+});
+
+test("products outside the order start at zero and cannot be reduced below zero", async () => {
+  const f = quantityPanel(0); f.bind();
+  assert.equal(f.fields["quantity-input"].value, "0");
+  assert.equal(f.directions[0].disabled, true);
+  await f.directions[0].dispatch("click");
+  assert.equal(f.fields["quantity-input"].value, "0");
+  await f.directions[1].dispatch("click");
+  await f.fields.save.dispatch("click");
+  assert.equal(f.calls[0].quantity, 1);
+  assert.equal(f.calls[0].expectedQuantity, 0);
+});
+
+test("counter removes an item at zero, rejects invalid totals and prevents concurrent saves", async () => {
+  const f = quantityPanel(1); let resolve; let writes = 0;
+  f.bind(() => { writes++; return new Promise(done => { resolve = done; }); });
+  for (const value of ["", "-1", "1.5", "1000"]) {
+    f.fields["quantity-input"].value = value;
+    await f.fields["quantity-input"].dispatch("input");
+    assert.equal(f.fields.save.disabled, true);
+  }
+  f.fields["quantity-input"].value = "1";
+  await f.fields["quantity-input"].dispatch("input");
+  await f.directions[0].dispatch("click");
+  assert.equal(f.fields["quantity-input"].value, "0");
+  const pending = f.fields.save.dispatch("click");
+  await f.fields.save.dispatch("click");
+  assert.equal(writes, 1);
+  assert.ok(f.directions.every(button => button.disabled));
+  resolve(); await pending;
+});

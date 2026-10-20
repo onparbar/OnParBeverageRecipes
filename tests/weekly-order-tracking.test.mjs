@@ -388,3 +388,18 @@ test("stores and restores a current-week order exclusion", () => {
   assert.equal(tracking.adjustments.length, 0);
   assert.equal(tracking.vendors[0].items[0].quantity, 1);
 });
+
+test("quantity totals reject stale edits and can remove an item added from zero", () => {
+  const now = () => new Date("2026-08-10T15:00:00.000Z");
+  const state = recommendations();
+  state.items.push({ key: "new-item", id: "new-item", actionType: "order", isKegTap: true,
+    orderQty: 0, orderProductName: "Extra lager", vendor: "Bonbright", vendorSku: "BB-EXTRA", unitCost: 120, tapNumber: 1, wall: "Main" });
+  const item = buildWeeklyOrderTracking(state, now()).adjustmentCatalog.find(row => row.name === "Extra lager");
+  assert.equal(item.currentPlanQuantity, 0);
+  const payload = {action:"set-order-adjustment",generatedAt,catalogId:item.catalogId,vendor:item.vendor,
+    quantity:1,expectedQuantity:0,reason:"Quantity changed during weekly order review.",adjustedBy:"Sam"};
+  const added=applyWeeklyOrderTrackingUpdate(state,payload,{role:"owner",now});
+  assert.throws(()=>applyWeeklyOrderTrackingUpdate(added,payload,{role:"owner",now}), error=>error.code==="ORDER_ADJUSTMENT_QUANTITY_CHANGED");
+  const removed=applyWeeklyOrderTrackingUpdate(added,{...payload,quantity:0,expectedQuantity:1},{role:"owner",now});
+  assert.equal(buildWeeklyOrderTracking(removed,now()).adjustments.find(row=>row.catalogId===item.catalogId).quantity,0);
+});

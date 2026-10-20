@@ -231,3 +231,19 @@ test("guided supplier adjustments contain only that supplier's products and save
   f.context.weeklyOrderTracking.vendors[0].ordered = true;
   assert.doesNotMatch(cards(f.render())[0], /data-order-adjustment-panel/);
 });
+
+test("adjustment editor uses total quantities with zero defaults and no action or reason fields", () => {
+  const f = fixture([draft("OHLQ", [line("Current product", 21)])], { tracking: {
+    adjustmentCatalog: [
+      {catalogId:"current",vendor:"OHLQ",name:"Current product",orderable:true,quantityUnit:"units",currentPlanQuantity:21},
+      {catalogId:"extra",vendor:"OHLQ",name:"Extra product",orderable:true,quantityUnit:"units",currentPlanQuantity:0},
+    ], adjustments:[{catalogId:"current",vendor:"OHLQ",name:"Current product",quantity:23,quantityUnit:"units",reason:"Previously saved",adjustedBy:"Sam"}],
+  } });
+  const html=f.render();
+  assert.match(html,/value="current"[^>]*data-order-adjustment-default-quantity="23"/);
+  assert.match(html,/value="extra"[^>]*data-order-adjustment-default-quantity="0"/);
+  assert.match(html,/data-order-adjustment-direction="remove"/);
+  assert.match(html,/data-order-adjustment-direction="add"/);
+  assert.match(html,/min="0" max="999"/);
+  assert.doesNotMatch(html,/data-order-adjustment-action|data-order-adjustment-reason-input|St\. Patrick/);
+});
