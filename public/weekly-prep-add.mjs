@@ -7,7 +7,7 @@ export function renderWeeklyPrepAdder() {
     <button type="button" class="ghost-button" data-prep-tap-open aria-expanded="false">Add cocktail</button>
     <div data-prep-tap-fields hidden><select aria-label="Cocktail tap to prep" data-prep-tap-select><option value="">Choose tap</option></select>
     <select aria-label="Prep cooler" data-prep-tap-cooler><option value="Main">Main cooler</option><option value="Karaoke">Karaoke cooler</option></select>
-    <button type="button" class="primary-button" data-prep-tap-save>Add to this week</button>
+    <button type="button" class="primary-button" data-prep-tap-save>Save</button>
     <section data-prep-forecast aria-label="Upcoming cocktail prep"></section></div>
     <p data-prep-tap-status role="status"></p></div>`;
 }
@@ -230,9 +230,11 @@ function bindTapPrepControls(root, documentRef, { request, createRequestId, relo
       opener.setAttribute("aria-expanded", "true");
       const forecast = panel.querySelector("[data-prep-forecast]");
       forecast.replaceChildren();
-      const note = documentRef.createElement("p");
-      note.textContent = choices.forecast?.note || "Forecast unavailable.";
-      forecast.append(note);
+      if (!choices.forecast) {
+        const note = documentRef.createElement("p");
+        note.textContent = "Forecast unavailable.";
+        forecast.append(note);
+      }
       for (const week of choices.forecast?.weeks || []) {
         const section = documentRef.createElement("section");
         const heading = documentRef.createElement("h4");
