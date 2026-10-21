@@ -39,6 +39,7 @@ export function createWeeklyOrderPractice({ root, getRows = () => [], getSupplie
     if (destroyed || !root) return;
     root.setAttribute?.("aria-busy", "false");
     root.innerHTML = renderPracticeSupplier({ drafts, index, weekLabel });
+    root.scrollIntoView?.({ block: "start" });
     root.querySelector?.(".weekly-order-title")?.focus?.({ preventScroll: true });
   }
 
