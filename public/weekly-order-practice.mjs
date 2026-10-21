@@ -11,8 +11,11 @@ export function renderPracticeSupplier({ drafts = [], index = 0, weekLabel = "" 
     <div class="weekly-order-practice-notice"><strong>Practice walkthrough</strong><p>No live counts or orders change. These are this week's saved supplier orders; practice counts do not recalculate them.</p></div>
     <header class="weekly-order-header"><p>${escapeHtml(weekLabel)}${draft ? ` · Supplier ${index + 1} of ${drafts.length}` : ""}</p><h2 class="weekly-order-title" tabindex="-1">${escapeHtml(draft?.vendor || "Practice complete")}</h2></header>
     ${draft ? `<div class="vendor-order-draft-card"><div class="vendor-order-draft-lines">${(draft.lines || []).map((line) => {
-      const amount = Number(line.requestedCases) > 0 ? `${line.requestedCases} cases` : `${line.requestedUnits ?? 0} ${line.lineType === "Beer keg" ? "kegs" : "units"}`;
-      return `<div class="vendor-order-draft-line"><span class="vendor-order-draft-line__copy"><strong>${escapeHtml(line.productName || line.name)}</strong><span>${escapeHtml(amount)}</span></span><b>${money(line.extendedCost)}</b></div>`;
+      const cases = Number(line.requestedCases) > 0;
+      const quantity = cases ? line.requestedCases : line.requestedUnits ?? 0;
+      const unit = cases ? "case" : line.lineType === "Beer keg" ? "keg" : ["Liquor bottle", "Liquor tap bottle", "Mixer"].includes(line.lineType) ? "bottle" : "unit";
+      const amount = `${quantity} ${unit}${Number(quantity) === 1 ? "" : "s"}`;
+      return `<div class="vendor-order-draft-line"><span class="vendor-order-draft-line__copy"><strong>${escapeHtml(line.productName || line.name)}</strong><span>${escapeHtml(amount)}</span></span><b>${line.excludeFromOrderCost ? "—" : Number(line.extendedCost) > 0 ? money(line.extendedCost) : "Price needed"}</b></div>`;
     }).join("")}</div><p>Estimated total: <strong>${money(draft.estimatedTotal)}</strong></p><p>In the live flow, review this supplier's items, open the supplier, and mark the order placed after submitting it.</p><button class="weekly-order-button" type="button" disabled>Practice only — no order sent</button></div>` : '<p>You have finished the inventory and ordering walkthrough.</p>'}
     <footer class="weekly-order-footer"><div class="weekly-order-footer-buttons">
       <button class="weekly-order-button" type="button" data-practice-action="restart">Practice counts again</button>
