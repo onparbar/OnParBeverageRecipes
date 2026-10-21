@@ -20,7 +20,7 @@ function setup(overrides = {}) {
     applySharedWeeklyUsageState(state) { calls.applies++; context.weeklyUsageSharedInitialized = state.initialized; context.weeklyUsageSharedRevision = state.revision; },
     async queueSharedWeeklyUsageSave() { calls.recoveries++; return true; },
     dashboardRenderCoordinator: { batch: async callback => callback() },
-    renderWeeklyUsage() {}, renderOnParInsights() {}, renderDashboardOverview() {},
+    renderWeeklyUsage() {}, renderOnParInsights() {}, renderDashboardOverview() {}, renderDashboardBeveragePulse() {},
     ...overrides,
   });
   vm.runInContext(refreshSource, context);
@@ -105,4 +105,29 @@ test('simultaneous focus and timer refreshes share one read', async () => {
   await Promise.all([first, second]);
   assert.equal(reads, 1);
   assert.equal(calls.applies, 1);
+});
+
+test('failed history reads update Home and a successful same-revision retry clears the warning', async () => {
+  let homeRenders = 0;
+  const { context, calls } = setup({
+    requestSharedWeeklyUsage: async () => { throw new Error('offline'); },
+    renderDashboardBeveragePulse: () => { homeRenders++; },
+  });
+  assert.equal(await context.refreshSharedWeeklyUsageForDisplay(), false);
+  assert.equal(vm.runInContext('weeklyUsageDisplayReadError', context), 'Could not check saved history.');
+  assert.equal(homeRenders, 1);
+  context.requestSharedWeeklyUsage = async () => ({ initialized: true, revision: 10 });
+  assert.equal(await context.refreshSharedWeeklyUsageForDisplay(), false);
+  assert.equal(vm.runInContext('weeklyUsageDisplayReadError', context), '');
+  assert.equal(homeRenders, 2);
+  assert.equal(calls.applies, 0, 'unchanged history is not replaced just to clear a connection warning');
+});
+
+test('the lightweight unchanged-history response clears a prior connection warning', async () => {
+  const { context, calls } = setup({ requestSharedWeeklyUsage: async () => { throw new Error('offline'); } });
+  await context.refreshSharedWeeklyUsageForDisplay();
+  context.requestSharedWeeklyUsage = async () => ({ unchanged: true, revision: 10 });
+  await context.refreshSharedWeeklyUsageForDisplay();
+  assert.equal(vm.runInContext('weeklyUsageDisplayReadError', context), '');
+  assert.equal(calls.applies, 0);
 });

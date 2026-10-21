@@ -3403,16 +3403,24 @@ function bindEvents() {
         ? nextPeriod
         : "six-weeks";
       renderDashboardBeveragePulse();
+      void refreshSharedWeeklyUsageForDisplay();
       return;
     }
     const wallFilterControl = event.target.closest("[data-seller-ranking-wall]");
     if (!wallFilterControl) return;
     sellerRankingWall = clean(wallFilterControl.value).toLowerCase() || "main";
     renderDashboardBeveragePulse();
+    void refreshSharedWeeklyUsageForDisplay();
   };
   dashboardOverview?.addEventListener("change", handleDashboardPulseChange);
   document.querySelector("#dashboard-guest-favorites")?.addEventListener("change", handleDashboardPulseChange);
   document.querySelector("#dashboard-beverage-pulse")?.addEventListener("change", handleDashboardPulseChange);
+  const handleHistoryRefresh = (event) => {
+    if (!event.target.closest("[data-dashboard-history-refresh]")) return;
+    void refreshSharedWeeklyUsageForDisplay();
+  };
+  document.querySelector("#dashboard-guest-favorites")?.addEventListener("click", handleHistoryRefresh);
+  document.querySelector("#dashboard-beverage-pulse")?.addEventListener("click", handleHistoryRefresh);
   addProductTypeButtons.forEach((button) => {
     button.addEventListener("click", () => switchAddProductType(button.dataset.addProductType));
     button.addEventListener("keydown", (event) => {
@@ -8122,8 +8130,26 @@ function renderDashboardCategoryMix(mix) {
   `;
 }
 
+function renderDashboardPulseHistoryStatus(profitMix) {
+  const expectedWeek = getCompletedMondayWeekStarts(1)[0]?.getTime() || 0;
+  const behind = !profitMix.weekStartTime || profitMix.weekStartTime < expectedWeek;
+  if (!behind && !weeklyUsageDisplayReadError && !weeklyUsageSharedOutbox) return "";
+  const message = weeklyUsageSharedOutbox
+    ? "This browser has an unsaved report. Open Weekly Usage to review its recovery status; these estimates may differ from other devices."
+    : weeklyUsageDisplayReadError
+      ? "Could not check saved history. Showing the last available report; these estimates may differ from other devices."
+      : profitMix.weekStartTime
+        ? `History is behind. These estimates cover ${profitMix.weekLabel}; newer completed weeks are missing from this view.`
+        : "No saved pour history is available for these estimates.";
+  return `<div class="sync-status" role="status">
+    <p>${escapeHtml(message)}</p>
+    <button type="button" class="ghost-button" data-dashboard-history-refresh>Check saved history</button>
+  </div>`;
+}
+
 function renderDashboardProjectedSalesMix(profitMix) {
   return `<aside class="dashboard-pulse-sales-mix">
+    ${renderDashboardPulseHistoryStatus(profitMix)}
     ${renderDashboardCategoryMix(profitMix)}
     ${renderDashboardProjectedWallMix(profitMix.walls, profitMix.weekLabel)}
   </aside>`;
@@ -10276,12 +10302,14 @@ function applySharedWeeklyUsageState(state) {
 }
 
 let weeklyUsageDisplayRefreshPromise = null;
+let weeklyUsageDisplayReadError = "";
 
 function refreshSharedWeeklyUsageForDisplay() {
   if (weeklyUsageDisplayRefreshPromise) return weeklyUsageDisplayRefreshPromise;
   if (!isEmployeeDashboard && !weeklyUsageJournalLoaded) {
     weeklyUsageDisplayRefreshPromise = loadSharedWeeklyUsageState().finally(() => {
       weeklyUsageDisplayRefreshPromise = null;
+      renderDashboardBeveragePulse();
     });
     return weeklyUsageDisplayRefreshPromise;
   }
@@ -10311,6 +10339,7 @@ function refreshSharedWeeklyUsageForDisplay() {
   weeklyUsageDisplayRefreshPromise = (async () => {
     try {
       const state = await requestSharedWeeklyUsage(null, { knownRevision: revisionAtStart });
+      if (state.initialized || state?.unchanged === true) weeklyUsageDisplayReadError = "";
       if (state?.unchanged === true) return false;
       // A read must never replace edits or another refresh that arrived in flight.
       if (hasLocalWork() || weeklyUsageSharedRevision !== revisionAtStart
@@ -10328,9 +10357,11 @@ function refreshSharedWeeklyUsageForDisplay() {
     } catch {
       // Keep the last saved report during a transient read failure. The next
       // visible refresh retries without discarding data or creating a write.
+      weeklyUsageDisplayReadError = "Could not check saved history.";
       return false;
     } finally {
       weeklyUsageDisplayRefreshPromise = null;
+      renderDashboardBeveragePulse();
     }
   })();
   return weeklyUsageDisplayRefreshPromise;
