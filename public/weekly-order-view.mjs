@@ -35,7 +35,7 @@ function landing(model, completed) {
       <h2 class="weekly-order-title" tabindex="-1">Your weekly plan is saved.</h2>
       ${model.weekLabel ? `<p class="weekly-order-week">${escapeHtml(model.weekLabel)}</p>` : ""}
       ${feedback(model)}
-      <div class="weekly-order-start-actions">${button("plan", "Open weekly plan", { primary: true, disabled: model.busy })}${button("exit", "Back to overview", { disabled: model.busy })}</div>
+      <div class="weekly-order-start-actions">${button("plan", "Open weekly plan", { primary: true, disabled: model.busy })}${model.canPractice ? button("practice", "Practice inventory & ordering", { disabled: model.busy }) : ""}${button("exit", "Back to overview", { disabled: model.busy })}</div>
     </div>`;
   }
   const canResume = model.progressAvailable || completed.size > 0;
@@ -81,9 +81,9 @@ function review(model, completed) {
       <button type="button" class="weekly-order-change" data-weekly-order-step="${escapeHtml(step.id)}" aria-label="${escapeHtml(`${completed.has(step.id) ? "Change" : "Check"} ${step.label.toLowerCase()}`)}"${model.busy ? " disabled" : ""}>${completed.has(step.id) ? "Change" : "Check"}</button>
     </li>`).join("")}</ul>
     <div class="weekly-order-reason" data-weekly-order-reason-field${model.needsReason ? "" : " hidden"}><label for="weekly-order-reason">What changed?</label><textarea id="weekly-order-reason" data-weekly-order-reason rows="3"${model.needsReason ? " required" : ""}${model.busy ? " disabled" : ""}>${escapeHtml(model.reason || "")}</textarea></div>
-    <p class="weekly-order-save-note">Saving does not place orders.</p>
+    <p class="weekly-order-save-note">${model.practice ? "Practice counts stay in this walkthrough. Next, review this week’s saved supplier orders; practice counts do not recalculate them." : "Saving does not place orders."}</p>
     ${feedback(model)}
-    <footer class="weekly-order-footer"><div class="weekly-order-footer-buttons">${button("back", "Back", { disabled: model.busy })}${button("save", model.busy ? "Saving…" : "Save weekly plan", { primary: true, disabled: model.busy || !allComplete })}${button("plan", "Open weekly plan", { primary: true, disabled: model.busy, hidden: true })}</div></footer>`;
+    <footer class="weekly-order-footer"><div class="weekly-order-footer-buttons">${button("back", "Back", { disabled: model.busy })}${button("save", model.busy ? "Saving…" : model.practice ? "Review supplier orders" : "Save weekly plan", { primary: true, disabled: model.busy || !allComplete })}${button("plan", "Open weekly plan", { primary: true, disabled: model.busy, hidden: true })}</div></footer>`;
 }
 
 export function renderWeeklyOrderView(model = {}) {
@@ -94,5 +94,5 @@ export function renderWeeklyOrderView(model = {}) {
     : model.screen === "review"
       ? review(model, completed)
       : stepIndex >= 0 ? countScreen(model, WEEKLY_ORDER_STEPS[stepIndex], stepIndex) : landing(model, completed);
-  return `<section class="weekly-order" aria-label="Weekly order" aria-busy="${Boolean(model.busy)}">${content}</section>`;
+  return `<section class="weekly-order" aria-label="Weekly order" aria-busy="${Boolean(model.busy)}">${model.practice ? '<div class="weekly-order-practice-notice"><strong>Practice walkthrough</strong><p>No live counts or orders change. Closing this walkthrough discards your practice counts.</p><button type="button" class="weekly-order-button" data-weekly-order-action="exit">Exit practice</button></div>' : ""}${content}</section>`;
 }

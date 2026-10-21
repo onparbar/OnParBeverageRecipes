@@ -583,3 +583,13 @@
 
 .vendor-order-adjustments__quantity-field { display: grid; gap: 4px; min-width: 0; }
 .vendor-order-adjustments__quantity-field > span { color: var(--muted); font-size: 0.72rem; font-weight: 700; }
+
+.weekly-order-practice-notice {
+  padding: 1rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid #b7c9bd;
+  border-radius: 12px;
+  background: #f0f6f1;
+  color: #183c28;
+}
+.weekly-order-practice-notice p { margin: .5rem 0; }
