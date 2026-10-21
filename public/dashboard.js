@@ -1,7 +1,6 @@
 import { mountDashboardSessionRecovery } from "./dashboard-session.mjs";
 import { getTapPricingCoverage } from "./tap-pricing-coverage.mjs";
 import { buildPriorWeekWorkAlert } from "./prep-carry-forward.mjs";
-import { createWeeklyOrderPractice } from "./weekly-order-practice.mjs";
 import { createWeeklyOrderController } from "./weekly-order-controller.mjs";
 import { WEEKLY_ORDER_STEPS } from "./weekly-order-view.mjs";
 import { formatOperatingWeekLabel } from "./weekly-action-plan.mjs";
@@ -6838,43 +6837,22 @@ function renderMondayRunCompact(run) {
 }
 
 function openWeeklyOrder() {
-  if (weeklyOrderController?.practice) {
-    weeklyOrderController.destroy();
-    weeklyOrderController = null;
-  }
   if (!weeklyOrderController) {
     weeklyOrderController = createWeeklyOrderController({
       root: document.querySelector("#weekly-order"),
       getContext: () => ({
         weekLabel: formatOperatingWeekLabel(),
         planLocked: Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date())),
-        canPractice: Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date()) && inventorySharedInitialized && kegWallItems.length && inventoryItems.length),
         needsReason: !isEasternMonday(),
         ready: Boolean(parAgentState?.initialized && inventorySharedInitialized && kegWallItems.length && inventoryItems.length),
       }),
       getRows: getWeeklyOrderRows,
-      practice: openWeeklyOrderPractice,
       saveStep: saveWeeklyOrderStep,
       savePlan: saveWeeklyOrderPlan,
       openPlan: () => openMondayRunStep("orders", "weekly-plan"),
       exit: () => switchTab("dashboard"),
     });
   }
-  weeklyOrderController.open();
-}
-
-function openWeeklyOrderPractice() {
-  weeklyOrderController?.destroy();
-  weeklyOrderController = createWeeklyOrderPractice({
-    root: document.querySelector("#weekly-order"),
-    weekLabel: formatOperatingWeekLabel(),
-    getRows: getWeeklyOrderRows,
-    getSupplierDrafts: () => {
-      const plan = getWeeklyPlanModel();
-      return getVendorOrderDraftModel(plan, getWeeklyPlanFreshness(plan)).drafts;
-    },
-    exit: () => openWeeklyOrder(),
-  });
   weeklyOrderController.open();
 }
 

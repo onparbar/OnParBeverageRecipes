@@ -22,7 +22,6 @@ export function createWeeklyOrderController({
   saveStep,
   savePlan,
   openPlan = () => {},
-  practice = () => {},
   exit = () => {},
   storage = globalThis.localStorage,
   now = () => new Date(),
@@ -331,11 +330,6 @@ export function createWeeklyOrderController({
     if (destroyed || busy) return false;
     if (checkWeek()) { render(); return false; }
     if (action === "exit") { exit(); return true; }
-    if (action === "practice") {
-      if (!context().canPractice) return false;
-      practice();
-      return true;
-    }
     if (context().planLocked) { openPlan(); return true; }
     if (action === "start") navigate(STEP_IDS[0]);
     else if (action === "resume") {
