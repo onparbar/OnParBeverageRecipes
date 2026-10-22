@@ -1,3 +1,4 @@
+import { completeRecipeIngredientInventory, includeMissingRecipeInventory, getIngredientPurchaseGaps } from "./recipe-ingredient-inventory.mjs";
 import { mountDashboardSessionRecovery } from "./dashboard-session.mjs";
 import { getTapPricingCoverage } from "./tap-pricing-coverage.mjs";
 import { buildPriorWeekWorkAlert } from "./prep-carry-forward.mjs";
@@ -5649,7 +5650,7 @@ function renderInventory() {
 
 function getWeeklyPlanInventoryItems({ live = false } = {}) {
   const mondaySnapshot = getCurrentMondayInventorySnapshot(inventoryHistory, new Date());
-  const sourceItems = (live ? getInventorySnapshotItems() : mondaySnapshot?.items || [])
+  const sourceItems = (live ? getInventorySnapshotItems() : includeMissingRecipeInventory(mondaySnapshot?.items || [], getInventorySnapshotItems()))
     .map(applyInventoryCountPolicy);
   const frozenKegPlan = getCurrentMondayKegPlanSnapshot();
   const recommendationItems = live && liveParRecommendations?.items
@@ -5727,6 +5728,7 @@ function getWeeklyPlanInventoryItems({ live = false } = {}) {
     tapInputs: frozenKegPlan?.tapInputs?.length ? frozenKegPlan.tapInputs : recommendationItems,
     recipes,
     recipeAliases: Object.fromEntries([...MENU_ORDER, ...NEW_RECIPE_ORDER]),
+    cocktails: recommendationItems.filter(item => item.actionType === "make" && toNumber(item.orderQty) > 0),
   });
 }
 
@@ -8621,6 +8623,25 @@ function renderWeeklyPlanByVendor(plan, deferredOrders = []) {
     : '<p class="weekly-plan-empty">No active purchasing lines. Review held and excluded items below before concluding no order is needed.</p>';
 }
 
+function renderCurrentIngredientPurchaseReview(plan) {
+  if (!hasPublishedWeeklyPlanRecommendations()) return "";
+  const pending = dashboardStaffPrepPlan?.available
+    ? dashboardStaffPrepPlan.items.filter(item => !item.completed)
+    : (plan.prep?.cocktails || []).filter(item => !parAgentState?.recommendations?.prepChecklist?.[`cocktail:${encodeURIComponent(item.name.toLowerCase())}`]?.completed);
+  const current = getWeeklyPlanInventoryItems({ live: true }).map(item => ({ ...item,
+    onHand: inventoryItems.find(current => current.id === item.id)?.onHandDisplay,
+    hasCurrentCount: clean(inventoryItems.find(current => current.id === item.id)?.onHandDisplay) !== "",
+  }));
+  const remaining = buildRollingCocktailIngredientOrders({ inventoryItems: current, cocktails: pending,
+    recipes, recipeAliases: Object.fromEntries([...MENU_ORDER, ...NEW_RECIPE_ORDER]),
+  });
+  const gaps = getIngredientPurchaseGaps(remaining, weeklyOrderTracking.vendors || []);
+  if (!gaps.length) return "";
+  return `<section class="weekly-plan-review" aria-label="Ingredient purchasing review"><h2>Ingredients still needed</h2>
+    <p>Check these ingredients before batching. Quantities include the saved cabinet reserves.</p>
+    ${gaps.map(item => `<div class="weekly-plan-item weekly-plan-item--held"><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.reason)}</span></div><b>${item.held ? "Verify" : `${formatNumber(item.quantity)} units`}</b></div>`).join("")}</section>`;
+}
+
 function renderWeeklyPlanReview(plan) {
   if (!plan.review.heldRecommendations.length && !plan.review.excludedInventory.length) return "";
   return `
@@ -9138,6 +9159,7 @@ function renderWeeklyPlan() {
     ${renderWeeklyPlanReadiness(freshness.readiness)}
     ${currentWeekPlanAvailable ? `
     ${priceNote ? `<p class="weekly-plan-cost-note">${escapeHtml(priceNote)}</p>` : ""}
+    ${renderCurrentIngredientPurchaseReview(plan)}
     ${renderWeeklyPlanReview(plan)}
     ${planLocked
       ? renderSupplierOrderFlow({
@@ -16103,10 +16125,16 @@ function mergeCustomInventoryItems(baseItems) {
     byId.set(normalized.id, normalized);
   });
 
-  return [...byId.values()].map((item) => applyInventoryCountPolicy({
-    ...item,
-    group: inventoryGroupOverrides[item.id] || item.group,
-  }));
+  return completeRecipeIngredientInventory([...byId.values()], getActiveRecipes(), {
+    productFor: (id, name) => getVendorMapping(id) || getVendorMapping(slugify(normalizeIngredientAlias(name))),
+    normalizeName: normalizeIngredientAlias, onHand: inventoryOnHandOverrides, pars: inventoryParOverrides,
+  }).map((item) => {
+    recalculateInventoryItem(item);
+    return applyInventoryCountPolicy({
+      ...item,
+      group: inventoryGroupOverrides[item.id] || item.group,
+    });
+  });
 }
 
 function normalizeCustomInventoryItem(item) {
@@ -16660,10 +16688,10 @@ function syncInventoryItemCatalogLinks() {
   const ingredientById = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
 
   inventoryItems.forEach((item) => {
-    item.onHandDisplay = clean(item.onHandDisplay) || "0";
+    item.onHandDisplay = clean(item.onHandDisplay);
     const ingredient = ingredientById.get(item.id) || null;
     item.linkedIngredientName = ingredient?.name || item.name;
-    item.vendorProduct = ingredient?.vendorProduct || getVendorMapping(item.id) || null;
+    item.vendorProduct = ingredient?.vendorProduct || getVendorMapping(item.id) || item.vendorProduct || null;
     if (item.id === "non-alcoholic-beer") item.excludeFromInventoryValue = false;
     Object.assign(item, applyMappedInventoryPackageRule(item, item.vendorProduct));
     item.unitCost = getInventoryBottleCost(item, ingredient);
@@ -16753,7 +16781,7 @@ function setInventoryItemDisplayValue(item, field, value) {
 
 function getInventoryDisplayValue(item, field) {
   if (!item) return "";
-  return field === "par" ? item.parDisplay : clean(item.onHandDisplay) || "0";
+  return field === "par" ? item.parDisplay : clean(item.onHandDisplay);
 }
 
 function persistInventoryField(id, field, value) {
@@ -20685,6 +20713,7 @@ function getRecipeFlavor(recipeTitle) {
 }
 
 function getVendorMapping(ingredientId) {
+  if (ingredientId === "mint-syrup") ingredientId = "mint";
   if (priceOverrides[ingredientId]?.vendorMapping) return priceOverrides[ingredientId].vendorMapping;
   if (INVENTORY_PROVI_MAPPINGS[ingredientId] || PROOF_MAPPINGS[ingredientId] || OHLQ_MAPPINGS[ingredientId]) {
     return INVENTORY_PROVI_MAPPINGS[ingredientId] || PROOF_MAPPINGS[ingredientId] || OHLQ_MAPPINGS[ingredientId] || null;
@@ -20696,6 +20725,7 @@ function getVendorMapping(ingredientId) {
 
 function normalizeIngredientAlias(name) {
   const normalized = clean(name).toLowerCase();
+  if (/^mint(?: syrup)?$/.test(normalized)) return "Mint Syrup";
   const preparedName = getPreparedIngredientCanonicalName(normalized);
   if (preparedName) return preparedName;
 

@@ -16,8 +16,12 @@ export function isKitchenManagedInventoryItem(item) {
   return inventoryPolicyKeys(item).some(key => KITCHEN_ITEMS.has(key));
 }
 
+export function isSodaMachineInventoryItem(item) {
+  return inventoryPolicyKeys(item).some(key => ["lemonade", "strawberry-lemonade", "cranberry-juice", "sweet-tea", "blue-dot-juice"].includes(key));
+}
+
 export function isInventoryCountExcluded(item) {
-  return isKitchenManagedInventoryItem(item) || getUncountedInventoryAmount(item) !== null;
+  return isKitchenManagedInventoryItem(item) || isSodaMachineInventoryItem(item) || getUncountedInventoryAmount(item) !== null;
 }
 
 export function isWeeklyCountOnlyInventoryItem(item) {
@@ -33,15 +37,15 @@ export function getUncountedInventoryAmount(item) {
 }
 
 export function applyInventoryCountPolicy(item) {
-  if (isKitchenManagedInventoryItem(item)) return {
+  if (isKitchenManagedInventoryItem(item) || isSodaMachineInventoryItem(item)) return {
     ...item,
-    group: "Other", kitchenManaged: true, notCounted: true, countSource: "kitchen",
+    group: "Other", kitchenManaged: true, notCounted: true, countSource: isSodaMachineInventoryItem(item) ? "soda-machine" : "kitchen",
     assumedOnHand: null, onHand: null, onHandDisplay: "", hasCurrentCount: false,
     par: 0, parDisplay: "", orderQuantity: 0, orderUnits: 0, orderDisplay: "0", shortageDisplay: "0",
     totalValue: 0, estimatedCost: 0, excludeFromInventoryValue: true, excludeFromOrderList: true, excludeFromOrderCost: true,
     cocktailPrepRequiredBottles: 0, cocktailPrepShortageUnits: 0, rollingReserveUnits: 0,
     rollingIngredientVersion: 0, rollingPrepWeeks: [], rollingPrepTapNumbers: [],
-    orderHoldReason: "", rollingPlanReason: "Kitchen managed; excluded from beverage counts and ordering.",
+    orderHoldReason: "", rollingPlanReason: isSodaMachineInventoryItem(item) ? "Soda machine; excluded from beverage counts and ordering." : "Kitchen managed; excluded from beverage counts and ordering.",
   };
   const amount = getUncountedInventoryAmount(item);
   return amount === null ? item : {

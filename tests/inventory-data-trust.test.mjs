@@ -171,7 +171,6 @@ test("uncounted prep mixers need no inventory match and still contribute to batc
     "gallon lemonade",
     "Sweet Tea",
     "Simple Syrup",
-    "Mint",
     "1152 blue dot juice",
   ]) {
     const recipe = { ingredients: [

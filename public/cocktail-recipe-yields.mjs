@@ -1,7 +1,7 @@
 const recipeYieldDefinitions = [
   {
     sourceTitle: "Whiskey Smash",
-    yieldOz: 1463,
+    yieldOz: 1488,
     aliases: [],
   },
   {

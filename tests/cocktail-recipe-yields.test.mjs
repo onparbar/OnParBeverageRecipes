@@ -90,7 +90,7 @@ function roundToHundredths(value) {
 }
 
 const sourceRecipes = [
-  ["Whiskey Smash", 1463],
+  ["Whiskey Smash", 1488],
   ["Apple Jack (Whiskey)", 1516],
   ["On Par Tee", 1452],
   ["Bacardi Sunset", 1379.05],
@@ -185,7 +185,7 @@ test("Whiskey Smash and On Par Tee source instructions agree with their ounce ma
     );
     assert.equal(
       whiskeySmash.find(({ label }) => label.toLowerCase() === "total oz")?.cost,
-      1463,
+      1488,
     );
     assert.equal(
       onParTee.find(({ label }) => label === "Peach Schnapps= 8 bottles")?.oz,
@@ -226,12 +226,12 @@ test("new cocktail costs and pricing metrics agree with their recipe files", asy
       recipes: [
         {
           title: "Whiskey Smash",
-          totalCost: 256.09,
-          totalOz: 1463,
+          totalCost: 263.22,
+          totalOz: 1488,
           costPerOz: 0.18,
           chargePerOz: 2.09,
           profitPerOz: 1.91,
-          margin: 91.62,
+          margin: 91.54,
           pourOz: 5.30,
           chargePerPour: 11.08,
         },
@@ -253,12 +253,12 @@ test("new cocktail costs and pricing metrics agree with their recipe files", asy
       recipes: [
         {
           title: "Whiskey Smash",
-          totalCost: 256.09,
-          totalOz: 1463,
+          totalCost: 263.22,
+          totalOz: 1488,
           costPerOz: 0.18,
           chargePerOz: 1.99,
           profitPerOz: 1.81,
-          margin: 91.20,
+          margin: 91.11,
           pourOz: 5.30,
           chargePerPour: 10.55,
         },
@@ -422,7 +422,7 @@ test("Keg Levels sizing prefers named cocktails before generic PMB sizes", () =>
       },
       1536,
     ),
-    1463,
+    1488,
   );
   assert.equal(
     getCocktailAwareKegFullOunces(

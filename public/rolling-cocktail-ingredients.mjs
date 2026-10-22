@@ -1,7 +1,8 @@
+import { findRecipeIngredientInventory, recipeIngredientQuantityIssue, getRecipeIngredientBottlePackage } from "./recipe-ingredient-inventory.mjs";
 import { findPlanningCocktailRecipe } from "./planning-cocktail-recipe.mjs";
 import { MINIMUM_KEG_CUSHION } from "./keg-demand-policy.mjs";
 import { normalizeLiquorTapProductName } from "./weekly-action-plan.mjs";
-import { applyInventoryCountPolicy, getUncountedInventoryAmount, isKitchenManagedInventoryItem } from "./inventory-count-policy.mjs";
+import { applyInventoryCountPolicy, getUncountedInventoryAmount, isInventoryCountExcluded, isKitchenManagedInventoryItem } from "./inventory-count-policy.mjs";
 import { getLiquorTapBottleBatch } from "./liquor-tap-order-policy.mjs";
 
 const RESERVES = Object.freeze({
@@ -24,27 +25,16 @@ function nonnegative(value) {
   return Number.isFinite(result) && result >= 0 ? result : null;
 }
 function managed(item) {
-  if (isKitchenManagedInventoryItem(item)) return false;
+  if (isKitchenManagedInventoryItem(item) || item.countSource === "soda-machine") return false;
   return /^(Liquor|Mixer) Cabinet$/i.test(item.group || "") || ["simple-syrup", "vanilla"].includes(item.id)
     || getUncountedInventoryAmount(item) !== null;
 }
 
 function ingredientUnits(ingredient, unitOz) {
   const ounces = nonnegative(ingredient.oz) || 0;
-  const raw = String(ingredient.raw || "");
-  const bottles = raw.match(/(\d+(?:\.\d+)?)\s*(?:\([^)]*\)\s*)?(?:bottles?|btls?)\b/i);
-  const count = nonnegative(ingredient.packageCount) || Number(bottles?.[1]) || 0;
-  if (count > 0 && (bottles || /^bottles?$/i.test(ingredient.packageUnit || ""))) {
-    const size = raw.match(/\b(\d+(?:\.\d+)?)\s*(ml|l|liters?|oz)\b/i);
-    const sizeUnit = size?.[2].toLowerCase();
-    const declaredOz = nonnegative(ingredient.packageSizeOz) || (size
-      ? Number(size[1]) * (sizeUnit === "oz" ? 1 : sizeUnit === "ml" ? 0.033814 : 33.814)
-      : 0);
-    // Use the recipe's stated bottles; legacy ounces are rounded. Convert
-    // explicitly when the recipe and purchased bottle sizes differ.
-    if (declaredOz > 0) return Math.abs(declaredOz - unitOz) <= 0.05 ? count : count * declaredOz / unitOz;
-    if (Math.abs(ounces / count - unitOz) <= 0.05) return count;
-  }
+  const pack = getRecipeIngredientBottlePackage(ingredient);
+  if (pack?.bottleOz > 0) return Math.abs(pack.bottleOz - unitOz) <= 0.05 ? pack.count : pack.count * pack.bottleOz / unitOz;
+  if (pack?.count > 0 && Math.abs(ounces / pack.count - unitOz) <= 0.05) return pack.count;
   return ounces / unitOz;
 }
 
@@ -52,21 +42,24 @@ function ingredientUnits(ingredient, unitOz) {
 // batches for the current Thursday prep session. Future weeks are recalculated
 // from the next saved inventory count instead of being bought ahead.
 export function buildRollingCocktailIngredientOrders({
-  inventoryItems = [], tapInputs = [], recipes = [], recipeAliases = {},
+  inventoryItems = [], tapInputs = [], recipes = [], recipeAliases = {}, cocktails = null,
 } = {}) {
   inventoryItems = inventoryItems.map(applyInventoryCountPolicy);
   const demand = new Map();
   const issues = [];
+  const itemIssues = new Map();
   const seen = new Set();
-  for (const tap of tapInputs) {
+  const planned = Array.isArray(cocktails);
+  const inputs = planned ? cocktails : tapInputs;
+  for (const tap of inputs) {
     const n = Number(tap.tapNumber);
-    if (!((n >= 47 && n <= 72) || (n >= 93 && n <= 102)) || /coming\s*soon/i.test(tap.name || "")) continue;
-    const identity = tap.key || `${tap.wall}:${n}`;
+    if ((!planned && !((n >= 47 && n <= 72) || (n >= 93 && n <= 102))) || /coming\s*soon/i.test(tap.name || "")) continue;
+    const identity = tap.prepAdditionId || tap.key || (planned ? `${tap.name}:${tap.tapNumbers || n}` : `${tap.wall}:${n}`);
     if (seen.has(identity)) continue;
     seen.add(identity);
     const stock = nonnegative(tap.currentStockKegs);
     const average = nonnegative(tap.avgWeeklyKegs);
-    if (stock === null || average === null || tap.inventoryStateMissing) {
+    if (!planned && (stock === null || average === null || tap.inventoryStateMissing)) {
       issues.push(`Tap ${n}: saved stock or weekly usage is missing.`);
       continue;
     }
@@ -78,33 +71,37 @@ export function buildRollingCocktailIngredientOrders({
       batches[week] = Math.max(0, Math.ceil(average + cushion - remaining - 1e-9));
       remaining = Math.max(0, remaining + batches[week] - average);
     }
+    if (planned) batches[0] = Math.max(0, Number(tap.quantity ?? tap.orderQty) || 0);
     if (!batches.some(Boolean)) continue;
     const recipe = findPlanningCocktailRecipe(tap, recipes, recipeAliases);
     if (!recipe) { issues.push(`Tap ${n}: recipe for ${tap.name} is missing.`); continue; }
     for (const ingredient of recipe.ingredients || []) {
       const ounces = nonnegative(ingredient.oz);
       if (!(ounces > 0)) continue;
-      const names = [ingredient.inventoryId, ingredient.id, ingredient.name].map(key).filter(Boolean);
-      const item = inventoryItems.find((item) => [item.id, item.name, item.linkedIngredientName].some((name) => name && names.includes(key(name))));
-      // Kitchen-managed ingredients are outside beverage vendor purchasing.
-      if (!item || !managed(item)) continue;
+      // Water, kitchen and soda-machine ingredients have explicit policies.
+      if (/^(water|ice)$/i.test(ingredient.name || "") || isInventoryCountExcluded(ingredient)) continue;
+      const item = findRecipeIngredientInventory(ingredient, inventoryItems);
+      if (!item) { issues.push(`${ingredient.name}: add or link its inventory item for ${recipe.title}.`); continue; }
+      if (!managed(item)) { issues.push(`${item.name}: confirm its inventory ordering policy.`); continue; }
       const unitOz = nonnegative(item.bottleOz);
-      if (!(unitOz > 0)) { issues.push(`${item.name}: inventory package size is missing.`); continue; }
+      if (!(unitOz > 0)) { itemIssues.set(item.id, `${item.name}: inventory package size is missing.`); continue; }
+      const quantityIssue = recipeIngredientQuantityIssue(ingredient);
+      if (quantityIssue) { itemIssues.set(item.id, quantityIssue); continue; }
       const entry = demand.get(item.id) || { units: [0], taps: new Set() };
       const units = ingredientUnits(ingredient, unitOz);
       batches.forEach((count, week) => { entry.units[week] += units * count; });
-      entry.taps.add(n);
+      (tap.tapNumbers || [n]).filter(Number.isFinite).forEach(number => entry.taps.add(number));
       demand.set(item.id, entry);
     }
   }
-  if (!seen.size) issues.push("Saved cocktail tap stock and usage are required for the current Thursday ingredient plan.");
+  if (!planned && !seen.size) issues.push("Saved cocktail tap stock and usage are required for the current Thursday ingredient plan.");
   return inventoryItems.map((item) => {
     if (!managed(item)) return item;
     const onHand = item.hasCurrentCount === false ? null : nonnegative(item.onHand);
     const entry = demand.get(item.id);
     const prep = Math.max(0, Math.ceil((entry?.units.reduce((a, b) => a + b, 0) || 0) - 1e-6));
     const reserve = RESERVES[item.id] || 0;
-    const hold = issues.length ? issues.join(" ") : onHand === null ? `${item.name}: count is missing.` : "";
+    const hold = issues.length ? issues.join(" ") : itemIssues.get(item.id) || (onHand === null ? `${item.name}: count is missing.` : "");
     const shortage = hold ? 0 : Math.max(0, Math.ceil(prep + reserve - onHand));
     const pack = Math.max(1, Number(item.packSize) || 1);
     const quantity = item.casePackaged ? Math.ceil(shortage / pack) * pack : shortage;

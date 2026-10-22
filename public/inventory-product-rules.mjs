@@ -4,7 +4,7 @@ function positiveNumber(value) {
 }
 
 export function applyMappedInventoryPackageRule(item = {}, vendorProduct = null) {
-  const packSize = Math.max(1, Math.round(positiveNumber(vendorProduct?.packSize) || positiveNumber(item.packSize) || 1));
+  const packSize = vendorProduct?.casePackaged === false ? 1 : Math.max(1, Math.round(positiveNumber(vendorProduct?.packSize) || positiveNumber(item.packSize) || 1));
   const mappedUnitPrice = positiveNumber(vendorProduct?.unitPrice);
   const mappedCasePrice = positiveNumber(vendorProduct?.casePrice);
   const caseCost = mappedCasePrice || (mappedUnitPrice ? mappedUnitPrice * packSize : positiveNumber(item.caseCost));
@@ -12,7 +12,7 @@ export function applyMappedInventoryPackageRule(item = {}, vendorProduct = null)
   return {
     ...item,
     packSize,
-    casePackaged: packSize > 1 || item.casePackaged === true,
+    casePackaged: vendorProduct?.casePackaged === false ? false : packSize > 1 || item.casePackaged === true,
     caseCost,
     baseUnitCost: unitCost,
     unitCost,
