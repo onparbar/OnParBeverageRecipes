@@ -20,56 +20,9 @@ import { readSharedDashboardState } from "../../../lib/shared-dashboard-store.mj
 import { isCompletedMondayWeekStart } from "../../../lib/weekly-usage-periods.mjs";
 import { pmbLocalMidnight } from "../../../lib/pmb-first-pour-report.mjs";
 import { filterPmbTransactionWindow } from "../../../lib/pmb-transaction-window.mjs";
+import { parsePmbJson } from "../../../lib/pmb-json.mjs";
 
 export const runtime = "nodejs";
-
-function parseJsonLoose(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    const safe = [];
-    let inString = false;
-    let escaping = false;
-
-    for (const char of String(text || "")) {
-      if (!inString) {
-        if (char === "\"") inString = true;
-        safe.push(char);
-        continue;
-      }
-      if (escaping) {
-        safe.push(char);
-        escaping = false;
-        continue;
-      }
-      if (char === "\\") {
-        safe.push(char);
-        escaping = true;
-        continue;
-      }
-      if (char === "\"") {
-        inString = false;
-        safe.push(char);
-        continue;
-      }
-      if (char === "\n") {
-        safe.push("\\n");
-        continue;
-      }
-      if (char === "\r") {
-        safe.push("\\r");
-        continue;
-      }
-      safe.push(char);
-    }
-
-    try {
-      return JSON.parse(safe.join("").replace(/,\s*([}\]])/g, "$1"));
-    } catch {
-      return null;
-    }
-  }
-}
 
 async function postJson(baseUrl, requestPath, body, token = "") {
   const response = await fetch(`${baseUrl}${requestPath}`, {
@@ -87,7 +40,7 @@ async function postJson(baseUrl, requestPath, body, token = "") {
   const raw = await response.text();
   return {
     status: response.status,
-    json: parseJsonLoose(raw),
+    json: parsePmbJson(raw),
     raw,
   };
 }
