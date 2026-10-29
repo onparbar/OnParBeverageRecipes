@@ -1,4 +1,4 @@
-import { completeRecipeIngredientInventory, includeMissingRecipeInventory, getIngredientPurchaseGaps } from "./recipe-ingredient-inventory.mjs";
+import { completeRecipeIngredientInventory, includeMissingRecipeInventory } from "./recipe-ingredient-inventory.mjs";
 import { mountDashboardSessionRecovery } from "./dashboard-session.mjs";
 import { getTapPricingCoverage } from "./tap-pricing-coverage.mjs";
 import { buildPriorWeekWorkAlert } from "./prep-carry-forward.mjs";
@@ -8623,25 +8623,6 @@ function renderWeeklyPlanByVendor(plan, deferredOrders = []) {
     : '<p class="weekly-plan-empty">No active purchasing lines. Review held and excluded items below before concluding no order is needed.</p>';
 }
 
-function renderCurrentIngredientPurchaseReview(plan) {
-  if (!hasPublishedWeeklyPlanRecommendations()) return "";
-  const pending = dashboardStaffPrepPlan?.available
-    ? dashboardStaffPrepPlan.items.filter(item => !item.completed)
-    : (plan.prep?.cocktails || []).filter(item => !parAgentState?.recommendations?.prepChecklist?.[`cocktail:${encodeURIComponent(item.name.toLowerCase())}`]?.completed);
-  const current = getWeeklyPlanInventoryItems({ live: true }).map(item => ({ ...item,
-    onHand: inventoryItems.find(current => current.id === item.id)?.onHandDisplay,
-    hasCurrentCount: clean(inventoryItems.find(current => current.id === item.id)?.onHandDisplay) !== "",
-  }));
-  const remaining = buildRollingCocktailIngredientOrders({ inventoryItems: current, cocktails: pending,
-    recipes, recipeAliases: Object.fromEntries([...MENU_ORDER, ...NEW_RECIPE_ORDER]),
-  });
-  const gaps = getIngredientPurchaseGaps(remaining, weeklyOrderTracking.vendors || []);
-  if (!gaps.length) return "";
-  return `<section class="weekly-plan-review" aria-label="Ingredient purchasing review"><h2>Ingredients still needed</h2>
-    <p>Check these ingredients before batching. Quantities include the saved cabinet reserves.</p>
-    ${gaps.map(item => `<div class="weekly-plan-item weekly-plan-item--held"><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.reason)}</span></div><b>${item.held ? "Verify" : `${formatNumber(item.quantity)} units`}</b></div>`).join("")}</section>`;
-}
-
 function renderWeeklyPlanReview(plan) {
   if (!plan.review.heldRecommendations.length && !plan.review.excludedInventory.length) return "";
   return `
@@ -9159,7 +9140,6 @@ function renderWeeklyPlan() {
     ${renderWeeklyPlanReadiness(freshness.readiness)}
     ${currentWeekPlanAvailable ? `
     ${priceNote ? `<p class="weekly-plan-cost-note">${escapeHtml(priceNote)}</p>` : ""}
-    ${renderCurrentIngredientPurchaseReview(plan)}
     ${renderWeeklyPlanReview(plan)}
     ${planLocked
       ? renderSupplierOrderFlow({
