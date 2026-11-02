@@ -5,6 +5,17 @@ import http from "node:http";
 import sharp from "sharp";
 import { requireDashboardRequestRole } from "../../../lib/dashboard-auth.mjs";
 import { fetchRemoteBuffer } from "../../../lib/safe-remote-fetch.mjs";
+import {
+  normalizeNewProductPortions,
+  savePmbLiquorProductPortions,
+  verifyProductPortionChoices,
+} from "../../../lib/pmb-product-portions.mjs";
+import {
+  digestRequest as managementRequest,
+  openProductEditForm,
+  saveProductEditForm,
+  urlEncodedBody,
+} from "../../../lib/pmb-product-management.mjs";
 
 export const runtime = "nodejs";
 let productWriteInProgress = false;
@@ -613,7 +624,7 @@ function decimalOuncesFromHundredths(value) {
   return text || "0";
 }
 
-function buildManagementProductForm(product, imageFile = null, { mode = "add" } = {}) {
+function buildManagementProductForm(product, imageFile = null, { mode = "add", portions = [] } = {}) {
   const fields = {
     fd_plu: String(product.plu),
     fd_name: product.name,
@@ -636,10 +647,11 @@ function buildManagementProductForm(product, imageFile = null, { mode = "add" } 
     fd_abv: (Number(product.abv || 0) / 100).toFixed(1),
     fd_ibu_used: "on",
     fd_ibu: String(Math.max(0, Number(product.ibu || 0))),
-    fd_is_active: "on",
     fd_printable_as_qr: "on",
-    chosenPortions: "Test",
+    chosenPortions: portions.length ? portions.map((portion) => portion.name).join(";") : "Test",
+    ...Object.fromEntries(portions.map((portion) => [portion.name, "on"])),
   };
+  if (product.is_active !== 0 && product.is_active !== false) fields.fd_is_active = "on";
 
   if (mode === "edit") {
     fields.submit_saveedit_product = "save";
@@ -650,7 +662,7 @@ function buildManagementProductForm(product, imageFile = null, { mode = "add" } 
   return fields;
 }
 
-async function createProductViaManagementUi(config, token, product, imageFile = null, { matchByPluOnly = false, createOnly = false } = {}) {
+async function createProductViaManagementUi(config, token, product, imageFile = null, { matchByPluOnly = false, createOnly = false, portions = [] } = {}) {
   const before = await getProductList(config, token);
   const existing = (before.productlist || []).find((item) => (
     Number(item.plu) === Number(product.plu) ||
@@ -673,8 +685,9 @@ async function createProductViaManagementUi(config, token, product, imageFile = 
       response: clean(openForm.raw).slice(0, 500) || "TTG did not return the add-product form.",
     };
   }
+  if (portions.length) verifyProductPortionChoices(openForm.raw, portions);
 
-  const result = await postDigestForm(config, "/pages/products", buildManagementProductForm(product, imageFile), {
+  const result = await postDigestForm(config, "/pages/products", buildManagementProductForm(product, imageFile, { portions }), {
     multipart: true,
     cookieJar,
     files: imageFile ? [imageFile] : [],
@@ -782,6 +795,38 @@ async function trySendConfigUpdate(config, token) {
   }
 }
 
+function createPortionProductClient(config, token, imageFile) {
+  const readPage = async (path) => {
+    const response = await managementRequest(config, "GET", path, Buffer.alloc(0), {});
+    if (response.status !== 200) throw Object.assign(new Error(`PMB portion setup could not read ${path} (${response.status}).`), { status: 503 });
+    return response.raw;
+  };
+  return {
+    definitions: () => readPage("/pages/portions"),
+    items: () => readPage("/pages/items"),
+    list: async () => (await getProductList(config, token)).productlist,
+    openProduct: (plu) => openProductEditForm(config, plu),
+    create: async (product, portions) => {
+      const result = await createProductViaManagementUi(config, token, product, imageFile, { createOnly: true, matchByPluOnly: true, portions });
+      if (!result.ok) throw Object.assign(new Error("PMB did not confirm the inactive product draft. No activation was sent."), { code: "PMB_PRODUCT_CREATE_UNCONFIRMED", status: 502 });
+      return result;
+    },
+    openItem: async (itemId) => {
+      const cookieJar = new Map();
+      const request = urlEncodedBody([["fd_edit_id", String(itemId)], ["submit_edit_item", "edit"]]);
+      const response = await managementRequest(config, "POST", "/pages/items", request.body, request.headers, cookieJar);
+      if (response.status !== 200) throw Object.assign(new Error("PMB could not open the saved portion item."), { status: 503 });
+      return { html: response.raw, cookieJar };
+    },
+    saveItem: async (entries, cookieJar) => {
+      const request = urlEncodedBody(entries);
+      const response = await managementRequest(config, "POST", "/pages/items", request.body, request.headers, cookieJar);
+      if (response.status !== 200) throw Object.assign(new Error("PMB did not confirm the portion price save. It will not be retried automatically."), { code: "PMB_PRODUCT_PORTION_SAVE_UNCONFIRMED", status: 502 });
+    },
+    activate: (entries, cookieJar) => saveProductEditForm(config, entries, cookieJar),
+  };
+}
+
 export async function GET(request) {
   const params = new URL(request.url).searchParams;
   const cloneImageFor = clean(params.get("cloneImageFor"));
@@ -863,9 +908,11 @@ export async function POST(request) {
     if (request.headers.get("sec-fetch-site") === "cross-site") return NextResponse.json({ error: "Open the dashboard to create a product." }, { status: 403 });
     const input = await request.json();
     if (!input || typeof input !== "object" || Array.isArray(input)) throw Object.assign(new Error("Invalid product request."), { status: 400 });
+    const portions = normalizeNewProductPortions(input);
     if (productWriteInProgress) throw Object.assign(new Error("Another product is saving. Please try again shortly."), { status: 409 });
     productWriteInProgress = true; claimedWrite = true;
     const duplicate = input.duplicateSourcePlu != null;
+    if (portions.length && (duplicate || clean(input.cloneSourceName))) throw Object.assign(new Error("Portion-priced liquor must use its own product setup."), { status: 400 });
     if (duplicate && (!Number.isSafeInteger(input.duplicateSourcePlu) || input.duplicateSourcePlu <= 0 || !["Main", "Karaoke"].includes(input.destinationWall))) throw Object.assign(new Error("Choose a source product and destination wall."), { status: 400 });
     const config = getConfig();
     const token = await getAuthtoken(config);
@@ -896,6 +943,24 @@ export async function POST(request) {
     });
     if (sourceProduct && !imageFile) {
       throw new Error(`PMB did not provide the ${cloneSourceName} image, so the duplicate was not created.`);
+    }
+    if (portions.length) {
+      const saved = await savePmbLiquorProductPortions({
+        product,
+        portions,
+        requestedPlu: toNumber(input.plu),
+        activate: input.isActive !== false,
+        client: createPortionProductClient(config, token, imageFile),
+      });
+      let catalogBackupWarning = "";
+      try { await savePmbProductCatalog((await getProductList(config, token)).productlist); }
+      catch { catalogBackupWarning = "Product saved in PMB. Its catalog backup needs a retry."; }
+      const configUpdatePath = saved.activationVerified && input.sendConfigUpdate === true ? await trySendConfigUpdate(config, token) : "";
+      return NextResponse.json({
+        ok: true, ...saved, catalogBackupWarning, imageUploaded: saved.created && Boolean(imageFile),
+        message: `${saved.product.name} has verified Single and Double prices${saved.activationVerified ? " and is active" : " and is saved inactive"} in Pour My Beer.`,
+        configUpdatePath, configUpdateSent: Boolean(configUpdatePath),
+      });
     }
     const uiWrite = await createProductViaManagementUi(config, token, product, imageFile, {
       matchByPluOnly: duplicate ? false : input.matchByPluOnly === true,
@@ -944,6 +1009,8 @@ export async function POST(request) {
     return NextResponse.json(
       {
         error: message,
+        code: error.code || "PMB_PRODUCT_SAVE_FAILED",
+        ...(error.stagedProduct ? { product: error.stagedProduct, staged: true, portionsVerified: false, activationVerified: false } : {}),
         attempts,
       },
       { status },

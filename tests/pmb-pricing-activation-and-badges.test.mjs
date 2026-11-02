@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { once } from "node:events";
 import { readCurrentPmbPricing, productPriceFromPmbEditForm, validateCurrentPmbPriceProducts } from "../lib/pmb-pricing-reader.mjs";
-import { activateQueuedPmbProducts, resolvePmbActivationTargets, inspectPmbActivationForm } from "../lib/pmb-product-activation.mjs";
+import { activateQueuedPmbProducts, getQueuedPmbActivationTargets, resolvePmbActivationTargets, inspectPmbActivationForm } from "../lib/pmb-product-activation.mjs";
 import { getTapNewBadge, getTapHistoryContext } from "../public/tap-first-pour.mjs";
 import { LOCAL_AI_COLUMNS, sanitizeLocalAiSnapshot } from "../lib/local-ai-data.mjs";
 
@@ -140,6 +140,83 @@ test("activation deduplicates assigned taps and both queued lists and changes on
   assert.equal(result.checked, 1);
   assert.equal(result.activated.length, 1);
   assert.equal(result.verified, true);
+});
+
+test("unverified portion drafts and their On Deck references cannot be activated by name or PLU", async () => {
+  for (const plu of [undefined, 500]) {
+    for (const pmbPortionsVerifiedAt of [undefined, "", "not a timestamp"]) {
+      const pending = { id: "liquor:pending", kind: "liquor", name: product.name, plu,
+        portions: [{ name: "Single", quantityOz: 1.5, price: 7 }, { name: "Double", quantityOz: 2, price: 9 }],
+        pmbPortionsVerifiedAt };
+      const result = await activateQueuedPmbProducts(activationOptions({
+        readDashboard: async () => ({ initialized: true, data: { products: { comingSoonItems: [pending] } } }),
+        readKegs: async () => ({ initialized: true, data: { onDeckOverrides: {
+          referenced: { comingSoonId: pending.id, name: pending.name, plu },
+          nameOnly: { name: pending.name },
+          pluOnly: { name: pending.name, plu },
+          staleReference: { comingSoonId: "liquor:stale-id", name: pending.name, plu },
+        } } }),
+        client: {
+          taps: async () => [],
+          list: async () => assert.fail("Pending portion products must not reach catalog resolution"),
+          open: async () => assert.fail("Pending portion products must not be opened"),
+          save: async () => assert.fail("Pending portion products must not be activated"),
+        },
+      }));
+      assert.equal(result.activated.length, 0);
+      assert.equal(result.checked, 0);
+    }
+  }
+});
+
+test("verified portion drafts remain eligible for scheduled activation", async () => {
+  const verified = { id: "liquor:verified", kind: "liquor", name: product.name, plu: 500,
+    portions: [{ name: "Single", quantityOz: 1.5, price: 7 }, { name: "Double", quantityOz: 2, price: 9 }],
+    pmbPortionsVerifiedAt: "2026-11-02T22:00:00.000Z" };
+  let active = false;
+  let writes = 0;
+  const result = await activateQueuedPmbProducts(activationOptions({
+    readDashboard: async () => ({ initialized: true, data: { products: { comingSoonItems: [verified] } } }),
+    readKegs: async () => ({ initialized: true, data: { onDeckOverrides: {
+      verified: { comingSoonId: verified.id, name: verified.name, plu: verified.plu, portions: verified.portions },
+    } } }),
+    client: {
+      taps: async () => [], list: async () => [product],
+      open: async () => ({ html: form({ active }), cookieJar: new Map() }),
+      save: async (_entries, _cookies, guard) => { await guard(); writes += 1; active = true; },
+    },
+  }));
+  assert.equal(writes, 1);
+  assert.equal(result.activated.length, 1);
+  assert.equal(result.issues.some((issue) => issue.plu === product.plu), false);
+});
+
+test("pending portion guard preserves ordinary queues and unrelated stale On Deck references", () => {
+  const pending = { id: "liquor:pending", kind: "liquor", name: "Pending liquor",
+    portions: [{ name: "Single", quantityOz: 1.5, price: 7 }] };
+  const targets = getQueuedPmbActivationTargets(
+    { initialized: true, data: { products: { comingSoonItems: [pending,
+      { id: "beer:ordinary", kind: "beer", name: product.name, plu: product.plu },
+      { id: "liquor:ordinary", kind: "liquor", name: "Ordinary liquor", portions: [] },
+    ] } } },
+    { initialized: true, data: { onDeckOverrides: {
+      other: { comingSoonId: pending.id, name: "Other product", plu: 501 },
+    } } },
+  );
+  assert.deepEqual(targets.map(({ name }) => name), [product.name, "Ordinary liquor", "Other product"]);
+});
+
+test("conflicting On Deck PLUs cannot inherit a Coming Soon portion verification marker", () => {
+  const verified = { id: "liquor:verified", kind: "liquor", name: product.name, plu: 500,
+    portions: [{ name: "Single", quantityOz: 1.5, price: 7 }],
+    pmbPortionsVerifiedAt: "2026-11-02T22:00:00.000Z" };
+  const targets = getQueuedPmbActivationTargets(
+    { initialized: true, data: { products: { comingSoonItems: [verified] } } },
+    { initialized: true, data: { onDeckOverrides: {
+      conflicting: { comingSoonId: verified.id, name: verified.name, plu: 501, portions: verified.portions },
+    } } },
+  );
+  assert.deepEqual(targets.map(({ plu }) => plu), [500]);
 });
 
 test("a changed assignment prevents scheduled product activation", async () => {

@@ -9181,7 +9181,6 @@ function renderComingSoonBlock() {
 function renderComingSoonItem(item) {
   const imageUrl = getComingSoonImageUrl(item);
   const description = getComingSoonCardDescription(item.description);
-  const needsPortionSetup = item.kind === "liquor" && !toNumber(item.plu) && Array.isArray(item.portions) && item.portions.length > 0;
   const label = item.pmbActiveAt ? "Update PMB product" : item.plu ? "Update & activate on PMB" : "Create & activate on PMB";
   const onDeckLocations = (item.onDeckAssignments || []).map((assignment) => assignment.tapNumber
     ? `${assignment.wall ? `${assignment.wall} · ` : ""}Tap ${assignment.tapNumber}`
@@ -9196,10 +9195,9 @@ function renderComingSoonItem(item) {
         </div>
         ${description ? `<p>${escapeHtml(description)}</p>` : ""}
         ${item.kind === "liquor" ? renderComingSoonLiquorDetails(item) : ""}
-        ${needsPortionSetup ? '<p class="table-note">Single/Double prices are saved. PMB portion setup is required before activation.</p>' : ""}
         ${onDeckLocations.length ? `<span class="table-note table-note--accent">On Deck: ${escapeHtml(onDeckLocations.join(", "))}</span>` : ""}
         <div class="coming-soon-controls">
-          <button class="mini-button activate-coming-soon-pmb" type="button"${item.replacedAt || needsPortionSetup ? " disabled" : ""}>${label}</button>
+          <button class="mini-button activate-coming-soon-pmb" type="button"${item.replacedAt ? " disabled" : ""}>${label}</button>
         </div>
       </div>
     </article>
@@ -12352,7 +12350,7 @@ async function sendComingSoonItemToPmb(id, { activate = false } = {}) {
     };
   } catch (error) {
     kegSyncMessage = clean(error?.message) || `${item.name} needs more information before it can be sent to PMB.`;
-    if (item.kind === "liquor" && error?.code !== "COMING_SOON_PORTION_SETUP_REQUIRED") {
+    if (item.kind === "liquor" && !(Array.isArray(item.portions) && item.portions.length)) {
       openComingSoonLiquorSetup(item);
     } else {
       renderKegLevels();
@@ -12369,8 +12367,9 @@ async function sendComingSoonItemToPmb(id, { activate = false } = {}) {
     activate ? `${item.plu ? "Update" : "Create"} and activate ${item.name} in Pour My Beer?` : `${item.plu ? "Update" : "Create"} ${item.name} in Pour My Beer?`,
     [
       item.plu ? `Existing PMB PLU: ${item.plu}` : "A new PMB product will be created.",
-      `Charge: ${money(payload.pricePerOz)} / oz`,
-      `Serving size: ${formatNumber(payload.servingOz)} oz`,
+      ...(payload.portions?.length
+        ? payload.portions.map(portion => `${portion.name}: ${money(portion.price)} / ${formatNumber(portion.quantityOz)} oz`)
+        : [`Charge: ${money(payload.pricePerOz)} / oz`, `Serving size: ${formatNumber(payload.servingOz)} oz`]),
       payload.abvPercent ? `ABV: ${formatNumber(payload.abvPercent)}%` : "",
       activate ? "The PMB configuration update will be sent." : "",
     ],
@@ -12392,13 +12391,36 @@ async function sendComingSoonItemToPmb(id, { activate = false } = {}) {
       body: JSON.stringify(payload),
     });
     const result = await parseJsonResponse(response);
-    if (!response.ok) throw new Error(result?.error || "PMB product save failed.");
+    if (!response.ok) {
+      if (payload.portions?.length && result.staged === true
+          && toNumber(result.product?.plu) > 0 && clean(result.product?.name) === clean(item.name)) {
+        const stagedItem = {
+          ...item,
+          plu: toNumber(result.product.plu),
+          pmbProductName: result.product.name,
+          pmbUpdatedAt: new Date().toISOString(),
+        };
+        delete stagedItem.pmbActiveAt;
+        delete stagedItem.pmbPortionsVerifiedAt;
+        comingSoonItems = comingSoonItems.map((entry) => (entry.id === id ? stagedItem : entry));
+        saveComingSoonItems();
+      }
+      throw new Error(result?.error || "PMB product save failed.");
+    }
+    if (payload.portions?.length && result.portionsVerified !== true) {
+      throw new Error("PMB has not verified both Single/Double prices. Refresh the product before trying again.");
+    }
+
+    if (payload.portions?.length && activate && result.activationVerified !== true) {
+      throw new Error("PMB has not confirmed activation. Refresh the product before trying again.");
+    }
 
     const updatedItem = {
       ...item,
       plu: toNumber(result.product?.plu || item.plu),
       pmbProductName: result.product?.name || item.name,
       pmbUpdatedAt: new Date().toISOString(),
+      ...(payload.portions?.length ? { pmbPortionsVerifiedAt: new Date().toISOString() } : {}),
       ...(activate ? { pmbActiveAt: new Date().toISOString() } : {}),
     };
     comingSoonItems = comingSoonItems.map((entry) => (entry.id === id ? updatedItem : entry));
@@ -12460,11 +12482,6 @@ function openComingSoonLiquorSetup(item) {
 }
 
 function buildPmbPayloadFromComingSoonItem(item) {
-  if (item.kind === "liquor" && !toNumber(item.plu) && Array.isArray(item.portions) && item.portions.length > 0) {
-    throw Object.assign(new Error("Single/Double prices are saved. PMB portion setup is required before activation."), {
-      code: "COMING_SOON_PORTION_SETUP_REQUIRED",
-    });
-  }
   // Let PMB copy the original wall product's image for a duplicate product.
   // A saved preview must not override that source image during publishing.
   const imageUrl = clean(item.cloneSourceName) ? "" : clean(item.imageUrl);
@@ -12492,6 +12509,19 @@ function buildPmbPayloadFromComingSoonItem(item) {
     imageUrl: imageUrl.startsWith("/") ? new URL(imageUrl, window.location.origin).href : imageUrl,
     cloneSourceName: clean(item.cloneSourceName),
   };
+  if (item.kind === "liquor" && Array.isArray(item.portions) && item.portions.length) {
+    const portions = item.portions.map(portion => ({
+      name: clean(portion.name),
+      quantityOz: toNumber(portion.quantityOz || portion.servingOz),
+      price: toNumber(portion.price),
+    }));
+    if (portions.length !== 2 || new Set(portions.map(portion => portion.name.toLowerCase())).size !== 2
+        || portions.some(portion => !/^(single|double)$/i.test(portion.name) || portion.quantityOz <= 0 || portion.price <= 0)) {
+      throw new Error("Set valid Single and Double sizes and prices before sending this product to PMB.");
+    }
+    payload.portions = portions;
+    payload.comingSoonId = item.id;
+  }
   if (!payload.cloneSourceName) {
     const missing = [];
     if (!clean(payload.name)) missing.push("name");

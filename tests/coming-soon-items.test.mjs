@@ -30,8 +30,8 @@ test("keeps the required products in Coming Soon", () => {
       "Whiskey Smash (Jim Beam) 1",
       "Triple Jam Cider 2",
       "Vodka Cran (Tito's) 2",
-      "Maker's Mark",
-      "Ciroc Pineapple",
+      "Maker's Mark 3",
+      "Ciroc Pineapple 3",
     ],
   );
 
@@ -213,7 +213,7 @@ test("liquor defaults preserve saved prices, PMB identities, and completed-produ
 
   for (const original of saved.slice(0, 2)) {
     const item = merged.find(entry => entry.id === original.id);
-    for (const [key, value] of Object.entries(original)) assert.deepEqual(item?.[key], value, `${original.id}: ${key}`);
+    for (const [key, value] of Object.entries(original)) assert.deepEqual(item?.[key], key === "name" ? `${value} 3` : value, `${original.id}: ${key}`);
   }
   assert.equal(getActiveComingSoonItems(merged).some(item => item.id === "liquor:makers-mark"), false);
   assert.equal(getActiveComingSoonItems(merged).some(item => item.id === "liquor:ciroc-pineapple"), true);
@@ -223,8 +223,8 @@ test("liquor defaults preserve saved prices, PMB identities, and completed-produ
 
 test("minimal and blank liquor cards receive complete product details and approved portions", () => {
   const expected = [
-    { id: "liquor:makers-mark", name: "Maker's Mark", abv: 45, cost: 49.99, size: 59.1745, label: "1.75 L", rate: 5.34, prices: [8, 10], image: "/images/products/makers-mark.webp" },
-    { id: "liquor:ciroc-pineapple", name: "Ciroc Pineapple", abv: 35, cost: 38.99, size: 33.814, label: "1 L", rate: 8, prices: [12, 16], image: "/images/products/ciroc-pineapple.webp" },
+    { id: "liquor:makers-mark", name: "Maker's Mark 3", abv: 45, cost: 49.99, size: 59.1745, label: "1.75 L", rate: 5.34, prices: [8, 10], image: "/images/products/makers-mark.webp" },
+    { id: "liquor:ciroc-pineapple", name: "Ciroc Pineapple 3", abv: 35, cost: 38.99, size: 33.814, label: "1 L", rate: 8, prices: [12, 16], image: "/images/products/ciroc-pineapple.webp" },
   ];
   for (const product of expected) {
     for (const blanks of [{}, {
@@ -284,7 +284,7 @@ test("older seeded bottle records migrate to the largest OHLQ size and exact lis
     for (const changed of [{ bottleCost: 39 }, { bottleCostSource: "Supplier invoice" }, { plu: 1234 }, { replacedAt: "2026-11-02T21:00:00Z" }]) {
       const custom = { ...old, ...changed };
       const preserved = mergeRequiredComingSoonItems([custom]).find(entry => entry.id === old.id);
-      for (const [field, value] of Object.entries(custom)) assert.deepEqual(preserved[field], value, field);
+      for (const [field, value] of Object.entries(custom)) assert.deepEqual(preserved[field], field === "name" ? required.name : value, field);
     }
   }
   assert.equal(JSON.stringify(saved), before);
@@ -373,7 +373,7 @@ test("saved custom bottle costs and sizes never inherit fallback estimate attrib
     bottleCostSourceUrl: "https://supplier.example/invoice", bottleSizeLabel: "750 ml bottle",
   };
   const item = mergeRequiredComingSoonItems([saved]).find(entry => entry.id === base.id);
-  for (const [field, value] of Object.entries(saved)) assert.deepEqual(item[field], value, field);
+  for (const [field, value] of Object.entries(saved)) assert.deepEqual(item[field], field === "name" ? "Ciroc Pineapple 3" : value, field);
 });
 
 test("older liquor IDs and queued Maker's Mark retain their custom pricing when defaults are filled", () => {
@@ -387,7 +387,7 @@ test("older liquor IDs and queued Maker's Mark retain their custom pricing when 
   };
   for (const [items, queue, expectedId] of [[[saved], [], saved.id], [[], [queued], "liquor:maker-s-mark"]]) {
     const merged = mergeRequiredComingSoonItems(items, queue);
-    const makers = merged.filter(item => item.name === "Maker's Mark");
+    const makers = merged.filter(item => item.name === "Maker's Mark 3");
     assert.equal(makers.length, 1);
     assert.equal(makers[0].id, expectedId);
     assert.equal(makers[0].bottleCost, 55);
@@ -399,6 +399,60 @@ test("older liquor IDs and queued Maker's Mark retain their custom pricing when 
     assert.ok(makers[0].description);
     assert.equal(JSON.stringify(mergeRequiredComingSoonItems(merged, queue)), JSON.stringify(merged));
   }
+});
+
+test("wall 3 names upgrade stale liquor drafts without duplicate queue cards or changed portion prices", () => {
+  for (const [id, oldName, producer] of [
+    ["liquor:makers-mark", "Maker's Mark", "Maker's Mark"],
+    ["liquor:ciroc-pineapple", "Ciroc Pineapple", "Cîroc"],
+  ]) {
+    const saved = {
+      id, kind: "liquor", name: oldName, producer, pricePerOz: 6,
+      portions: [{ name: "Single", quantityOz: 1.5, price: 9 }, { name: "Double", quantityOz: 2, price: 11 }],
+      plu: 1234, createdAt: "2026-10-01T12:00:00Z", pmbActiveAt: "2026-10-02T12:00:00Z",
+    };
+    const queue = [oldName, `${oldName} 3`].map(name => ({
+      kind: "liquor", name, status: "ready", payload: { pricePerOz: 10 },
+    }));
+    const before = JSON.stringify(saved);
+    const merged = mergeRequiredComingSoonItems([saved], queue);
+    const matching = merged.filter(item => item.name === oldName || item.name === `${oldName} 3`);
+    assert.equal(matching.length, 1);
+    assert.equal(matching[0].id, id);
+    assert.equal(matching[0].name, `${oldName} 3`);
+    for (const field of ["producer", "pricePerOz", "portions", "plu", "createdAt", "pmbActiveAt"]) {
+      assert.deepEqual(matching[0][field], saved[field], field);
+    }
+    assert.equal(JSON.stringify(mergeRequiredComingSoonItems(merged, queue)), JSON.stringify(merged));
+    assert.equal(JSON.stringify(saved), before);
+  }
+});
+
+test("required wall 3 liquor aliases preserve other wall copies and separate PMB product history", () => {
+  for (const [id, oldName] of [["liquor:makers-mark", "Maker's Mark"], ["liquor:ciroc-pineapple", "Ciroc Pineapple"]]) {
+    const previous = { id, kind: "liquor", name: oldName, plu: 303, pricePerOz: 6 };
+    const otherCopies = [1, 2, 3].map(wall => ({
+      id: `liquor:${wall}00`, kind: "liquor", name: `${oldName} ${wall}`, plu: wall * 100,
+      pricePerOz: wall + 3, replacedAt: "2026-10-15T12:00:00Z", replaceTapKey: `wall-${wall}`,
+    }));
+    const merged = mergeRequiredComingSoonItems([previous, ...otherCopies]);
+    const renamed = merged.find(item => item.id === id);
+    assert.equal(renamed.name, `${oldName} 3`);
+    assert.equal(renamed.plu, previous.plu);
+    assert.equal(renamed.pricePerOz, previous.pricePerOz);
+    for (const original of otherCopies) assert.deepEqual(merged.find(item => item.id === original.id), original);
+  }
+});
+
+test("an unnumbered Ciroc record with an older PMB ID becomes wall 3 without losing its identity", () => {
+  const saved = { id: "liquor:5678", kind: "liquor", name: "Ciroc Pineapple", plu: 5678, pricePerOz: 6 };
+  const merged = mergeRequiredComingSoonItems([saved]);
+  const matching = merged.filter(item => item.name === "Ciroc Pineapple 3");
+  assert.equal(matching.length, 1);
+  assert.equal(matching[0].id, saved.id);
+  assert.equal(matching[0].plu, saved.plu);
+  assert.equal(matching[0].pricePerOz, saved.pricePerOz);
+  assert.equal(merged.some(item => item.id === "liquor:ciroc-pineapple"), false);
 });
 
 test("liquor fallback hydration stays stable across reloads for defaults and custom pricing", () => {
@@ -421,7 +475,7 @@ test("On Deck offers both required liquor products after stale Coming Soon data 
     { id: "beer:christmas-ale", kind: "beer", name: "Christmas Ale", plu: 7654 },
   ]);
   const options = buildKegOnDeckOptions({ comingSoonItems });
-  for (const [id, name] of [["liquor:makers-mark", "Maker's Mark"], ["liquor:ciroc-pineapple", "Ciroc Pineapple"]]) {
+  for (const [id, name] of [["liquor:makers-mark", "Maker's Mark 3"], ["liquor:ciroc-pineapple", "Ciroc Pineapple 3"]]) {
     const option = options.find(item => item.id === id);
     assert.equal(option?.name, name);
     assert.equal(option?.kind, "liquor");

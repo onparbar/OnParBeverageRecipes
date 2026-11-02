@@ -31,7 +31,7 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
   Object.freeze({
     id: "liquor:makers-mark",
     kind: "liquor",
-    name: "Maker's Mark",
+    name: "Maker's Mark 3",
     producer: "Maker's Mark",
     brewery: "Maker's Mark",
     style: "Kentucky Straight Bourbon",
@@ -57,7 +57,7 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
   Object.freeze({
     id: "liquor:ciroc-pineapple",
     kind: "liquor",
-    name: "Ciroc Pineapple",
+    name: "Ciroc Pineapple 3",
     producer: "Cîroc",
     brewery: "Cîroc",
     style: "Pineapple Vodka",
@@ -100,6 +100,13 @@ const RETIRED_COMING_SOON_IDS = new Set([
 const REQUIRED_COMING_SOON_LEGACY_IDS = Object.freeze({
   "recipe:vodka-cran-2": Object.freeze(["recipe:vodka-cran-tito-s"]),
 });
+
+// These two unnumbered drafts were renamed for wall 3. Do not treat other
+// numbered wall copies as aliases of the requested products.
+const REQUIRED_LIQUOR_NAME_ALIASES = new Map([
+  [slug("Maker's Mark"), slug("Maker's Mark 3")],
+  [slug("Ciroc Pineapple"), slug("Ciroc Pineapple 3")],
+]);
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -186,7 +193,12 @@ function isSameComingSoonProduct(left, right) {
   if (clean(left.id) === clean(right.id)) return true;
   if (clean(left.kind).toLowerCase() !== clean(right.kind).toLowerCase()) return false;
   // Separate wall copies and reused PLUs must not collapse into one queue item.
-  if (!slug(left.name) || slug(left.name) !== slug(right.name)) return false;
+  const identityName = (item) => {
+    const name = slug(item.name);
+    return clean(item.kind).toLowerCase() === "liquor"
+      ? REQUIRED_LIQUOR_NAME_ALIASES.get(name) || name : name;
+  };
+  if (!identityName(left) || identityName(left) !== identityName(right)) return false;
   const leftPlu = Number(left.plu) || 0;
   const rightPlu = Number(right.plu) || 0;
   if (leftPlu > 0 && rightPlu > 0) return leftPlu === rightPlu;

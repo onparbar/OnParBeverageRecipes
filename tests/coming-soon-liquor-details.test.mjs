@@ -94,7 +94,7 @@ test("the migrated Maker's Mark and Ciroc cards show their complete approved pro
     assert.ok(html.includes(`<b>$${double}</b> Double · 2 oz`));
     assert.doesNotMatch(html, /tap price \/ oz/);
     assert.doesNotMatch(html, /proposed|Tap price not set/);
-    assert.match(html, /activate-coming-soon-pmb" type="button" disabled/);
+    assert.doesNotMatch(html, /activate-coming-soon-pmb" type="button" disabled/);
   }
   const cirocHtml = helpers.renderComingSoonItem(items.find((entry) => entry.id === "liquor:ciroc-pineapple"));
   assert.match(cirocHtml, /\$38\.99<\/b> bottle cost/);
@@ -149,26 +149,73 @@ test("saved portion prices retain cents when present and support the PMB quantit
   assert.doesNotMatch(html, /Double ·/);
 });
 
-test("new liquor products preserve saved portion prices by blocking unsupported PMB creation", async () => {
+test("new liquor products enable creation and carry both approved portions", () => {
   const helpers = loadComingSoonHelpers();
-  const item = { ...liquor, portions: [{ name: "Single", servingOz: 1.5, price: 12 }, { name: "Double", servingOz: 2, price: 16 }] };
-  const html = helpers.renderComingSoonItem(item);
-  assert.match(html, /Single\/Double prices are saved\. PMB portion setup is required before activation\./);
-  assert.match(html, /activate-coming-soon-pmb" type="button" disabled/);
-  assert.throws(() => helpers.buildPmbPayloadFromComingSoonItem(item), { code: "COMING_SOON_PORTION_SETUP_REQUIRED" });
-  let renderCount = 0;
+  for (const item of mergeRequiredComingSoonItems([]).filter(entry => entry.kind === "liquor")) {
+    const html = helpers.renderComingSoonItem(item);
+    assert.doesNotMatch(html, /activate-coming-soon-pmb" type="button" disabled|PMB portion setup is required/);
+    const payload = helpers.buildPmbPayloadFromComingSoonItem(item);
+    assert.deepEqual(JSON.parse(JSON.stringify(payload.portions)), item.portions);
+    assert.equal(payload.comingSoonId, item.id);
+    assert.equal(payload.name, item.name);
+    assert.match(payload.name, / 3$/);
+  }
+});
+
+test("incomplete portion pairs cannot fall back to a flat-price setup", async () => {
+  const helpers = loadComingSoonHelpers();
+  const item = { ...liquor, portions: [{ name: "Single", quantityOz: 1.5, price: 12 }] };
+  assert.throws(() => helpers.buildPmbPayloadFromComingSoonItem(item), /valid Single and Double/);
   helpers.comingSoonItems = [item];
-  helpers.kegSyncMessage = "";
-  helpers.renderKegLevels = () => { renderCount += 1; };
-  helpers.openComingSoonLiquorSetup = () => assert.fail("Portion setup must not fall back to the flat-price auto-publishing form");
+  helpers.renderKegLevels = () => {};
+  helpers.openComingSoonLiquorSetup = () => assert.fail("A portion-priced product cannot open the flat-rate publishing form");
   assert.equal(await helpers.sendComingSoonItemToPmb(item.id, { activate: true }), null);
-  assert.match(helpers.kegSyncMessage, /PMB portion setup is required/);
-  assert.equal(renderCount, 1);
+});
+
+test("confirmation and creation use both portion prices and require verified PMB readback", async () => {
+  for (const [verified, active] of [[false, false], [true, false], [true, true]]) {
+    const helpers = loadComingSoonHelpers();
+    const item = mergeRequiredComingSoonItems([]).find(entry => entry.id === "liquor:makers-mark");
+    let saves = 0;
+    helpers.comingSoonItems = [item];
+    helpers.kegSyncMessage = "";
+    helpers.confirmDashboardAction = (title, lines) => {
+      assert.match(title, /Maker's Mark 3/);
+      assert.ok(lines.includes("Single: $8.00 / 1.5 oz"));
+      assert.ok(lines.includes("Double: $10.00 / 2 oz"));
+      assert.equal(lines.some(line => /^Charge:/.test(line)), false);
+      return true;
+    };
+    helpers.fetch = async (path, options) => {
+      assert.equal(path, "/api/pmb-products");
+      const body = JSON.parse(options.body);
+      assert.deepEqual(body.portions, item.portions);
+      assert.equal(body.isActive, true);
+      return { ok: true, json: async () => ({ product: { plu: 1234, name: item.name }, portionsVerified: verified, activationVerified: active, configUpdateSent: true }) };
+    };
+    helpers.parseJsonResponse = response => response.json();
+    helpers.getPmbConnectionErrorMessage = error => error.message;
+    helpers.saveComingSoonItems = () => { saves += 1; };
+    helpers.renderKegLevels = helpers.render = helpers.runTapPricingSync = () => {};
+    const result = await helpers.sendComingSoonItemToPmb(item.id, { activate: true });
+    if (verified && active) {
+      assert.ok(result.pmbPortionsVerifiedAt);
+      assert.equal(result.plu, 1234);
+      assert.ok(result.pmbActiveAt);
+      assert.equal(saves, 1);
+    } else {
+      assert.equal(result, null);
+      assert.equal(saves, 0);
+      assert.equal(helpers.comingSoonItems[0].pmbActiveAt, undefined);
+      assert.equal(helpers.comingSoonItems[0].pmbPortionsVerifiedAt, undefined);
+      assert.match(helpers.kegSyncMessage, verified ? /not confirmed activation/ : /not verified both Single\/Double prices/);
+    }
+  }
 });
 
 test("existing PMB products are not blocked by saved portion display metadata", () => {
   const helpers = loadComingSoonHelpers();
-  const item = { ...liquor, plu: 1234, portions: [{ name: "Single", servingOz: 1.5, price: 12 }] };
+  const item = { ...liquor, plu: 1234, portions: [{ name: "Single", servingOz: 1.5, price: 12 }, { name: "Double", servingOz: 2, price: 16 }] };
   const html = helpers.renderComingSoonItem(item);
   assert.doesNotMatch(html, /activate-coming-soon-pmb" type="button" disabled|PMB portion setup is required/);
   assert.equal(helpers.buildPmbPayloadFromComingSoonItem(item).plu, 1234);
@@ -239,4 +286,33 @@ test("card descriptions and manufacturer details are escaped and liquor stats st
   assert.doesNotMatch(html, /<script>/);
   const beerHtml = helpers.renderComingSoonItem({ id: "beer:future", kind: "beer", name: "Future Lager" });
   assert.doesNotMatch(beerHtml, /Tap price not set|bottle cost|oz pour/);
+});
+
+
+test("a verified inactive partial save retains its PLU for retry without marking it ready or active", async () => {
+  for (const [staged, matchesName] of [[false, true], [true, false], [true, true]]) {
+    const helpers = loadComingSoonHelpers();
+    const item = mergeRequiredComingSoonItems([]).find(entry => entry.id === "liquor:ciroc-pineapple");
+    let saves = 0;
+    helpers.comingSoonItems = [item];
+    helpers.confirmDashboardAction = () => true;
+    helpers.fetch = async () => ({ ok: false, json: async () => ({
+      error: "The inactive product needs its Double price completed. Retry to finish setup.",
+      staged,
+      product: { plu: 1234, name: matchesName ? item.name : "Different product" },
+      portionsVerified: false,
+    }) });
+    helpers.parseJsonResponse = response => response.json();
+    helpers.getPmbConnectionErrorMessage = error => error.message;
+    helpers.saveComingSoonItems = () => { saves += 1; };
+    helpers.renderKegLevels = helpers.render = helpers.runTapPricingSync = () => {};
+    const result = await helpers.sendComingSoonItemToPmb(item.id, { activate: true });
+    const saved = helpers.comingSoonItems[0];
+    assert.equal(result, null);
+    assert.equal(saved.plu || 0, staged && matchesName ? 1234 : 0);
+    assert.equal(saves, staged && matchesName ? 1 : 0);
+    assert.equal(saved.pmbActiveAt, undefined);
+    assert.equal(saved.pmbPortionsVerifiedAt, undefined);
+    assert.match(helpers.kegSyncMessage, /Retry to finish setup/);
+  }
 });
