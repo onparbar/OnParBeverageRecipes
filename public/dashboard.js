@@ -13908,13 +13908,19 @@ function getKegNeedCalculation(item) {
     });
   }
 
-  if (placeholder
-    && !getTapOrderProductName({ ...item, name: currentName }, usageItem, onDeck)) return null;
+  const orderProductName = onDeck?.name && !isPricingPlaceholder(onDeck.name)
+    ? onDeck.name
+    : placeholder ? getTapOrderProductName({ ...item, name: currentName }, usageItem, onDeck) : currentName;
+  if (placeholder && !orderProductName) return null;
 
   const fullOunces = placeholder
     ? getKegSizeOverrideOz(usageItem) || STANDARD_BEER_KEG_OZ
     : getKegFullOunces(liveRow, item);
-  const peakUsage = getEightWeekPeakUsage(usageItem || {}, new Date(), fullOunces);
+  const peakUsage = getEightWeekPeakUsage(usageItem || {}, new Date(), fullOunces, {
+    kind: normalizeTitle(item.type) === "cocktail" ? "cocktail" : "beer",
+    wall: item.wall,
+    productName: orderProductName,
+  });
   if (!peakUsage.sampleWeeks) return null;
   const bufferedTarget = peakUsage.targetStock;
   const position = buildInventoryPosition({
@@ -13923,10 +13929,11 @@ function getKegNeedCalculation(item) {
     onDeck: onDeck && normalizeTitle(onDeck.kind) !== "liquor" && onDeck.onHandUnit !== "oz"
       ? toNumber(onDeck.onHand) : 0,
   });
-  return buildStockGapRecommendation({
-    targetStock: bufferedTarget,
-    position,
-  });
+  return {
+    ...buildStockGapRecommendation({ targetStock: bufferedTarget, position }),
+    reserveKegs: peakUsage.reserveKegs,
+    reserveReason: peakUsage.reserveReason,
+  };
 }
 
 function getKegNeed(item) {
@@ -13957,6 +13964,7 @@ function renderKegNeedCell(item, need) {
       <strong>${peakUsage.sampleWeeks && (unit === "kegs" || fullOunces > 0) ? `${formatNumber(unit === "oz" ? peakUsage.peak * fullOunces : peakUsage.peak)} ${unit}` : "Not available"}</strong>
       <span class="tap-product-detail__label">Need at least</span>
       <strong>${calculation ? `${formatNumber(calculation.targetStock)} ${unit}` : "Not available"}</strong>
+      ${calculation?.reserveKegs === 1 ? `<span class="tap-product-detail__label">Backup reserve</span><strong>${escapeHtml(calculation.reserveReason)}</strong>` : ""}
     </div>
   </details>`;
 }

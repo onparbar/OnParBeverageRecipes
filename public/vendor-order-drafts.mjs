@@ -328,6 +328,12 @@ function applyManualOrderAdjustments(plan = {}, catalog = [], adjustments = []) 
       manualAdjustmentReason: reason,
       manualAdjustmentActor: clean(adjustment.adjustedBy),
     };
+    if (adjusted.lineType === "Beer keg"
+      && Array.isArray(adjusted.kegDestinations) && adjusted.kegDestinations.length === 1) {
+      // A single cooler receives the changed quantity. Multiple coolers still
+      // need their existing allocation reviewed instead of guessing a split.
+      adjusted.kegDestinations = [{ ...adjusted.kegDestinations[0], quantity: requestedUnits }];
+    }
     if (existingIndex >= 0) orders[existingCollection][existingIndex] = adjusted;
     else orders[collection].push(adjusted);
   });

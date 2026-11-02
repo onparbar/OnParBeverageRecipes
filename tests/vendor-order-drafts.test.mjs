@@ -38,6 +38,50 @@ function inventoryPlan(overrides = {}) {
   });
 }
 
+test("a manual beer quantity change follows its single cooler without changing the locked plan", () => {
+  const destination = {
+    id: "onHandOverrides:main-21-ultra", key: "main-21-ultra", field: "onHandOverrides",
+    cooler: "Main cooler", tapNumber: 21, product: "Michelob Ultra", quantity: 1,
+  };
+  const beer = {
+    id: "main-21-ultra", name: "Michelob Ultra", quantity: 1, vendor: "Heidelberg",
+    vendorSku: "014676-C", unitCost: 130, estimatedCost: 130, hasKnownPrice: true,
+    kegDestinations: [destination],
+  };
+  const plan = { orders: { beerKegs: [beer] } };
+  const original = structuredClone(plan);
+  const draft = buildVendorOrderDrafts(plan, {
+    ...options,
+    manualCatalog: [{ ...beer, catalogId: "ultra", internalId: beer.id, lineType: "Beer keg", orderCategory: "beerKegs" }],
+    manualAdjustments: [{ catalogId: "ultra", quantity: 2, reason: "Keep one full backup in Main", adjustedBy: "Sam" }],
+  }).drafts[0];
+
+  assert.equal(draft.lines[0].requestedUnits, 2);
+  assert.equal(draft.estimatedTotal, 260);
+  assert.deepEqual(draft.lines[0].kegDestinations, [{ ...destination, quantity: 2 }]);
+  assert.match(draft.lines[0].reason, /Main cooler: 2 kegs \(tap 21\)/);
+  assert.deepEqual(plan, original);
+});
+
+test("a manual beer quantity change does not guess a split between multiple coolers", () => {
+  const destinations = [
+    { id: "onHandOverrides:main-21-ultra", key: "main-21-ultra", field: "onHandOverrides", cooler: "Main cooler", tapNumber: 21, quantity: 1 },
+    { id: "onHandOverrides:karaoke-73-ultra", key: "karaoke-73-ultra", field: "onHandOverrides", cooler: "Karaoke cooler", tapNumber: 73, quantity: 1 },
+  ];
+  const beer = { id: "combined-ultra", name: "Michelob Ultra", quantity: 2, vendor: "Heidelberg", vendorSku: "014676-C", unitCost: 130, estimatedCost: 260, kegDestinations: destinations };
+  const plan = { orders: { beerKegs: [beer] } };
+  const original = structuredClone(plan);
+  const draft = buildVendorOrderDrafts(plan, {
+    ...options,
+    manualCatalog: [{ ...beer, catalogId: "ultra", internalId: beer.id, lineType: "Beer keg", orderCategory: "beerKegs" }],
+    manualAdjustments: [{ catalogId: "ultra", quantity: 3, reason: "Manager reviewed total", adjustedBy: "Sam" }],
+  }).drafts[0];
+
+  assert.equal(draft.lines[0].requestedUnits, 3);
+  assert.deepEqual(draft.lines[0].kegDestinations, destinations);
+  assert.deepEqual(plan, original);
+});
+
 test("warns after the ordering cutoff without blocking the draft", () => {
   const now = new Date("2026-08-12T10:00:00");
   const schedule = getVendorOrderScheduleStatus(now);
