@@ -563,6 +563,26 @@ export function buildWeeklyActionPlan({ inventoryItems = [], recommendations = [
     "orderQty",
     normalizeLiquorTapProductName,
   ).map((item) => ({ ...item, isLiquorTapOrder: true }));
+  // Cabinet stock reduces purchasing, but the same bottles still need to reach the keg.
+  const refillRecommendations = recommendations.filter((item) => (
+    item.isLiquorTap && !isPricingPlaceholder(item.orderProductName || item.name)
+    && (item.refillBottleQty != null || item.actionType === "order")
+  )).map((item) => ({ ...item, refillBottleQty: item.refillBottleQty ?? item.orderQty }));
+  const liquorRefills = aggregateTapActions(
+    refillRecommendations,
+    "liquor-tap-refills",
+    "refillBottleQty",
+    normalizeLiquorTapProductName,
+  ).map((item) => {
+    const sources = refillRecommendations.filter((source) => number(source.refillBottleQty) > 0
+      && normalizeLiquorTapProductName(source.orderProductName || source.name).toLowerCase() === item.name.toLowerCase());
+    const inventoryIds = uniqueStrings(sources.map((source) => source.cabinetInventoryId));
+    return {
+      ...item,
+      ...(inventoryIds.length === 1 && sources.every((source) => clean(source.cabinetInventoryId))
+        ? { inventoryItemId: inventoryIds[0] } : {}),
+    };
+  });
   const cocktails = aggregateTapActions(
     activeRecommendations.filter((item) => item.actionType === "make"),
     "cocktails",
@@ -596,7 +616,7 @@ export function buildWeeklyActionPlan({ inventoryItems = [], recommendations = [
       mixers,
       supplies,
     },
-    prep: { cocktails, ingredients: buildInHouseIngredientPrep(inventoryItems) },
+    prep: { cocktails, liquorRefills, ingredients: buildInHouseIngredientPrep(inventoryItems) },
     review: {
       heldRecommendations,
       deferredLiquorRefills: [],

@@ -8873,6 +8873,7 @@ function renderWeeklyPlan() {
   if (!weeklyPlan) return;
   const recommendations = parAgentState?.recommendations;
   const plan = getWeeklyPlanModel();
+  const liquorRefills = plan.prep.liquorRefills || plan.orders.liquorTapBottles;
   const freshness = getWeeklyPlanFreshness(plan);
   const vendorOrderModel = getVendorOrderDraftModel(plan, freshness);
   const planLocked = Boolean(getCurrentWeeklyPlanSnapshot(recommendations, new Date()));
@@ -8896,7 +8897,7 @@ function renderWeeklyPlan() {
     && clean(dashboardStaffPrepPlan.generatedAt) === clean(recommendations?.generatedAt);
   const prepStatus = formatPrepCompletionSummary({
     cocktails: prepCompletionAvailable ? dashboardStaffPrepPlan.items : plan.prep.cocktails,
-    liquor: prepCompletionAvailable ? dashboardStaffPrepPlan.liquorRefills : plan.orders.liquorTapBottles,
+    liquor: prepCompletionAvailable ? dashboardStaffPrepPlan.liquorRefills : liquorRefills,
     completionAvailable: prepCompletionAvailable,
   });
   const demoToggle = ORDER_REHEARSAL_AVAILABLE && (planLocked || orderRehearsalMode)
@@ -8920,7 +8921,7 @@ function renderWeeklyPlan() {
       <div class="weekly-plan-column__header"><h2>Cocktails</h2></div>
       ${renderWeeklyPlanCocktailRows(plan.prep.cocktails, { editable: planLocked })}
       <div class="weekly-plan-column__header"><h2>Liquor Tap Refills</h2></div>
-      ${renderWeeklyPlanLiquorRefillRows(plan.orders.liquorTapBottles)}
+      ${renderWeeklyPlanLiquorRefillRows(liquorRefills)}
     </section>
     ${renderWeeklyPlanFinishWeek(planLocked, Boolean(orderStep?.complete), "prep")}
   `;

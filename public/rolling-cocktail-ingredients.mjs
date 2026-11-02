@@ -17,6 +17,11 @@ function key(value) {
   const normalized = String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase().replace(/['\u2019]/g, "").replace(/\s+[123]$/, "")
     .replace(/\([^)]*\)/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
+  // PMB includes the spirit type in these tap names; cabinet names omit it.
+  // Keep expressions distinct instead of stripping every spirit suffix.
+  if (/^don julio blanco(?: tequila)?$/.test(normalized)) return "don julio blanco";
+  if (/^crown royal peach(?: whisk(?:e)?y)?$/.test(normalized)) return "crown royal peach";
+  if (/^woodford reserve(?: bourbon)?$/.test(normalized)) return "woodford reserve";
   return /^bacardi(?: superior(?: traveler)?(?: rum)?)?$/.test(normalized) ? "bacardi superior" : normalized;
 }
 function nonnegative(value) {
@@ -123,9 +128,10 @@ export function netRollingLiquorTapRecommendations(recommendations = [], invento
   return recommendations.map((r) => {
     if (!r.isLiquorTap || r.actionType !== "order") return r;
     const identity = key(normalizeLiquorTapProductName(r.orderProductName || r.name));
-    const item = inventoryItems.find((item) => item.rollingIngredientVersion === 1
+    const matches = inventoryItems.filter((item) => item.rollingIngredientVersion === 1
       && /liquor/i.test(item.group || "") && !item.orderHoldReason
       && [item.id, item.name, item.linkedIngredientName].some((name) => name && key(name) === identity));
+    const item = matches.length === 1 ? matches[0] : null;
     if (!item || nonnegative(item.onHand) === null || item.hasCurrentCount === false) return r;
     const reserved = Number(item.cocktailPrepRequiredBottles || 0) + Number(item.rollingReserveUnits || 0);
     const remaining = available.has(item.id) ? available.get(item.id) : Math.max(0, Math.floor(Number(item.onHand) - reserved));
@@ -137,6 +143,7 @@ export function netRollingLiquorTapRecommendations(recommendations = [], invento
     available.set(item.id, remaining - used);
     return {
       ...r, orderQty, suggestedBottleOrderQty: orderQty,
+      refillBottleQty: nonnegative(r.refillBottleQty) ?? requested,
       actionType: requested > used ? "order" : "none", cabinetUsedQty: used,
       cabinetReservedForCocktails: reserved, cabinetInventoryId: item.id,
       reason: `${r.reason || ""} ${used} cabinet bottles cover the refill after reserving this Thursday's prep and the small reserve.`.trim(),
