@@ -78,9 +78,9 @@ test("the migrated Maker's Mark and Ciroc cards show their complete approved pro
     { id: "liquor:makers-mark", kind: "liquor", name: "Maker's Mark" },
     { id: "liquor:ciroc-pineapple", kind: "liquor", name: "Ciroc Pineapple" },
   ]);
-  for (const [id, single, double, label, rate, abv] of [
-    ["liquor:makers-mark", 7, 9, "1.75 L", "4.67", 45],
-    ["liquor:ciroc-pineapple", 12, 16, "1 L", "8.00", 35],
+  for (const [id, single, double, label, abv] of [
+    ["liquor:makers-mark", 8, 10, "1.75 L", 45],
+    ["liquor:ciroc-pineapple", 12, 16, "1 L", 35],
   ]) {
     const item = items.find((entry) => entry.id === id);
     const html = helpers.renderComingSoonItem(item);
@@ -92,7 +92,7 @@ test("the migrated Maker's Mark and Ciroc cards show their complete approved pro
     assert.ok(html.includes(`<b>${abv}%</b> ABV`));
     assert.ok(html.includes(`<b>$${single}</b> Single · 1.5 oz`));
     assert.ok(html.includes(`<b>$${double}</b> Double · 2 oz`));
-    assert.ok(html.includes(`<b>$${rate}</b> tap price / oz`));
+    assert.doesNotMatch(html, /tap price \/ oz/);
     assert.doesNotMatch(html, /proposed|Tap price not set/);
     assert.match(html, /activate-coming-soon-pmb" type="button" disabled/);
   }
@@ -133,7 +133,7 @@ test("saved Single and Double prices are displayed as whole dollars instead of b
   const html = helpers.renderComingSoonItem(item);
   assert.match(html, /\$12<\/b> Single · 1\.5 oz/);
   assert.match(html, /\$16<\/b> Double · 2 oz/);
-  assert.match(html, /\$3\.25<\/b> tap price \/ oz/);
+  assert.doesNotMatch(html, /tap price \/ oz/);
   assert.doesNotMatch(html, /\$12\.00|\$16\.00|\$5<\/b>|\$7<\/b>/);
   assert.equal(JSON.stringify(item), before);
 });

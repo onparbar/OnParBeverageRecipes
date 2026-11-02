@@ -45,12 +45,12 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
     bottleCostSource: "OHLQ largest bottle · 6060D",
     bottleCostCheckedAt: "2026-11-02",
     bottleCostSourceUrl: "https://www.ohlq.com/liquor/whiskey/american/bourbon/makers-mark?sku=6060d",
-    pricePerOz: 4.67,
+    pricePerOz: 5.34,
     servingOz: 1.5,
     targetMargin: 82,
     portions: Object.freeze([
-      Object.freeze({ name: "Single", quantityOz: 1.5, price: 7 }),
-      Object.freeze({ name: "Double", quantityOz: 2, price: 9 }),
+      Object.freeze({ name: "Single", quantityOz: 1.5, price: 8 }),
+      Object.freeze({ name: "Double", quantityOz: 2, price: 10 }),
     ]),
     priceStatus: "approved",
   }),
@@ -119,6 +119,16 @@ function hasText(value) {
 }
 
 function mergeRequiredLiquorItem(required, existing = {}) {
+  // The owner approved new whole-dollar Maker's portions with the OHLQ cost.
+  // Only replace the exact previous draft prices, never a custom or live price.
+  if (required.id === "liquor:makers-mark" && !existing.replacedAt && !existing.pmbActiveAt && !positiveNumber(existing.plu)
+      && existing.priceStatus === "approved" && Number(existing.pricePerOz) === 4.67 && !positiveNumber(existing.chargePerOz)
+      && ["Saved supplier price", "OHLQ largest bottle · 6060D"].includes(existing.bottleCostSource)
+      && Array.isArray(existing.portions) && existing.portions.length === 2
+      && existing.portions.some(portion => portion.name === "Single" && Number(portion.quantityOz) === 1.5 && Number(portion.price) === 7)
+      && existing.portions.some(portion => portion.name === "Double" && Number(portion.quantityOz) === 2 && Number(portion.price) === 9)) {
+    existing = { ...existing, pricePerOz: required.pricePerOz, portions: required.portions.map(portion => ({ ...portion })) };
+  }
   const merged = { ...existing, id: required.id, kind: required.kind, name: required.name };
   const previousBottle = PREVIOUS_LIQUOR_BOTTLE_BASELINES[required.id];
   if (!existing.replacedAt && !existing.pmbActiveAt && !positiveNumber(existing.plu)

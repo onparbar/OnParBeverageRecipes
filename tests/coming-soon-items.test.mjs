@@ -223,7 +223,7 @@ test("liquor defaults preserve saved prices, PMB identities, and completed-produ
 
 test("minimal and blank liquor cards receive complete product details and approved portions", () => {
   const expected = [
-    { id: "liquor:makers-mark", name: "Maker's Mark", abv: 45, cost: 49.99, size: 59.1745, label: "1.75 L", rate: 4.67, prices: [7, 9], image: "/images/products/makers-mark.webp" },
+    { id: "liquor:makers-mark", name: "Maker's Mark", abv: 45, cost: 49.99, size: 59.1745, label: "1.75 L", rate: 5.34, prices: [8, 10], image: "/images/products/makers-mark.webp" },
     { id: "liquor:ciroc-pineapple", name: "Ciroc Pineapple", abv: 35, cost: 38.99, size: 33.814, label: "1 L", rate: 8, prices: [12, 16], image: "/images/products/ciroc-pineapple.webp" },
   ];
   for (const product of expected) {
@@ -289,6 +289,27 @@ test("older seeded bottle records migrate to the largest OHLQ size and exact lis
   }
   assert.equal(JSON.stringify(saved), before);
   assert.equal(JSON.stringify(mergeRequiredComingSoonItems(merged)), JSON.stringify(merged));
+});
+
+test("the approved Maker's price correction replaces only the previous unpublished seeded portions", () => {
+  const original = {
+    id: "liquor:makers-mark", name: "Maker's Mark", kind: "liquor",
+    bottleCost: 49.99, bottleOz: 59.1745, bottleCostSource: "OHLQ largest bottle · 6060D",
+    pricePerOz: 4.67, priceStatus: "approved",
+    portions: [{ name: "Single", quantityOz: 1.5, price: 7 }, { name: "Double", quantityOz: 2, price: 9 }],
+  };
+  const before = JSON.stringify(original);
+  const corrected = mergeRequiredComingSoonItems([original]).find(item => item.id === original.id);
+  assert.deepEqual(corrected.portions.map(portion => portion.price), [8, 10]);
+  assert.equal(corrected.pricePerOz, 5.34);
+  assert.deepEqual(mergeRequiredComingSoonItems([corrected]).find(item => item.id === original.id), corrected);
+  for (const changed of [{ plu: 1234 }, { replacedAt: "2026-11-02" }, { pricePerOz: 6 }, { chargePerOz: 6 }, { bottleCostSource: "Invoice" }, { portions: [{ name: "Single", quantityOz: 1.5, price: 9 }] }]) {
+    const custom = { ...original, ...changed };
+    const preserved = mergeRequiredComingSoonItems([custom]).find(item => item.id === original.id);
+    assert.deepEqual(preserved.portions, custom.portions);
+    assert.equal(preserved.pricePerOz, custom.pricePerOz);
+  }
+  assert.equal(JSON.stringify(original), before);
 });
 
 test("saved liquor prices do not acquire conflicting portions or unearned approval", () => {

@@ -9256,7 +9256,7 @@ function renderComingSoonLiquorDetails(item) {
     toNumber(item.abvPercent) ? `<span><b>${formatNumber(item.abvPercent)}%</b> ABV</span>` : "",
     bottleCost > 0 ? `<span><b>${money(bottleCost)}</b> ${item.bottleCostStatus === "estimate" ? "estimated bottle cost" : "bottle cost"}</span>` : "",
     bottleOz > 0 ? `<span><b>${escapeHtml(clean(item.bottleSizeLabel)) || `${formatNumber(bottleOz)} oz`}</b> bottle size</span>` : "",
-    pricePerOz > 0
+    savedPortions.length ? "" : pricePerOz > 0
       ? `<span><b>${money(pricePerOz)}</b> ${proposed ? "proposed price" : "tap price"} / oz</span>`
       : "<span><b>Tap price not set</b></span>",
     ...portions.map((portion) => `<span><b>${money(portion.price).replace(/\.00$/, "")}</b> ${proposed ? "proposed " : ""}${escapeHtml(portion.name || "Pour")} · ${formatNumber(portion.servingOz)} oz</span>`),
