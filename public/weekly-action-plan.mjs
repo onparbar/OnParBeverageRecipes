@@ -6,6 +6,8 @@ import {
   normalizeCocktailRecipeName,
 } from "./cocktail-recipe-yields.mjs";
 import { beerDeliveryDestination, withBeerDeliveryDestinations } from "./beer-delivery-destinations.mjs";
+import { fillMissingKegOrderMetadata } from "./keg-order-defaults.mjs";
+import { weeklyOrderItemId, legacyWeeklyOrderItemId } from "./weekly-order-item-identity.mjs";
 
 function number(value) {
   const parsed = Number(value);
@@ -803,8 +805,29 @@ export function createWeeklyPlanSnapshot({
     publishedAt: clean(publishedAt),
     orderCatalog: normalizeInventoryOrderCatalog(inventoryItems),
     ...(orderPolicy && typeof orderPolicy === "object" ? { orderPolicy } : {}),
-    plan: buildWeeklyActionPlan({ inventoryItems, recommendations }),
+    plan: normalizeWeeklyPlanKegOrderMetadata(buildWeeklyActionPlan({ inventoryItems, recommendations })),
   };
+}
+
+export function normalizeWeeklyPlanKegOrderMetadata(plan, tracking = {}) {
+  const placedVendors = new Set(Object.values(tracking?.vendors || {})
+    .filter((vendor) => clean(vendor?.orderedAt))
+    .map((vendor) => clean(vendor.vendor).toLowerCase()));
+  return refreshWeeklyPlanMetadata(plan, {
+    resolveBeerOrder: (item) => {
+      const resolved = fillMissingKegOrderMetadata(item);
+      const sourceVendor = clean(item.vendor) || "Needs vendor";
+      const receiptLine = { ...item, internalId: item.id || item.internalId, lineType: "Beer keg" };
+      const hasReceipt = [weeklyOrderItemId(sourceVendor, receiptLine), legacyWeeklyOrderItemId(sourceVendor, receiptLine)]
+        .some((id) => Object.hasOwn(tracking?.receipts || {}, id));
+      // Never add an unresolved line to an order that was already placed.
+      // Legacy per-item receipts can also exist before a vendor was marked placed.
+      if ((hasReceipt && sourceVendor !== clean(resolved.vendor || "Needs vendor"))
+        || placedVendors.has(sourceVendor.toLowerCase())
+        || placedVendors.has(clean(resolved.vendor).toLowerCase())) return null;
+      return resolved;
+    },
+  });
 }
 
 export function getCurrentWeeklyPlanSnapshot(recommendations, now = new Date()) {
@@ -816,14 +839,14 @@ export function getCurrentWeeklyPlanSnapshot(recommendations, now = new Date()) 
   if (!hasWeeklyPlanShape(snapshot.plan)) return null;
   return {
     ...snapshot,
-    plan: {
+    plan: normalizeWeeklyPlanKegOrderMetadata({
       ...snapshot.plan,
       orders: {
         ...snapshot.plan.orders,
         beerKegs: (snapshot.plan.orders.beerKegs || []).map((line) =>
           withBeerDeliveryDestinations(line, recommendations.items || [])),
       },
-    },
+    }, recommendations.weeklyOrderTracking),
   };
 }
 

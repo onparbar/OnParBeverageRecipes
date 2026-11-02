@@ -1,3 +1,4 @@
+import { DEFAULT_KEG_PRICE_OVERRIDES, KEG_PRICING_KEY_ALIASES, KEG_VENDOR_MAPPINGS, KEG_VENDOR_PRODUCT_CATALOG, getKegOrderDefaults } from "./keg-order-defaults.mjs";
 import { completeRecipeIngredientInventory, includeMissingRecipeInventory } from "./recipe-ingredient-inventory.mjs";
 import { mountDashboardSessionRecovery } from "./dashboard-session.mjs";
 import { getTapPricingCoverage } from "./tap-pricing-coverage.mjs";
@@ -77,8 +78,6 @@ import {
 } from "./cocktail-recipe-yields.mjs";
 import {
   getKnownBeerKegSizeOz,
-  GUINNESS_KEG_OZ,
-  GUINNESS_KEG_PRICE,
   isBeerTapPosition,
 } from "./beer-keg-pricing.mjs";
 import {
@@ -467,168 +466,6 @@ const DEFAULT_PRICE_OVERRIDES = {
     updatedAt: "Default pricing",
   },
 };
-const DEFAULT_KEG_PRICE_OVERRIDES = {
-  "michelob-ultra": {
-    kegOz: "1984",
-    kegPrice: "135",
-    updatedAt: "Default Heidelberg Provi pricing",
-  },
-  "busch-light": {
-    kegOz: "1984",
-    kegPrice: "115",
-    updatedAt: "Default Heidelberg Provi pricing",
-  },
-  "bud-light": {
-    kegOz: "1984",
-    kegPrice: "126",
-    updatedAt: "Default Heidelberg Provi pricing",
-  },
-  "cincy-light": {
-    kegOz: "1984",
-    kegPrice: "130",
-    updatedAt: "Default Heidelberg Provi pricing",
-  },
-  "summer-ale": {
-    kegOz: "1984",
-    kegPrice: "185",
-    updatedAt: "Default Heidelberg Provi pricing",
-  },
-  "kona-big-wave": {
-    kegOz: "1984",
-    kegPrice: "170",
-    updatedAt: "Default Heidelberg Provi pricing",
-  },
-  yuengling: {
-    kegOz: "1984",
-    kegPrice: "126",
-    updatedAt: "Default Heidelberg Provi pricing",
-  },
-  "goose-ipa": {
-    kegOz: "1984",
-    kegPrice: "150",
-    updatedAt: "Default Heidelberg Provi pricing",
-  },
-  truth: {
-    kegOz: "1984",
-    kegPrice: "182",
-    updatedAt: "Default Heidelberg Provi pricing",
-  },
-  "stella-artois": {
-    kegOz: "1690.7",
-    kegPrice: "170",
-    updatedAt: "Default Heidelberg Provi pricing",
-  },
-  budweiser: {
-    kegOz: "1984",
-    kegPrice: "126",
-    updatedAt: "Default Heidelberg Provi pricing",
-  },
-  "angry-orchard": {
-    kegOz: "1984",
-    kegPrice: "182",
-    updatedAt: "Default Heidelberg Provi pricing",
-  },
-  "triple-jam-cider": {
-    kegOz: "1984",
-    kegPrice: "189",
-    updatedAt: "Default Heidelberg Provi pricing",
-  },
-  "truly-wild-berry": {
-    kegOz: "1984",
-    kegPrice: "182",
-    updatedAt: "Default Heidelberg Provi pricing",
-  },
-  "miller-lite": {
-    kegOz: "1984",
-    kegPrice: "130",
-    updatedAt: "Bonbright manual pricing 2026-08-15",
-  },
-  "coors-light": {
-    kegOz: "1984",
-    kegPrice: "130",
-    updatedAt: "Bonbright manual pricing 2026-08-15",
-  },
-  "pabst-blue-ribbon": {
-    kegOz: "1984",
-    kegPrice: "89",
-    updatedAt: "Bonbright manual pricing 2026-08-15",
-  },
-  modelo: {
-    kegOz: "1984",
-    kegPrice: "143",
-    updatedAt: "Bonbright manual pricing 2026-08-15",
-  },
-  "blue-moon": {
-    kegOz: "1984",
-    kegPrice: "171",
-    updatedAt: "Bonbright manual pricing 2026-08-15",
-  },
-  guinness: {
-    kegOz: String(GUINNESS_KEG_OZ),
-    kegPrice: String(GUINNESS_KEG_PRICE),
-    updatedAt: "Bonbright manual pricing 2026-08-10",
-  },
-  "dortmunder-gold-lager": {
-    kegOz: "1984",
-    kegPrice: "175",
-    updatedAt: "Bonbright manual pricing 2026-08-15",
-  },
-  "garage-beer": {
-    kegOz: "1984",
-    kegPrice: "135",
-    updatedAt: "Bonbright manual pricing 2026-08-15",
-  },
-  "garage-beer-lime": {
-    kegOz: "1984",
-    kegPrice: "135",
-    updatedAt: "Bonbright manual pricing 2026-08-15",
-  },
-  "astra-red-cream-soda": {
-    kegOz: "1984",
-    kegPrice: "96",
-    updatedAt: "Bonbright manual pricing 2026-08-15",
-  },
-  "voodoo-ranger-ipa": {
-    kegOz: "1984",
-    kegPrice: "160",
-    updatedAt: "Bonbright manual pricing 2026-08-15",
-  },
-  "voodoo-ranger-juicy-haze": {
-    kegOz: "1984",
-    kegPrice: "185",
-    updatedAt: "Bonbright manual pricing 2026-08-15",
-  },
-  "two-hearted-ipa": {
-    kegOz: "1984",
-    kegPrice: "186",
-    updatedAt: "Bonbright manual pricing 2026-08-15",
-  },
-  corona: {
-    kegOz: "1984",
-    kegPrice: "143",
-    updatedAt: "Bonbright manual pricing 2026-08-15",
-  },
-};
-const KEG_PRICING_KEY_ALIASES = {
-  lite: "miller-lite",
-  "miller-light": "miller-lite",
-  pabst: "pabst-blue-ribbon",
-  pbr: "pabst-blue-ribbon",
-  "bm-bl-moon": "blue-moon",
-  "blue-moon-belgian-white": "blue-moon",
-  "modelo-esp": "modelo",
-  "modelo-especial": "modelo",
-  "coors-lt": "coors-light",
-  "guinness-draught": "guinness",
-  "gl-dortmunder": "dortmunder-gold-lager",
-  "dortmunder-gold": "dortmunder-gold-lager",
-  "garage-lime": "garage-beer-lime",
-  "astra-red-cream-seltz": "astra-red-cream-soda",
-  "nb-vd-rgr-ipa": "voodoo-ranger-ipa",
-  "voodoo-regular-ipa": "voodoo-ranger-ipa",
-  "bells-two-hearted-ipa": "two-hearted-ipa",
-  "triple-jam": "triple-jam-cider",
-};
 const BONBRIGHT_KEG_ALIASES = {
   "miller-lite": ["Lite 1/2 BBL", "Lite", "Miller Light"],
   "blue-moon": ["BM BL MOON", "BM BL MOON 1/2 BBL"],
@@ -644,56 +481,7 @@ const BONBRIGHT_KEG_ALIASES = {
   "voodoo-ranger-juicy-haze": ["Voodoo Ranger Juicy Haze", "VD RGR JUICY HAZE", "Juicy Haze"],
   "two-hearted-ipa": ["Two Hearted IPA", "Bell's Two Hearted IPA"],
 };
-const KEG_VENDOR_MAPPINGS = {
-  psychopathy: "Bonbright",
-  "michelob-ultra": "Heidelberg",
-  "busch-light": "Heidelberg",
-  "bud-light": "Heidelberg",
-  "cincy-light": "Heidelberg",
-  "summer-ale": "Heidelberg",
-  "kona-big-wave": "Heidelberg",
-  truth: "Heidelberg",
-  "stella-artois": "Heidelberg",
-  "angry-orchard": "Heidelberg",
-  "truly-wild-berry": "Heidelberg",
-  "goose-ipa": "Heidelberg",
-  budweiser: "Heidelberg",
-  "triple-jam-cider": "Heidelberg",
-  yuengling: "Heidelberg",
-  octoberfest: "Heidelberg",
-  "miller-lite": "Bonbright",
-  "pabst-blue-ribbon": "Bonbright",
-  "coors-light": "Bonbright",
-  "blue-moon": "Bonbright",
-  modelo: "Bonbright",
-  "astra-red-cream-soda": "Bonbright",
-  "voodoo-ranger-juicy-haze": "Bonbright",
-  "two-hearted-ipa": "Bonbright",
-  "dortmunder-gold-lager": "Bonbright",
-  "garage-beer-lime": "Bonbright",
-  corona: "Bonbright",
-  "garage-beer": "Bonbright",
-  guinness: "Bonbright",
-  "voodoo-ranger-ipa": "Bonbright",
-};
 
-const KEG_VENDOR_PRODUCT_CATALOG = {
-  "michelob-ultra": { vendor: "Heidelberg", vendorSku: "014676-C", productName: "Michelob Ultra 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 135, currentPrice: 130, promotion: true, priceCheckedAt: "2026-08-14" },
-  "busch-light": { vendor: "Heidelberg", vendorSku: "010376-C", productName: "Busch Light 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 115, currentPrice: 115, promotion: false, priceCheckedAt: "2026-08-14" },
-  "bud-light": { vendor: "Heidelberg", vendorSku: "011276-C", productName: "Bud Light 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 126, currentPrice: 126, promotion: false, priceCheckedAt: "2026-08-14" },
-  "cincy-light": { vendor: "Heidelberg", vendorSku: "057895-C", productName: "Rhinegeist Cincy Light 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 130, currentPrice: 130, promotion: false, priceCheckedAt: "2026-08-14" },
-  "summer-ale": { vendor: "Heidelberg", vendorSku: "048166-C", productName: "Samuel Adams Summer Ale 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 182, currentPrice: 182, promotion: false, priceCheckedAt: "2026-08-14" },
-  "kona-big-wave": { vendor: "Heidelberg", vendorSku: "011400-C", productName: "Kona Big Wave 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 170, currentPrice: 150, promotion: true, priceCheckedAt: "2026-08-14" },
-  truth: { vendor: "Heidelberg", vendorSku: "054519-C", productName: "Rhinegeist Truth 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 182, currentPrice: 182, promotion: false, priceCheckedAt: "2026-08-14" },
-  "stella-artois": { vendor: "Heidelberg", vendorSku: "082476-C", productName: "Stella Artois 13.2 gal Keg", packSize: 1, kegOz: 1690.7, listPrice: 170, currentPrice: 150, promotion: true, priceCheckedAt: "2026-08-14" },
-  "angry-orchard": { vendor: "Heidelberg", vendorSku: "083700-C", productName: "Angry Orchard Crisp Apple 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 182, currentPrice: 182, promotion: false, priceCheckedAt: "2026-08-14" },
-  "truly-wild-berry": { vendor: "Heidelberg", vendorSku: "042517-C", productName: "Truly Wild Berry 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 182, currentPrice: 182, promotion: false, priceCheckedAt: "2026-08-14" },
-  "goose-ipa": { vendor: "Heidelberg", vendorSku: "075908-C", productName: "Goose Island IPA 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 150, currentPrice: 122, promotion: true, priceCheckedAt: "2026-08-14" },
-  budweiser: { vendor: "Heidelberg", vendorSku: "011176-C", productName: "Budweiser 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 126, currentPrice: 109, promotion: true, priceCheckedAt: "2026-08-14" },
-  "triple-jam-cider": { vendor: "Heidelberg", vendorSku: "041189-C", productName: "Blake's Triple Jam 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 189, currentPrice: 189, promotion: false, priceCheckedAt: "2026-08-14" },
-  yuengling: { vendor: "Heidelberg", vendorSku: "013476-C", productName: "Yuengling Traditional Lager 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 126, currentPrice: 126, promotion: false, priceCheckedAt: "2026-08-14" },
-  octoberfest: { vendor: "Heidelberg", vendorSku: "048110-C", productName: "Samuel Adams Octoberfest 15.5 gal (1/2 bbl) Keg", packSize: 1, kegOz: 1984, listPrice: 182, currentPrice: 182, promotion: false, priceCheckedAt: "2026-08-14" },
-};
 
 function normalizeKegVendorCatalogKey(value) {
   return String(value ?? "")
@@ -5781,20 +5569,21 @@ function getWeeklyPlanRecommendations({ live = false } = {}) {
       getSavedTapOrderProduct(item, weeklyUsageItems, weeklyUsageArchivedItems),
       item.onDeckProduct);
     const pricingItem = getKegPricingItem(orderProductName);
+    const orderDefaults = getKegOrderDefaults(orderProductName);
     const vendorCatalogProduct = getKegVendorCatalogProduct(
       pricingItem?.id,
       pricingItem?.name,
       orderProductName,
       item.name,
     );
-    const unitCost = vendorCatalogProduct?.currentPrice ?? (pricingItem ? getKegPrice(pricingItem) : 0);
+    const unitCost = vendorCatalogProduct?.currentPrice ?? (pricingItem ? getKegPrice(pricingItem) : orderDefaults?.unitCost || 0);
     return {
       ...item,
       orderProductName,
       internalId: pricingItem?.id || item.key,
-      vendor: vendorCatalogProduct?.vendor || pricingItem?.vendor || "",
-      vendorSku: vendorCatalogProduct?.vendorSku || getOrderingSku(pricingItem?.vendorProduct) || pricingItem?.preferredSku || "",
-      vendorProductName: vendorCatalogProduct?.productName || pricingItem?.vendorProduct?.productName || pricingItem?.name || item.orderProductName || item.name,
+      vendor: vendorCatalogProduct?.vendor || pricingItem?.vendor || orderDefaults?.vendor || "",
+      vendorSku: vendorCatalogProduct?.vendorSku || getOrderingSku(pricingItem?.vendorProduct) || pricingItem?.preferredSku || orderDefaults?.vendorSku || "",
+      vendorProductName: vendorCatalogProduct?.productName || pricingItem?.vendorProduct?.productName || pricingItem?.name || orderDefaults?.vendorProductName || item.orderProductName || item.name,
       unitCost,
       vendorListPrice: vendorCatalogProduct?.listPrice ?? unitCost,
       vendorPriceCheckedAt: vendorCatalogProduct?.priceCheckedAt || "",
@@ -5820,6 +5609,7 @@ function getWeeklyPlanModel({ live = false } = {}) {
     });
   return refreshWeeklyPlanMetadata(plan, {
     resolveBeerOrder: (item) => {
+      if (snapshot) return null;
       const pricingKey = getKegPricingKey(item.name);
       const pricingItem = getKegPricingItem(item.name);
       const vendor = pricingItem?.vendor || KEG_VENDOR_MAPPINGS[pricingKey] || "";

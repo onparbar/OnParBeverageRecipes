@@ -6,6 +6,7 @@ import { buildRawRecommendation } from "../lib/par-agent.mjs";
 import { buildWeeklyActionPlan } from "../public/weekly-action-plan.mjs";
 import { getSavedTapOrderProduct, getTapOrderProductName } from "../public/tap-order-product.mjs";
 import { isPricingPlaceholder } from "../public/pricing-placeholders.mjs";
+import { getKegOrderDefaults } from "../public/keg-order-defaults.mjs";
 
 const source = readFileSync(new URL("../public/dashboard.js", import.meta.url), "utf8");
 function load(name, scope) {
@@ -42,7 +43,7 @@ test("cached placeholder purchases cannot enter the weekly purchase plan", () =>
   assert.equal(result.summary.missingPriceCount, 0);
 });
 function pricingScope() {
-  const scope = { toNumber: value => Number(value) || 0, priceOverrides: {}, inventoryItems: [],
+  const scope = { getKegOrderDefaults, toNumber: value => Number(value) || 0, priceOverrides: {}, inventoryItems: [],
     ingredients: [{ id: "1800-reposado", name: "1800 Reposado" }],
     normalizeIngredientAlias: () => "1800 Reposado", normalizeLiquorTapProductName: value => value,
     slugify: () => "1800-reposado", getVendorMapping: () => ({ unitPrice: 42.3, preferredSku: "2411D", vendor: "OHLQ" }),
