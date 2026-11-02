@@ -5,6 +5,7 @@ import { buildRollingCocktailIngredientOrders } from "../public/rolling-cocktail
 import { buildVendorOrderDrafts } from "../public/vendor-order-drafts.mjs";
 import { renderWeeklyIngredientPrep } from "../public/weekly-plan-view.mjs";
 import { isInventoryCountExcluded } from "../public/inventory-count-policy.mjs";
+import { refreshWeeklyIngredientPrep } from "../public/in-house-ingredient-prep.mjs";
 
 const syrup = { id: "simple-syrup", name: "Simple Syrup", group: "Other", onHand: 0, hasCurrentCount: true, bottleOz: 128, unitCost: 3.84, baseline: 0 };
 const recipe = { title: "Example Cocktail", ingredients: [{ name: "Simple Syrup", oz: 640 }] };
@@ -58,4 +59,66 @@ test("the prep notice is explicit and holds unknown quantities for verification"
   const unknown = buildWeeklyActionPlan({ inventoryItems: [{ ...syrup, hasCurrentCount: false }] });
   assert.match(renderWeeklyIngredientPrep(unknown.prep.ingredients), /Verify the Simple Syrup count/);
   assert.doesNotMatch(renderWeeklyIngredientPrep(unknown.prep.ingredients), /Prep 0 gallons/);
+});
+
+const lemonDrop = { title: "Lemon Drop Martini(Vodka)", ingredients: [
+  { name: "Vodka", oz: 828 }, { name: "Lemon Juice", oz: 300 }, { name: "Simple Syrup", oz: 320 },
+] };
+const exactOptions = {
+  resolveRecipe: item => item.name === "Lemon Drop" ? lemonDrop : null,
+  getRecipeYieldOz: recipe => recipe.ingredients.reduce((total, ingredient) => total + ingredient.oz, 0),
+  onHandGallons: "0",
+};
+
+test("current syrup prep uses exact Lemon Drop ounces and preserves unrelated plan data", () => {
+  const other = { id: "other-prep", name: "Other prep", quantity: 1 };
+  const plan = { orders: { supplies: [{ id: "cups", quantity: 10 }] }, summary: { saved: true }, prep: {
+    note: "Keep chilled", ingredients: [other, { id: "simple-syrup", quantity: 99 }],
+    cocktails: [{ name: "Lemon Drop", quantity: 1, batchSizeOz: 1448 }],
+  } };
+  const before = structuredClone(plan);
+  const updated = refreshWeeklyIngredientPrep(plan, exactOptions);
+  assert.deepEqual(updated.prep.ingredients, [other, {
+    id: "simple-syrup", name: "Simple Syrup", quantity: 2.5, unit: "gallons",
+    requiredGallons: 2.5, onHandGallons: 0, holdReason: "",
+  }]);
+  assert.equal(updated.prep.note, "Keep chilled");
+  assert.deepEqual(updated.orders, plan.orders);
+  assert.deepEqual(updated.summary, plan.summary);
+  assert.deepEqual(plan, before);
+  assert.equal(refreshWeeklyIngredientPrep(plan, { ...exactOptions, onHandGallons: 1 }).prep.ingredients[1].quantity, 1.5);
+  assert.deepEqual(refreshWeeklyIngredientPrep(plan, { ...exactOptions, onHandGallons: 3 }).prep.ingredients, [other]);
+});
+
+test("current syrup prep scales quantities and retains completed cocktail demand against unchanged counts", () => {
+  const plan = { prep: { ingredients: [{ id: "simple-syrup", quantity: 99 }], cocktails: [
+    { name: "Lemon Drop", quantity: 2, batchSizeOz: 724 },
+    { name: "Lemon Drop", quantity: 3, batchSizeOz: 1448, completed: true },
+  ] } };
+  assert.equal(refreshWeeklyIngredientPrep(plan, exactOptions).prep.ingredients[0].quantity, 10);
+  assert.deepEqual(refreshWeeklyIngredientPrep(plan, { ...exactOptions, plannedItems: [] }).prep.ingredients, []);
+});
+
+test("completing one of two batches cannot erase a syrup shortage when counts are not deducted", () => {
+  const plan = { prep: { cocktails: [
+    { name: "Lemon Drop", quantity: 1, batchSizeOz: 1448, completed: true },
+    { name: "Lemon Drop", quantity: 1, batchSizeOz: 1448, completed: false },
+  ] } };
+  const result = refreshWeeklyIngredientPrep(plan, { ...exactOptions, onHandGallons: 3 });
+  assert.equal(result.prep.ingredients[0].requiredGallons, 5);
+  assert.equal(result.prep.ingredients[0].quantity, 2);
+});
+
+test("current syrup prep holds missing recipes and missing or invalid counts", () => {
+  const plan = { prep: { cocktails: [{ name: "Lemon Drop", quantity: 1, batchSizeOz: 1448 }] } };
+  for (const onHandGallons of [undefined, null, "", " ", "invalid", -1, Infinity]) {
+    const result = refreshWeeklyIngredientPrep(plan, { ...exactOptions, onHandGallons });
+    assert.match(result.prep.ingredients[0].holdReason, /Verify the Simple Syrup count/);
+    assert.equal(result.prep.ingredients[0].onHandGallons, null);
+    assert.doesNotMatch(renderWeeklyIngredientPrep(result.prep.ingredients), /Prep 0 gallons/);
+  }
+  assert.match(refreshWeeklyIngredientPrep(plan, { ...exactOptions, hasCurrentCount: false }).prep.ingredients[0].holdReason, /Verify/);
+  const unresolved = refreshWeeklyIngredientPrep(plan, { ...exactOptions, resolveRecipe: () => null });
+  assert.match(unresolved.prep.ingredients[0].holdReason, /Review cocktail recipes.*Lemon Drop/);
+  assert.deepEqual(refreshWeeklyIngredientPrep({ prep: { cocktails: [] } }).prep.ingredients, []);
 });

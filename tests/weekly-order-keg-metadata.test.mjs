@@ -9,6 +9,7 @@ import { fillMissingKegOrderMetadata, getKegOrderDefaults } from "../public/keg-
 import { buildUnifiedVendorOrderModel } from "../public/vendor-order-drafts.mjs";
 import { buildWeeklyOrderTracking, applyWeeklyOrderTrackingUpdate, WeeklyOrderTrackingError } from "../lib/weekly-order-tracking.mjs";
 import { normalizeSnapshotOrder } from "../public/weekly-snapshot-orders.mjs";
+import { isInHousePrepIngredient, refreshWeeklyIngredientPrep } from "../public/in-house-ingredient-prep.mjs";
 
 const generatedAt = "2026-11-02T16:57:27.987Z";
 const now = () => new Date("2026-11-02T18:00:00.000Z");
@@ -41,6 +42,8 @@ function browserPlan(recommendations) {
     Date: TestDate, parAgentState: { recommendations }, getCurrentWeeklyPlanSnapshot,
     hydrateWeeklyPlanLiquorTapPricing: plan => plan, refreshWeeklyPlanMetadata,
     isFoodDepartmentOrderedInventoryItem: () => false, inventoryItems: [],
+    isInHousePrepIngredient, refreshWeeklyIngredientPrep,
+    getActiveRecipes: () => [], normalizeIngredientAlias: value => value,
     getKegPricingKey: () => { throw new Error("Locked beer metadata must not be replaced by live catalog metadata"); },
   });
 }

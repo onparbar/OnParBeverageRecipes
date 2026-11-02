@@ -78,7 +78,7 @@ test("weekly snapshots display saved levels and counts without replacing missing
   assert.match(renderSavedWeeklySnapshot({}, helpers), /Keg levels and on-hand kegs were not recorded/);
   const summaryHtml = renderSavedWeeklySnapshot({ ...snapshot, summary: { totalBeverageInventoryValue: 12345.67 } }, { ...helpers, simpleSyrupNeed: "2.5 gal" });
   assert.match(summaryHtml, /Total beverage inventory<\/span><strong>\$12,345.67/);
-  assert.match(summaryHtml, /Simple syrup needed for next week<\/span><strong>2.5 gal/);
+  assert.match(summaryHtml, /Simple syrup planned when saved<\/span><strong>2.5 gal/);
   assert.ok(summaryHtml.indexOf("Total beverage inventory") < summaryHtml.indexOf('data-snapshot-section="counts"'));
   assert.match(renderSavedWeeklySnapshot({}, helpers), /Total beverage inventory<\/span><strong>Not recorded/);
   assert.doesNotMatch(renderSavedWeeklySnapshot(snapshot, { ...helpers, simpleSyrupNeed: "0 gal" }), /For the saved cocktail prep plan|Estimated using current recipes/);

@@ -1,5 +1,6 @@
 import { DEFAULT_KEG_PRICE_OVERRIDES, KEG_PRICING_KEY_ALIASES, KEG_VENDOR_MAPPINGS, KEG_VENDOR_PRODUCT_CATALOG, getKegOrderDefaults } from "./keg-order-defaults.mjs";
 import { completeRecipeIngredientInventory, includeMissingRecipeInventory } from "./recipe-ingredient-inventory.mjs";
+import { isInHousePrepIngredient, refreshWeeklyIngredientPrep } from "./in-house-ingredient-prep.mjs";
 import { mountDashboardSessionRecovery } from "./dashboard-session.mjs";
 import { getTapPricingCoverage } from "./tap-pricing-coverage.mjs";
 import { buildPriorWeekWorkAlert } from "./prep-carry-forward.mjs";
@@ -5607,7 +5608,7 @@ function getWeeklyPlanModel({ live = false } = {}) {
       inventoryItems: getWeeklyPlanInventoryItems({ live: true }),
       recommendations: getWeeklyPlanRecommendations({ live: true }),
     });
-  return refreshWeeklyPlanMetadata(plan, {
+  const refreshedPlan = refreshWeeklyPlanMetadata(plan, {
     resolveBeerOrder: (item) => {
       if (snapshot) return null;
       const pricingKey = getKegPricingKey(item.name);
@@ -5630,6 +5631,15 @@ function getWeeklyPlanModel({ live = false } = {}) {
         || inventoryItems.find((candidate) => candidate.name === item.name);
       return Boolean(currentItem) && toNumber(currentItem.parDisplay) <= 0;
     },
+  });
+  const syrup = inventoryItems.find(isInHousePrepIngredient);
+  const recipes = getActiveRecipes();
+  return refreshWeeklyIngredientPrep(refreshedPlan, {
+    resolveRecipe: (item) => findRecipeForWallProduct(recipes, item.name),
+    getRecipeYieldOz: (recipe) => getRecipeTotals(recipe).oz,
+    normalizeIngredientName: normalizeIngredientAlias,
+    onHandGallons: syrup?.onHandDisplay,
+    hasCurrentCount: Boolean(syrup) && clean(syrup.onHandDisplay) !== "",
   });
 }
 
@@ -6173,6 +6183,17 @@ function getInventorySnapshotSimpleSyrupNeed(snapshot) {
 
 function formatInventorySnapshotSimpleSyrupNeed(snapshot) {
   const need = getInventorySnapshotSimpleSyrupNeed(snapshot);
+  return formatSimpleSyrupNeed(need);
+}
+
+function getCurrentSnapshotSimpleSyrupNeed(snapshot) {
+  const current = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
+  if (!current || !snapshot?.kegPlanSnapshot?.generatedAt
+    || current.generatedAt !== snapshot.kegPlanSnapshot.generatedAt) return "";
+  return formatSimpleSyrupNeed(getWeeklySimpleSyrupNeed(current.plan.prep.cocktails));
+}
+
+function formatSimpleSyrupNeed(need) {
   if (!need) return "Not recorded";
   if (!need.complete) {
     return need.totalOz > 0
@@ -17034,6 +17055,7 @@ function renderInventoryHistory() {
       openSections: [...openSectionKeys],
       dateLabel: formatInventorySnapshotLabel(getInventorySnapshotDate(snapshot)),
       simpleSyrupNeed: formatInventorySnapshotSimpleSyrupNeed(snapshot),
+      currentSimpleSyrupNeed: getCurrentSnapshotSimpleSyrupNeed(snapshot),
     });
     content.querySelector(".inventory-history-restore")?.addEventListener("click", () => restoreInventorySnapshot(snapshot.id));
   };

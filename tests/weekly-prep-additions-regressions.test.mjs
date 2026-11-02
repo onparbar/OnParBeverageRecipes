@@ -7,28 +7,41 @@ import { buildStaffPrepPlan, applyStaffPrepPlanUpdate } from "../lib/staff-prep-
 import { buildWeeklyActionPlan } from "../public/weekly-action-plan.mjs";
 import { getCocktailRecipeYieldOz, normalizeCocktailRecipeName } from "../public/cocktail-recipe-yields.mjs";
 import { applyPrepKegCounts } from "../lib/prep-keg-counts.mjs";
+import { isInHousePrepIngredient, refreshWeeklyIngredientPrep } from "../public/in-house-ingredient-prep.mjs";
 
 const source = readFileSync(new URL("../lib/weekly-prep-additions.mjs", import.meta.url), "utf8");
 const route = readFileSync(new URL("../app/api/weekly-prep-additions/route.js", import.meta.url), "utf8");
 const executable = s => s.replace(/^import[\s\S]*?;\n/gm, "").replace(/^export /gm, "");
-function harness() {
+function harness({ lemonDrop = false } = {}) {
   const generatedAt = "2026-09-14T15:00:00.000Z";
   const items = [
     { key: "main-47-house-special-1", name: "House Special 1", tapNumber: 47, wall: "Main", actionType: "make", orderQty: 1, batchSizeOz: 777 },
     { key: "karaoke-93-house-special-2", name: "House Special 2", tapNumber: 93, wall: "Karaoke", actionType: "make", orderQty: 0, batchSizeOz: 777 },
   ];
+  if (lemonDrop) items.forEach((item, index) => {
+    item.name = `Lemon Drop Martini (Absolut Citron) ${index + 1}`;
+    item.batchSizeOz = 1448;
+  });
   let state = { initialized: true, revision: 2, recommendations: { generatedAt, items, prepChecklist: {}, weeklyPlanSnapshot: { generatedAt, plan: buildWeeklyActionPlan({ recommendations: items }) } } };
   const initialOrders = structuredClone(state.recommendations.weeklyPlanSnapshot.plan.orders);
   let writes = 0;
-  const recipes = [{ id: "house", title: "House Special", ingredients: [{ name: "Vodka", oz: 77 }, { name: "Mixer", oz: 700 }] }];
+  const recipes = lemonDrop
+    ? [{ id: "lemon-drop-martini-vodka", title: "Lemon Drop Martini(Vodka)", ingredients: [
+      { name: "Vodka", oz: 828 }, { name: "Lemon Juice", oz: 300 }, { name: "Simple Syrup", oz: 320 },
+    ] }]
+    : [{ id: "house", title: "House Special", ingredients: [{ name: "Vodka", oz: 77 }, { name: "Mixer", oz: 700 }] }];
+  const inventory = { current: { onHandOverrides: {} }, snapshots: [{
+    kegPlanSnapshot: { generatedAt }, items: [{ id: "simple-syrup", name: "Simple Syrup", onHandDisplay: "0" }],
+  }] };
   const context = vm.createContext({
     randomUUID, structuredClone, buildStaffPrepPlan, buildWeeklyActionPlan,
+    isInHousePrepIngredient, refreshWeeklyIngredientPrep,
     getCocktailRecipeYieldOz, normalizeCocktailRecipeName, COCKTAIL_RECIPE_YIELDS: [],
     getCurrentWeeklyPlanSnapshot: rec => rec.weeklyPlanSnapshot,
     readParAgentState: async () => structuredClone(state),
     readPrepRecipes: async () => recipes,
     findPrepRecipe: () => recipes[0],
-    readSharedInventoryState: async () => ({ snapshots: [] }),
+    readSharedInventoryState: async () => structuredClone(inventory),
     recordDashboardActivity: async () => {},
     writeParAgentState: async (next, { expectedRevision }) => {
       assert.equal(expectedRevision, state.revision);
@@ -37,7 +50,7 @@ function harness() {
     },
   });
   vm.runInContext(executable(source), context);
-  return { context, state: () => state, writes: () => writes, initialOrders,
+  return { context, state: () => state, writes: () => writes, initialOrders, inventory,
     body: (extra = {}) => ({ generatedAt, expectedRevision: state.revision, requestId: randomUUID(), cocktailId: "tap:93", cooler: "Karaoke", quantity: 1, ...extra }),
     identity: { role: "owner", name: "Test manager" } };
 }
@@ -45,6 +58,59 @@ function harness() {
 test("prep choices retain individual taps even when a tap currently needs no prep", async () => {
   const h = harness(); const result = await h.context.readWeeklyPrepChoices();
   assert.deepEqual(Array.from(result.tapCocktails, x => [x.id, x.name, x.wall]), [["tap:47", "House Special 1", "Main"], ["tap:93", "House Special 2", "Karaoke"]]);
+});
+
+test("adding and subtracting Lemon Drop recalculates exact syrup prep without replacing other records", async () => {
+  const h = harness({ lemonDrop: true });
+  h.state().recommendations.items[0].orderQty = 0;
+  const snapshot = h.state().recommendations.weeklyPlanSnapshot;
+  snapshot.plan.prep.ingredients = [{ id: "other-prep", name: "Other prep", quantity: 1 }];
+  snapshot.plan.prep.note = "Keep chilled";
+  const originalInventory = structuredClone(h.inventory);
+  await h.context.addWeeklyPrepCocktail(h.body(), h.identity);
+  let prep = h.state().recommendations.weeklyPlanSnapshot.plan.prep;
+  assert.equal(prep.ingredients[1].quantity, 2.5);
+  assert.equal(prep.ingredients[1].requiredGallons, 2.5);
+  assert.equal(prep.note, "Keep chilled");
+  assert.deepEqual(prep.ingredients[0], { id: "other-prep", name: "Other prep", quantity: 1 });
+  assert.deepEqual(h.state().recommendations.weeklyPlanSnapshot.plan.orders, h.initialOrders);
+  assert.deepEqual(h.inventory, originalInventory);
+  const added = buildStaffPrepPlan(h.state().recommendations).items.find(item => item.prepAdditionId);
+  await h.context.subtractWeeklyPrepCocktail(h.body({ itemId: added.id }), h.identity);
+  prep = h.state().recommendations.weeklyPlanSnapshot.plan.prep;
+  assert.deepEqual(prep.ingredients, [{ id: "other-prep", name: "Other prep", quantity: 1 }]);
+  assert.equal(prep.note, "Keep chilled");
+  assert.deepEqual(h.state().recommendations.weeklyPlanSnapshot.plan.orders, h.initialOrders);
+});
+
+test("syrup prep retains completed batch demand because completion leaves the syrup count unchanged", async () => {
+  const h = harness({ lemonDrop: true });
+  const original = buildStaffPrepPlan(h.state().recommendations).items[0];
+  h.state().recommendations = applyStaffPrepPlanUpdate(h.state().recommendations, {
+    generatedAt: h.state().recommendations.generatedAt, itemId: original.id, completed: true, preparedBy: "Test",
+  });
+  const checklist = structuredClone(h.state().recommendations.prepChecklist);
+  h.inventory.current.onHandOverrides["simple-syrup"] = "3";
+  await h.context.addWeeklyPrepCocktail(h.body({ quantity: 2 }), h.identity);
+  let syrup = h.state().recommendations.weeklyPlanSnapshot.plan.prep.ingredients[0];
+  assert.equal(syrup.requiredGallons, 7.5);
+  assert.equal(syrup.quantity, 4.5);
+  const added = buildStaffPrepPlan(h.state().recommendations).items.find(item => item.prepAdditionId);
+  await h.context.subtractWeeklyPrepCocktail(h.body({ itemId: added.id }), h.identity);
+  syrup = h.state().recommendations.weeklyPlanSnapshot.plan.prep.ingredients[0];
+  assert.equal(syrup.requiredGallons, 5);
+  assert.equal(syrup.quantity, 2);
+  assert.equal(h.inventory.current.onHandOverrides["simple-syrup"], "3");
+  assert.deepEqual(h.state().recommendations.prepChecklist, checklist);
+});
+
+test("a blank current syrup count holds prep instead of falling back to an older saved count", async () => {
+  const h = harness({ lemonDrop: true });
+  h.inventory.current.onHandOverrides["simple-syrup"] = "";
+  await h.context.addWeeklyPrepCocktail(h.body(), h.identity);
+  const syrup = h.state().recommendations.weeklyPlanSnapshot.plan.prep.ingredients[0];
+  assert.match(syrup.holdReason, /Verify the Simple Syrup count/);
+  assert.equal(syrup.onHandGallons, null);
 });
 
 test("adding custom batches is idempotent, keeps correct cooler/yield and leaves orders unchanged", async () => {

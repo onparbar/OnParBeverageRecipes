@@ -16,7 +16,8 @@ export function getWeeklySnapshotCompletionSummary(snapshot) {
     liquorRefillCompleted: 0, liquorRefillTotal };
 }
 
-// Historical views use only the selected snapshot, never current dashboard inputs.
+// Historical figures stay frozen; a separately labeled current-plan total may
+// be supplied only for the snapshot belonging to the active weekly plan.
 export function renderSavedWeeklySnapshot(snapshot, helpers) {
   const { escapeHtml: html, formatNumber: number, money, formatUpdatedAt, dateLabel } = helpers;
   const items = Array.isArray(snapshot.items) ? snapshot.items : [];
@@ -121,7 +122,8 @@ export function renderSavedWeeklySnapshot(snapshot, helpers) {
     ${lateReason ? `<p class="muted">Late capture: ${html(lateReason)}</p>` : ""}
     <div class="inventory-history-value-summary">
       <div class="inventory-history-value-summary__total"><span>Total beverage inventory</span><strong>${currency(snapshot.summary?.totalBeverageInventoryValue)}</strong></div>
-      <div><span>Simple syrup needed for next week</span><strong>${html(helpers.simpleSyrupNeed || "Not recorded")}</strong></div>
+      ${helpers.currentSimpleSyrupNeed ? `<div><span>Simple syrup for this week's cocktails</span><strong>${html(helpers.currentSimpleSyrupNeed)}</strong></div>` : ""}
+      <div><span>Simple syrup planned when saved</span><strong>${html(helpers.simpleSyrupNeed || "Not recorded")}</strong></div>
     </div>
     <details class="weekly-snapshot-section" data-snapshot-section="counts"${["counts", "kegs", "inventory"].some(key => openSections.has(key)) ? " open" : ""}>
       <summary><span>Saved counts</span><strong>${quantity(taps.length)} taps / ${quantity(items.length)} items</strong></summary>
