@@ -28,9 +28,20 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
     cloneSourceName: "VODKA CRAN (TITO'S) 1",
     imageUrl: "/images/products/vodka-cran-2.png",
   }),
+  Object.freeze({
+    id: "liquor:makers-mark",
+    kind: "liquor",
+    name: "Maker's Mark",
+  }),
+  Object.freeze({
+    id: "liquor:ciroc-pineapple",
+    kind: "liquor",
+    name: "Ciroc Pineapple",
+  }),
 ]);
 
 const RETIRED_COMING_SOON_IDS = new Set([
+  "beer:octoberfest",
   "recipe:bacardi-sunset",
   "liquor:captain-morgan",
   "liquor:don-julio-blanco-2",

@@ -10,6 +10,7 @@ import {
   mergeRequiredComingSoonItems,
   REQUIRED_COMING_SOON_ITEMS,
 } from "../public/coming-soon-items.mjs";
+import { buildKegOnDeckOptions } from "../public/keg-on-deck-options.mjs";
 
 test("shows only unresolved products in the Coming Soon section", () => {
   const active = getActiveComingSoonItems([
@@ -29,12 +30,14 @@ test("keeps the required products in Coming Soon", () => {
       "Whiskey Smash (Jim Beam) 1",
       "Triple Jam Cider 2",
       "Vodka Cran (Tito's) 2",
+      "Maker's Mark",
+      "Ciroc Pineapple",
     ],
   );
 
   const merged = mergeRequiredComingSoonItems([]);
-  assert.equal(merged.length, 4);
-  assert.deepEqual(merged.map(({ kind }) => kind), ["recipe", "recipe", "beer", "recipe"]);
+  assert.equal(merged.length, 6);
+  assert.deepEqual(merged.map(({ kind }) => kind), ["recipe", "recipe", "beer", "recipe", "liquor", "liquor"]);
   assert.deepEqual(
     merged.find(({ id }) => id === "recipe:vodka-cran-2"),
     {
@@ -157,6 +160,82 @@ test("Bacardi Sunset is removed from old saved Coming Soon data and never reseed
   assert.equal(saved.length, 1);
 });
 
+test("an older local Coming Soon draft cannot revive Octoberfest or omit the required liquor options", () => {
+  const staleDraft = [
+    { id: "beer:octoberfest", kind: "beer", name: "Octoberfest", kegCost: 185 },
+    { id: "beer:psychopathy", kind: "beer", name: "Psychopathy", pricePerOz: 0.6 },
+    { id: "beer:christmas-ale", kind: "beer", name: "Christmas Ale", kegCost: 204 },
+  ];
+  const queued = [{
+    id: "pmb-publish:beer:octoberfest",
+    kind: "beer",
+    name: "Octoberfest",
+    status: "ready",
+    payload: { kegCost: 185 },
+  }];
+  const draftBefore = JSON.stringify(staleDraft);
+  const queueBefore = JSON.stringify(queued);
+  const merged = mergeRequiredComingSoonItems(staleDraft, queued);
+  const replayed = mergeRequiredComingSoonItems(JSON.parse(JSON.stringify(merged)), queued);
+
+  assert.equal(merged.some(item => item.id === "beer:octoberfest"), false);
+  assert.equal(getActiveComingSoonItems(staleDraft).some(item => item.id === "beer:octoberfest"), false);
+  for (const id of ["liquor:makers-mark", "liquor:ciroc-pineapple"]) {
+    assert.equal(merged.filter(item => item.id === id).length, 1);
+  }
+  assert.equal(merged.find(item => item.id === "beer:psychopathy")?.pricePerOz, 0.6);
+  assert.equal(merged.find(item => item.id === "beer:christmas-ale")?.kegCost, 204);
+  assert.equal(JSON.stringify(replayed), JSON.stringify(merged), "reloads do not reintroduce or duplicate products");
+  assert.equal(JSON.stringify(staleDraft), draftBefore, "the recoverable local draft stays untouched");
+  assert.equal(JSON.stringify(queued), queueBefore, "the publishing queue stays untouched");
+});
+
+test("liquor defaults preserve saved prices, PMB identities, and completed-product history", () => {
+  const saved = [
+    {
+      id: "liquor:makers-mark", kind: "liquor", name: "Maker's Mark",
+      plu: 1234, bottleCost: 47, bottleOz: 59.1745, pricePerOz: 2.25,
+      pmbActiveAt: "2026-10-01T16:00:00Z", replacedAt: "2026-10-02T16:00:00Z",
+      replaceTapKey: "main-10", imageUrl: "/saved-makers-mark.png",
+    },
+    {
+      id: "liquor:ciroc-pineapple", kind: "liquor", name: "Ciroc Pineapple",
+      plu: 5678, bottleCost: 29.99, bottleOz: 25.3605, pricePerOz: 2,
+      description: "Saved product details", imageUrl: "/saved-ciroc-pineapple.png",
+    },
+    {
+      id: "beer:octoberfest", kind: "beer", name: "Octoberfest",
+      plu: 41438, replacedAt: "2026-09-28T16:00:00Z", kegCost: 182,
+    },
+  ];
+  const before = JSON.stringify(saved);
+  const merged = mergeRequiredComingSoonItems(saved);
+
+  for (const original of saved.slice(0, 2)) {
+    const item = merged.find(entry => entry.id === original.id);
+    for (const [key, value] of Object.entries(original)) assert.deepEqual(item?.[key], value, `${original.id}: ${key}`);
+  }
+  assert.equal(getActiveComingSoonItems(merged).some(item => item.id === "liquor:makers-mark"), false);
+  assert.equal(getActiveComingSoonItems(merged).some(item => item.id === "liquor:ciroc-pineapple"), true);
+  assert.equal(merged.some(item => item.id === "beer:octoberfest"), false);
+  assert.equal(JSON.stringify(saved), before, "the saved Octoberfest archive and all other source records stay untouched");
+});
+
+test("On Deck offers both required liquor products after stale Coming Soon data is restored", () => {
+  const comingSoonItems = mergeRequiredComingSoonItems([
+    { id: "beer:octoberfest", kind: "beer", name: "Octoberfest" },
+    { id: "beer:christmas-ale", kind: "beer", name: "Christmas Ale", plu: 7654 },
+  ]);
+  const options = buildKegOnDeckOptions({ comingSoonItems });
+  for (const [id, name] of [["liquor:makers-mark", "Maker's Mark"], ["liquor:ciroc-pineapple", "Ciroc Pineapple"]]) {
+    const option = options.find(item => item.id === id);
+    assert.equal(option?.name, name);
+    assert.equal(option?.kind, "liquor");
+  }
+  assert.equal(options.some(item => item.id === "beer:octoberfest"), false);
+  assert.equal(options.find(item => item.id === "beer:christmas-ale")?.plu, 7654);
+});
+
 test("clone previews and publishing use the main-wall image instead of the saved substitute", () => {
   const source = readFileSync(new URL("../public/dashboard.js", import.meta.url), "utf8");
   const context = vm.createContext({
@@ -182,25 +261,25 @@ test("clone previews and publishing use the main-wall image instead of the saved
 
 test("includes an unpublished queued beer in Coming Soon immediately", () => {
   const merged = mergeRequiredComingSoonItems([], [{
-    id: "pmb-publish:beer:octoberfest",
+    id: "pmb-publish:beer:future-lager",
     kind: "beer",
-    name: "Octoberfest",
+    name: "Future Lager",
     status: "ready",
     updatedAt: "2026-08-15T05:32:00.000Z",
     payload: {
-      name: "Octoberfest",
+      name: "Future Lager",
       kegCost: 185,
       kegOz: 1984,
       pricePerOz: 0.52,
       abvPercent: 5.3,
     },
   }]);
-  const octoberfest = merged.find(({ id }) => id === "beer:octoberfest");
+  const futureLager = merged.find(({ id }) => id === "beer:future-lager");
 
-  assert.equal(octoberfest?.kind, "beer");
-  assert.equal(octoberfest?.name, "Octoberfest");
-  assert.equal(octoberfest?.kegCost, 185);
-  assert.equal(octoberfest?.source, "PMB publishing queue");
+  assert.equal(futureLager?.kind, "beer");
+  assert.equal(futureLager?.name, "Future Lager");
+  assert.equal(futureLager?.kegCost, 185);
+  assert.equal(futureLager?.source, "PMB publishing queue");
 });
 
 test("includes an unpublished queued liquor tap in Coming Soon immediately", () => {
