@@ -29,7 +29,7 @@ import { mountTapPerformance } from "./tap-performance.mjs";
 import "./operations-learning-ui.mjs";
 import { classifyShotPriceReadback } from "./shot-price-readback.mjs";
 import { waitForPmbTapReadiness } from "./pmb-repair-monitor.mjs";
-import { inventorySnapshotInputsMatch } from "./inventory-snapshot-recovery.mjs";
+import { inventorySnapshotInputsMatch, isRejectedInventorySnapshot } from "./inventory-snapshot-recovery.mjs";
 import {
   buildInventoryPosition,
   buildOperationalRecommendation,
@@ -14536,8 +14536,10 @@ function nextInventoryOutboxClientOrder() {
 }
 
 function stageInventoryActionOutbox(payload, options = {}) {
+  const capturedRevision = payload.action === "save-snapshot" && payload.reliableCapture === true
+    ? payload.snapshotBaseState?.revision : undefined;
   const entry = createOperationalOutboxEntry({
-    baseRevision: inventorySharedRevision,
+    baseRevision: capturedRevision ?? inventorySharedRevision,
     payload: {
       ...payload,
       countedAt: new Date().toISOString(),
@@ -14798,6 +14800,12 @@ async function loadSharedInventoryState() {
       applySharedInventoryState(state);
       if (getPendingInventoryOperations().length) {
         overlayInventoryOutboxes();
+        if (!await retireRejectedInventorySnapshots()) return;
+        if (!getPendingInventoryOperations().length) {
+          inventorySharedSaveError = "";
+          inventorySharedMessage = "The outdated snapshot attempt was backed up. Current inventory counts are preserved.";
+          return;
+        }
         const safeToRetry = getPendingInventoryOperations().every(({ kind, entry }) => (
           canAutoRecoverInventoryOperation(kind, entry, state.revision)
         ));
@@ -15062,7 +15070,8 @@ function queueInventoryActionSync(operationId) {
         inventoryActionOutbox[currentIndex] = markOperationalOutboxFailure(inventoryActionOutbox[currentIndex], {
           message: error.message || "A pending Inventory operation could not be saved.",
           currentRevision: error.currentRevision,
-          conflict: error.code === "INVENTORY_STATE_REVISION_CONFLICT",
+          conflict: error.code === "INVENTORY_STATE_REVISION_CONFLICT"
+            || (body.action === "save-snapshot" && error.code === "INVALID_INVENTORY_STATE_REVISION"),
         });
       }
       saveInventoryActionOutbox();
@@ -15355,7 +15364,7 @@ function isIncludedInInventoryValue(item) {
 
 function renderInventorySummary() {
   const needsSetup = inventorySharedProvisioned && !inventorySharedInitialized;
-  const needsRecovery = inventoryActionOutbox.some((entry) => entry.conflict && entry.payload.action === "save-snapshot");
+  const needsRecovery = inventoryActionOutbox.some(isRejectedInventorySnapshot);
   const message = inventorySharedSaveError || inventorySharedMessage;
   const feedback = document.querySelector("#inventory-submit-feedback");
   if (feedback) {
@@ -16894,7 +16903,7 @@ function toggleInventoryRowEdit(id) {
 }
 
 async function retireRejectedInventorySnapshots() {
-  const rejected = inventoryActionOutbox.filter(entry => entry.conflict && entry.payload?.action === "save-snapshot");
+  const rejected = inventoryActionOutbox.filter(isRejectedInventorySnapshot);
   if (!rejected.length) return true;
   try {
     // These captures cannot be reused with new inputs. Archive each independently

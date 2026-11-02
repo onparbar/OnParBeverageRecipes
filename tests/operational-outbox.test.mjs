@@ -57,6 +57,21 @@ test("only a known successful local commit rebases later pending operations", ()
   }).baseRevision, 5);
 });
 
+test("a reliable snapshot keeps its captured revision after another local save", () => {
+  const entry = createOperationalOutboxEntry({
+    baseRevision: 4,
+    payload: {
+      action: "save-snapshot", reliableCapture: true, captureId: "capture-1",
+      snapshotBaseState: { revision: 4, current: { onHandOverrides: { vodka: "2" } } },
+    },
+  });
+  const rebased = rebaseOperationalOutboxAfterOwnCommit(entry, {
+    committedBaseRevision: 4, nextRevision: 5,
+  });
+  assert.equal(rebased.baseRevision, 4);
+  assert.deepEqual(rebased.payload, entry.payload);
+});
+
 test("invalid persisted map entries are ignored without losing valid operations", () => {
   const valid = createOperationalOutboxEntry({
     baseRevision: 1,

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { applyInventoryStateAction, createEmptyInventoryState, normalizeInventoryState } from "../lib/inventory-store.mjs";
 import { markOperationalOutboxFailure, canSafelyRetryOperationalOutbox, createOperationalOutboxEntry } from "../public/operational-outbox.mjs";
+import { isRejectedInventorySnapshot } from "../public/inventory-snapshot-recovery.mjs";
 
 const morning = "2026-10-12T12:00:00.000Z";
 const afternoon = "2026-10-12T16:00:00.000Z";
@@ -101,6 +102,7 @@ function recoveryHarness({ put = async () => {}, persist = () => true } = {}) {
   const unknown = createOperationalOutboxEntry({ id: "unknown", baseRevision: 8, updatedAt: afternoon, payload: { action: "save-snapshot", captureId: "unknown" } });
   const scope = {
     inventoryActionOutbox: [rejected, unknown], inventorySharedSaveError: "old conflict",
+    isRejectedInventorySnapshot,
     inventorySnapshotRecoveryJournal: { put }, saveInventoryActionOutbox: persist,
     getPendingInventoryOperations: () => scope.inventoryActionOutbox,
   };
@@ -118,6 +120,46 @@ test("snapshot recovery archives rejected captures while preserving unknown outc
   assert.equal(await recovery, true);
   assert.deepEqual(archived.map(record => record.id), ["rejected"]);
   assert.deepEqual(Array.from(h.inventoryActionOutbox, record => record.id), ["unknown", "new-count"]);
+});
+
+test("legacy snapshots with rebased envelopes are archived without changing counts or unrelated work", async () => {
+  const archived = [];
+  const h = recoveryHarness({ put: async record => { archived.push(record); } });
+  const malformed = createOperationalOutboxEntry({
+    id: "malformed", baseRevision: 9, payload: {
+      action: "save-snapshot", reliableCapture: true, captureId: "malformed",
+      snapshotBaseState: { revision: 8, current: { onHandOverrides: { vodka: "2" } } },
+    },
+  });
+  const unknown = createOperationalOutboxEntry({
+    id: "unknown", baseRevision: 9, payload: {
+      action: "save-snapshot", reliableCapture: true, captureId: "unknown",
+      snapshotBaseState: { revision: 9 },
+    },
+  });
+  const count = entry("batch-update-fields", "count");
+  h.inventoryActionOutbox = [malformed, unknown, count];
+  h.inventoryOnHandOverrides = { vodka: "2", gin: "5" };
+  assert.equal(await h.retireRejectedInventorySnapshots(), true);
+  assert.deepEqual(archived.map(record => record.id), ["malformed"]);
+  assert.deepEqual(archived[0].payload, malformed.payload);
+  assert.deepEqual(Array.from(h.inventoryActionOutbox, record => record.id), ["unknown", "count"]);
+  assert.deepEqual(h.inventoryOnHandOverrides, { vodka: "2", gin: "5" });
+});
+
+test("new snapshot actions use the captured revision even when the dashboard has advanced", () => {
+  const scope = {
+    inventorySharedRevision: 9, inventoryActionOutbox: [],
+    createOperationalOutboxEntry, clean: value => String(value || "").trim(),
+    nextInventoryOutboxClientOrder: () => 1, saveInventoryActionOutbox: () => true,
+  };
+  vm.runInContext(functionSource("stageInventoryActionOutbox"), vm.createContext(scope));
+  const payload = { action: "save-snapshot", reliableCapture: true, snapshotBaseState: { revision: 8 } };
+  const staged = scope.stageInventoryActionOutbox(payload);
+  assert.equal(staged.baseRevision, 8);
+  assert.equal(staged.payload.snapshotBaseState.revision, 8);
+  assert.ok(staged.payload.captureId);
+  assert.equal(scope.stageInventoryActionOutbox({ action: "batch-update-fields", changes: [] }).baseRevision, 9);
 });
 
 test("snapshot archive or outbox write failure retains the full pending capture", async () => {

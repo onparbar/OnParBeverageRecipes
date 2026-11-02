@@ -17,3 +17,16 @@ export function inventorySnapshotInputsMatch(local = {}, shared = {}) {
   });
   return JSON.stringify(canonical(inputs(local))) === JSON.stringify(canonical(inputs(shared)));
 }
+
+export function isRejectedInventorySnapshot(entry) {
+  if (entry?.payload?.action !== "save-snapshot") return false;
+  if (entry.conflict === true) return true;
+  const capturedRevision = entry.payload.snapshotBaseState?.revision;
+  // Older clients rebased the request envelope without changing its captured
+  // inputs. That request is invalid, including after its error text was lost.
+  // An intact capture with an uncertain network outcome must remain retryable.
+  return entry.payload.reliableCapture === true
+    && Number.isSafeInteger(capturedRevision) && capturedRevision >= 0
+    && Number.isSafeInteger(entry.baseRevision) && entry.baseRevision >= 0
+    && capturedRevision !== entry.baseRevision;
+}

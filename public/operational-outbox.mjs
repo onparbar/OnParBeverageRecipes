@@ -173,6 +173,9 @@ export function rebaseOperationalOutboxAfterOwnCommit(entry, {
   const next = normalizeRevision(nextRevision);
   if (!normalized || committedBase === null || next === null) return normalized;
   if (normalized.baseRevision !== committedBase) return normalized;
+  // A reliable capture's calculations belong to its recorded inventory base.
+  // The server must compare that base, even after this browser saves a count.
+  if (normalized.payload.action === "save-snapshot" && normalized.payload.reliableCapture === true) return normalized;
   return {
     ...normalized,
     baseRevision: next,
