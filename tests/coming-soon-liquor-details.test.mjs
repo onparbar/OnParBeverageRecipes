@@ -80,7 +80,7 @@ test("the migrated Maker's Mark and Ciroc cards show their complete approved pro
   ]);
   for (const [id, single, double, label, rate, abv] of [
     ["liquor:makers-mark", 7, 9, "1.75 L", "4.67", 45],
-    ["liquor:ciroc-pineapple", 12, 16, "750 mL", "8.00", 35],
+    ["liquor:ciroc-pineapple", 12, 16, "1 L", "8.00", 35],
   ]) {
     const item = items.find((entry) => entry.id === id);
     const html = helpers.renderComingSoonItem(item);
@@ -97,8 +97,9 @@ test("the migrated Maker's Mark and Ciroc cards show their complete approved pro
     assert.match(html, /activate-coming-soon-pmb" type="button" disabled/);
   }
   const cirocHtml = helpers.renderComingSoonItem(items.find((entry) => entry.id === "liquor:ciroc-pineapple"));
-  assert.match(cirocHtml, /\$24\.99<\/b> estimated bottle cost/);
-  assert.match(cirocHtml, /Bottle cost source: OHLQ retail estimate/);
+  assert.match(cirocHtml, /\$38\.99<\/b> bottle cost/);
+  assert.match(cirocHtml, /Bottle cost source: OHLQ largest bottle · 2056L/);
+  assert.doesNotMatch(cirocHtml, /estimated bottle cost/);
 });
 
 test("bottle size labels are used and escaped while an absent label retains the ounce fallback", () => {

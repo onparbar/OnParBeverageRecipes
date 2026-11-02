@@ -38,11 +38,13 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
     abvPercent: 45,
     description: "Kentucky straight bourbon with vanilla, caramel, bright fruit and soft spice, followed by a smooth, creamy finish.",
     imageUrl: "/images/products/makers-mark.webp",
-    bottleCost: 47,
+    bottleCost: 49.99,
     bottleOz: 59.1745,
     bottleSizeLabel: "1.75 L",
-    bottleCostSource: "Saved supplier price",
-    bottleCostCheckedAt: "2026-09-10",
+    bottleCostStatus: "verified",
+    bottleCostSource: "OHLQ largest bottle · 6060D",
+    bottleCostCheckedAt: "2026-11-02",
+    bottleCostSourceUrl: "https://www.ohlq.com/liquor/whiskey/american/bourbon/makers-mark?sku=6060d",
     pricePerOz: 4.67,
     servingOz: 1.5,
     targetMargin: 82,
@@ -62,13 +64,13 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
     abvPercent: 35,
     description: "French grape-based vodka distilled five times and infused with pineapple and other natural flavors for a smooth tropical taste.",
     imageUrl: "/images/products/ciroc-pineapple.webp",
-    bottleCost: 24.99,
-    bottleOz: 25.3605,
-    bottleSizeLabel: "750 mL",
-    bottleCostStatus: "estimate",
-    bottleCostSource: "OHLQ retail estimate",
+    bottleCost: 38.99,
+    bottleOz: 33.814,
+    bottleSizeLabel: "1 L",
+    bottleCostStatus: "verified",
+    bottleCostSource: "OHLQ largest bottle · 2056L",
     bottleCostCheckedAt: "2026-11-02",
-    bottleCostSourceUrl: "https://www.ohlq.com/liquor/vodka/flavored/ciroc-pineapple",
+    bottleCostSourceUrl: "https://www.ohlq.com/liquor/vodka/flavored/ciroc-pineapple?sku=2056l",
     pricePerOz: 8,
     servingOz: 1.5,
     targetMargin: 82,
@@ -79,6 +81,13 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
     priceStatus: "approved",
   }),
 ]);
+
+// Repair only the exact cost baselines previously seeded by this dashboard.
+// User-entered costs and completed products retain their original data.
+const PREVIOUS_LIQUOR_BOTTLE_BASELINES = {
+  "liquor:makers-mark": { bottleCost: 47, bottleOz: 59.1745, bottleCostSource: "Saved supplier price", bottleCostCheckedAt: "2026-09-10" },
+  "liquor:ciroc-pineapple": { bottleCost: 24.99, bottleOz: 25.3605, bottleCostSource: "OHLQ retail estimate", bottleCostCheckedAt: "2026-11-02", bottleCostStatus: "estimate" },
+};
 
 const RETIRED_COMING_SOON_IDS = new Set([
   "beer:octoberfest",
@@ -111,6 +120,13 @@ function hasText(value) {
 
 function mergeRequiredLiquorItem(required, existing = {}) {
   const merged = { ...existing, id: required.id, kind: required.kind, name: required.name };
+  const previousBottle = PREVIOUS_LIQUOR_BOTTLE_BASELINES[required.id];
+  if (!existing.replacedAt && !existing.pmbActiveAt && !positiveNumber(existing.plu)
+      && previousBottle && Object.entries(previousBottle).every(([field, value]) => existing[field] === value)) {
+    for (const field of ["bottleCost", "bottleOz", "bottleSizeLabel", "bottleCostStatus", "bottleCostSource", "bottleCostCheckedAt", "bottleCostSourceUrl"]) {
+      merged[field] = required[field];
+    }
+  }
   for (const field of ["producer", "brewery", "style", "description", "imageUrl"]) {
     if (!hasText(merged[field])) merged[field] = required[field];
   }

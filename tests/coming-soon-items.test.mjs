@@ -223,8 +223,8 @@ test("liquor defaults preserve saved prices, PMB identities, and completed-produ
 
 test("minimal and blank liquor cards receive complete product details and approved portions", () => {
   const expected = [
-    { id: "liquor:makers-mark", name: "Maker's Mark", abv: 45, cost: 47, size: 59.1745, label: "1.75 L", rate: 4.67, prices: [7, 9], image: "/images/products/makers-mark.webp" },
-    { id: "liquor:ciroc-pineapple", name: "Ciroc Pineapple", abv: 35, cost: 24.99, size: 25.3605, label: "750 mL", rate: 8, prices: [12, 16], image: "/images/products/ciroc-pineapple.webp" },
+    { id: "liquor:makers-mark", name: "Maker's Mark", abv: 45, cost: 49.99, size: 59.1745, label: "1.75 L", rate: 4.67, prices: [7, 9], image: "/images/products/makers-mark.webp" },
+    { id: "liquor:ciroc-pineapple", name: "Ciroc Pineapple", abv: 35, cost: 38.99, size: 33.814, label: "1 L", rate: 8, prices: [12, 16], image: "/images/products/ciroc-pineapple.webp" },
   ];
   for (const product of expected) {
     for (const blanks of [{}, {
@@ -258,13 +258,37 @@ test("minimal and blank liquor cards receive complete product details and approv
   }
   const defaults = mergeRequiredComingSoonItems([]);
   const makers = defaults.find(item => item.id === "liquor:makers-mark");
-  assert.equal(makers.bottleCostSource, "Saved supplier price");
-  assert.equal(makers.bottleCostCheckedAt, "2026-09-10");
+  assert.equal(makers.bottleCostSource, "OHLQ largest bottle · 6060D");
+  assert.equal(makers.bottleCostCheckedAt, "2026-11-02");
   const ciroc = defaults.find(item => item.id === "liquor:ciroc-pineapple");
-  assert.equal(ciroc.bottleCostStatus, "estimate");
-  assert.equal(ciroc.bottleCostSource, "OHLQ retail estimate");
+  assert.equal(ciroc.bottleCostStatus, "verified");
+  assert.equal(ciroc.bottleCostSource, "OHLQ largest bottle · 2056L");
   assert.equal(ciroc.bottleCostCheckedAt, "2026-11-02");
-  assert.equal(ciroc.bottleCostSourceUrl, "https://www.ohlq.com/liquor/vodka/flavored/ciroc-pineapple");
+  assert.equal(ciroc.bottleCostSourceUrl, "https://www.ohlq.com/liquor/vodka/flavored/ciroc-pineapple?sku=2056l");
+});
+
+test("older seeded bottle records migrate to the largest OHLQ size and exact listed price together", () => {
+  const saved = [
+    { id: "liquor:makers-mark", kind: "liquor", name: "Maker's Mark", bottleCost: 47, bottleOz: 59.1745, bottleSizeLabel: "1.75 L", bottleCostSource: "Saved supplier price", bottleCostCheckedAt: "2026-09-10" },
+    { id: "liquor:ciroc-pineapple", kind: "liquor", name: "Ciroc Pineapple", bottleCost: 24.99, bottleOz: 25.3605, bottleSizeLabel: "750 mL", bottleCostSource: "OHLQ retail estimate", bottleCostCheckedAt: "2026-11-02", bottleCostStatus: "estimate" },
+  ].map(item => ({ ...item, portions: [{ name: "Single", quantityOz: 1.5, price: 12 }], pricePerOz: 8, createdAt: "2026-11-02T20:16:13.371Z" }));
+  const before = JSON.stringify(saved);
+  const merged = mergeRequiredComingSoonItems(saved);
+  for (const old of saved) {
+    const item = merged.find(entry => entry.id === old.id);
+    const required = REQUIRED_COMING_SOON_ITEMS.find(entry => entry.id === old.id);
+    for (const field of ["bottleCost", "bottleOz", "bottleSizeLabel", "bottleCostStatus", "bottleCostSource", "bottleCostSourceUrl"]) assert.equal(item[field], required[field], field);
+    assert.deepEqual(item.portions, old.portions);
+    assert.equal(item.pricePerOz, old.pricePerOz);
+    assert.equal(item.createdAt, old.createdAt);
+    for (const changed of [{ bottleCost: 39 }, { bottleCostSource: "Supplier invoice" }, { plu: 1234 }, { replacedAt: "2026-11-02T21:00:00Z" }]) {
+      const custom = { ...old, ...changed };
+      const preserved = mergeRequiredComingSoonItems([custom]).find(entry => entry.id === old.id);
+      for (const [field, value] of Object.entries(custom)) assert.deepEqual(preserved[field], value, field);
+    }
+  }
+  assert.equal(JSON.stringify(saved), before);
+  assert.equal(JSON.stringify(mergeRequiredComingSoonItems(merged)), JSON.stringify(merged));
 });
 
 test("saved liquor prices do not acquire conflicting portions or unearned approval", () => {
@@ -320,7 +344,7 @@ test("saved custom bottle costs and sizes never inherit fallback estimate attrib
     assert.equal(item.bottleCost, saved.bottleCost || saved.kegCost);
     assert.equal(item.bottleOz, saved.bottleOz || saved.kegOz);
     for (const field of sourceFields) assert.equal(item[field], undefined, field);
-    if (item.bottleOz !== 25.3605) assert.equal(item.bottleSizeLabel, undefined);
+    if (item.bottleOz !== 33.814) assert.equal(item.bottleSizeLabel, undefined);
   }
   const saved = {
     ...base, bottleCost: 30, bottleOz: 25.3605, bottleCostStatus: "verified",
