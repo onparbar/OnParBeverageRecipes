@@ -32,11 +32,51 @@ export const REQUIRED_COMING_SOON_ITEMS = Object.freeze([
     id: "liquor:makers-mark",
     kind: "liquor",
     name: "Maker's Mark",
+    producer: "Maker's Mark",
+    brewery: "Maker's Mark",
+    style: "Kentucky Straight Bourbon",
+    abvPercent: 45,
+    description: "Kentucky straight bourbon with vanilla, caramel, bright fruit and soft spice, followed by a smooth, creamy finish.",
+    imageUrl: "/images/products/makers-mark.webp",
+    bottleCost: 47,
+    bottleOz: 59.1745,
+    bottleSizeLabel: "1.75 L",
+    bottleCostSource: "Saved supplier price",
+    bottleCostCheckedAt: "2026-09-10",
+    pricePerOz: 4.67,
+    servingOz: 1.5,
+    targetMargin: 82,
+    portions: Object.freeze([
+      Object.freeze({ name: "Single", quantityOz: 1.5, price: 7 }),
+      Object.freeze({ name: "Double", quantityOz: 2, price: 9 }),
+    ]),
+    priceStatus: "approved",
   }),
   Object.freeze({
     id: "liquor:ciroc-pineapple",
     kind: "liquor",
     name: "Ciroc Pineapple",
+    producer: "Cîroc",
+    brewery: "Cîroc",
+    style: "Pineapple Vodka",
+    abvPercent: 35,
+    description: "French grape-based vodka distilled five times and infused with pineapple and other natural flavors for a smooth tropical taste.",
+    imageUrl: "/images/products/ciroc-pineapple.webp",
+    bottleCost: 24.99,
+    bottleOz: 25.3605,
+    bottleSizeLabel: "750 mL",
+    bottleCostStatus: "estimate",
+    bottleCostSource: "OHLQ retail estimate",
+    bottleCostCheckedAt: "2026-11-02",
+    bottleCostSourceUrl: "https://www.ohlq.com/liquor/vodka/flavored/ciroc-pineapple",
+    pricePerOz: 8,
+    servingOz: 1.5,
+    targetMargin: 82,
+    portions: Object.freeze([
+      Object.freeze({ name: "Single", quantityOz: 1.5, price: 12 }),
+      Object.freeze({ name: "Double", quantityOz: 2, price: 16 }),
+    ]),
+    priceStatus: "approved",
   }),
 ]);
 
@@ -58,6 +98,62 @@ function clean(value) {
 
 function slug(value) {
   return clean(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function positiveNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function hasText(value) {
+  return typeof value === "string" && Boolean(clean(value)) && clean(value) !== "0";
+}
+
+function mergeRequiredLiquorItem(required, existing = {}) {
+  const merged = { ...existing, id: required.id, kind: required.kind, name: required.name };
+  for (const field of ["producer", "brewery", "style", "description", "imageUrl"]) {
+    if (!hasText(merged[field])) merged[field] = required[field];
+  }
+  const savedPortions = Array.isArray(existing.portions) && existing.portions.length
+    ? existing.portions : null;
+  const savedSingle = savedPortions?.find(portion => /single/i.test(clean(portion?.name))) || savedPortions?.[0];
+  const savedPortionOz = positiveNumber(savedSingle?.quantityOz) || positiveNumber(savedSingle?.servingOz);
+  const portionRate = savedPortionOz && positiveNumber(savedSingle?.price)
+    ? Number(savedSingle.price) / savedPortionOz : 0;
+  const savedPrice = positiveNumber(existing.chargePerOz) || positiveNumber(existing.pricePerOz) || portionRate;
+  const savedServing = positiveNumber(existing.pourOz) || positiveNumber(existing.servingOz);
+
+  const positiveFallbacks = {
+    abvPercent: required.abvPercent,
+    bottleCost: positiveNumber(existing.kegCost) || required.bottleCost,
+    bottleOz: positiveNumber(existing.kegOz) || required.bottleOz,
+    pricePerOz: savedPrice || required.pricePerOz,
+    servingOz: savedServing || required.servingOz,
+    targetMargin: required.targetMargin,
+  };
+  for (const [field, fallback] of Object.entries(positiveFallbacks)) {
+    if (!positiveNumber(merged[field])) merged[field] = fallback;
+  }
+
+  // Cost provenance describes this exact bottle/price, not any saved supplier cost.
+  const defaultBottleSize = Number(merged.bottleOz) === required.bottleOz;
+  if (defaultBottleSize && !hasText(merged.bottleSizeLabel)) merged.bottleSizeLabel = required.bottleSizeLabel;
+  if (defaultBottleSize && Number(merged.bottleCost) === required.bottleCost) {
+    for (const field of ["bottleCostStatus", "bottleCostSource", "bottleCostCheckedAt", "bottleCostSourceUrl"]) {
+      if (!hasText(merged[field]) && hasText(required[field])) merged[field] = required[field];
+    }
+  }
+
+  const defaultPrice = !savedPrice || Math.abs(savedPrice - required.pricePerOz) < 0.000001;
+  const defaultServing = !savedServing || savedServing === required.servingOz;
+  if (!savedPortions && defaultPrice && defaultServing) {
+    merged.portions = required.portions.map(portion => ({ ...portion }));
+  }
+  // A matching number alone cannot establish that an older saved price was approved.
+  if (!hasText(merged.priceStatus) && !savedPrice && !savedPortions && defaultServing) {
+    merged.priceStatus = required.priceStatus;
+  }
+  return merged;
 }
 
 function isSameComingSoonProduct(left, right) {
@@ -136,7 +232,10 @@ export function getActiveComingSoonItems(items = []) {
 
 export function mergeRequiredComingSoonItems(items = [], pmbPublishQueue = []) {
   const safeItems = Array.isArray(items)
-    ? items.filter((item) => (
+    ? items.map((item) => {
+        const required = REQUIRED_COMING_SOON_ITEMS.find(entry => entry.id === clean(item?.id));
+        return required && !hasText(item.name) ? { ...item, name: required.name } : item;
+      }).filter((item) => (
         item
         && typeof item === "object"
         && clean(item.id)
@@ -157,7 +256,16 @@ export function mergeRequiredComingSoonItems(items = [], pmbPublishQueue = []) {
     (REQUIRED_COMING_SOON_LEGACY_IDS[required.id] || []).forEach((legacyId) => {
       byId.delete(legacyId);
     });
-    const existing = byId.get(required.id);
+    const existing = byId.get(required.id)
+      || (required.kind === "liquor" && [...byId.values()].find(item => isSameComingSoonProduct(item, required)));
+    if (required.kind === "liquor") {
+      const merged = mergeRequiredLiquorItem(required, existing || {});
+      // Publishing may have assigned a numeric or older slug ID. Keep that
+      // selection stable while enriching its saved values instead of duplicating it.
+      merged.id = existing?.id || required.id;
+      byId.set(merged.id, merged);
+      return;
+    }
     byId.set(required.id, existing
       ? {
           ...required,

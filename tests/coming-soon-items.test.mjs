@@ -221,6 +221,155 @@ test("liquor defaults preserve saved prices, PMB identities, and completed-produ
   assert.equal(JSON.stringify(saved), before, "the saved Octoberfest archive and all other source records stay untouched");
 });
 
+test("minimal and blank liquor cards receive complete product details and approved portions", () => {
+  const expected = [
+    { id: "liquor:makers-mark", name: "Maker's Mark", abv: 45, cost: 47, size: 59.1745, label: "1.75 L", rate: 4.67, prices: [7, 9], image: "/images/products/makers-mark.webp" },
+    { id: "liquor:ciroc-pineapple", name: "Ciroc Pineapple", abv: 35, cost: 24.99, size: 25.3605, label: "750 mL", rate: 8, prices: [12, 16], image: "/images/products/ciroc-pineapple.webp" },
+  ];
+  for (const product of expected) {
+    for (const blanks of [{}, {
+      name: "", kind: "", producer: " ", brewery: null, style: 0,
+      description: "", imageUrl: null, abvPercent: 0, bottleCost: null,
+      bottleOz: "0", bottleSizeLabel: " ", pricePerOz: 0, servingOz: null,
+      targetMargin: 0, portions: [], priceStatus: null, plu: 9876,
+    }]) {
+      const saved = { id: product.id, kind: "liquor", name: product.name, ...blanks };
+      const before = JSON.stringify(saved);
+      const item = mergeRequiredComingSoonItems([saved]).find(entry => entry.id === product.id);
+      assert.equal(item.name, product.name);
+      assert.equal(item.kind, "liquor");
+      for (const field of ["producer", "brewery", "style", "description"]) assert.ok(item[field]?.trim(), field);
+      assert.equal(item.imageUrl, product.image);
+      assert.equal(item.abvPercent, product.abv);
+      assert.equal(item.bottleCost, product.cost);
+      assert.equal(item.bottleOz, product.size);
+      assert.equal(item.bottleSizeLabel, product.label);
+      assert.equal(item.pricePerOz, product.rate);
+      assert.equal(item.servingOz, 1.5);
+      assert.equal(item.targetMargin, 82);
+      assert.deepEqual(item.portions, [
+        { name: "Single", quantityOz: 1.5, price: product.prices[0] },
+        { name: "Double", quantityOz: 2, price: product.prices[1] },
+      ]);
+      assert.equal(item.priceStatus, "approved");
+      if (saved.plu) assert.equal(item.plu, saved.plu);
+      assert.equal(JSON.stringify(saved), before);
+    }
+  }
+  const defaults = mergeRequiredComingSoonItems([]);
+  const makers = defaults.find(item => item.id === "liquor:makers-mark");
+  assert.equal(makers.bottleCostSource, "Saved supplier price");
+  assert.equal(makers.bottleCostCheckedAt, "2026-09-10");
+  const ciroc = defaults.find(item => item.id === "liquor:ciroc-pineapple");
+  assert.equal(ciroc.bottleCostStatus, "estimate");
+  assert.equal(ciroc.bottleCostSource, "OHLQ retail estimate");
+  assert.equal(ciroc.bottleCostCheckedAt, "2026-11-02");
+  assert.equal(ciroc.bottleCostSourceUrl, "https://www.ohlq.com/liquor/vodka/flavored/ciroc-pineapple");
+});
+
+test("saved liquor prices do not acquire conflicting portions or unearned approval", () => {
+  const base = { id: "liquor:ciroc-pineapple", kind: "liquor", name: "Ciroc Pineapple" };
+  const customPortions = [{ name: "Single", quantityOz: 1.5, price: 10 }, { name: "Double", quantityOz: 2, price: 13 }];
+  for (const saved of [
+    { ...base, pricePerOz: 6 },
+    { ...base, chargePerOz: 6 },
+    { ...base, pricePerOz: 6, portions: customPortions },
+    { ...base, portions: customPortions },
+    { ...base, pricePerOz: 8 },
+    { ...base, servingOz: 1 },
+  ]) {
+    const item = mergeRequiredComingSoonItems([saved]).find(entry => entry.id === base.id);
+    assert.equal(item.priceStatus, undefined);
+    if (saved.portions) assert.deepEqual(item.portions, saved.portions);
+    else if (saved.pricePerOz !== 8) assert.equal(item.portions, undefined);
+    if (saved.pricePerOz) assert.equal(item.pricePerOz, saved.pricePerOz);
+    if (saved.chargePerOz) {
+      assert.equal(item.chargePerOz, saved.chargePerOz);
+      assert.equal(item.pricePerOz, saved.chargePerOz);
+    }
+    if (saved.servingOz) assert.equal(item.servingOz, saved.servingOz);
+  }
+  const savedApproval = { ...base, pricePerOz: 6, portions: customPortions, priceStatus: "approved", approvedAt: "2026-10-15T12:00:00Z" };
+  const item = mergeRequiredComingSoonItems([savedApproval]).find(entry => entry.id === base.id);
+  assert.equal(item.priceStatus, savedApproval.priceStatus);
+  assert.equal(item.approvedAt, savedApproval.approvedAt);
+  assert.deepEqual(item.portions, customPortions);
+});
+
+test("saved servingOz portions determine the ounce rate without being replaced by defaults", () => {
+  const saved = {
+    id: "liquor:ciroc-pineapple", kind: "liquor", name: "Ciroc Pineapple",
+    portions: [{ name: "Single", servingOz: 1.5, price: 10 }, { name: "Double", servingOz: 2, price: 13 }],
+  };
+  const item = mergeRequiredComingSoonItems([saved]).find(entry => entry.id === saved.id);
+  assert.equal(item.pricePerOz, 10 / 1.5);
+  assert.deepEqual(item.portions, saved.portions);
+  assert.equal(item.priceStatus, undefined);
+  assert.deepEqual(mergeRequiredComingSoonItems([item]).find(entry => entry.id === saved.id), item);
+});
+
+test("saved custom bottle costs and sizes never inherit fallback estimate attribution", () => {
+  const base = { id: "liquor:ciroc-pineapple", kind: "liquor", name: "Ciroc Pineapple" };
+  const sourceFields = ["bottleCostStatus", "bottleCostSource", "bottleCostCheckedAt", "bottleCostSourceUrl"];
+  for (const saved of [
+    { ...base, bottleCost: 30, bottleOz: 25.3605 },
+    { ...base, kegCost: 30, kegOz: 25.3605 },
+    { ...base, bottleCost: 24.99, bottleOz: 33.814 },
+  ]) {
+    const item = mergeRequiredComingSoonItems([saved]).find(entry => entry.id === base.id);
+    assert.equal(item.bottleCost, saved.bottleCost || saved.kegCost);
+    assert.equal(item.bottleOz, saved.bottleOz || saved.kegOz);
+    for (const field of sourceFields) assert.equal(item[field], undefined, field);
+    if (item.bottleOz !== 25.3605) assert.equal(item.bottleSizeLabel, undefined);
+  }
+  const saved = {
+    ...base, bottleCost: 30, bottleOz: 25.3605, bottleCostStatus: "verified",
+    bottleCostSource: "Supplier invoice", bottleCostCheckedAt: "2026-10-30",
+    bottleCostSourceUrl: "https://supplier.example/invoice", bottleSizeLabel: "750 ml bottle",
+  };
+  const item = mergeRequiredComingSoonItems([saved]).find(entry => entry.id === base.id);
+  for (const [field, value] of Object.entries(saved)) assert.deepEqual(item[field], value, field);
+});
+
+test("older liquor IDs and queued Maker's Mark retain their custom pricing when defaults are filled", () => {
+  const saved = {
+    id: "liquor:1234", kind: "liquor", name: "Maker's Mark", plu: 1234,
+    bottleCost: 55, bottleOz: 59.1745, pricePerOz: 6, imageUrl: "/saved.png",
+  };
+  const queued = {
+    id: "pmb-publish:liquor:maker-s-mark", kind: "liquor", name: "Maker's Mark", status: "ready",
+    payload: { bottleCost: 55, bottleOz: 59.1745, pricePerOz: 6, imageUrl: "/saved.png" },
+  };
+  for (const [items, queue, expectedId] of [[[saved], [], saved.id], [[], [queued], "liquor:maker-s-mark"]]) {
+    const merged = mergeRequiredComingSoonItems(items, queue);
+    const makers = merged.filter(item => item.name === "Maker's Mark");
+    assert.equal(makers.length, 1);
+    assert.equal(makers[0].id, expectedId);
+    assert.equal(makers[0].bottleCost, 55);
+    assert.equal(makers[0].pricePerOz, 6);
+    assert.equal(makers[0].imageUrl, "/saved.png");
+    assert.equal(makers[0].portions, undefined);
+    assert.equal(makers[0].priceStatus, undefined);
+    assert.equal(makers[0].bottleCostSource, undefined);
+    assert.ok(makers[0].description);
+    assert.equal(JSON.stringify(mergeRequiredComingSoonItems(merged, queue)), JSON.stringify(merged));
+  }
+});
+
+test("liquor fallback hydration stays stable across reloads for defaults and custom pricing", () => {
+  for (const saved of [
+    [],
+    [{ id: "liquor:ciroc-pineapple", kind: "liquor", name: "Ciroc Pineapple", pricePerOz: 6, bottleCost: 30 }],
+    [{ id: "liquor:makers-mark", kind: "liquor", name: "Maker's Mark", imageUrl: "/custom.png", replacedAt: "2026-10-01T12:00:00Z", plu: 1234 }],
+  ]) {
+    const first = JSON.parse(JSON.stringify(mergeRequiredComingSoonItems(saved)));
+    const second = JSON.parse(JSON.stringify(mergeRequiredComingSoonItems(first)));
+    const third = JSON.parse(JSON.stringify(mergeRequiredComingSoonItems(second)));
+    assert.deepEqual(second, first);
+    assert.deepEqual(third, first);
+  }
+});
+
 test("On Deck offers both required liquor products after stale Coming Soon data is restored", () => {
   const comingSoonItems = mergeRequiredComingSoonItems([
     { id: "beer:octoberfest", kind: "beer", name: "Octoberfest" },

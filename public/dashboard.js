@@ -9180,6 +9180,8 @@ function renderComingSoonBlock() {
 
 function renderComingSoonItem(item) {
   const imageUrl = getComingSoonImageUrl(item);
+  const description = getComingSoonCardDescription(item.description);
+  const needsPortionSetup = item.kind === "liquor" && !toNumber(item.plu) && Array.isArray(item.portions) && item.portions.length > 0;
   const label = item.pmbActiveAt ? "Update PMB product" : item.plu ? "Update & activate on PMB" : "Create & activate on PMB";
   const onDeckLocations = (item.onDeckAssignments || []).map((assignment) => assignment.tapNumber
     ? `${assignment.wall ? `${assignment.wall} · ` : ""}Tap ${assignment.tapNumber}`
@@ -9192,9 +9194,12 @@ function renderComingSoonItem(item) {
           <strong>${escapeHtml(item.name)}</strong>
           <span>${escapeHtml(getComingSoonKindLabel(item.kind))}</span>
         </div>
+        ${description ? `<p>${escapeHtml(description)}</p>` : ""}
+        ${item.kind === "liquor" ? renderComingSoonLiquorDetails(item) : ""}
+        ${needsPortionSetup ? '<p class="table-note">Single/Double prices are saved. PMB portion setup is required before activation.</p>' : ""}
         ${onDeckLocations.length ? `<span class="table-note table-note--accent">On Deck: ${escapeHtml(onDeckLocations.join(", "))}</span>` : ""}
         <div class="coming-soon-controls">
-          <button class="mini-button activate-coming-soon-pmb" type="button"${item.replacedAt ? " disabled" : ""}>${label}</button>
+          <button class="mini-button activate-coming-soon-pmb" type="button"${item.replacedAt || needsPortionSetup ? " disabled" : ""}>${label}</button>
         </div>
       </div>
     </article>
@@ -9230,12 +9235,34 @@ function renderComingSoonRecipeStats(item) {
 }
 
 function renderComingSoonLiquorDetails(item) {
+  const catalogPricing = getComingSoonLiquorCatalogPricing(item);
+  const producer = clean(item.producer || item.brewery);
+  const bottleCost = toNumber(item.bottleCost || item.kegCost || catalogPricing?.unitPrice);
+  const bottleOz = toNumber(item.bottleOz || item.kegOz || catalogPricing?.bottleOz);
+  const pricePerOz = toNumber(item.chargePerOz || item.pricePerOz);
+  const proposed = item.priceStatus === "proposed";
+  const savedPortions = (Array.isArray(item.portions) ? item.portions : []).map((portion) => ({
+    name: clean(portion.name),
+    servingOz: toNumber(portion.servingOz || portion.quantityOz),
+    price: toNumber(portion.price),
+  })).filter((portion) => portion.price > 0 && portion.servingOz > 0);
+  const portions = savedPortions.length ? savedPortions : pricePerOz > 0 ? [
+    { name: "Single", servingOz: 1.5, price: Math.ceil(pricePerOz * 1.5 - 1e-9) },
+    { name: "Double", servingOz: 2, price: Math.ceil(pricePerOz * 2 - 1e-9) },
+  ] : [];
   const details = [
-    item.producer ? `<span><b>${escapeHtml(item.producer)}</b> maker</span>` : "",
+    producer ? `<span><b>${escapeHtml(producer)}</b> maker</span>` : "",
     item.style ? `<span><b>${escapeHtml(item.style)}</b></span>` : "",
     toNumber(item.abvPercent) ? `<span><b>${formatNumber(item.abvPercent)}%</b> ABV</span>` : "",
+    bottleCost > 0 ? `<span><b>${money(bottleCost)}</b> ${item.bottleCostStatus === "estimate" ? "estimated bottle cost" : "bottle cost"}</span>` : "",
+    bottleOz > 0 ? `<span><b>${escapeHtml(clean(item.bottleSizeLabel)) || `${formatNumber(bottleOz)} oz`}</b> bottle size</span>` : "",
+    pricePerOz > 0
+      ? `<span><b>${money(pricePerOz)}</b> ${proposed ? "proposed price" : "tap price"} / oz</span>`
+      : "<span><b>Tap price not set</b></span>",
+    ...portions.map((portion) => `<span><b>${money(portion.price).replace(/\.00$/, "")}</b> ${proposed ? "proposed " : ""}${escapeHtml(portion.name || "Pour")} · ${formatNumber(portion.servingOz)} oz</span>`),
   ].filter(Boolean);
-  return details.length ? `<div class="coming-soon-stats">${details.join("")}</div>` : "";
+  const costSource = clean(item.bottleCostSource);
+  return `<div class="coming-soon-stats">${details.join("")}</div>${costSource ? `<p class="table-note">Bottle cost source: ${escapeHtml(costSource)}</p>` : ""}`;
 }
 
 function getReplaceableTapOptions(selectedKey = "") {
@@ -12325,7 +12352,7 @@ async function sendComingSoonItemToPmb(id, { activate = false } = {}) {
     };
   } catch (error) {
     kegSyncMessage = clean(error?.message) || `${item.name} needs more information before it can be sent to PMB.`;
-    if (item.kind === "liquor") {
+    if (item.kind === "liquor" && error?.code !== "COMING_SOON_PORTION_SETUP_REQUIRED") {
       openComingSoonLiquorSetup(item);
     } else {
       renderKegLevels();
@@ -12396,7 +12423,7 @@ async function sendComingSoonItemToPmb(id, { activate = false } = {}) {
 function getComingSoonLiquorCatalogPricing(item) {
   if (item?.kind !== "liquor") return null;
   const catalogKey = clean(item.id).replace(/^liquor:/, "");
-  return CATALOG_PRICING[catalogKey] || null;
+  return OHLQ_MAPPINGS[catalogKey] || null;
 }
 
 function openComingSoonLiquorSetup(item) {
@@ -12433,6 +12460,11 @@ function openComingSoonLiquorSetup(item) {
 }
 
 function buildPmbPayloadFromComingSoonItem(item) {
+  if (item.kind === "liquor" && !toNumber(item.plu) && Array.isArray(item.portions) && item.portions.length > 0) {
+    throw Object.assign(new Error("Single/Double prices are saved. PMB portion setup is required before activation."), {
+      code: "COMING_SOON_PORTION_SETUP_REQUIRED",
+    });
+  }
   // Let PMB copy the original wall product's image for a duplicate product.
   // A saved preview must not override that source image during publishing.
   const imageUrl = clean(item.cloneSourceName) ? "" : clean(item.imageUrl);
@@ -12444,9 +12476,9 @@ function buildPmbPayloadFromComingSoonItem(item) {
     plu: toNumber(item.plu) || "",
     name: item.name,
     pricePerOz: toNumber(item.chargePerOz || item.pricePerOz),
-    servingOz: toNumber(item.pourOz) || (item.kind === "liquor" ? 1.5 : item.kind === "beer" ? 16 : 5.8),
-    brewery: "On Par Entertainment",
-    style: item.kind === "beer" ? "Beer" : item.kind === "liquor" ? "Liquor" : "Draft Cocktail",
+    servingOz: toNumber(item.pourOz || item.servingOz) || (item.kind === "liquor" ? 1.5 : item.kind === "beer" ? 16 : 5.8),
+    brewery: clean(item.producer || item.brewery) || "On Par Entertainment",
+    style: clean(item.style) || (item.kind === "beer" ? "Beer" : item.kind === "liquor" ? "Liquor" : "Draft Cocktail"),
     abvPercent: toNumber(item.abvPercent),
     ibu: "0",
     kegOz: item.kind === "beer"
