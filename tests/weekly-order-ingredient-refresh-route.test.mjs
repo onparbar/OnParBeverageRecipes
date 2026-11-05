@@ -61,15 +61,16 @@ for (const body of [
   { action: "record-handoff", event: "opened_vendor" },
   { action: "set-ordered", ordered: true },
 ]) {
-  test(`legacy unplaced supplier rejects ${body.action} before mutating or archiving`, async () => {
+  test(`legacy unplaced supplier permits ${body.action} without changing its purchase plan`, async () => {
     const f = fixture();
-    const before = structuredClone(f.state);
+    const before = structuredClone(f.state.recommendations.weeklyPlanSnapshot);
     const result = await f.post(body);
-    assert.equal(result.status, 409);
-    assert.equal(result.body.code, "INGREDIENT_ORDERS_REFRESH_REQUIRED");
-    assert.deepEqual(f.events, []);
-    assert.deepEqual(f.writes, []);
-    assert.deepEqual(f.state, before);
+    assert.equal(result.status, 200, result.body.error);
+    assert.equal(f.writes.length, 1);
+    assert.equal(f.writes[0].options.expectedRevision, 7);
+    assert.equal(f.events.includes("refresh-adjustment"), false);
+    assert.equal(f.events.includes("archive"), body.action === "set-ordered");
+    assert.deepEqual(f.writes[0].value.recommendations.weeklyPlanSnapshot, before);
   });
 
   test(`refreshed supplier permits ${body.action} through its normal validation`, async () => {
@@ -91,10 +92,13 @@ test("a legacy placed order permits an idempotent placement retry", async () => 
 
 test("legacy placed delivery receipts keep their existing inventory workflow", async () => {
   const f = fixture({ placed: true, role: "employee" });
+  const before = structuredClone(f.state.recommendations.weeklyPlanSnapshot);
   const result = await f.post({ action: "set-receipt", itemId: f.vendor.items[0].id, status: "received", receivedQuantity: 14 });
   assert.equal(result.status, 200, result.body.error);
   assert.ok(f.events.includes("receipt-plan"));
+  assert.equal(f.events.includes("refresh-adjustment"), false);
   assert.equal(f.writes.length, 1);
+  assert.deepEqual(f.writes[0].value.recommendations.weeklyPlanSnapshot, before);
   assert.equal(result.body.vendors.find(vendor => vendor.vendor === "OHLQ").items[0].status, "received");
 });
 
@@ -106,11 +110,30 @@ test("staff order approval retains its owner-only error", async () => {
   assert.equal(f.writes.length, 0);
 });
 
-test("a current manual order adjustment still refreshes ingredient reviews", async () => {
-  const f = fixture({ legacy: false });
-  const catalog = buildWeeklyOrderTracking(f.state.recommendations, now()).adjustmentCatalog.find(item => item.internalId === "absolut-citron");
-  const result = await f.post({ action: "set-order-adjustment", catalogId: catalog.catalogId, quantity: 12, reason: "Partial supplier availability." });
-  assert.equal(result.status, 200, result.body.error);
-  assert.ok(f.events.includes("refresh-adjustment"));
-  assert.equal(f.writes.length, 1);
-});
+for (const legacy of [true, false]) {
+  for (const action of ["set-order-adjustment", "set-order-adjustments", "remove-order-adjustment"]) {
+    test(`${legacy ? "legacy" : "two-Thursday"} ${action} ${legacy ? "preserves the purchase plan" : "refreshes ingredient reviews"}`, async () => {
+      const f = fixture({ legacy });
+      const catalog = buildWeeklyOrderTracking(f.state.recommendations, now()).adjustmentCatalog.find(item => item.internalId === "absolut-citron");
+      const adjustment = { catalogId: catalog.catalogId, vendor: "OHLQ", quantity: 12, reason: "Partial supplier availability." };
+      if (action === "remove-order-adjustment") {
+        f.state.recommendations = applyWeeklyOrderTrackingUpdate(f.state.recommendations, {
+          action: "set-order-adjustment", generatedAt, adjustedBy: "Sam", ...adjustment,
+        }, { role: "owner", now });
+      }
+      const before = structuredClone(f.state.recommendations.weeklyPlanSnapshot);
+      const result = await f.post(action === "set-order-adjustments"
+        ? { action, adjustments: [adjustment] }
+        : { action, ...adjustment });
+      assert.equal(result.status, 200, result.body.error);
+      assert.equal(f.events.filter(event => event === "refresh-adjustment").length, legacy ? 0 : 1);
+      assert.equal(f.writes.length, 1);
+      assert.equal(f.writes[0].options.expectedRevision, 7);
+      if (legacy) assert.deepEqual(f.writes[0].value.recommendations.weeklyPlanSnapshot, before);
+      const tracked = buildWeeklyOrderTracking(f.writes[0].value.recommendations, now());
+      assert.equal(tracked.adjustments.length, action === "remove-order-adjustment" ? 0 : 1);
+      assert.equal(tracked.vendors.find(vendor => vendor.vendor === "OHLQ").items[0].quantity,
+        action === "remove-order-adjustment" ? 14 : 12);
+    });
+  }
+}

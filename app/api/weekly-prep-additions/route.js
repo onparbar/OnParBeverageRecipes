@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireDashboardRequestIdentity } from "../../../lib/dashboard-auth.mjs";
-import { addWeeklyPrepCocktail, readWeeklyPrepChoices, subtractWeeklyPrepCocktail, refreshWeeklyIngredientPurchases } from "../../../lib/weekly-prep-additions.mjs";
+import { addWeeklyPrepCocktail, readWeeklyPrepChoices, subtractWeeklyPrepCocktail } from "../../../lib/weekly-prep-additions.mjs";
 
 export const runtime = "nodejs";
 
@@ -34,7 +34,7 @@ export async function POST(request) {
     let body;
     try { body = await request.json(); } catch { return respond({ error: "The prep details are invalid." }, 400); }
     if (!body || typeof body !== "object" || Array.isArray(body)) return respond({ error: "The prep details are invalid." }, 400);
-    if (body.action === "refresh-ingredients") return respond(await refreshWeeklyIngredientPurchases(body, identity));
+    if (body.action && !["add", "subtract"].includes(body.action)) return respond({ error: "That prep action is not supported." }, 400);
     return respond(await (body.action === "subtract" ? subtractWeeklyPrepCocktail(body, identity) : addWeeklyPrepCocktail(body, identity)));
   } catch (error) {
     return respond({

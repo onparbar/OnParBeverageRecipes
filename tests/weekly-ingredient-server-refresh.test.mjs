@@ -10,7 +10,7 @@ function fixture() {
     { name: "Absolut Citron", raw: "Absolut Citron=14 bottles (1.75L)", oz: 828 },
     { name: "Gallons Strawberry lemonade", oz: 320 },
   ] }];
-  const snapshot = { generatedAt: "2026-11-02T16:57:27.987Z", plan: buildWeeklyActionPlan(), orderCatalog: [
+  const snapshot = { ingredientPlanningVersion: 2, generatedAt: "2026-11-09T16:57:27.987Z", plan: buildWeeklyActionPlan(), orderCatalog: [
     { id: "absolut-citron", name: "Absolut Citron", vendor: "OHLQ", vendorSku: "0028D",
       vendorProductName: "Absolut Citron Vodka 1.75L", packSize: 1, casePackaged: false, unitCost: 32.9, orderCategory: "liquor" },
   ] };
@@ -60,4 +60,13 @@ test("missing saved tap evidence cannot silently publish a current-only ingredie
   context.savedCounts.kegPlanSnapshot.tapInputs = [];
   assert.throws(() => refreshIngredientPurchases(context, { weeklyPlanSnapshot: context.snapshot }),
     error => error.code === "INGREDIENT_FORECAST_INPUTS_MISSING");
+});
+
+test("an existing published week is preserved without reading or rewriting ingredient evidence", () => {
+  const context = fixture();
+  delete context.snapshot.ingredientPlanningVersion;
+  const recommendations = { generatedAt: context.snapshot.generatedAt, items: [], weeklyPlanSnapshot: context.snapshot };
+  const before = structuredClone(recommendations);
+  assert.equal(refreshIngredientPurchases({}, recommendations), recommendations);
+  assert.deepEqual(recommendations, before);
 });

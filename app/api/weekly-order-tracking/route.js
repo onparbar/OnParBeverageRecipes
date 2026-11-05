@@ -100,18 +100,6 @@ export async function POST(request) {
       orderedBy: identity.name,
     };
     const priorTracking = buildWeeklyOrderTracking(state.recommendations);
-    const advancesOrder = ["approve-draft", "review-and-approve", "record-handoff"].includes(body.action)
-      || (body.action === "set-ordered" && body.ordered === true);
-    const targetVendor = body.action === "set-ordered"
-      ? priorTracking.vendors.find((vendor) => vendor.id === String(body.vendorId || "").trim())
-      : priorTracking.vendors.find((vendor) => vendor.vendor === String(body.vendor || "").trim());
-    if (role === "owner" && advancesOrder && !targetVendor?.ordered
-      && !(Number(state.recommendations.weeklyPlanSnapshot?.ingredientPlanningVersion) >= 2)) {
-      return jsonResponse({
-        error: "Refresh ingredient orders for this Thursday and next Thursday before placing this order.",
-        code: "INGREDIENT_ORDERS_REFRESH_REQUIRED",
-      }, 409);
-    }
     let effectiveBody = body;
     let updatedRecommendations = applyWeeklyOrderTrackingUpdate(
       state.recommendations,

@@ -23,7 +23,7 @@ function harness({ lemonDrop = false } = {}) {
     item.name = `Lemon Drop Martini (Absolut Citron) ${index + 1}`;
     item.batchSizeOz = 1448;
   });
-  let state = { initialized: true, revision: 2, recommendations: { generatedAt, items, prepChecklist: {}, weeklyPlanSnapshot: { generatedAt, plan: buildWeeklyActionPlan({ recommendations: items }) } } };
+  let state = { initialized: true, revision: 2, recommendations: { generatedAt, items, prepChecklist: {}, weeklyPlanSnapshot: { ingredientPlanningVersion: 2, generatedAt, plan: buildWeeklyActionPlan({ recommendations: items }) } } };
   const initialOrders = structuredClone(state.recommendations.weeklyPlanSnapshot.plan.orders);
   let writes = 0;
   const recipes = lemonDrop
@@ -214,18 +214,28 @@ test("prep API exposes conflict codes used by the safe removal retry", async () 
   assert.equal(response.body.code, "WEEKLY_PREP_REVISION_CONFLICT");
 });
 
-test("legacy ingredient refresh is revision guarded and idempotent without changing counts or prep", async () => {
+test("editing prep in an existing legacy week preserves its published purchases", async () => {
   const h = harness();
   delete h.state().recommendations.weeklyPlanSnapshot.ingredientPlanningVersion;
   const beforeInventory = structuredClone(h.inventory);
-  const beforePrep = structuredClone(h.state().recommendations.weeklyPlanSnapshot.plan.prep);
-  await assert.rejects(() => h.context.refreshWeeklyIngredientPurchases(h.body({ expectedRevision: 1 }), h.identity),
-    error => error.code === "WEEKLY_PREP_REVISION_CONFLICT");
-  const result = await h.context.refreshWeeklyIngredientPurchases(h.body(), h.identity);
-  assert.equal(result.refreshed, true);
+  const beforeOrders = structuredClone(h.state().recommendations.weeklyPlanSnapshot.plan.orders);
+  await h.context.addWeeklyPrepCocktail(h.body(), h.identity);
   assert.equal(h.writes(), 1);
   assert.deepEqual(h.inventory, beforeInventory);
-  assert.deepEqual(h.state().recommendations.weeklyPlanSnapshot.plan.prep, beforePrep);
-  assert.equal((await h.context.refreshWeeklyIngredientPurchases(h.body(), h.identity)).refreshed, false);
-  assert.equal(h.writes(), 1);
+  assert.deepEqual(h.state().recommendations.weeklyPlanSnapshot.plan.orders, beforeOrders);
+  assert.equal(h.state().recommendations.weeklyPlanSnapshot.ingredientPlanningVersion, undefined);
+});
+
+test("retired ingredient migration requests cannot change an existing published plan", async () => {
+  let writes = 0;
+  const ctx = vm.createContext({
+    NextResponse: { json: (body, options) => ({ body, ...options }) },
+    requireDashboardRequestIdentity: async () => ({ role: "owner" }),
+    addWeeklyPrepCocktail: async () => { writes++; },
+    subtractWeeklyPrepCocktail: async () => { writes++; },
+  });
+  vm.runInContext(executable(route), ctx);
+  const result = await ctx.POST({ headers: { get: () => "same-origin" }, json: async () => ({ action: "refresh-ingredients" }) });
+  assert.equal(result.status, 400);
+  assert.equal(writes, 0);
 });

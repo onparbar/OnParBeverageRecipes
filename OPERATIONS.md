@@ -103,8 +103,8 @@ save. Already placed orders and recorded deliveries retain their original
 quantities; extra ingredients appear as an additional-order warning on the
 supplier card. Manager adjustments that leave ingredients short also show a
 warning. Missing saved counts, recipe data, or package sizes require review.
-Older current-week plans refresh their ingredient purchasing on owner dashboard
-startup before unplaced orders can be approved.
+The advance-ordering rule applies to newly published plans. Existing published
+weeks retain their saved purchases, without an automatic ingredient migration.
 
 Purchasing is grouped by distributor by default. Bonbright and Heidelberg are
 shown as separate orders and remain separate sections in the CSV export. Items
