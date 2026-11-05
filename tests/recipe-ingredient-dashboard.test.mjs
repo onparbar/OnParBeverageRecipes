@@ -31,6 +31,7 @@ test("dashboard orders every saved batch and includes a newly counted ingredient
     recipes: [recipe("Apple Jack", fire, 4), recipe("Vodka Cran", tito, 6)],
     getVendorMapping: () => null, getRecipeBuilderPackageConfig: () => null, isKitchenManagedInventoryItem: () => false, isFoodDepartmentOrderedInventoryItem: () => false,
     MENU_ORDER: [], NEW_RECIPE_ORDER: [], liveParRecommendations: null,
+    parAgentState: null, getCurrentWeeklyPlanSnapshot: () => null,
   };
   runInNewContext(declaration("getWeeklyPlanInventoryItems"), context);
   const result = context.getWeeklyPlanInventoryItems();
@@ -38,6 +39,34 @@ test("dashboard orders every saved batch and includes a newly counted ingredient
   assert.equal(result.find(item => item.id === tito.id).orderUnits, 12);
   assert.equal(original.items.length, 1);
   assert.equal(original.items[0].onHandDisplay, "12");
+});
+
+test("saved prep additions drive ingredient orders while Monday tap stock and counts remain frozen", () => {
+  const citron = { id: "absolut-citron", name: "Absolut Citron", group: "Liquor Cabinet", onHandDisplay: "0", parDisplay: "0", orderDisplay: "0", unitCost: 34 };
+  const savedTap = { key: "main:57", tapNumber: 57, wall: "Main", name: "Lemon Drop", currentStockKegs: 2, avgWeeklyKegs: 0.2 };
+  const frozen = { items: [], tapInputs: [savedTap] };
+  const original = { items: [citron] };
+  const context = {
+    clean, toNumber, normalizePackSize, applyInventoryCountPolicy, getLiquorCabinetWeeklyBottleNeeds, getLiquorCabinetOrderQuantity,
+    includeMissingRecipeInventory, buildRollingCocktailIngredientOrders, inventoryHistory: [original],
+    getCurrentMondayInventorySnapshot: () => original, getCurrentMondayKegPlanSnapshot: () => frozen,
+    getInventorySnapshotItems: () => [{ ...citron, onHandDisplay: "20" }],
+    inventoryItems: [{ ...citron, bottleOz: 59.17, vendorProduct: { vendor: "OHLQ", bottleOz: 59.17, preferredSku: citron.id } }],
+    recipes: [{ title: "Lemon Drop", ingredients: [{ name: citron.name, raw: "Absolut Citron=14 bottles (1.75L)", oz: 828 }] }],
+    getVendorMapping: () => null, getRecipeBuilderPackageConfig: () => null, isKitchenManagedInventoryItem: () => false, isFoodDepartmentOrderedInventoryItem: () => false,
+    MENU_ORDER: [], NEW_RECIPE_ORDER: [], liveParRecommendations: null,
+    parAgentState: { recommendations: { items: [{ ...savedTap, prepAdditionId: "lemon-added", actionType: "make", orderQty: 1 }] } },
+    getCurrentWeeklyPlanSnapshot: () => ({ ingredientPlanningVersion: 2 }),
+  };
+  runInNewContext(declaration("getWeeklyPlanInventoryItems"), context);
+  const result = context.getWeeklyPlanInventoryItems();
+  assert.equal(result[0].orderUnits, 14);
+  assert.equal(result[0].onHand, 0);
+  const liveInventory = context.getWeeklyPlanInventoryItems({ live: true });
+  assert.equal(liveInventory[0].cocktailPrepRequiredBottles, 14);
+  assert.equal(liveInventory[0].onHand, 20);
+  assert.equal(frozen.items.length, 0);
+  assert.equal(original.items[0].onHandDisplay, "0");
 });
 
 test("catalog pricing and display preserve an unknown count and individual Mint Syrup packaging", () => {

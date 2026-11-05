@@ -11,17 +11,17 @@ const cabinet = [
   { id: "lime-juice", name: "Lime Juice", group: "Mixer Cabinet", bottleOz: 1, onHand: 3, hasCurrentCount: true, unitCost: 5, packSize: 12, casePackaged: true },
 ];
 
-test("current Thursday excludes later prep while keeping reserves and whole-case rounding", () => {
+test("two Thursdays include later prep while keeping reserves and whole-case rounding", () => {
   const items = buildRollingCocktailIngredientOrders({ inventoryItems: cabinet, recipes: [recipe], tapInputs: [tap] });
-  assert.deepEqual(items[0].rollingPrepWeeks, [0]);
-  assert.equal(items[0].cocktailPrepRequiredBottles, 0);
+  assert.deepEqual(items[0].rollingPrepWeeks, [0, 6]);
+  assert.equal(items[0].cocktailPrepRequiredBottles, 6);
   assert.equal(items[0].rollingReserveUnits, 12);
   assert.equal(items[0].orderUnits, 0);
-  assert.equal(items[1].orderUnits, 12);
-  assert.equal(items[1].estimatedCost, 60);
+  assert.equal(items[1].orderUnits, 24);
+  assert.equal(items[1].estimatedCost, 120);
 });
 
-test("Tito's order covers this Thursday and reserve without buying next week's projected batch", () => {
+test("Tito's order covers both Thursdays and reserve", () => {
   const titoOnlyRecipe = { title: "Example", ingredients: [{ name: "Tito's", oz: 6 }] };
   const items = buildRollingCocktailIngredientOrders({
     inventoryItems: [{ ...cabinet[0], onHand: 18 }], recipes: [titoOnlyRecipe],
@@ -31,10 +31,10 @@ test("Tito's order covers this Thursday and reserve without buying next week's p
       { ...tap, key: "main:59", tapNumber: 59, currentStockKegs: 0.7 },
     ],
   });
-  assert.deepEqual(items[0].rollingPrepWeeks, [12]);
-  assert.equal(items[0].cocktailPrepRequiredBottles, 12);
+  assert.deepEqual(items[0].rollingPrepWeeks, [12, 6]);
+  assert.equal(items[0].cocktailPrepRequiredBottles, 18);
   assert.equal(items[0].rollingReserveUnits, 12);
-  assert.equal(items[0].orderUnits, 6);
+  assert.equal(items[0].orderUnits, 12);
 });
 
 test("a spare keg on another wall cannot satisfy this tap's prep demand", () => {

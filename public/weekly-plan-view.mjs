@@ -32,8 +32,8 @@ export function renderWeeklyPlanInventoryRows(items) {
     const details = [
       item.vendor,
       `${formatNumber(item.onHand)} on hand`,
-      item.rollingIngredientVersion === 1
-        ? `${formatNumber(item.cocktailPrepRequiredBottles)} units for two weeks of prep`
+      item.rollingIngredientVersion >= 1
+        ? `${formatNumber(item.cocktailPrepRequiredBottles)} units for this Thursday and next Thursday`
         : "",
       item.estimatedCost > 0 ? `${money(item.estimatedCost)} estimated` : "Price needed",
     ].filter(Boolean).join(" · ");
@@ -149,4 +149,22 @@ export function renderWeeklyIngredientPrep(items = []) {
         : `<p><strong>Prep ${formatNumber(item.quantity)} gallon${item.quantity === 1 ? "" : "s"} of ${escapeHtml(item.name)}.</strong></p><p>Have it ready before making this week's cocktails.</p>`}
     </div>`).join("")}
   </section>`;
+}
+
+export function renderWeeklyIngredientOrderReview(items = []) {
+  if (!items.length) return "";
+  return `<div class="vendor-order-draft-issues vendor-order-draft-issues--blocked" role="status">
+    <strong>Ingredient ordering needs attention</strong>
+    ${items.map((item) => {
+      const quantity = toNumber(item.quantity);
+      const unit = clean(item.unit) || (item.casePackaged ? "cases" : "units");
+      const amount = quantity > 0 ? `${formatNumber(quantity)} ${quantity === 1 ? unit.replace(/s$/, "") : unit}` : "";
+      const instruction = item.kind === "additional-order"
+        ? `Contact ${clean(item.vendor) || "the supplier"} to add these ingredients. This amount is not included in the placed order.`
+        : item.kind === "adjustment-shortage"
+          ? "Update the order adjustment to cover the planned prep."
+          : "Resolve the ingredient details before ordering.";
+      return `<span><b>${escapeHtml([item.name, amount].filter(Boolean).join(" · "))}</b> ${escapeHtml(instruction)}${item.reason ? ` ${escapeHtml(item.reason)}` : ""}</span>`;
+    }).join("")}
+  </div>`;
 }

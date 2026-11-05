@@ -40,7 +40,7 @@ test("rolling ingredient display explains two-week need without the old par", ()
     rollingIngredientVersion: 1, cocktailPrepRequiredBottles: 8,
     reasons: ["Two-week prep plus reserve minus counted stock.", "<review>"],
   }]);
-  assert.match(html, /8 units for two weeks of prep/);
+  assert.match(html, /8 units for this Thursday and next Thursday/);
   assert.match(html, /Why this quantity\?/);
   assert.match(html, /&lt;review&gt;/);
   assert.doesNotMatch(html, /99 par/);

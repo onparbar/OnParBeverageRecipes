@@ -254,6 +254,7 @@ import {
 } from "./weekly-handoff-state.mjs";
 import {
   renderWeeklyIngredientPrep,
+  renderWeeklyIngredientOrderReview,
   getWeeklyPlanTapContext as getWeeklyPlanTapContextView,
   renderWeeklyPlanCocktailRows as renderWeeklyPlanCocktailRowsView,
   renderWeeklyPlanGroup as renderWeeklyPlanGroupView,
@@ -1036,6 +1037,8 @@ let parAgentStateOutboxDurable = true;
 let weeklyPlanUpdating = false;
 let weeklyPlanRefreshMessage = "";
 let weeklyPlanOutsideMondayReason = "";
+let weeklyIngredientRefreshRunning = false;
+let weeklyIngredientRefreshError = "";
   let weeklyOrderTracking = { available: false, generatedAt: "", drafts: [], adjustments: [], adjustmentCatalog: [], vendors: [], itemCount: 0, receivedCount: 0, notReceivedCount: 0, notReceivedItems: [], activeNotReceivedCount: 0, activeNotReceivedItems: [], criticalNotReceivedItems: [], waitNotReceivedItems: [] };
   let weeklyOrderTrackingMessage = "Loading shared order tracking...";
   let weeklyOrderTrackingRefreshRunning = false;
@@ -1206,6 +1209,7 @@ async function init() {
     loadDashboardActivity(),
   ]);
   reconcileWeeklyOrderTrackingRevision();
+  await refreshCurrentWeeklyIngredientOrders();
   renderDashboardSharedStateStatus();
   hydrateCategoryFilter(recipes);
   bindEvents();
@@ -5442,8 +5446,11 @@ function getWeeklyPlanInventoryItems({ live = false } = {}) {
   const sourceItems = (live ? getInventorySnapshotItems() : includeMissingRecipeInventory(mondaySnapshot?.items || [], getInventorySnapshotItems()))
     .map(applyInventoryCountPolicy);
   const frozenKegPlan = getCurrentMondayKegPlanSnapshot();
+  const currentSnapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
   const recommendationItems = live && liveParRecommendations?.items
     ? liveParRecommendations.items
+    : currentSnapshot && Array.isArray(parAgentState?.recommendations?.items)
+      ? parAgentState.recommendations.items
     : Array.isArray(frozenKegPlan?.items)
     ? frozenKegPlan.items
     : live && isRecommendationForOperatingWeek(parAgentState?.recommendations?.generatedAt, new Date()) && Array.isArray(parAgentState?.recommendations?.items)
@@ -5819,6 +5826,52 @@ function reconcileWeeklyOrderTrackingRevision() {
   parAgentState.revision = weeklyOrderTracking.stateRevision;
   if (parAgentState.recommendations) {
     parAgentState.recommendations.publishedStateRevision = weeklyOrderTracking.stateRevision;
+  }
+}
+
+async function refreshCurrentWeeklyIngredientOrders() {
+  const currentSnapshot = () => getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
+  if (isEmployeeDashboard || weeklyIngredientRefreshRunning) return false;
+  const initialSnapshot = currentSnapshot();
+  if (!initialSnapshot || toNumber(initialSnapshot.ingredientPlanningVersion) >= 2) return false;
+  if (parAgentStateOutbox) {
+    weeklyIngredientRefreshError = "Finish saving Keg Levels, then retry ingredient orders.";
+    return false;
+  }
+  weeklyIngredientRefreshRunning = true;
+  weeklyIngredientRefreshError = "";
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const snapshot = currentSnapshot();
+      if (!snapshot || toNumber(snapshot.ingredientPlanningVersion) >= 2) return true;
+      const { response, result } = await requestOperationalSharedJson("/api/weekly-prep-additions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          action: "refresh-ingredients",
+          generatedAt: snapshot.generatedAt,
+          expectedRevision: parAgentState.revision,
+        }),
+      });
+      if (response.status === 409 && attempt === 0) {
+        await loadParAgentState();
+        if (parAgentStateOutbox) throw new Error("Finish saving Keg Levels, then retry ingredient orders.");
+        continue;
+      }
+      if (!response.ok) throw new Error(result?.error || "Ingredient orders could not be updated.");
+      await Promise.all([loadParAgentState(), loadWeeklyOrderTracking()]);
+      reconcileWeeklyOrderTrackingRevision();
+      if (toNumber(currentSnapshot()?.ingredientPlanningVersion) < 2) {
+        throw new Error("Ingredient orders were updated, but the saved plan could not be reloaded.");
+      }
+      return true;
+    }
+    return false;
+  } catch (error) {
+    weeklyIngredientRefreshError = `Ingredient orders for this Thursday and next Thursday need a refresh. ${error?.message || "Please try again."}`;
+    return false;
+  } finally {
+    weeklyIngredientRefreshRunning = false;
   }
 }
 
@@ -8513,7 +8566,8 @@ function getCurrentVendorOrderPolicy(plan, snapshot = null) {
   return normalizeVendorOrderPolicy({
     proofMinimum: 350,
     proofMinimumCandidates: proofPrep.candidates,
-    proofPrepRequirement: proofPrep.requirement,
+    proofPrepRequirement: savedInventoryItems.some((item) => clean(item.vendor).toLowerCase() === "proof"
+      && toNumber(item.orderUnits) > 0 && !item.orderHoldReason) ? "required" : proofPrep.requirement,
     cocktailIngredientMinimumOrders,
   });
 }
@@ -8530,6 +8584,20 @@ function getVendorOrderDraftModel(plan, freshness) {
     manualAdjustments: weeklyOrderTracking.adjustments,
     manualCatalog: weeklyOrderTracking.adjustmentCatalog,
   });
+  if (!orderRehearsalMode && snapshot && toNumber(snapshot.ingredientPlanningVersion) < 2) {
+    const placedVendors = new Set((weeklyOrderTracking.vendors || [])
+      .filter((vendor) => vendor.ordered === true).map((vendor) => vendor.vendor));
+    model.drafts.forEach((draft) => {
+      if (placedVendors.has(draft.vendor)) return;
+      draft.blockers.push({
+        code: "INGREDIENT_ORDERS_REFRESH_REQUIRED",
+        message: "Refresh ingredient orders for this Thursday and next Thursday before placing this order.",
+      });
+      draft.canApprove = false;
+      draft.status = "blocked";
+    });
+    model.canApproveAll = false;
+  }
   return orderRehearsalMode ? buildOrderRehearsalModel(model) : model;
 }
 
@@ -8634,7 +8702,11 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null, 
   const savedDrafts = orderRehearsalMode ? model.savedDrafts : weeklyOrderTracking.drafts;
   const savedById = new Map((savedDrafts || []).map((draft) => [draft.id, draft]));
   const vendorsByName = new Map((orderRehearsalMode ? [] : weeklyOrderTracking.vendors || []).map((vendor) => [vendor.vendor, vendor]));
-  if (!model.drafts.length) return `${weeklyOrderTrackingMessage ? `<p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage)}</p>` : ""}${renderVendorOrderAdjustments()}`;
+  const ingredientReviews = orderRehearsalMode ? []
+    : getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date())?.ingredientOrderReview || [];
+  const draftVendors = new Set(model.drafts.map((draft) => draft.vendor));
+  const unmatchedIngredientReviews = ingredientReviews.filter((item) => !draftVendors.has(item.vendor));
+  if (!model.drafts.length) return `${renderWeeklyIngredientOrderReview(ingredientReviews)}${weeklyOrderTrackingMessage ? `<p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage)}</p>` : ""}${renderVendorOrderAdjustments()}`;
   const allOrdersPlaced = !orderRehearsalMode && model.drafts.every((draft) => vendorsByName.get(draft.vendor)?.ordered === true);
   return `
     <section class="vendor-order-drafts" ${guided ? 'aria-label="Supplier order"' : 'aria-labelledby="vendor-order-drafts-title"'}>
@@ -8643,6 +8715,7 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null, 
         <div><strong>${formatNumber(model.drafts.reduce((total, draft) => total + draft.lineCount, 0))} items</strong><span>${money(model.weeklyTotal)}</span></div>
       </header>`}
       ${weeklyOrderTrackingMessage ? `<p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage)}</p>` : ""}
+      ${renderWeeklyIngredientOrderReview(unmatchedIngredientReviews)}
       ${guided ? "" : renderVendorOrderAdjustments()}
       <div class="vendor-order-drafts__grid">
         ${model.drafts.map((draft) => {
@@ -8657,6 +8730,7 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null, 
           return `
             <section class="vendor-order-draft-card vendor-order-draft-card--${placed ? "approved vendor-order-draft-card--placed" : draft.status}" data-vendor-order-draft-id="${escapeHtml(draft.vendor)}"${guided ? ` data-supplier-order-card="${escapeHtml(draft.vendor)}" data-supplier-order-placed="${placed}" hidden` : ""}>
               <header><div><h3${guided ? ' class="supplier-order-card-title"' : ""}>${escapeHtml(draft.vendor)}</h3><p>${formatNumber(orderCount)} ${orderUnit}${orderCount === 1 ? "" : "s"} · ${money(draft.estimatedTotal)}</p></div><span title="${escapeHtml(workflow.label)}">${placed ? escapeHtml(workflow.label) : draft.blockers.length ? "Needs attention" : "Ready"}</span></header>
+              ${renderWeeklyIngredientOrderReview(ingredientReviews.filter((item) => item.vendor === draft.vendor))}
               ${guided && !placed ? renderVendorOrderAdjustments(draft.vendor) : ""}
               ${placed ? `<details><summary>${workflow.label === "Received" ? "View received order" : "View order and receive delivery"}</summary>` : ""}
               <div class="vendor-order-draft-lines vendor-order-draft-lines--inline">
@@ -8684,6 +8758,12 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null, 
 }
 
 function bindOwnerWeeklyOrderTrackingEvents() {
+  document.querySelector("#retry-weekly-ingredient-orders")?.addEventListener("click", async () => {
+    const refresh = refreshCurrentWeeklyIngredientOrders();
+    renderWeeklyPlan();
+    await refresh;
+    renderWeeklyPlan();
+  });
   bindVendorOrderController({
     documentRef: document,
     clean,
@@ -8897,7 +8977,9 @@ function renderWeeklyPlan() {
   const liquorRefills = plan.prep.liquorRefills || plan.orders.liquorTapBottles;
   const freshness = getWeeklyPlanFreshness(plan);
   const vendorOrderModel = getVendorOrderDraftModel(plan, freshness);
-  const planLocked = Boolean(getCurrentWeeklyPlanSnapshot(recommendations, new Date()));
+  const lockedSnapshot = getCurrentWeeklyPlanSnapshot(recommendations, new Date());
+  const planLocked = Boolean(lockedSnapshot);
+  const ingredientOrdersNeedRefresh = planLocked && toNumber(lockedSnapshot.ingredientPlanningVersion) < 2;
   const currentWeekPlanAvailable = planLocked
     || Boolean(getCurrentMondayKegPlanSnapshot())
     || isRecommendationForOperatingWeek(recommendations?.generatedAt, new Date());
@@ -8948,6 +9030,7 @@ function renderWeeklyPlan() {
   `;
   const liveWeeklyPlanBody = `
     <p class="weekly-plan-live-status" id="weekly-plan-live-status" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(getWeeklyPlanManagerMessage(weeklyPlanRefreshMessage || (parAgentRunning || weeklyPlanUpdating || parAgentError ? parAgentMessage : "")))}</p>
+    ${ingredientOrdersNeedRefresh || weeklyIngredientRefreshError || weeklyIngredientRefreshRunning ? `<div class="vendor-order-draft-issues vendor-order-draft-issues--blocked" role="status"><strong>${weeklyIngredientRefreshRunning ? "Updating advance ingredient orders..." : escapeHtml(weeklyIngredientRefreshError || "Refresh ingredient orders for this Thursday and next Thursday before ordering.")}</strong>${weeklyIngredientRefreshRunning ? "" : '<button id="retry-weekly-ingredient-orders" class="mini-button" type="button">Retry ingredient orders</button>'}</div>` : ""}
     ${planLocked ? "" : renderMondayRun(mondayRun)}
     ${renderWeeklyPlanReadiness(freshness.readiness)}
     ${currentWeekPlanAvailable ? `

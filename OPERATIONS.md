@@ -92,6 +92,20 @@ shared order-and-prep snapshot and locks it through Sunday. Later PMB keg-level
 refreshes, inventory counts, and staff prep checkoffs remain live but do not
 rewrite that published order. On the next Monday, publish the new week's plan.
 
+Each Monday's ingredient order covers this Thursday and next Thursday. The
+forecast carries stock forward by physical tap and credits scheduled prep once,
+so moving a batch into this Thursday does not buy its ingredients twice. Cabinet
+bottles assigned to liquor tap refills are unavailable for cocktail ingredients.
+In-house simple syrup is prepared only for the current scheduled prep.
+
+Owner prep additions and removals update unplaced ingredient orders in the same
+save. Already placed orders and recorded deliveries retain their original
+quantities; extra ingredients appear as an additional-order warning on the
+supplier card. Manager adjustments that leave ingredients short also show a
+warning. Missing saved counts, recipe data, or package sizes require review.
+Older current-week plans refresh their ingredient purchasing on owner dashboard
+startup before unplaced orders can be approved.
+
 Purchasing is grouped by distributor by default. Bonbright and Heidelberg are
 shown as separate orders and remain separate sections in the CSV export. Items
 with a par of zero are excluded from both ordering and review warnings, and new

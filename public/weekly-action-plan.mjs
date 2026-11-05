@@ -218,6 +218,8 @@ function normalizeInventoryOrderCatalog(items) {
       return {
         id: clean(item.id),
         name: clean(item.name),
+        group,
+        bottleOz: Math.max(0, number(item.bottleOz)),
         vendor: clean(item.vendor),
         vendorSku: clean(item.vendorSku || item.preferredSku),
         vendorProductName: clean(item.vendorProductName || item.productName || item.name),
@@ -821,6 +823,7 @@ export function createWeeklyPlanSnapshot({
   if (!parseTime(normalizedGeneratedAt)) return null;
   return {
     version: 3,
+    ingredientPlanningVersion: 2,
     generatedAt: normalizedGeneratedAt,
     publishedAt: clean(publishedAt),
     orderCatalog: normalizeInventoryOrderCatalog(inventoryItems),

@@ -157,6 +157,7 @@ test("manager prep renders physical refill rows and falls back for already saved
     let displayed;
     const stopAfterPrep = new Error("prep rendered");
     const render = dashboardFunction("renderWeeklyPlan", {
+      toNumber: Number,
       dashboardRenderCoordinator: { defer: () => false }, weeklyOrderController: null,
       weeklyPlan: {}, parAgentState: { recommendations: { generatedAt } },
       getWeeklyPlanModel: () => plan, getWeeklyPlanFreshness: () => ({}),

@@ -8,6 +8,7 @@ import { buildWeeklyActionPlan } from "../public/weekly-action-plan.mjs";
 import { getCocktailRecipeYieldOz, normalizeCocktailRecipeName } from "../public/cocktail-recipe-yields.mjs";
 import { applyPrepKegCounts } from "../lib/prep-keg-counts.mjs";
 import { isInHousePrepIngredient, refreshWeeklyIngredientPrep } from "../public/in-house-ingredient-prep.mjs";
+import { refreshIngredientPurchases } from "../lib/weekly-ingredient-refresh.mjs";
 
 const source = readFileSync(new URL("../lib/weekly-prep-additions.mjs", import.meta.url), "utf8");
 const route = readFileSync(new URL("../app/api/weekly-prep-additions/route.js", import.meta.url), "utf8");
@@ -31,11 +32,12 @@ function harness({ lemonDrop = false } = {}) {
     ] }]
     : [{ id: "house", title: "House Special", ingredients: [{ name: "Vodka", oz: 77 }, { name: "Mixer", oz: 700 }] }];
   const inventory = { current: { onHandOverrides: {} }, snapshots: [{
-    kegPlanSnapshot: { generatedAt }, items: [{ id: "simple-syrup", name: "Simple Syrup", onHandDisplay: "0" }],
+    kegPlanSnapshot: { generatedAt, tapInputs: items.map(item => ({ ...item, currentStockKegs: 1, avgWeeklyKegs: 0 })) }, items: [{ id: "simple-syrup", name: "Simple Syrup", onHandDisplay: "0" }],
   }] };
   const context = vm.createContext({
+    MINIMUM_KEG_CUSHION: 0.25,
     randomUUID, structuredClone, buildStaffPrepPlan, buildWeeklyActionPlan,
-    isInHousePrepIngredient, refreshWeeklyIngredientPrep,
+    isInHousePrepIngredient, refreshWeeklyIngredientPrep, refreshIngredientPurchases,
     getCocktailRecipeYieldOz, normalizeCocktailRecipeName, COCKTAIL_RECIPE_YIELDS: [],
     getCurrentWeeklyPlanSnapshot: rec => rec.weeklyPlanSnapshot,
     readParAgentState: async () => structuredClone(state),
@@ -210,4 +212,20 @@ test("prep API exposes conflict codes used by the safe removal retry", async () 
   });
   assert.equal(response.status, 409);
   assert.equal(response.body.code, "WEEKLY_PREP_REVISION_CONFLICT");
+});
+
+test("legacy ingredient refresh is revision guarded and idempotent without changing counts or prep", async () => {
+  const h = harness();
+  delete h.state().recommendations.weeklyPlanSnapshot.ingredientPlanningVersion;
+  const beforeInventory = structuredClone(h.inventory);
+  const beforePrep = structuredClone(h.state().recommendations.weeklyPlanSnapshot.plan.prep);
+  await assert.rejects(() => h.context.refreshWeeklyIngredientPurchases(h.body({ expectedRevision: 1 }), h.identity),
+    error => error.code === "WEEKLY_PREP_REVISION_CONFLICT");
+  const result = await h.context.refreshWeeklyIngredientPurchases(h.body(), h.identity);
+  assert.equal(result.refreshed, true);
+  assert.equal(h.writes(), 1);
+  assert.deepEqual(h.inventory, beforeInventory);
+  assert.deepEqual(h.state().recommendations.weeklyPlanSnapshot.plan.prep, beforePrep);
+  assert.equal((await h.context.refreshWeeklyIngredientPurchases(h.body(), h.identity)).refreshed, false);
+  assert.equal(h.writes(), 1);
 });

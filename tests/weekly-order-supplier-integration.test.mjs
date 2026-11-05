@@ -6,6 +6,7 @@ import { buildAssistedOrderView } from "../public/assisted-order-direct-ui.mjs";
 import { clean, escapeHtml, formatNumber, money, sum, toNumber } from "../public/dashboard-formatters.mjs";
 import { renderFinishWeekDeliveries } from "../public/finish-week-view.mjs";
 import { renderSupplierOrderFlow } from "../public/weekly-order-supplier-flow.mjs";
+import { renderWeeklyIngredientOrderReview } from "../public/weekly-plan-view.mjs";
 
 const dashboard = readFileSync(new URL("../public/dashboard.js", import.meta.url), "utf8");
 const generatedAt = "2026-10-12T16:00:00.000Z";
@@ -33,10 +34,12 @@ function draft(vendor, lines, overrides = {}) {
   };
 }
 
-function fixture(drafts, { tracking = {}, rehearsal = false, savedDrafts = [], message = "" } = {}) {
+function fixture(drafts, { tracking = {}, rehearsal = false, savedDrafts = [], message = "", ingredientOrderReview = [] } = {}) {
   const model = { drafts, savedDrafts, weeklyTotal: drafts.reduce((total, entry) => total + entry.estimatedTotal, 0) };
   const context = {
-    clean, escapeHtml, formatNumber, money, sum, toNumber, buildAssistedOrderView, renderFinishWeekDeliveries,
+    clean, escapeHtml, formatNumber, money, sum, toNumber, buildAssistedOrderView, renderFinishWeekDeliveries, renderWeeklyIngredientOrderReview,
+    parAgentState: { recommendations: {} },
+    getCurrentWeeklyPlanSnapshot: () => ({ ingredientOrderReview }),
     orderRehearsalMode: rehearsal, weeklyOrderTrackingMessage: message,
     dashboardFinishWeekActor: "Fallback manager", dashboardFinishWeekSaving: false,
     onParDashboardIdentity: { name: "Sam" }, currentVendorOrderDraftViews: new Map(),
@@ -89,6 +92,29 @@ test("guided cards keep every supplier, original totals, keg quantities, and coo
   const legacy = f.render(false);
   assert.doesNotMatch(legacy, /data-supplier-order-card/);
   assert.match(legacy, /<strong>3 items<\/strong><span>\$560\.00<\/span>/);
+});
+
+test("new ingredient needs appear inside a placed supplier card while the existing receipt lines stay unchanged", () => {
+  const drafts = [draft("OHLQ", [line("Tito's", 6, { lineType: "Liquor bottle" })])];
+  const f = fixture(drafts, {
+    tracking: { vendors: [{ id: "ohlq", vendor: "OHLQ", ordered: true, items: [] }] },
+    ingredientOrderReview: [{ kind: "additional-order", vendor: "OHLQ", name: "Absolut Citron", quantity: 14, unit: "bottles" }],
+  });
+  const before = structuredClone(f.context.weeklyOrderTracking);
+  const [card] = cards(f.render());
+  assert.match(card, /data-supplier-order-placed="true"/);
+  assert.match(card, /Absolut Citron · 14 bottles/);
+  assert.match(card, /not included in the placed order/);
+  assert.doesNotMatch(card, /data-weekly-order-place/);
+  assert.deepEqual(f.context.weeklyOrderTracking, before);
+});
+
+test("ingredient issues without an existing supplier draft remain visible", () => {
+  const f = fixture([], {
+    ingredientOrderReview: [{ kind: "ingredient-data", name: "Absolut Citron", vendor: "OHLQ", reason: "Saved package size is missing." }],
+  });
+  assert.match(f.render(), /Absolut Citron/);
+  assert.match(f.render(), /Saved package size is missing/);
 });
 
 test("supplier screens retain the existing handoff, placement identity, and manager", () => {

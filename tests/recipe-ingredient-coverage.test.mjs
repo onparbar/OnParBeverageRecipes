@@ -38,8 +38,8 @@ test("saved prep quantities win even when a separate average forecast would skip
   const recipe = { title: "Vodka Cran", ingredients: [{ name: "Tito's", raw: "Tito's=6 bottles (1.75L)", oz: 355 }, { name: "Cranberry Juice", oz: 1024 }] };
   const inventory = [{ id: "tito-s", name: "Tito's", group: "Liquor Cabinet", bottleOz: 59.17, onHand: 12, hasCurrentCount: true }];
   const [result] = buildRollingCocktailIngredientOrders({ inventoryItems: inventory, recipes: [recipe],
-    tapInputs: [{ name: "Vodka Cran", tapNumber: 57, currentStockKegs: 2, avgWeeklyKegs: 0.1 }],
-    cocktails: [{ name: "Vodka Cran", quantity: 2, tapNumbers: [57, 58] }],
+    tapInputs: [57, 58].map(tapNumber => ({ name: "Vodka Cran", tapNumber, currentStockKegs: 2, avgWeeklyKegs: 0.1 })),
+    cocktails: [57, 58].map(tapNumber => ({ name: "Vodka Cran", quantity: 1, tapNumber })),
   });
   assert.equal(result.cocktailPrepRequiredBottles, 12);
   assert.equal(result.orderUnits, 12);

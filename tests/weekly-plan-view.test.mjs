@@ -6,6 +6,7 @@ import {
   renderWeeklyPlanCocktailRows,
   renderWeeklyPlanGroup,
   renderWeeklyPlanInventoryRows,
+  renderWeeklyIngredientOrderReview,
   renderWeeklyPlanLiquorRefillRows,
   renderWeeklyPlanLiquorTapRows,
   renderWeeklyPlanTapRows,
@@ -40,6 +41,36 @@ test("renders inventory rows with case math, vendor, stock, cost, and safe produ
   assert.match(html, /Proof · 4 on hand · \$35\.50 estimated/);
   assert.doesNotMatch(html, /12 par/);
   assert.match(html, /2 cases · 12 units/);
+});
+
+test("ingredient rows state the two Thursday ordering coverage", () => {
+  const html = renderWeeklyPlanInventoryRows([{
+    name: "Absolut Citron", vendor: "OHLQ", onHand: 0, quantity: 14,
+    rollingIngredientVersion: 2, cocktailPrepRequiredBottles: 14, estimatedCost: 420,
+  }]);
+  assert.match(html, /14 units for this Thursday and next Thursday/);
+});
+
+test("a placed supplier shortfall clearly requests an additional order instead of implying it was placed", () => {
+  const html = renderWeeklyIngredientOrderReview([{
+    kind: "additional-order", vendor: "OHLQ", name: "Absolut <Citron>", quantity: 14, unit: "bottles",
+    reason: "Added Lemon Drop prep needs more bottles.",
+  }]);
+  assert.match(html, /Absolut &lt;Citron&gt; · 14 bottles/);
+  assert.match(html, /Contact OHLQ/);
+  assert.match(html, /not included in the placed order/);
+  assert.match(html, /Added Lemon Drop prep/);
+});
+
+test("ingredient data and manual adjustment issues remain visible even without a purchase quantity", () => {
+  const html = renderWeeklyIngredientOrderReview([
+    { kind: "ingredient-data", name: "Citron", quantity: 0, reason: "Count is missing." },
+    { kind: "adjustment-shortage", name: "Lime Juice", quantity: 1, unit: "cases", reason: "The manual adjustment is below the prep need." },
+  ]);
+  assert.match(html, /Count is missing/);
+  assert.match(html, /Lime Juice · 1 case/);
+  assert.match(html, /Update the order adjustment/);
+  assert.doesNotMatch(html, /0 units/);
 });
 
 test("renders canonical beer and refill actions while preserving tap assignments", () => {
