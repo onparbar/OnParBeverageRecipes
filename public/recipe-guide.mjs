@@ -47,9 +47,12 @@ export function getRecipeGuide(recipe) {
   return entry ? { id: entry[0], title: entry[1], src: `/guided-player/index.html?recipe=${entry[0]}&embed=1` } : null;
 }
 
-export function renderRecipeGuide(recipe) {
+export function renderRecipeGuide(recipe, { compact = false } = {}) {
   const guide = getRecipeGuide(recipe);
   if (!guide) return '<section class="recipe-guide recipe-guide--unavailable"><p>A video guide is not available for this recipe yet.</p></section>';
+  if (compact) return `<section class="recipe-guide recipe-guide--compact">
+    <a class="recipe-guide__open" href="${html(guide.src)}" target="_blank" rel="noopener" aria-label="Open ${html(guide.title)} guide (opens in a new tab)">Open guide</a>
+  </section>`;
   return `<section class="recipe-guide" aria-label="${html(guide.title)} video guide">
     <div class="recipe-guide__heading"><strong>Step-by-step guide</strong><a href="${html(guide.src)}" target="_blank" rel="noopener">Open guide</a></div>
     <p class="recipe-guide__hint">Press Next to start. Each step pauses until you’re ready. Use Back to repeat a step.</p>
@@ -57,9 +60,9 @@ export function renderRecipeGuide(recipe) {
   </section>`;
 }
 
-export function createRecipeGuide(recipe) {
+export function createRecipeGuide(recipe, options) {
   const template = document.createElement("template");
-  template.innerHTML = renderRecipeGuide(recipe);
+  template.innerHTML = renderRecipeGuide(recipe, options);
   return template.content.firstElementChild;
 }
 

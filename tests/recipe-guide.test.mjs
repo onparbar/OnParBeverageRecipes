@@ -59,6 +59,18 @@ test("guide markup is lazy, safely escaped, and does not echo supplied HTML", ()
   assert.doesNotMatch(fallback, /<img|onerror|alert/);
 });
 
+test("compact guides open the matching player in a new tab without embedding media", () => {
+  const markup = renderRecipeGuide({ title: "Vodka Cran (Tito's)" }, { compact: true });
+  assert.match(markup, /class="recipe-guide__open"/);
+  assert.match(markup, /href="\/guided-player\/index\.html\?recipe=vodka-cran-tito-s&amp;embed=1"/);
+  assert.match(markup, /target="_blank" rel="noopener"/);
+  assert.match(markup, />Open guide<\/a>/);
+  assert.doesNotMatch(markup, /<iframe|<video|data-recipe-guide-src/);
+  const missing = renderRecipeGuide("New Cocktail", { compact: true });
+  assert.match(missing, /not available/);
+  assert.doesNotMatch(missing, /<a |<iframe/);
+});
+
 const prepItems = [
   { name: "Whiskey Smash", walls: ["Main"], tapNumbers: [45], batchSizeOz: 1500, quantity: 1 },
   { name: "On Par Tee", walls: ["Karaoke"], tapNumbers: [79], batchSizeOz: 1200, quantity: 2 },

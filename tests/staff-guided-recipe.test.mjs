@@ -29,8 +29,9 @@ function renderRecipe(name, recipe) {
     getIngredientAddAmount: (value) => value,
     getOptionalIngredientProgress: () => null,
     getStaffRecipeDisplayTitle: () => "Display title differs from canonical recipe",
-    createRecipeGuide(value) {
+    createRecipeGuide(value, options) {
       assert.equal(value, recipe, "the player must receive the canonical recipe and current ingredients");
+      assert.equal(options?.compact, true, "staff see an Open guide button instead of an embedded player");
       return guide;
     },
   };
@@ -46,7 +47,7 @@ const recipe = {
   ],
 };
 
-test("staff weekly prep recipes retain ingredient quantities and place the guide below the ingredient table", () => {
+test("staff weekly prep recipes retain ingredient quantities and place the guide button below the ingredient table", () => {
   const { card, guide } = renderRecipe("createInlineStaffPrepRecipe", recipe);
   assert.equal(card.hidden, true, "the existing recipe disclosure remains collapsed initially");
   assert.equal(card.id, "weekly-prep-recipe");
@@ -59,7 +60,7 @@ test("staff weekly prep recipes retain ingredient quantities and place the guide
   ]);
 });
 
-test("staff recipe cards keep their disclosure and show the matching guide below the full recipe", () => {
+test("staff recipe cards keep their disclosure and show the matching guide button below the full recipe", () => {
   const { card, guide } = renderRecipe("createRecipeCard", recipe);
   assert.equal(card.tagName, "details");
   assert.equal(card.children[0].tagName, "summary");

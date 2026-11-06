@@ -4463,8 +4463,10 @@ function createRecipeCard(recipe, state) {
     tbody.append(row);
   });
 
-  card.append(createRecipeGuide(recipe));
-  if (isEmployeeDashboard) return card;
+  if (isEmployeeDashboard) {
+    card.append(createRecipeGuide(recipe, { compact: true }));
+    return card;
+  }
 
   const detailMetrics = getCalculatedMetrics(recipe, totals, pricing);
   const details = document.createElement("details");
@@ -4492,7 +4494,7 @@ function createRecipeCard(recipe, state) {
       </tbody>
     </table>
   `;
-  detailsBody.append(metricsTableWrap);
+  detailsBody.append(metricsTableWrap, createRecipeGuide(recipe));
   card.append(details);
 
   return card;
