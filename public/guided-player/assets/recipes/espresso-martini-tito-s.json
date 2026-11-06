@@ -1,0 +1,556 @@
+{
+  "id": "espresso-martini-tito-s",
+  "title": "Espresso Martini (Tito's)",
+  "duration": 100.60000000000001,
+  "fps": 30,
+  "video": "assets/recipes/espresso-martini-tito-s.mp4",
+  "poster": "assets/recipes/espresso-martini-tito-s.jpg",
+  "label_placement": "top of closed lid",
+  "stages": [
+    {
+      "id": "setup",
+      "title": "Open the keg",
+      "amount": "",
+      "description": "",
+      "start": 0,
+      "end": 4
+    },
+    {
+      "id": "tito-s",
+      "title": "Add Tito's",
+      "amount": "12 \u00d7 1.75 L bottles",
+      "description": "",
+      "start": 4,
+      "end": 35.2
+    },
+    {
+      "id": "kahlua",
+      "title": "Add Kahlua",
+      "amount": "6 \u00d7 1 L bottles",
+      "description": "",
+      "start": 35.2,
+      "end": 50.8
+    },
+    {
+      "id": "creme-de-cacao",
+      "title": "Add Creme de Cacao",
+      "amount": "6 \u00d7 1 L bottles",
+      "description": "",
+      "start": 50.800000000000004,
+      "end": 66.4
+    },
+    {
+      "id": "cold-brew-concentrate",
+      "title": "Add Cold Brew Concentrate",
+      "amount": "2 \u00d7 32 fl oz bottles",
+      "description": "",
+      "start": 66.4,
+      "end": 71.6
+    },
+    {
+      "id": "water",
+      "title": "Add Water",
+      "amount": "320 fl oz \u00b7 2 full + 64 fl oz",
+      "description": "",
+      "start": 71.60000000000001,
+      "end": 83.6
+    },
+    {
+      "id": "stir",
+      "title": "Stir with the paddle",
+      "amount": "",
+      "description": "",
+      "start": 83.60000000000001,
+      "end": 90.6
+    },
+    {
+      "id": "close",
+      "title": "Close the keg",
+      "amount": "",
+      "description": "",
+      "start": 90.60000000000001,
+      "end": 95.6
+    },
+    {
+      "id": "label",
+      "title": "Attach the label to the lid",
+      "amount": "",
+      "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+      "start": 95.60000000000001,
+      "end": 100.6
+    }
+  ],
+  "pours": [
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 1,
+      "container": "titos-vodka",
+      "start": 4.0,
+      "flow_start": 5.02,
+      "flow_end": 5.9,
+      "end": 6.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 2,
+      "container": "titos-vodka",
+      "start": 6.6,
+      "flow_start": 7.62,
+      "flow_end": 8.5,
+      "end": 9.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 3,
+      "container": "titos-vodka",
+      "start": 9.2,
+      "flow_start": 10.22,
+      "flow_end": 11.1,
+      "end": 11.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 4,
+      "container": "titos-vodka",
+      "start": 11.8,
+      "flow_start": 12.82,
+      "flow_end": 13.7,
+      "end": 14.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 5,
+      "container": "titos-vodka",
+      "start": 14.4,
+      "flow_start": 15.42,
+      "flow_end": 16.3,
+      "end": 17.0,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 6,
+      "container": "titos-vodka",
+      "start": 17.0,
+      "flow_start": 18.02,
+      "flow_end": 18.9,
+      "end": 19.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 7,
+      "container": "titos-vodka",
+      "start": 19.6,
+      "flow_start": 20.62,
+      "flow_end": 21.5,
+      "end": 22.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 8,
+      "container": "titos-vodka",
+      "start": 22.2,
+      "flow_start": 23.22,
+      "flow_end": 24.1,
+      "end": 24.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 9,
+      "container": "titos-vodka",
+      "start": 24.8,
+      "flow_start": 25.82,
+      "flow_end": 26.7,
+      "end": 27.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 10,
+      "container": "titos-vodka",
+      "start": 27.4,
+      "flow_start": 28.42,
+      "flow_end": 29.3,
+      "end": 30.0,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 11,
+      "container": "titos-vodka",
+      "start": 30.0,
+      "flow_start": 31.02,
+      "flow_end": 31.9,
+      "end": 32.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 12,
+      "container": "titos-vodka",
+      "start": 32.6,
+      "flow_start": 33.62,
+      "flow_end": 34.5,
+      "end": 35.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "kahlua",
+      "ingredient": "Kahlua",
+      "number": 1,
+      "container": "kahlua",
+      "start": 35.2,
+      "flow_start": 36.22,
+      "flow_end": 37.1,
+      "end": 37.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814
+      }
+    },
+    {
+      "ingredient_id": "kahlua",
+      "ingredient": "Kahlua",
+      "number": 2,
+      "container": "kahlua",
+      "start": 37.8,
+      "flow_start": 38.82,
+      "flow_end": 39.7,
+      "end": 40.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814
+      }
+    },
+    {
+      "ingredient_id": "kahlua",
+      "ingredient": "Kahlua",
+      "number": 3,
+      "container": "kahlua",
+      "start": 40.4,
+      "flow_start": 41.42,
+      "flow_end": 42.3,
+      "end": 43.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814
+      }
+    },
+    {
+      "ingredient_id": "kahlua",
+      "ingredient": "Kahlua",
+      "number": 4,
+      "container": "kahlua",
+      "start": 43.0,
+      "flow_start": 44.02,
+      "flow_end": 44.9,
+      "end": 45.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814
+      }
+    },
+    {
+      "ingredient_id": "kahlua",
+      "ingredient": "Kahlua",
+      "number": 5,
+      "container": "kahlua",
+      "start": 45.6,
+      "flow_start": 46.62,
+      "flow_end": 47.5,
+      "end": 48.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814
+      }
+    },
+    {
+      "ingredient_id": "kahlua",
+      "ingredient": "Kahlua",
+      "number": 6,
+      "container": "kahlua",
+      "start": 48.2,
+      "flow_start": 49.22,
+      "flow_end": 50.1,
+      "end": 50.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814
+      }
+    },
+    {
+      "ingredient_id": "creme-de-cacao",
+      "ingredient": "Creme de Cacao",
+      "number": 1,
+      "container": "llords-creme-de-cacao",
+      "start": 50.8,
+      "flow_start": 51.82,
+      "flow_end": 52.7,
+      "end": 53.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.81
+      }
+    },
+    {
+      "ingredient_id": "creme-de-cacao",
+      "ingredient": "Creme de Cacao",
+      "number": 2,
+      "container": "llords-creme-de-cacao",
+      "start": 53.4,
+      "flow_start": 54.42,
+      "flow_end": 55.3,
+      "end": 56.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.81
+      }
+    },
+    {
+      "ingredient_id": "creme-de-cacao",
+      "ingredient": "Creme de Cacao",
+      "number": 3,
+      "container": "llords-creme-de-cacao",
+      "start": 56.0,
+      "flow_start": 57.02,
+      "flow_end": 57.9,
+      "end": 58.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.81
+      }
+    },
+    {
+      "ingredient_id": "creme-de-cacao",
+      "ingredient": "Creme de Cacao",
+      "number": 4,
+      "container": "llords-creme-de-cacao",
+      "start": 58.6,
+      "flow_start": 59.62,
+      "flow_end": 60.5,
+      "end": 61.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.81
+      }
+    },
+    {
+      "ingredient_id": "creme-de-cacao",
+      "ingredient": "Creme de Cacao",
+      "number": 5,
+      "container": "llords-creme-de-cacao",
+      "start": 61.2,
+      "flow_start": 62.22,
+      "flow_end": 63.1,
+      "end": 63.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.81
+      }
+    },
+    {
+      "ingredient_id": "creme-de-cacao",
+      "ingredient": "Creme de Cacao",
+      "number": 6,
+      "container": "llords-creme-de-cacao",
+      "start": 63.8,
+      "flow_start": 64.82,
+      "flow_end": 65.7,
+      "end": 66.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.81
+      }
+    },
+    {
+      "ingredient_id": "cold-brew-concentrate",
+      "ingredient": "Cold Brew Concentrate",
+      "number": 1,
+      "container": "cold-brew-concentrate",
+      "start": 66.4,
+      "flow_start": 67.42,
+      "flow_end": 68.3,
+      "end": 69.0,
+      "quantity": {
+        "display": "32 fl oz bottle",
+        "full_bottle": true,
+        "package_fl_oz": 32
+      }
+    },
+    {
+      "ingredient_id": "cold-brew-concentrate",
+      "ingredient": "Cold Brew Concentrate",
+      "number": 2,
+      "container": "cold-brew-concentrate",
+      "start": 69.0,
+      "flow_start": 70.02,
+      "flow_end": 70.9,
+      "end": 71.6,
+      "quantity": {
+        "display": "32 fl oz bottle",
+        "full_bottle": true,
+        "package_fl_oz": 32
+      }
+    },
+    {
+      "ingredient_id": "water",
+      "ingredient": "Water",
+      "number": 1,
+      "container": "pitcher",
+      "start": 71.6,
+      "flow_start": 72.62,
+      "flow_end": 74.9,
+      "end": 75.6,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "water",
+      "ingredient": "Water",
+      "number": 2,
+      "container": "pitcher",
+      "start": 75.6,
+      "flow_start": 76.62,
+      "flow_end": 78.9,
+      "end": 79.6,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "water",
+      "ingredient": "Water",
+      "number": 3,
+      "container": "pitcher",
+      "start": 79.6,
+      "flow_start": 80.62,
+      "flow_end": 82.9,
+      "end": 83.6,
+      "quantity": {
+        "fl_oz": 64,
+        "display": "64 fl oz"
+      }
+    }
+  ],
+  "configured_yield_oz": 1500,
+  "source_flags": [
+    "Batch text is 12 US gallons (1536 fl oz); configured yield is 1500 fl oz. Do not add unlisted liquid to bridge 36 fl oz."
+  ],
+  "source_evidence": "hold-resolution.json, captured live source revision 128",
+  "quantity_resolution": null,
+  "ingredient_source_quantities": [
+    {
+      "id": "tito-s",
+      "source_oz": 710
+    },
+    {
+      "id": "kahlua",
+      "source_oz": 203
+    },
+    {
+      "id": "creme-de-cacao",
+      "source_oz": 203
+    },
+    {
+      "id": "cold-brew-concentrate",
+      "source_oz": 64
+    },
+    {
+      "id": "water",
+      "source_oz": 320
+    }
+  ],
+  "validation": {
+    "individual_bottle_pours": 26,
+    "individual_pitcher_pours": 3,
+    "individual_sour_jug_pours": 0,
+    "total_pours": 29,
+    "pitcher_quantities_match_source": true,
+    "caps_removed_before_flow": true,
+    "streams_centered_in_actual_hatch": true,
+    "frame_exact_stages": true,
+    "label_on_closed_lid": true
+  }
+}

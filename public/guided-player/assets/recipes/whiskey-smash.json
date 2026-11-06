@@ -1,0 +1,369 @@
+{
+  "id": "whiskey-smash",
+  "title": "Whiskey Smash (Jim Beam)",
+  "duration": 79.2,
+  "fps": 30,
+  "video": "assets/recipes/whiskey-smash.mp4",
+  "poster": "assets/recipes/whiskey-smash.jpg",
+  "label_placement": "top of closed lid",
+  "stages": [
+    {
+      "id": "setup",
+      "title": "Open the keg",
+      "amount": "",
+      "description": "",
+      "start": 0,
+      "end": 4
+    },
+    {
+      "id": "jim-beam",
+      "title": "Add Jim Beam",
+      "amount": "7 \u00d7 1.75 L bottles",
+      "description": "",
+      "start": 4,
+      "end": 22.2
+    },
+    {
+      "id": "lemonade",
+      "title": "Add Lemonade",
+      "amount": "320 fl oz \u00b7 2 full + 64 fl oz",
+      "description": "Fill the pitcher with Lemonade using the fountain drink machine in karaoke.",
+      "start": 22.2,
+      "end": 34.2
+    },
+    {
+      "id": "simple-syrup",
+      "title": "Add Simple Syrup",
+      "amount": "128 fl oz \u00b7 1 \u00d7 4 qt pitchers",
+      "description": "",
+      "start": 34.2,
+      "end": 38.2
+    },
+    {
+      "id": "mint-syrup",
+      "title": "Add Mint Syrup",
+      "amount": "50 fl oz \u00b7 0 full + 50 fl oz",
+      "description": "",
+      "start": 38.2,
+      "end": 42.2
+    },
+    {
+      "id": "water",
+      "title": "Add Water",
+      "amount": "576 fl oz \u00b7 4 full + 64 fl oz",
+      "description": "",
+      "start": 42.2,
+      "end": 62.2
+    },
+    {
+      "id": "stir",
+      "title": "Stir with the paddle",
+      "amount": "",
+      "description": "",
+      "start": 62.2,
+      "end": 69.2
+    },
+    {
+      "id": "close",
+      "title": "Close the keg",
+      "amount": "",
+      "description": "",
+      "start": 69.2,
+      "end": 74.2
+    },
+    {
+      "id": "label",
+      "title": "Attach the label to the lid",
+      "amount": "",
+      "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+      "start": 74.2,
+      "end": 79.2
+    }
+  ],
+  "pours": [
+    {
+      "ingredient_id": "jim-beam",
+      "ingredient": "Jim Beam",
+      "number": 1,
+      "container": "jim-beam-bourbon",
+      "start": 4.0,
+      "flow_start": 5.02,
+      "flow_end": 5.9,
+      "end": 6.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jim-beam",
+      "ingredient": "Jim Beam",
+      "number": 2,
+      "container": "jim-beam-bourbon",
+      "start": 6.6,
+      "flow_start": 7.62,
+      "flow_end": 8.5,
+      "end": 9.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jim-beam",
+      "ingredient": "Jim Beam",
+      "number": 3,
+      "container": "jim-beam-bourbon",
+      "start": 9.2,
+      "flow_start": 10.22,
+      "flow_end": 11.1,
+      "end": 11.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jim-beam",
+      "ingredient": "Jim Beam",
+      "number": 4,
+      "container": "jim-beam-bourbon",
+      "start": 11.8,
+      "flow_start": 12.82,
+      "flow_end": 13.7,
+      "end": 14.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jim-beam",
+      "ingredient": "Jim Beam",
+      "number": 5,
+      "container": "jim-beam-bourbon",
+      "start": 14.4,
+      "flow_start": 15.42,
+      "flow_end": 16.3,
+      "end": 17.0,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jim-beam",
+      "ingredient": "Jim Beam",
+      "number": 6,
+      "container": "jim-beam-bourbon",
+      "start": 17.0,
+      "flow_start": 18.02,
+      "flow_end": 18.9,
+      "end": 19.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jim-beam",
+      "ingredient": "Jim Beam",
+      "number": 7,
+      "container": "jim-beam-bourbon",
+      "start": 19.6,
+      "flow_start": 20.62,
+      "flow_end": 21.5,
+      "end": 22.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 1,
+      "container": "pitcher",
+      "start": 22.2,
+      "flow_start": 23.22,
+      "flow_end": 25.5,
+      "end": 26.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 2,
+      "container": "pitcher",
+      "start": 26.2,
+      "flow_start": 27.22,
+      "flow_end": 29.5,
+      "end": 30.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 3,
+      "container": "pitcher",
+      "start": 30.2,
+      "flow_start": 31.22,
+      "flow_end": 33.5,
+      "end": 34.2,
+      "quantity": {
+        "fl_oz": 64,
+        "display": "64 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "simple-syrup",
+      "ingredient": "Simple Syrup",
+      "number": 1,
+      "container": "pitcher",
+      "start": 34.2,
+      "flow_start": 35.22,
+      "flow_end": 37.5,
+      "end": 38.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "mint-syrup",
+      "ingredient": "Mint Syrup",
+      "number": 1,
+      "container": "pitcher",
+      "start": 38.2,
+      "flow_start": 39.22,
+      "flow_end": 41.5,
+      "end": 42.2,
+      "quantity": {
+        "fl_oz": 50,
+        "display": "50 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "water",
+      "ingredient": "Water",
+      "number": 1,
+      "container": "pitcher",
+      "start": 42.2,
+      "flow_start": 43.22,
+      "flow_end": 45.5,
+      "end": 46.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "water",
+      "ingredient": "Water",
+      "number": 2,
+      "container": "pitcher",
+      "start": 46.2,
+      "flow_start": 47.22,
+      "flow_end": 49.5,
+      "end": 50.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "water",
+      "ingredient": "Water",
+      "number": 3,
+      "container": "pitcher",
+      "start": 50.2,
+      "flow_start": 51.22,
+      "flow_end": 53.5,
+      "end": 54.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "water",
+      "ingredient": "Water",
+      "number": 4,
+      "container": "pitcher",
+      "start": 54.2,
+      "flow_start": 55.22,
+      "flow_end": 57.5,
+      "end": 58.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "water",
+      "ingredient": "Water",
+      "number": 5,
+      "container": "pitcher",
+      "start": 58.2,
+      "flow_start": 59.22,
+      "flow_end": 61.5,
+      "end": 62.2,
+      "quantity": {
+        "fl_oz": 64,
+        "display": "64 fl oz"
+      }
+    }
+  ],
+  "configured_yield_oz": 1488,
+  "source_flags": [
+    "Do not produce Whiskey Smash from the base CSV until the full live whiskey-smash override is merged. Base amounts below are reference only."
+  ],
+  "source_evidence": "hold-resolution.json, captured live source revision 128",
+  "quantity_resolution": null,
+  "ingredient_source_quantities": [
+    {
+      "id": "jim-beam",
+      "source_oz": 414
+    },
+    {
+      "id": "lemonade",
+      "source_oz": 320
+    },
+    {
+      "id": "simple-syrup",
+      "source_oz": 128
+    },
+    {
+      "id": "mint-syrup",
+      "source_oz": 50
+    },
+    {
+      "id": "water",
+      "source_oz": 576
+    }
+  ],
+  "validation": {
+    "individual_bottle_pours": 7,
+    "individual_pitcher_pours": 10,
+    "individual_sour_jug_pours": 0,
+    "total_pours": 17,
+    "pitcher_quantities_match_source": true,
+    "caps_removed_before_flow": true,
+    "streams_centered_in_actual_hatch": true,
+    "frame_exact_stages": true,
+    "label_on_closed_lid": true
+  }
+}

@@ -155,7 +155,7 @@ test("the rendered Weekly Plan exposes the generation used by removal controls",
   );
   assert.match(
     dashboardSource,
-    /renderWeeklyPlanCocktailRows\(plan\.prep\.cocktails, \{ editable: planLocked \}\)/,
+    /renderWeeklyPlanCocktailRows\(plan\.prep\.cocktails, \{ editable: planLocked, recipeDetails: renderWeeklyPrepRecipe \}\)/,
   );
 });
 

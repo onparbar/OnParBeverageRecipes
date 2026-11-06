@@ -18,7 +18,7 @@ test("live weekly plan embeds receiving in orders and completion in prep", () =>
   assert.equal(prep.split("renderWeeklyPlanFinishWeek(").length - 1, 1);
   assert.match(prep, /renderWeeklyPlanFinishWeek\(planLocked, Boolean\(orderStep\?\.complete\), "prep"\)/);
   assert.match(prep, /renderWeeklyIngredientPrep\(plan\.prep\.ingredients\)/);
-  assert.match(prep, /renderWeeklyPlanCocktailRows\(plan\.prep\.cocktails, \{ editable: planLocked \}\)/);
+  assert.match(prep, /renderWeeklyPlanCocktailRows\(plan\.prep\.cocktails, \{ editable: planLocked, recipeDetails: renderWeeklyPrepRecipe \}\)/);
   assert.match(prep, /renderWeeklyPlanLiquorRefillRows\(liquorRefills\)/);
   assert.match(source, /const liquorRefills = plan\.prep\.liquorRefills \|\| plan\.orders\.liquorTapBottles/);
   assert.doesNotMatch(body, /id="weekly-plan-finish-week"/);

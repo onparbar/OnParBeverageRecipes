@@ -1,6 +1,7 @@
 import Script from "next/script";
 import "./globals.css";
 import "./identity.css";
+import "./recipe-guide.css";
 
 export const metadata = {
   title: "On Par Beverage Dashboard",

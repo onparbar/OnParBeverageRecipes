@@ -1,3 +1,4 @@
+import { createRecipeGuide, renderRecipeGuide, initializeRecipeGuides } from "./recipe-guide.mjs";
 import { DEFAULT_KEG_PRICE_OVERRIDES, KEG_PRICING_KEY_ALIASES, KEG_VENDOR_MAPPINGS, KEG_VENDOR_PRODUCT_CATALOG, getKegOrderDefaults } from "./keg-order-defaults.mjs";
 import { completeRecipeIngredientInventory, includeMissingRecipeInventory } from "./recipe-ingredient-inventory.mjs";
 import { isInHousePrepIngredient, refreshWeeklyIngredientPrep } from "./in-house-ingredient-prep.mjs";
@@ -4247,6 +4248,7 @@ function renderRecipes() {
     const card = createRecipeCard(recipe, "active");
     recipeGrid.append(card);
   });
+  initializeRecipeGuides(recipeGrid);
 }
 
 function getWallCocktailRecipeCoverage() {
@@ -4461,6 +4463,7 @@ function createRecipeCard(recipe, state) {
     tbody.append(row);
   });
 
+  card.append(createRecipeGuide(recipe));
   if (isEmployeeDashboard) return card;
 
   const detailMetrics = getCalculatedMetrics(recipe, totals, pricing);
@@ -6137,7 +6140,7 @@ function renderWeeklyPlanTapRows(items, { action, unit = "kegs" } = {}) {
   return renderWeeklyPlanTapRowsView(items.map(getWeeklyPlanProductViewItem), { action, unit });
 }
 
-function renderWeeklyPlanCocktailRows(items, { editable = true } = {}) {
+function renderWeeklyPlanCocktailRows(items, { editable = true, recipeDetails = () => "" } = {}) {
   const completionAvailable = dashboardStaffPrepPlan.available
     && Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date()))
     && clean(dashboardStaffPrepPlan.generatedAt) === clean(parAgentState?.recommendations?.generatedAt);
@@ -6150,7 +6153,7 @@ function renderWeeklyPlanCocktailRows(items, { editable = true } = {}) {
       : !entry.prepAdditionId && clean(entry.name).toLowerCase() === clean(item.name).toLowerCase()) : null,
     completionSaving: dashboardFinishWeekSaving,
   }));
-  return renderWeeklyPlanCocktailRowsView(viewItems, { editable });
+  return renderWeeklyPlanCocktailRowsView(viewItems, { editable, recipeDetails });
 }
 
 function getWeeklySimpleSyrupNeed(cocktails = []) {
@@ -8899,6 +8902,14 @@ function bindBossDemoEvents() {
   });
 }
 
+function renderWeeklyPrepRecipe(item) {
+  const recipe = getRecipeForKegWallItem(item.name, null, [item.displayName]);
+  const title = recipe?.title || item.displayName || item.name;
+  const ingredients = recipe ? `<table aria-label="${escapeHtml(title)} ingredients"><thead><tr><th>Ingredient</th><th>Add per batch</th></tr></thead><tbody>${recipe.ingredients.map((ingredient) => `<tr><td>${escapeHtml(ingredient.name)}</td><td>${escapeHtml(getRecipeCardAddAmount(ingredient) || `${formatNumber(ingredient.oz)} oz`)}</td></tr>`).join("")}</tbody></table>`
+    : '<p>Recipe quantities are unavailable. Check the Recipes tab.</p>';
+  return `<details class="prep-recipe-details" id="prep-recipe-${slugify(item.name)}-${slugify((item.walls || []).join("-"))}"><summary>View recipe and guide · ${escapeHtml(title)}</summary><div class="prep-recipe-details__body">${ingredients}${renderRecipeGuide(recipe || { title })}</div></details>`;
+}
+
 function renderWeeklyPlan() {
   if (dashboardRenderCoordinator.defer("weekly-plan", renderWeeklyPlan)) return;
   weeklyOrderController?.refresh();
@@ -8951,7 +8962,7 @@ function renderWeeklyPlan() {
     ${renderWeeklyIngredientPrep(plan.prep.ingredients)}
     <section class="weekly-plan-column weekly-plan-column--prep">
       <div class="weekly-plan-column__header"><h2>Cocktails</h2></div>
-      ${renderWeeklyPlanCocktailRows(plan.prep.cocktails, { editable: planLocked })}
+      ${renderWeeklyPlanCocktailRows(plan.prep.cocktails, { editable: planLocked, recipeDetails: renderWeeklyPrepRecipe })}
       <div class="weekly-plan-column__header"><h2>Liquor Tap Refills</h2></div>
       ${renderWeeklyPlanLiquorRefillRows(liquorRefills)}
     </section>
@@ -9013,6 +9024,7 @@ function renderWeeklyPlan() {
     ${weeklyPlanBody}
   `;
   weeklyPlan.dataset.generatedAt = clean(recommendations?.generatedAt);
+  initializeRecipeGuides(weeklyPlan);
 
   globalThis.onParWeeklyPlanEstimatedPurchaseCost = toNumber(summary.estimatedKnownPurchaseCost);
   weeklyPlan.classList.toggle("weekly-plan--orders-complete", Boolean(orderStep?.complete));

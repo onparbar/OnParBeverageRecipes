@@ -1,0 +1,338 @@
+{
+  "id": "whiskey-sour-jack-daniels",
+  "title": "Whiskey Sour (Jack Daniels)",
+  "duration": 67.0,
+  "fps": 30,
+  "video": "assets/recipes/whiskey-sour-jack-daniels.mp4",
+  "poster": "assets/recipes/whiskey-sour-jack-daniels.jpg",
+  "label_placement": "top of closed lid",
+  "stages": [
+    {
+      "id": "setup",
+      "title": "Open the keg",
+      "amount": "",
+      "description": "",
+      "start": 0,
+      "end": 4
+    },
+    {
+      "id": "jack-daniel-s",
+      "title": "Add Jack Daniel's",
+      "amount": "10 \u00d7 1.75 L bottles",
+      "description": "",
+      "start": 4,
+      "end": 30.0
+    },
+    {
+      "id": "sour-mix",
+      "title": "Add Sour Mix",
+      "amount": "4 \u00d7 1 gallon jugs",
+      "description": "",
+      "start": 30.0,
+      "end": 42.0
+    },
+    {
+      "id": "simple-syrup",
+      "title": "Add Simple Syrup",
+      "amount": "256 fl oz \u00b7 2 \u00d7 4 qt pitchers",
+      "description": "",
+      "start": 42.0,
+      "end": 50.0
+    },
+    {
+      "id": "stir",
+      "title": "Stir with the paddle",
+      "amount": "",
+      "description": "",
+      "start": 50.0,
+      "end": 57.0
+    },
+    {
+      "id": "close",
+      "title": "Close the keg",
+      "amount": "",
+      "description": "",
+      "start": 57.0,
+      "end": 62.0
+    },
+    {
+      "id": "label",
+      "title": "Attach the label to the lid",
+      "amount": "",
+      "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+      "start": 62.0,
+      "end": 67.0
+    }
+  ],
+  "pours": [
+    {
+      "ingredient_id": "jack-daniel-s",
+      "ingredient": "Jack Daniel's",
+      "number": 1,
+      "container": "jack-daniels-old-no-7",
+      "start": 4.0,
+      "flow_start": 5.02,
+      "flow_end": 5.9,
+      "end": 6.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jack-daniel-s",
+      "ingredient": "Jack Daniel's",
+      "number": 2,
+      "container": "jack-daniels-old-no-7",
+      "start": 6.6,
+      "flow_start": 7.62,
+      "flow_end": 8.5,
+      "end": 9.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jack-daniel-s",
+      "ingredient": "Jack Daniel's",
+      "number": 3,
+      "container": "jack-daniels-old-no-7",
+      "start": 9.2,
+      "flow_start": 10.22,
+      "flow_end": 11.1,
+      "end": 11.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jack-daniel-s",
+      "ingredient": "Jack Daniel's",
+      "number": 4,
+      "container": "jack-daniels-old-no-7",
+      "start": 11.8,
+      "flow_start": 12.82,
+      "flow_end": 13.7,
+      "end": 14.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jack-daniel-s",
+      "ingredient": "Jack Daniel's",
+      "number": 5,
+      "container": "jack-daniels-old-no-7",
+      "start": 14.4,
+      "flow_start": 15.42,
+      "flow_end": 16.3,
+      "end": 17.0,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jack-daniel-s",
+      "ingredient": "Jack Daniel's",
+      "number": 6,
+      "container": "jack-daniels-old-no-7",
+      "start": 17.0,
+      "flow_start": 18.02,
+      "flow_end": 18.9,
+      "end": 19.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jack-daniel-s",
+      "ingredient": "Jack Daniel's",
+      "number": 7,
+      "container": "jack-daniels-old-no-7",
+      "start": 19.6,
+      "flow_start": 20.62,
+      "flow_end": 21.5,
+      "end": 22.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jack-daniel-s",
+      "ingredient": "Jack Daniel's",
+      "number": 8,
+      "container": "jack-daniels-old-no-7",
+      "start": 22.2,
+      "flow_start": 23.22,
+      "flow_end": 24.1,
+      "end": 24.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jack-daniel-s",
+      "ingredient": "Jack Daniel's",
+      "number": 9,
+      "container": "jack-daniels-old-no-7",
+      "start": 24.8,
+      "flow_start": 25.82,
+      "flow_end": 26.7,
+      "end": 27.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jack-daniel-s",
+      "ingredient": "Jack Daniel's",
+      "number": 10,
+      "container": "jack-daniels-old-no-7",
+      "start": 27.4,
+      "flow_start": 28.42,
+      "flow_end": 29.3,
+      "end": 30.0,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "sour-mix",
+      "ingredient": "Sour Mix",
+      "number": 1,
+      "container": "dailys-sweet-and-sour",
+      "start": 30.0,
+      "flow_start": 31.02,
+      "flow_end": 32.3,
+      "end": 33.0,
+      "quantity": {
+        "display": "1 gallon jug",
+        "full_bottle": true,
+        "package_fl_oz": 128
+      }
+    },
+    {
+      "ingredient_id": "sour-mix",
+      "ingredient": "Sour Mix",
+      "number": 2,
+      "container": "dailys-sweet-and-sour",
+      "start": 33.0,
+      "flow_start": 34.02,
+      "flow_end": 35.3,
+      "end": 36.0,
+      "quantity": {
+        "display": "1 gallon jug",
+        "full_bottle": true,
+        "package_fl_oz": 128
+      }
+    },
+    {
+      "ingredient_id": "sour-mix",
+      "ingredient": "Sour Mix",
+      "number": 3,
+      "container": "dailys-sweet-and-sour",
+      "start": 36.0,
+      "flow_start": 37.02,
+      "flow_end": 38.3,
+      "end": 39.0,
+      "quantity": {
+        "display": "1 gallon jug",
+        "full_bottle": true,
+        "package_fl_oz": 128
+      }
+    },
+    {
+      "ingredient_id": "sour-mix",
+      "ingredient": "Sour Mix",
+      "number": 4,
+      "container": "dailys-sweet-and-sour",
+      "start": 39.0,
+      "flow_start": 40.02,
+      "flow_end": 41.3,
+      "end": 42.0,
+      "quantity": {
+        "display": "1 gallon jug",
+        "full_bottle": true,
+        "package_fl_oz": 128
+      }
+    },
+    {
+      "ingredient_id": "simple-syrup",
+      "ingredient": "Simple Syrup",
+      "number": 1,
+      "container": "pitcher",
+      "start": 42.0,
+      "flow_start": 43.02,
+      "flow_end": 45.3,
+      "end": 46.0,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "simple-syrup",
+      "ingredient": "Simple Syrup",
+      "number": 2,
+      "container": "pitcher",
+      "start": 46.0,
+      "flow_start": 47.02,
+      "flow_end": 49.3,
+      "end": 50.0,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    }
+  ],
+  "configured_yield_oz": 1360,
+  "source_flags": [
+    "Batch text is 12 US gallons (1536 fl oz); configured yield is 1360 fl oz. Do not add unlisted liquid to bridge 176 fl oz."
+  ],
+  "source_evidence": "hold-resolution.json, captured live source revision 128",
+  "quantity_resolution": null,
+  "ingredient_source_quantities": [
+    {
+      "id": "jack-daniel-s",
+      "source_oz": 592
+    },
+    {
+      "id": "sour-mix",
+      "source_oz": 512
+    },
+    {
+      "id": "simple-syrup",
+      "source_oz": 256
+    }
+  ],
+  "validation": {
+    "individual_bottle_pours": 10,
+    "individual_pitcher_pours": 2,
+    "individual_sour_jug_pours": 4,
+    "total_pours": 16,
+    "pitcher_quantities_match_source": true,
+    "caps_removed_before_flow": true,
+    "streams_centered_in_actual_hatch": true,
+    "frame_exact_stages": true,
+    "label_on_closed_lid": true
+  }
+}

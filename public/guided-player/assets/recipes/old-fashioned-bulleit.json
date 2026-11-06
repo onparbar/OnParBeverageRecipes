@@ -1,0 +1,427 @@
+{
+  "id": "old-fashioned-bulleit",
+  "title": "Old Fashioned (Bulleit)",
+  "duration": 83.6,
+  "fps": 30,
+  "video": "assets/recipes/old-fashioned-bulleit.mp4",
+  "poster": "assets/recipes/old-fashioned-bulleit.jpg",
+  "label_placement": "top of closed lid",
+  "stages": [
+    {
+      "id": "setup",
+      "title": "Open the keg",
+      "amount": "",
+      "description": "",
+      "start": 0,
+      "end": 4
+    },
+    {
+      "id": "bulleit-bourbon",
+      "title": "Add Bulleit Bourbon",
+      "amount": "16 \u00d7 1.75 L bottles",
+      "description": "",
+      "start": 4,
+      "end": 45.6
+    },
+    {
+      "id": "bitters",
+      "title": "Add Bitters",
+      "amount": "3 \u00d7 16 fl oz bottles",
+      "description": "",
+      "start": 45.6,
+      "end": 54.6
+    },
+    {
+      "id": "simple-syrup",
+      "title": "Add Simple Syrup",
+      "amount": "384 fl oz \u00b7 3 \u00d7 4 qt pitchers",
+      "description": "",
+      "start": 54.6,
+      "end": 66.6
+    },
+    {
+      "id": "stir",
+      "title": "Stir with the paddle",
+      "amount": "",
+      "description": "",
+      "start": 66.6,
+      "end": 73.6
+    },
+    {
+      "id": "close",
+      "title": "Close the keg",
+      "amount": "",
+      "description": "",
+      "start": 73.6,
+      "end": 78.6
+    },
+    {
+      "id": "label",
+      "title": "Attach the label to the lid",
+      "amount": "",
+      "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+      "start": 78.6,
+      "end": 83.6
+    }
+  ],
+  "pours": [
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 1,
+      "container": "bourbon",
+      "start": 4.0,
+      "flow_start": 5.02,
+      "flow_end": 5.9,
+      "end": 6.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 2,
+      "container": "bourbon",
+      "start": 6.6,
+      "flow_start": 7.62,
+      "flow_end": 8.5,
+      "end": 9.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 3,
+      "container": "bourbon",
+      "start": 9.2,
+      "flow_start": 10.22,
+      "flow_end": 11.1,
+      "end": 11.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 4,
+      "container": "bourbon",
+      "start": 11.8,
+      "flow_start": 12.82,
+      "flow_end": 13.7,
+      "end": 14.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 5,
+      "container": "bourbon",
+      "start": 14.4,
+      "flow_start": 15.42,
+      "flow_end": 16.3,
+      "end": 17.0,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 6,
+      "container": "bourbon",
+      "start": 17.0,
+      "flow_start": 18.02,
+      "flow_end": 18.9,
+      "end": 19.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 7,
+      "container": "bourbon",
+      "start": 19.6,
+      "flow_start": 20.62,
+      "flow_end": 21.5,
+      "end": 22.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 8,
+      "container": "bourbon",
+      "start": 22.2,
+      "flow_start": 23.22,
+      "flow_end": 24.1,
+      "end": 24.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 9,
+      "container": "bourbon",
+      "start": 24.8,
+      "flow_start": 25.82,
+      "flow_end": 26.7,
+      "end": 27.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 10,
+      "container": "bourbon",
+      "start": 27.4,
+      "flow_start": 28.42,
+      "flow_end": 29.3,
+      "end": 30.0,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 11,
+      "container": "bourbon",
+      "start": 30.0,
+      "flow_start": 31.02,
+      "flow_end": 31.9,
+      "end": 32.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 12,
+      "container": "bourbon",
+      "start": 32.6,
+      "flow_start": 33.62,
+      "flow_end": 34.5,
+      "end": 35.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 13,
+      "container": "bourbon",
+      "start": 35.2,
+      "flow_start": 36.22,
+      "flow_end": 37.1,
+      "end": 37.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 14,
+      "container": "bourbon",
+      "start": 37.8,
+      "flow_start": 38.82,
+      "flow_end": 39.7,
+      "end": 40.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 15,
+      "container": "bourbon",
+      "start": 40.4,
+      "flow_start": 41.42,
+      "flow_end": 42.3,
+      "end": 43.0,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bulleit-bourbon",
+      "ingredient": "Bulleit Bourbon",
+      "number": 16,
+      "container": "bourbon",
+      "start": 43.0,
+      "flow_start": 44.02,
+      "flow_end": 44.9,
+      "end": 45.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "bitters",
+      "ingredient": "Bitters",
+      "number": 1,
+      "container": "bitters",
+      "start": 45.6,
+      "flow_start": 46.62,
+      "flow_end": 47.9,
+      "end": 48.6,
+      "quantity": {
+        "display": "16 fl oz bottle",
+        "full_bottle": true,
+        "package_fl_oz": 16
+      }
+    },
+    {
+      "ingredient_id": "bitters",
+      "ingredient": "Bitters",
+      "number": 2,
+      "container": "bitters",
+      "start": 48.6,
+      "flow_start": 49.62,
+      "flow_end": 50.9,
+      "end": 51.6,
+      "quantity": {
+        "display": "16 fl oz bottle",
+        "full_bottle": true,
+        "package_fl_oz": 16
+      }
+    },
+    {
+      "ingredient_id": "bitters",
+      "ingredient": "Bitters",
+      "number": 3,
+      "container": "bitters",
+      "start": 51.6,
+      "flow_start": 52.62,
+      "flow_end": 53.9,
+      "end": 54.6,
+      "quantity": {
+        "display": "16 fl oz bottle",
+        "full_bottle": true,
+        "package_fl_oz": 16
+      }
+    },
+    {
+      "ingredient_id": "simple-syrup",
+      "ingredient": "Simple Syrup",
+      "number": 1,
+      "container": "pitcher",
+      "start": 54.6,
+      "flow_start": 55.62,
+      "flow_end": 57.9,
+      "end": 58.6,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "simple-syrup",
+      "ingredient": "Simple Syrup",
+      "number": 2,
+      "container": "pitcher",
+      "start": 58.6,
+      "flow_start": 59.62,
+      "flow_end": 61.9,
+      "end": 62.6,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "simple-syrup",
+      "ingredient": "Simple Syrup",
+      "number": 3,
+      "container": "pitcher",
+      "start": 62.6,
+      "flow_start": 63.62,
+      "flow_end": 65.9,
+      "end": 66.6,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    }
+  ],
+  "configured_yield_oz": 1379,
+  "source_flags": [
+    "Batch text is 12 US gallons (1536 fl oz); configured yield is 1379 fl oz. Do not add unlisted liquid to bridge 157 fl oz."
+  ],
+  "source_evidence": "hold-resolution.json, captured live source revision 128",
+  "quantity_resolution": null,
+  "ingredient_source_quantities": [
+    {
+      "id": "bulleit-bourbon",
+      "source_oz": 947
+    },
+    {
+      "id": "bitters",
+      "source_oz": 48
+    },
+    {
+      "id": "simple-syrup",
+      "source_oz": 384
+    }
+  ],
+  "validation": {
+    "individual_bottle_pours": 19,
+    "individual_pitcher_pours": 3,
+    "individual_sour_jug_pours": 0,
+    "total_pours": 22,
+    "pitcher_quantities_match_source": true,
+    "caps_removed_before_flow": true,
+    "streams_centered_in_actual_hatch": true,
+    "frame_exact_stages": true,
+    "label_on_closed_lid": true
+  }
+}

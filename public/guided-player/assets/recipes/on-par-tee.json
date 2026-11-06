@@ -1,0 +1,447 @@
+{
+  "id": "on-par-tee",
+  "title": "On Par Tee (Crown Royal)",
+  "duration": 88.0,
+  "fps": 30,
+  "video": "assets/recipes/on-par-tee.mp4",
+  "poster": "assets/recipes/on-par-tee.jpg",
+  "label_placement": "top of closed lid",
+  "stages": [
+    {
+      "id": "setup",
+      "title": "Open the keg",
+      "amount": "",
+      "description": "",
+      "start": 0,
+      "end": 4
+    },
+    {
+      "id": "crown-royal",
+      "title": "Add Crown Royal",
+      "amount": "7 \u00d7 1.75 L bottles",
+      "description": "",
+      "start": 4,
+      "end": 22.2
+    },
+    {
+      "id": "peach-schnapps",
+      "title": "Add Peach Schnapps",
+      "amount": "8 \u00d7 1 L bottles",
+      "description": "",
+      "start": 22.2,
+      "end": 43.0
+    },
+    {
+      "id": "sour-mix",
+      "title": "Add Sour Mix",
+      "amount": "256 fl oz \u00b7 2 \u00d7 1 gal jugs",
+      "description": "",
+      "start": 43.0,
+      "end": 51.0
+    },
+    {
+      "id": "lemonade",
+      "title": "Add Lemonade",
+      "amount": "320 fl oz \u00b7 2 full + 64 fl oz",
+      "description": "Fill the pitcher with Lemonade using the fountain drink machine in karaoke.",
+      "start": 51.0,
+      "end": 63.0
+    },
+    {
+      "id": "water",
+      "title": "Add Water",
+      "amount": "192 fl oz \u00b7 1 full + 64 fl oz",
+      "description": "",
+      "start": 63.0,
+      "end": 71.0
+    },
+    {
+      "id": "stir",
+      "title": "Stir with the paddle",
+      "amount": "",
+      "description": "",
+      "start": 71.0,
+      "end": 78.0
+    },
+    {
+      "id": "close",
+      "title": "Close the keg",
+      "amount": "",
+      "description": "",
+      "start": 78.0,
+      "end": 83.0
+    },
+    {
+      "id": "label",
+      "title": "Attach the label to the lid",
+      "amount": "",
+      "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+      "start": 83.0,
+      "end": 88.0
+    }
+  ],
+  "pours": [
+    {
+      "ingredient_id": "crown-royal",
+      "ingredient": "Crown Royal",
+      "number": 1,
+      "container": "crown-royal-deluxe",
+      "start": 4.0,
+      "flow_start": 5.02,
+      "flow_end": 5.9,
+      "end": 6.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-royal",
+      "ingredient": "Crown Royal",
+      "number": 2,
+      "container": "crown-royal-deluxe",
+      "start": 6.6,
+      "flow_start": 7.62,
+      "flow_end": 8.5,
+      "end": 9.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-royal",
+      "ingredient": "Crown Royal",
+      "number": 3,
+      "container": "crown-royal-deluxe",
+      "start": 9.2,
+      "flow_start": 10.22,
+      "flow_end": 11.1,
+      "end": 11.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-royal",
+      "ingredient": "Crown Royal",
+      "number": 4,
+      "container": "crown-royal-deluxe",
+      "start": 11.8,
+      "flow_start": 12.82,
+      "flow_end": 13.7,
+      "end": 14.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-royal",
+      "ingredient": "Crown Royal",
+      "number": 5,
+      "container": "crown-royal-deluxe",
+      "start": 14.4,
+      "flow_start": 15.42,
+      "flow_end": 16.3,
+      "end": 17.0,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-royal",
+      "ingredient": "Crown Royal",
+      "number": 6,
+      "container": "crown-royal-deluxe",
+      "start": 17.0,
+      "flow_start": 18.02,
+      "flow_end": 18.9,
+      "end": 19.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-royal",
+      "ingredient": "Crown Royal",
+      "number": 7,
+      "container": "crown-royal-deluxe",
+      "start": 19.6,
+      "flow_start": 20.62,
+      "flow_end": 21.5,
+      "end": 22.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "peach-schnapps",
+      "ingredient": "Peach Schnapps",
+      "number": 1,
+      "container": "dekuyper-peachtree",
+      "start": 22.2,
+      "flow_start": 23.22,
+      "flow_end": 24.1,
+      "end": 24.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.81
+      }
+    },
+    {
+      "ingredient_id": "peach-schnapps",
+      "ingredient": "Peach Schnapps",
+      "number": 2,
+      "container": "dekuyper-peachtree",
+      "start": 24.8,
+      "flow_start": 25.82,
+      "flow_end": 26.7,
+      "end": 27.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.81
+      }
+    },
+    {
+      "ingredient_id": "peach-schnapps",
+      "ingredient": "Peach Schnapps",
+      "number": 3,
+      "container": "dekuyper-peachtree",
+      "start": 27.4,
+      "flow_start": 28.42,
+      "flow_end": 29.3,
+      "end": 30.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.81
+      }
+    },
+    {
+      "ingredient_id": "peach-schnapps",
+      "ingredient": "Peach Schnapps",
+      "number": 4,
+      "container": "dekuyper-peachtree",
+      "start": 30.0,
+      "flow_start": 31.02,
+      "flow_end": 31.9,
+      "end": 32.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.81
+      }
+    },
+    {
+      "ingredient_id": "peach-schnapps",
+      "ingredient": "Peach Schnapps",
+      "number": 5,
+      "container": "dekuyper-peachtree",
+      "start": 32.6,
+      "flow_start": 33.62,
+      "flow_end": 34.5,
+      "end": 35.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.81
+      }
+    },
+    {
+      "ingredient_id": "peach-schnapps",
+      "ingredient": "Peach Schnapps",
+      "number": 6,
+      "container": "dekuyper-peachtree",
+      "start": 35.2,
+      "flow_start": 36.22,
+      "flow_end": 37.1,
+      "end": 37.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.81
+      }
+    },
+    {
+      "ingredient_id": "peach-schnapps",
+      "ingredient": "Peach Schnapps",
+      "number": 7,
+      "container": "dekuyper-peachtree",
+      "start": 37.8,
+      "flow_start": 38.82,
+      "flow_end": 39.7,
+      "end": 40.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.81
+      }
+    },
+    {
+      "ingredient_id": "peach-schnapps",
+      "ingredient": "Peach Schnapps",
+      "number": 8,
+      "container": "dekuyper-peachtree",
+      "start": 40.4,
+      "flow_start": 41.42,
+      "flow_end": 42.3,
+      "end": 43.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.81
+      }
+    },
+    {
+      "ingredient_id": "sour-mix",
+      "ingredient": "Sour Mix",
+      "number": 1,
+      "container": "dailys-sweet-and-sour",
+      "start": 43.0,
+      "flow_start": 44.02,
+      "flow_end": 46.3,
+      "end": 47.0,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "sour-mix",
+      "ingredient": "Sour Mix",
+      "number": 2,
+      "container": "dailys-sweet-and-sour",
+      "start": 47.0,
+      "flow_start": 48.02,
+      "flow_end": 50.3,
+      "end": 51.0,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 1,
+      "container": "pitcher",
+      "start": 51.0,
+      "flow_start": 52.02,
+      "flow_end": 54.3,
+      "end": 55.0,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 2,
+      "container": "pitcher",
+      "start": 55.0,
+      "flow_start": 56.02,
+      "flow_end": 58.3,
+      "end": 59.0,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 3,
+      "container": "pitcher",
+      "start": 59.0,
+      "flow_start": 60.02,
+      "flow_end": 62.3,
+      "end": 63.0,
+      "quantity": {
+        "fl_oz": 64,
+        "display": "64 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "water",
+      "ingredient": "Water",
+      "number": 1,
+      "container": "pitcher",
+      "start": 63.0,
+      "flow_start": 64.02,
+      "flow_end": 66.3,
+      "end": 67.0,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "water",
+      "ingredient": "Water",
+      "number": 2,
+      "container": "pitcher",
+      "start": 67.0,
+      "flow_start": 68.02,
+      "flow_end": 70.3,
+      "end": 71.0,
+      "quantity": {
+        "fl_oz": 64,
+        "display": "64 fl oz"
+      }
+    }
+  ],
+  "configured_yield_oz": 1452,
+  "source_flags": [
+    "Batch text is 12 US gallons (1536 fl oz); configured yield is 1452 fl oz. Do not add unlisted liquid to bridge 84 fl oz."
+  ],
+  "source_evidence": "hold-resolution.json, captured live source revision 128",
+  "quantity_resolution": null,
+  "ingredient_source_quantities": [
+    {
+      "id": "crown-royal",
+      "source_oz": 414
+    },
+    {
+      "id": "peach-schnapps",
+      "source_oz": 270
+    },
+    {
+      "id": "sour-mix",
+      "source_oz": 256
+    },
+    {
+      "id": "lemonade",
+      "source_oz": 320
+    },
+    {
+      "id": "water",
+      "source_oz": 192
+    }
+  ],
+  "validation": {
+    "individual_bottle_pours": 15,
+    "individual_pitcher_pours": 5,
+    "individual_sour_jug_pours": 2,
+    "total_pours": 22,
+    "pitcher_quantities_match_source": true,
+    "caps_removed_before_flow": true,
+    "streams_centered_in_actual_hatch": true,
+    "frame_exact_stages": true,
+    "label_on_closed_lid": true
+  }
+}

@@ -1,0 +1,380 @@
+{
+  "id": "boozy-cucumber-lemonade-ketel-one",
+  "title": "Boozy Cucumber Lemonade (Ketel One)",
+  "duration": 84.2,
+  "fps": 30,
+  "video": "assets/recipes/boozy-cucumber-lemonade-ketel-one.mp4",
+  "poster": "assets/recipes/boozy-cucumber-lemonade-ketel-one.jpg",
+  "label_placement": "top of closed lid",
+  "stages": [
+    {
+      "id": "setup",
+      "title": "Open the keg",
+      "amount": "",
+      "description": "",
+      "start": 0,
+      "end": 4
+    },
+    {
+      "id": "ketel-one-cucumber-vodka",
+      "title": "Add Ketel One Cucumber Vodka",
+      "amount": "12 \u00d7 1 L bottles",
+      "description": "",
+      "start": 4,
+      "end": 35.2
+    },
+    {
+      "id": "lemonade",
+      "title": "Add Lemonade",
+      "amount": "1024 fl oz \u00b7 8 \u00d7 4 qt pitchers",
+      "description": "Fill the pitcher with Lemonade using the fountain drink machine in karaoke.",
+      "start": 35.2,
+      "end": 67.2
+    },
+    {
+      "id": "stir",
+      "title": "Stir with the paddle",
+      "amount": "",
+      "description": "",
+      "start": 67.2,
+      "end": 74.2
+    },
+    {
+      "id": "close",
+      "title": "Close the keg",
+      "amount": "",
+      "description": "",
+      "start": 74.2,
+      "end": 79.2
+    },
+    {
+      "id": "label",
+      "title": "Attach the label to the lid",
+      "amount": "",
+      "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+      "start": 79.2,
+      "end": 84.2
+    }
+  ],
+  "pours": [
+    {
+      "ingredient_id": "ketel-one-cucumber-vodka",
+      "ingredient": "Ketel One Cucumber Vodka",
+      "number": 1,
+      "container": "ketel-one-cucumber-mint",
+      "start": 4.0,
+      "flow_start": 5.02,
+      "flow_end": 5.9,
+      "end": 6.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "ketel-one-cucumber-vodka",
+      "ingredient": "Ketel One Cucumber Vodka",
+      "number": 2,
+      "container": "ketel-one-cucumber-mint",
+      "start": 6.6,
+      "flow_start": 7.62,
+      "flow_end": 8.5,
+      "end": 9.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "ketel-one-cucumber-vodka",
+      "ingredient": "Ketel One Cucumber Vodka",
+      "number": 3,
+      "container": "ketel-one-cucumber-mint",
+      "start": 9.2,
+      "flow_start": 10.22,
+      "flow_end": 11.1,
+      "end": 11.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "ketel-one-cucumber-vodka",
+      "ingredient": "Ketel One Cucumber Vodka",
+      "number": 4,
+      "container": "ketel-one-cucumber-mint",
+      "start": 11.8,
+      "flow_start": 12.82,
+      "flow_end": 13.7,
+      "end": 14.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "ketel-one-cucumber-vodka",
+      "ingredient": "Ketel One Cucumber Vodka",
+      "number": 5,
+      "container": "ketel-one-cucumber-mint",
+      "start": 14.4,
+      "flow_start": 15.42,
+      "flow_end": 16.3,
+      "end": 17.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "ketel-one-cucumber-vodka",
+      "ingredient": "Ketel One Cucumber Vodka",
+      "number": 6,
+      "container": "ketel-one-cucumber-mint",
+      "start": 17.0,
+      "flow_start": 18.02,
+      "flow_end": 18.9,
+      "end": 19.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "ketel-one-cucumber-vodka",
+      "ingredient": "Ketel One Cucumber Vodka",
+      "number": 7,
+      "container": "ketel-one-cucumber-mint",
+      "start": 19.6,
+      "flow_start": 20.62,
+      "flow_end": 21.5,
+      "end": 22.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "ketel-one-cucumber-vodka",
+      "ingredient": "Ketel One Cucumber Vodka",
+      "number": 8,
+      "container": "ketel-one-cucumber-mint",
+      "start": 22.2,
+      "flow_start": 23.22,
+      "flow_end": 24.1,
+      "end": 24.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "ketel-one-cucumber-vodka",
+      "ingredient": "Ketel One Cucumber Vodka",
+      "number": 9,
+      "container": "ketel-one-cucumber-mint",
+      "start": 24.8,
+      "flow_start": 25.82,
+      "flow_end": 26.7,
+      "end": 27.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "ketel-one-cucumber-vodka",
+      "ingredient": "Ketel One Cucumber Vodka",
+      "number": 10,
+      "container": "ketel-one-cucumber-mint",
+      "start": 27.4,
+      "flow_start": 28.42,
+      "flow_end": 29.3,
+      "end": 30.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "ketel-one-cucumber-vodka",
+      "ingredient": "Ketel One Cucumber Vodka",
+      "number": 11,
+      "container": "ketel-one-cucumber-mint",
+      "start": 30.0,
+      "flow_start": 31.02,
+      "flow_end": 31.9,
+      "end": 32.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "ketel-one-cucumber-vodka",
+      "ingredient": "Ketel One Cucumber Vodka",
+      "number": 12,
+      "container": "ketel-one-cucumber-mint",
+      "start": 32.6,
+      "flow_start": 33.62,
+      "flow_end": 34.5,
+      "end": 35.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 1,
+      "container": "pitcher",
+      "start": 35.2,
+      "flow_start": 36.22,
+      "flow_end": 38.5,
+      "end": 39.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 2,
+      "container": "pitcher",
+      "start": 39.2,
+      "flow_start": 40.22,
+      "flow_end": 42.5,
+      "end": 43.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 3,
+      "container": "pitcher",
+      "start": 43.2,
+      "flow_start": 44.22,
+      "flow_end": 46.5,
+      "end": 47.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 4,
+      "container": "pitcher",
+      "start": 47.2,
+      "flow_start": 48.22,
+      "flow_end": 50.5,
+      "end": 51.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 5,
+      "container": "pitcher",
+      "start": 51.2,
+      "flow_start": 52.22,
+      "flow_end": 54.5,
+      "end": 55.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 6,
+      "container": "pitcher",
+      "start": 55.2,
+      "flow_start": 56.22,
+      "flow_end": 58.5,
+      "end": 59.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 7,
+      "container": "pitcher",
+      "start": 59.2,
+      "flow_start": 60.22,
+      "flow_end": 62.5,
+      "end": 63.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 8,
+      "container": "pitcher",
+      "start": 63.2,
+      "flow_start": 64.22,
+      "flow_end": 66.5,
+      "end": 67.2,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    }
+  ],
+  "configured_yield_oz": 1430,
+  "source_flags": [
+    "Batch text is 12 US gallons (1536 fl oz); configured yield is 1430 fl oz. Do not add unlisted liquid to bridge 106 fl oz."
+  ],
+  "source_evidence": "hold-resolution.json, captured live source revision 128",
+  "quantity_resolution": null,
+  "ingredient_source_quantities": [
+    {
+      "id": "ketel-one-cucumber-vodka",
+      "source_oz": 406
+    },
+    {
+      "id": "lemonade",
+      "source_oz": 1024
+    }
+  ],
+  "validation": {
+    "individual_bottle_pours": 12,
+    "individual_pitcher_pours": 8,
+    "individual_sour_jug_pours": 0,
+    "total_pours": 20,
+    "pitcher_quantities_match_source": true,
+    "caps_removed_before_flow": true,
+    "streams_centered_in_actual_hatch": true,
+    "frame_exact_stages": true,
+    "label_on_closed_lid": true
+  }
+}

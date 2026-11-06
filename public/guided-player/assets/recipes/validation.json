@@ -1,0 +1,441 @@
+{
+  "checked_at": "2026-11-04T23:42:31.424882+00:00",
+  "ok": true,
+  "summary": {
+    "ready": 26,
+    "pending_active": 0,
+    "inactive": 4,
+    "queued": 0,
+    "media_checked": 26,
+    "photo_assets_unchanged": 31,
+    "pending_with_missing_photo_assets": 0,
+    "catalog_mirror_matches": true,
+    "replica_assets_registered": 8,
+    "replica_assets_verified": 8
+  },
+  "issues": [],
+  "recipes": [
+    {
+      "id": "blueberry-margarita-jose-cuervo",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 110.2,
+      "bytes": 19075254,
+      "stages": 9,
+      "individual_pours": 34
+    },
+    {
+      "id": "house-margarita-jose-cuervo",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 99.8,
+      "bytes": 17023887,
+      "stages": 8,
+      "individual_pours": 30
+    },
+    {
+      "id": "peach-margarita-jose-cuervo",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 110.2,
+      "bytes": 18585273,
+      "stages": 9,
+      "individual_pours": 34
+    },
+    {
+      "id": "raspberry-margarita-jose-cuervo",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 110.2,
+      "bytes": 19153259,
+      "stages": 9,
+      "individual_pours": 34
+    },
+    {
+      "id": "strawberry-margarita-jose-cuervo",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 110.2,
+      "bytes": 19673935,
+      "stages": 9,
+      "individual_pours": 34
+    },
+    {
+      "id": "watermelon-margarita-jose-cuervo",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 110.2,
+      "bytes": 19167313,
+      "stages": 9,
+      "individual_pours": 34
+    },
+    {
+      "id": "strawberry-senorita-jose-cuervo",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 68.6,
+      "bytes": 9061776,
+      "stages": 6,
+      "individual_pours": 14
+    },
+    {
+      "id": "blue-dot-svedka",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 90.4,
+      "bytes": 10830695,
+      "stages": 8,
+      "individual_pours": 19
+    },
+    {
+      "id": "boozy-cucumber-lemonade-ketel-one",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 84.2,
+      "bytes": 10959127,
+      "stages": 6,
+      "individual_pours": 20
+    },
+    {
+      "id": "espresso-martini-tito-s",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 100.6,
+      "bytes": 15601053,
+      "stages": 9,
+      "individual_pours": 29
+    },
+    {
+      "id": "lemon-drop-martini-absolut-citron",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 92.8,
+      "bytes": 13307970,
+      "stages": 7,
+      "individual_pours": 26
+    },
+    {
+      "id": "pomegranate-martini-tito-s",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 119.8,
+      "bytes": 19680218,
+      "stages": 8,
+      "individual_pours": 38
+    },
+    {
+      "id": "spiked-arnold-palmer-tito-s",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 76.6,
+      "bytes": 9798602,
+      "stages": 7,
+      "individual_pours": 16
+    },
+    {
+      "id": "spiked-cranberry-lemonade-tito-s",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 68.6,
+      "bytes": 8881388,
+      "stages": 7,
+      "individual_pours": 14
+    },
+    {
+      "id": "spiked-pink-lemonade-tito-s",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 68.6,
+      "bytes": 8870402,
+      "stages": 6,
+      "individual_pours": 14
+    },
+    {
+      "id": "spiked-strawberry-lemonade-tito-s",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 68.6,
+      "bytes": 8876062,
+      "stages": 6,
+      "individual_pours": 14
+    },
+    {
+      "id": "vodka-cran-tito-s",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 68.6,
+      "bytes": 8849442,
+      "stages": 6,
+      "individual_pours": 14
+    },
+    {
+      "id": "crown-apple-rita",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 114.6,
+      "bytes": 21048808,
+      "stages": 7,
+      "individual_pours": 36
+    },
+    {
+      "id": "jacked-up-strawberry-lemonade-jack-daniels",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 68.6,
+      "bytes": 9387982,
+      "stages": 6,
+      "individual_pours": 14
+    },
+    {
+      "id": "old-fashioned-bulleit",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 83.6,
+      "bytes": 16120132,
+      "stages": 7,
+      "individual_pours": 22
+    },
+    {
+      "id": "washington-apple-crown-royal-apple",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 60.6,
+      "bytes": 8864806,
+      "stages": 6,
+      "individual_pours": 12
+    },
+    {
+      "id": "whiskey-sour-jack-daniels",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 67.0,
+      "bytes": 10881845,
+      "stages": 7,
+      "individual_pours": 16
+    },
+    {
+      "id": "bacardi-sunset",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 68.6,
+      "bytes": 8786027,
+      "stages": 6,
+      "individual_pours": 14
+    },
+    {
+      "id": "whiskey-smash",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 79.2,
+      "bytes": 10285272,
+      "stages": 9,
+      "individual_pours": 17
+    },
+    {
+      "id": "apple-jack-whiskey",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 89.4,
+      "bytes": 12210716,
+      "stages": 9,
+      "individual_pours": 22
+    },
+    {
+      "id": "on-par-tee",
+      "ok": true,
+      "issues": [],
+      "duration_seconds": 88.0,
+      "bytes": 13758923,
+      "stages": 9,
+      "individual_pours": 22
+    }
+  ],
+  "pending": [],
+  "replica_assets": [
+    {
+      "slug": "absolut-citron",
+      "ok": true,
+      "issues": [],
+      "transparent_pixel_fraction": 0.59264,
+      "mouth_normalized": [
+        0.4969818913480885,
+        0.07687210072895957
+      ],
+      "path": "/Users/derekpethel/Documents/Codex/2026-10-29/wha/outputs/cocktail-replica-assets/absolut-citron.png",
+      "bytes": 1541575,
+      "size": [
+        1024,
+        1536
+      ],
+      "alpha32_bbox": [
+        264,
+        11,
+        761,
+        1520
+      ],
+      "cap_cut_y": 109
+    },
+    {
+      "slug": "bacardi-superior",
+      "ok": true,
+      "issues": [],
+      "transparent_pixel_fraction": 0.6603,
+      "mouth_normalized": [
+        0.5,
+        0.09188034188034189
+      ],
+      "path": "/Users/derekpethel/Documents/Codex/2026-10-29/wha/outputs/cocktail-replica-assets/bacardi-superior.png",
+      "bytes": 1578341,
+      "size": [
+        1024,
+        1536
+      ],
+      "alpha32_bbox": [
+        266,
+        72,
+        758,
+        1476
+      ],
+      "cap_cut_y": 122
+    },
+    {
+      "slug": "cold-brew-concentrate",
+      "ok": true,
+      "issues": [],
+      "transparent_pixel_fraction": 0.51631,
+      "mouth_normalized": [
+        0.502542372881356,
+        0.07601115760111576
+      ],
+      "path": "/Users/derekpethel/Documents/Codex/2026-10-29/wha/outputs/cocktail-replica-assets/cold-brew-concentrate.png",
+      "bytes": 1673571,
+      "size": [
+        1024,
+        1536
+      ],
+      "alpha32_bbox": [
+        215,
+        57,
+        805,
+        1491
+      ],
+      "cap_cut_y": 102
+    },
+    {
+      "slug": "jack-daniels-old-no-7",
+      "ok": true,
+      "issues": [],
+      "transparent_pixel_fraction": 0.61591,
+      "mouth_normalized": [
+        0.49902152641878667,
+        0.10254691689008043
+      ],
+      "path": "/Users/derekpethel/Documents/Codex/2026-10-29/wha/outputs/cocktail-replica-assets/jack-daniels-old-no-7.png",
+      "bytes": 1715643,
+      "size": [
+        1024,
+        1536
+      ],
+      "alpha32_bbox": [
+        257,
+        13,
+        768,
+        1505
+      ],
+      "cap_cut_y": 146
+    },
+    {
+      "slug": "jack-daniels-tennessee-fire",
+      "ok": true,
+      "issues": [],
+      "transparent_pixel_fraction": 0.6316,
+      "mouth_normalized": [
+        0.4969939879759519,
+        0.11737400530503979
+      ],
+      "path": "/Users/derekpethel/Documents/Codex/2026-10-29/wha/outputs/cocktail-replica-assets/jack-daniels-tennessee-fire.png",
+      "bytes": 1825860,
+      "size": [
+        1024,
+        1536
+      ],
+      "alpha32_bbox": [
+        263,
+        13,
+        762,
+        1521
+      ],
+      "cap_cut_y": 170
+    },
+    {
+      "slug": "kahlua",
+      "ok": true,
+      "issues": [],
+      "transparent_pixel_fraction": 0.65,
+      "mouth_normalized": [
+        0.5022471910112359,
+        0.10408432147562582
+      ],
+      "path": "/Users/derekpethel/Documents/Codex/2026-10-29/wha/outputs/cocktail-replica-assets/kahlua.png",
+      "bytes": 1444400,
+      "size": [
+        1024,
+        1536
+      ],
+      "alpha32_bbox": [
+        290,
+        10,
+        735,
+        1528
+      ],
+      "cap_cut_y": 151
+    },
+    {
+      "slug": "ketel-one-cucumber-mint",
+      "ok": true,
+      "issues": [],
+      "transparent_pixel_fraction": 0.69765,
+      "mouth_normalized": [
+        0.49865951742627346,
+        0.08988015978695073
+      ],
+      "path": "/Users/derekpethel/Documents/Codex/2026-10-29/wha/outputs/cocktail-replica-assets/ketel-one-cucumber-mint.png",
+      "bytes": 1672431,
+      "size": [
+        1024,
+        1536
+      ],
+      "alpha32_bbox": [
+        326,
+        17,
+        699,
+        1519
+      ],
+      "cap_cut_y": 128
+    },
+    {
+      "slug": "vanilla-syrup",
+      "ok": true,
+      "issues": [],
+      "transparent_pixel_fraction": 0.76749,
+      "mouth_normalized": [
+        0.49560117302052786,
+        0.07808946171341925
+      ],
+      "path": "/Users/derekpethel/Documents/Codex/2026-10-29/wha/outputs/cocktail-replica-assets/vanilla-syrup.png",
+      "bytes": 669064,
+      "size": [
+        1118,
+        1407
+      ],
+      "alpha32_bbox": [
+        388,
+        44,
+        729,
+        1363
+      ],
+      "cap_cut_y": 96
+    }
+  ],
+  "scope": "Encoded media properties, portable player URLs, stage descriptions, timing and authorized source quantities, production-overlay container mapping, unchanged 31 original photo PNGs, and transparent replica/cap geometry. Full visual animation review remains separate."
+}

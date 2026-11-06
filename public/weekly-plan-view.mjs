@@ -66,7 +66,7 @@ export function renderWeeklyPlanTapRows(items, {
   `).join("")}</div>`;
 }
 
-export function renderWeeklyPlanCocktailRows(items, { editable = true } = {}) {
+export function renderWeeklyPlanCocktailRows(items, { editable = true, recipeDetails = () => "" } = {}) {
   if (!items.length) return `<p class="weekly-plan-empty">None this week.</p>${editable ? renderWeeklyPrepAdder() : ""}`;
   const orderedItems = [...items].sort((a, b) => (
     toNumber(a.tapNumbers?.[0]) - toNumber(b.tapNumbers?.[0])
@@ -91,6 +91,7 @@ export function renderWeeklyPlanCocktailRows(items, { editable = true } = {}) {
         ${item.completionItem ? renderInlinePrepCompletion(item.completionItem, "cocktail", { saving: item.completionSaving }) : `<b>${escapeHtml(item.quantityLabel || `${formatNumber(item.quantity)} label${item.quantity === 1 ? "" : "s"}`)}</b>`}
         ${editable ? `${item.completionItem?.completed ? "" : `<button type="button" class="mini-button dashboard-owner-only" data-prep-subtract="${escapeHtml(prepItemId)}" aria-label="Remove one planned keg of ${escapeHtml(item.name)}" aria-describedby="${statusId}" title="Remove one planned keg">&times;</button>`}
         <span class="prep-subtract-status" id="${statusId}" data-prep-subtract-status role="status" aria-live="polite">${item.completionItem?.completed ? "Reopen completed prep before removing it." : ""}</span>` : ""}
+        ${recipeDetails(item)}
       </div>
     `;
   }).join("")}</div>`;

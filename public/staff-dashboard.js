@@ -1,3 +1,4 @@
+import { createRecipeGuide, initializeRecipeGuides } from "./recipe-guide.mjs";
 import { parseSmartReceivingTranscript } from "./smart-receiving.mjs";
 import { formatCalendarDate } from "./dashboard-formatters.mjs";
 import { kegDestination } from "./keg-destination.mjs";
@@ -869,6 +870,7 @@ function renderStaffPrepPlan() {
     liquorList.append(createEmptyState("No liquor needs to be added to kegs this week."));
   }
   updateStaffPrepBatchControls();
+  initializeRecipeGuides(prepList);
 }
 
 function appendStaffPrepGroups(root, items, kind, completedOpen) {
@@ -1214,7 +1216,7 @@ function createInlineStaffPrepRecipe(recipe, panelId) {
     if (progress) body.append(createOptionalIngredientProgressRow(ingredient.name, progress));
   });
   table.append(body);
-  panel.append(header, table);
+  panel.append(header, table, createRecipeGuide(recipe));
   return panel;
 }
 
@@ -1629,6 +1631,7 @@ function renderStaffRecipes() {
   }
   renderStaffOverview();
   recipeGrid.setAttribute("aria-busy", "false");
+  initializeRecipeGuides(recipeGrid);
 }
 
 function renderStats(visibleCount) {
@@ -1700,7 +1703,7 @@ function createRecipeCard(recipe) {
   });
   table.append(thead, tbody);
   tableWrap.append(table);
-  article.append(header, tableWrap);
+  article.append(header, tableWrap, createRecipeGuide(recipe));
   return article;
 }
 

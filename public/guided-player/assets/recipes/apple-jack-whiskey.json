@@ -1,0 +1,446 @@
+{
+  "id": "apple-jack-whiskey",
+  "title": "Apple Jack (Jack Fire)",
+  "duration": 89.4,
+  "fps": 30,
+  "video": "assets/recipes/apple-jack-whiskey.mp4",
+  "poster": "assets/recipes/apple-jack-whiskey.jpg",
+  "label_placement": "top of closed lid",
+  "stages": [
+    {
+      "id": "setup",
+      "title": "Open the keg",
+      "amount": "",
+      "description": "",
+      "start": 0,
+      "end": 4
+    },
+    {
+      "id": "jack-daniel-s-fire",
+      "title": "Add Jack Daniel's Fire",
+      "amount": "4 \u00d7 1.75 L bottles",
+      "description": "",
+      "start": 4,
+      "end": 14.4
+    },
+    {
+      "id": "apple-schnapps",
+      "title": "Add Apple Schnapps",
+      "amount": "8 \u00d7 1 L bottles",
+      "description": "",
+      "start": 14.4,
+      "end": 35.2
+    },
+    {
+      "id": "vanilla-syrup",
+      "title": "Add Vanilla Syrup",
+      "amount": "2 \u00d7 25 fl oz bottles",
+      "description": "",
+      "start": 35.2,
+      "end": 40.4
+    },
+    {
+      "id": "lemonade",
+      "title": "Add Lemonade",
+      "amount": "704 fl oz \u00b7 5 full + 64 fl oz",
+      "description": "Fill the pitcher with Lemonade using the fountain drink machine in karaoke.",
+      "start": 40.400000000000006,
+      "end": 64.4
+    },
+    {
+      "id": "water",
+      "title": "Add Water",
+      "amount": "256 fl oz \u00b7 2 \u00d7 4 qt pitchers",
+      "description": "",
+      "start": 64.4,
+      "end": 72.4
+    },
+    {
+      "id": "stir",
+      "title": "Stir with the paddle",
+      "amount": "",
+      "description": "",
+      "start": 72.4,
+      "end": 79.4
+    },
+    {
+      "id": "close",
+      "title": "Close the keg",
+      "amount": "",
+      "description": "",
+      "start": 79.4,
+      "end": 84.4
+    },
+    {
+      "id": "label",
+      "title": "Attach the label to the lid",
+      "amount": "",
+      "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+      "start": 84.4,
+      "end": 89.4
+    }
+  ],
+  "pours": [
+    {
+      "ingredient_id": "jack-daniel-s-fire",
+      "ingredient": "Jack Daniel's Fire",
+      "number": 1,
+      "container": "jack-daniels-tennessee-fire",
+      "start": 4.0,
+      "flow_start": 5.02,
+      "flow_end": 5.9,
+      "end": 6.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jack-daniel-s-fire",
+      "ingredient": "Jack Daniel's Fire",
+      "number": 2,
+      "container": "jack-daniels-tennessee-fire",
+      "start": 6.6,
+      "flow_start": 7.62,
+      "flow_end": 8.5,
+      "end": 9.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jack-daniel-s-fire",
+      "ingredient": "Jack Daniel's Fire",
+      "number": 3,
+      "container": "jack-daniels-tennessee-fire",
+      "start": 9.2,
+      "flow_start": 10.22,
+      "flow_end": 11.1,
+      "end": 11.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "jack-daniel-s-fire",
+      "ingredient": "Jack Daniel's Fire",
+      "number": 4,
+      "container": "jack-daniels-tennessee-fire",
+      "start": 11.8,
+      "flow_start": 12.82,
+      "flow_end": 13.7,
+      "end": 14.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "apple-schnapps",
+      "ingredient": "Apple Schnapps",
+      "number": 1,
+      "container": "llords-apple-schnapps",
+      "start": 14.4,
+      "flow_start": 15.42,
+      "flow_end": 16.3,
+      "end": 17.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "apple-schnapps",
+      "ingredient": "Apple Schnapps",
+      "number": 2,
+      "container": "llords-apple-schnapps",
+      "start": 17.0,
+      "flow_start": 18.02,
+      "flow_end": 18.9,
+      "end": 19.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "apple-schnapps",
+      "ingredient": "Apple Schnapps",
+      "number": 3,
+      "container": "llords-apple-schnapps",
+      "start": 19.6,
+      "flow_start": 20.62,
+      "flow_end": 21.5,
+      "end": 22.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "apple-schnapps",
+      "ingredient": "Apple Schnapps",
+      "number": 4,
+      "container": "llords-apple-schnapps",
+      "start": 22.2,
+      "flow_start": 23.22,
+      "flow_end": 24.1,
+      "end": 24.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "apple-schnapps",
+      "ingredient": "Apple Schnapps",
+      "number": 5,
+      "container": "llords-apple-schnapps",
+      "start": 24.8,
+      "flow_start": 25.82,
+      "flow_end": 26.7,
+      "end": 27.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "apple-schnapps",
+      "ingredient": "Apple Schnapps",
+      "number": 6,
+      "container": "llords-apple-schnapps",
+      "start": 27.4,
+      "flow_start": 28.42,
+      "flow_end": 29.3,
+      "end": 30.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "apple-schnapps",
+      "ingredient": "Apple Schnapps",
+      "number": 7,
+      "container": "llords-apple-schnapps",
+      "start": 30.0,
+      "flow_start": 31.02,
+      "flow_end": 31.9,
+      "end": 32.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "apple-schnapps",
+      "ingredient": "Apple Schnapps",
+      "number": 8,
+      "container": "llords-apple-schnapps",
+      "start": 32.6,
+      "flow_start": 33.62,
+      "flow_end": 34.5,
+      "end": 35.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "vanilla-syrup",
+      "ingredient": "Vanilla Syrup",
+      "number": 1,
+      "container": "vanilla-syrup",
+      "start": 35.2,
+      "flow_start": 36.22,
+      "flow_end": 37.1,
+      "end": 37.8,
+      "quantity": {
+        "display": "25 fl oz bottle",
+        "full_bottle": true,
+        "package_fl_oz": 25
+      }
+    },
+    {
+      "ingredient_id": "vanilla-syrup",
+      "ingredient": "Vanilla Syrup",
+      "number": 2,
+      "container": "vanilla-syrup",
+      "start": 37.8,
+      "flow_start": 38.82,
+      "flow_end": 39.7,
+      "end": 40.4,
+      "quantity": {
+        "display": "25 fl oz bottle",
+        "full_bottle": true,
+        "package_fl_oz": 25
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 1,
+      "container": "pitcher",
+      "start": 40.4,
+      "flow_start": 41.42,
+      "flow_end": 43.7,
+      "end": 44.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 2,
+      "container": "pitcher",
+      "start": 44.4,
+      "flow_start": 45.42,
+      "flow_end": 47.7,
+      "end": 48.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 3,
+      "container": "pitcher",
+      "start": 48.4,
+      "flow_start": 49.42,
+      "flow_end": 51.7,
+      "end": 52.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 4,
+      "container": "pitcher",
+      "start": 52.4,
+      "flow_start": 53.42,
+      "flow_end": 55.7,
+      "end": 56.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 5,
+      "container": "pitcher",
+      "start": 56.4,
+      "flow_start": 57.42,
+      "flow_end": 59.7,
+      "end": 60.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 6,
+      "container": "pitcher",
+      "start": 60.4,
+      "flow_start": 61.42,
+      "flow_end": 63.7,
+      "end": 64.4,
+      "quantity": {
+        "fl_oz": 64,
+        "display": "64 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "water",
+      "ingredient": "Water",
+      "number": 1,
+      "container": "pitcher",
+      "start": 64.4,
+      "flow_start": 65.42,
+      "flow_end": 67.7,
+      "end": 68.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "water",
+      "ingredient": "Water",
+      "number": 2,
+      "container": "pitcher",
+      "start": 68.4,
+      "flow_start": 69.42,
+      "flow_end": 71.7,
+      "end": 72.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    }
+  ],
+  "configured_yield_oz": 1516,
+  "source_flags": [
+    "Batch text is 12 US gallons (1536 fl oz); configured yield is 1516 fl oz. Do not add unlisted liquid to bridge 20 fl oz."
+  ],
+  "source_evidence": "hold-resolution.json, captured live source revision 128",
+  "quantity_resolution": null,
+  "ingredient_source_quantities": [
+    {
+      "id": "jack-daniel-s-fire",
+      "source_oz": 236
+    },
+    {
+      "id": "apple-schnapps",
+      "source_oz": 270
+    },
+    {
+      "id": "vanilla-syrup",
+      "source_oz": 50
+    },
+    {
+      "id": "lemonade",
+      "source_oz": 704
+    },
+    {
+      "id": "water",
+      "source_oz": 256
+    }
+  ],
+  "validation": {
+    "individual_bottle_pours": 14,
+    "individual_pitcher_pours": 8,
+    "individual_sour_jug_pours": 0,
+    "total_pours": 22,
+    "pitcher_quantities_match_source": true,
+    "caps_removed_before_flow": true,
+    "streams_centered_in_actual_hatch": true,
+    "frame_exact_stages": true,
+    "label_on_closed_lid": true
+  }
+}

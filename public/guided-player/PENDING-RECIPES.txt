@@ -1,0 +1,11 @@
+NO PENDING ACTIVE RECIPES
+
+All 26 active recipes are available in the validated complete release.
+
+Eight temporary realistic photo-based replicas fill the original product gaps; see ASSET-SOURCES.json in the package root. The 31 original photo assets are unchanged.
+
+Four recipes remain inactive in the source dashboard and are excluded:
+GIN & JUICE (BOMBAY)
+CAPTAIN QUENCHER (CAPTAIN MORGAN)
+APPLETINI (TITO'S)
+JACK & LEMONADE

@@ -1,0 +1,497 @@
+{
+  "id": "lemon-drop-martini-absolut-citron",
+  "title": "Lemon Drop Martini (Absolut Citron)",
+  "duration": 92.8,
+  "fps": 30,
+  "video": "assets/recipes/lemon-drop-martini-absolut-citron.mp4",
+  "poster": "assets/recipes/lemon-drop-martini-absolut-citron.jpg",
+  "label_placement": "top of closed lid",
+  "stages": [
+    {
+      "id": "setup",
+      "title": "Open the keg",
+      "amount": "",
+      "description": "",
+      "start": 0,
+      "end": 4
+    },
+    {
+      "id": "absolut-citron",
+      "title": "Add Absolut Citron",
+      "amount": "14 \u00d7 1.75 L bottles",
+      "description": "",
+      "start": 4,
+      "end": 40.4
+    },
+    {
+      "id": "lemon-juice",
+      "title": "Add Lemon Juice",
+      "amount": "9 \u00d7 1 L bottles",
+      "description": "",
+      "start": 40.4,
+      "end": 63.8
+    },
+    {
+      "id": "simple-syrup",
+      "title": "Add Simple Syrup",
+      "amount": "320 fl oz \u00b7 2 full + 64 fl oz",
+      "description": "",
+      "start": 63.8,
+      "end": 75.8
+    },
+    {
+      "id": "stir",
+      "title": "Stir with the paddle",
+      "amount": "",
+      "description": "",
+      "start": 75.8,
+      "end": 82.8
+    },
+    {
+      "id": "close",
+      "title": "Close the keg",
+      "amount": "",
+      "description": "",
+      "start": 82.8,
+      "end": 87.8
+    },
+    {
+      "id": "label",
+      "title": "Attach the label to the lid",
+      "amount": "",
+      "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+      "start": 87.8,
+      "end": 92.8
+    }
+  ],
+  "pours": [
+    {
+      "ingredient_id": "absolut-citron",
+      "ingredient": "Absolut Citron",
+      "number": 1,
+      "container": "absolut-citron",
+      "start": 4.0,
+      "flow_start": 5.02,
+      "flow_end": 5.9,
+      "end": 6.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "absolut-citron",
+      "ingredient": "Absolut Citron",
+      "number": 2,
+      "container": "absolut-citron",
+      "start": 6.6,
+      "flow_start": 7.62,
+      "flow_end": 8.5,
+      "end": 9.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "absolut-citron",
+      "ingredient": "Absolut Citron",
+      "number": 3,
+      "container": "absolut-citron",
+      "start": 9.2,
+      "flow_start": 10.22,
+      "flow_end": 11.1,
+      "end": 11.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "absolut-citron",
+      "ingredient": "Absolut Citron",
+      "number": 4,
+      "container": "absolut-citron",
+      "start": 11.8,
+      "flow_start": 12.82,
+      "flow_end": 13.7,
+      "end": 14.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "absolut-citron",
+      "ingredient": "Absolut Citron",
+      "number": 5,
+      "container": "absolut-citron",
+      "start": 14.4,
+      "flow_start": 15.42,
+      "flow_end": 16.3,
+      "end": 17.0,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "absolut-citron",
+      "ingredient": "Absolut Citron",
+      "number": 6,
+      "container": "absolut-citron",
+      "start": 17.0,
+      "flow_start": 18.02,
+      "flow_end": 18.9,
+      "end": 19.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "absolut-citron",
+      "ingredient": "Absolut Citron",
+      "number": 7,
+      "container": "absolut-citron",
+      "start": 19.6,
+      "flow_start": 20.62,
+      "flow_end": 21.5,
+      "end": 22.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "absolut-citron",
+      "ingredient": "Absolut Citron",
+      "number": 8,
+      "container": "absolut-citron",
+      "start": 22.2,
+      "flow_start": 23.22,
+      "flow_end": 24.1,
+      "end": 24.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "absolut-citron",
+      "ingredient": "Absolut Citron",
+      "number": 9,
+      "container": "absolut-citron",
+      "start": 24.8,
+      "flow_start": 25.82,
+      "flow_end": 26.7,
+      "end": 27.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "absolut-citron",
+      "ingredient": "Absolut Citron",
+      "number": 10,
+      "container": "absolut-citron",
+      "start": 27.4,
+      "flow_start": 28.42,
+      "flow_end": 29.3,
+      "end": 30.0,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "absolut-citron",
+      "ingredient": "Absolut Citron",
+      "number": 11,
+      "container": "absolut-citron",
+      "start": 30.0,
+      "flow_start": 31.02,
+      "flow_end": 31.9,
+      "end": 32.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "absolut-citron",
+      "ingredient": "Absolut Citron",
+      "number": 12,
+      "container": "absolut-citron",
+      "start": 32.6,
+      "flow_start": 33.62,
+      "flow_end": 34.5,
+      "end": 35.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "absolut-citron",
+      "ingredient": "Absolut Citron",
+      "number": 13,
+      "container": "absolut-citron",
+      "start": 35.2,
+      "flow_start": 36.22,
+      "flow_end": 37.1,
+      "end": 37.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "absolut-citron",
+      "ingredient": "Absolut Citron",
+      "number": 14,
+      "container": "absolut-citron",
+      "start": 37.8,
+      "flow_start": 38.82,
+      "flow_end": 39.7,
+      "end": 40.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "lemon-juice",
+      "ingredient": "Lemon Juice",
+      "number": 1,
+      "container": "finest-call-lemon-juice",
+      "start": 40.4,
+      "flow_start": 41.42,
+      "flow_end": 42.3,
+      "end": 43.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lemon-juice",
+      "ingredient": "Lemon Juice",
+      "number": 2,
+      "container": "finest-call-lemon-juice",
+      "start": 43.0,
+      "flow_start": 44.02,
+      "flow_end": 44.9,
+      "end": 45.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lemon-juice",
+      "ingredient": "Lemon Juice",
+      "number": 3,
+      "container": "finest-call-lemon-juice",
+      "start": 45.6,
+      "flow_start": 46.62,
+      "flow_end": 47.5,
+      "end": 48.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lemon-juice",
+      "ingredient": "Lemon Juice",
+      "number": 4,
+      "container": "finest-call-lemon-juice",
+      "start": 48.2,
+      "flow_start": 49.22,
+      "flow_end": 50.1,
+      "end": 50.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lemon-juice",
+      "ingredient": "Lemon Juice",
+      "number": 5,
+      "container": "finest-call-lemon-juice",
+      "start": 50.8,
+      "flow_start": 51.82,
+      "flow_end": 52.7,
+      "end": 53.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lemon-juice",
+      "ingredient": "Lemon Juice",
+      "number": 6,
+      "container": "finest-call-lemon-juice",
+      "start": 53.4,
+      "flow_start": 54.42,
+      "flow_end": 55.3,
+      "end": 56.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lemon-juice",
+      "ingredient": "Lemon Juice",
+      "number": 7,
+      "container": "finest-call-lemon-juice",
+      "start": 56.0,
+      "flow_start": 57.02,
+      "flow_end": 57.9,
+      "end": 58.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lemon-juice",
+      "ingredient": "Lemon Juice",
+      "number": 8,
+      "container": "finest-call-lemon-juice",
+      "start": 58.6,
+      "flow_start": 59.62,
+      "flow_end": 60.5,
+      "end": 61.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lemon-juice",
+      "ingredient": "Lemon Juice",
+      "number": 9,
+      "container": "finest-call-lemon-juice",
+      "start": 61.2,
+      "flow_start": 62.22,
+      "flow_end": 63.1,
+      "end": 63.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "simple-syrup",
+      "ingredient": "Simple Syrup",
+      "number": 1,
+      "container": "pitcher",
+      "start": 63.8,
+      "flow_start": 64.82,
+      "flow_end": 67.1,
+      "end": 67.8,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "simple-syrup",
+      "ingredient": "Simple Syrup",
+      "number": 2,
+      "container": "pitcher",
+      "start": 67.8,
+      "flow_start": 68.82,
+      "flow_end": 71.1,
+      "end": 71.8,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "simple-syrup",
+      "ingredient": "Simple Syrup",
+      "number": 3,
+      "container": "pitcher",
+      "start": 71.8,
+      "flow_start": 72.82,
+      "flow_end": 75.1,
+      "end": 75.8,
+      "quantity": {
+        "fl_oz": 64,
+        "display": "64 fl oz"
+      }
+    }
+  ],
+  "configured_yield_oz": 1448,
+  "source_flags": [
+    "Batch text is 12 US gallons (1536 fl oz); configured yield is 1448 fl oz. Do not add unlisted liquid to bridge 88 fl oz."
+  ],
+  "source_evidence": "hold-resolution.json, captured live source revision 128",
+  "quantity_resolution": {
+    "authority": "Explicit user instruction relayed by parent agent in the active chat",
+    "full_one_liter_bottles": 9,
+    "source_original_numeric_oz": 300,
+    "preserve_dashboard_configured_yield_oz": 1448,
+    "render_quantity": "Nine separate full 1 L lemon juice bottle pours",
+    "note": "The bottle count is authoritative for animation. Preserve the original numeric source amount and configured dashboard yield as provenance, without changing the dashboard."
+  },
+  "ingredient_source_quantities": [
+    {
+      "id": "absolut-citron",
+      "source_oz": 828
+    },
+    {
+      "id": "lemon-juice",
+      "source_oz": 300,
+      "display_total_oz": 304.326207,
+      "source_original_oz": 300,
+      "quantity_authority": "User confirmed nine full 1 L bottles; original numeric 300 fl oz retained as source data."
+    },
+    {
+      "id": "simple-syrup",
+      "source_oz": 320
+    }
+  ],
+  "validation": {
+    "individual_bottle_pours": 23,
+    "individual_pitcher_pours": 3,
+    "individual_sour_jug_pours": 0,
+    "total_pours": 26,
+    "pitcher_quantities_match_source": true,
+    "caps_removed_before_flow": true,
+    "streams_centered_in_actual_hatch": true,
+    "frame_exact_stages": true,
+    "label_on_closed_lid": true
+  }
+}

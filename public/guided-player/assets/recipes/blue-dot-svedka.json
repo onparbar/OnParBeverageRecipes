@@ -1,0 +1,383 @@
+{
+  "id": "blue-dot-svedka",
+  "title": "Blue Dot (Svedka)",
+  "duration": 90.4,
+  "fps": 30,
+  "video": "assets/recipes/blue-dot-svedka.mp4",
+  "poster": "assets/recipes/blue-dot-svedka.jpg",
+  "label_placement": "top of closed lid",
+  "stages": [
+    {
+      "id": "setup",
+      "title": "Open the keg",
+      "amount": "",
+      "description": "",
+      "start": 0,
+      "end": 4
+    },
+    {
+      "id": "svedka-blue-raspberry-vodka",
+      "title": "Add Svedka Blue Raspberry Vodka",
+      "amount": "9 \u00d7 0.75 L bottles",
+      "description": "",
+      "start": 4,
+      "end": 27.4
+    },
+    {
+      "id": "blue-juice-prep",
+      "title": "Prepare Blue Dot Juice",
+      "amount": "9 boxes \u00b7 54 packets \u00b7 9 gallons",
+      "description": "",
+      "start": 27.4,
+      "end": 33.4
+    },
+    {
+      "id": "blue-dot-juice",
+      "title": "Add Blue Dot Juice",
+      "amount": "1152 fl oz \u00b7 9 \u00d7 4 qt pitchers",
+      "description": "",
+      "start": 33.4,
+      "end": 69.4
+    },
+    {
+      "id": "lemonade",
+      "title": "Add Lemonade",
+      "amount": "128 fl oz \u00b7 1 \u00d7 4 qt pitchers",
+      "description": "Fill the pitcher with Lemonade using the fountain drink machine in karaoke.",
+      "start": 69.4,
+      "end": 73.4
+    },
+    {
+      "id": "stir",
+      "title": "Stir with the paddle",
+      "amount": "",
+      "description": "",
+      "start": 73.4,
+      "end": 80.4
+    },
+    {
+      "id": "close",
+      "title": "Close the keg",
+      "amount": "",
+      "description": "",
+      "start": 80.4,
+      "end": 85.4
+    },
+    {
+      "id": "label",
+      "title": "Attach the label to the lid",
+      "amount": "",
+      "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+      "start": 85.4,
+      "end": 90.4
+    }
+  ],
+  "pours": [
+    {
+      "ingredient_id": "svedka-blue-raspberry-vodka",
+      "ingredient": "Svedka Blue Raspberry Vodka",
+      "number": 1,
+      "container": "svedka-blue-raspberry",
+      "start": 4.0,
+      "flow_start": 5.02,
+      "flow_end": 5.9,
+      "end": 6.6,
+      "quantity": {
+        "display": "0.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 25.360517
+      }
+    },
+    {
+      "ingredient_id": "svedka-blue-raspberry-vodka",
+      "ingredient": "Svedka Blue Raspberry Vodka",
+      "number": 2,
+      "container": "svedka-blue-raspberry",
+      "start": 6.6,
+      "flow_start": 7.62,
+      "flow_end": 8.5,
+      "end": 9.2,
+      "quantity": {
+        "display": "0.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 25.360517
+      }
+    },
+    {
+      "ingredient_id": "svedka-blue-raspberry-vodka",
+      "ingredient": "Svedka Blue Raspberry Vodka",
+      "number": 3,
+      "container": "svedka-blue-raspberry",
+      "start": 9.2,
+      "flow_start": 10.22,
+      "flow_end": 11.1,
+      "end": 11.8,
+      "quantity": {
+        "display": "0.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 25.360517
+      }
+    },
+    {
+      "ingredient_id": "svedka-blue-raspberry-vodka",
+      "ingredient": "Svedka Blue Raspberry Vodka",
+      "number": 4,
+      "container": "svedka-blue-raspberry",
+      "start": 11.8,
+      "flow_start": 12.82,
+      "flow_end": 13.7,
+      "end": 14.4,
+      "quantity": {
+        "display": "0.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 25.360517
+      }
+    },
+    {
+      "ingredient_id": "svedka-blue-raspberry-vodka",
+      "ingredient": "Svedka Blue Raspberry Vodka",
+      "number": 5,
+      "container": "svedka-blue-raspberry",
+      "start": 14.4,
+      "flow_start": 15.42,
+      "flow_end": 16.3,
+      "end": 17.0,
+      "quantity": {
+        "display": "0.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 25.360517
+      }
+    },
+    {
+      "ingredient_id": "svedka-blue-raspberry-vodka",
+      "ingredient": "Svedka Blue Raspberry Vodka",
+      "number": 6,
+      "container": "svedka-blue-raspberry",
+      "start": 17.0,
+      "flow_start": 18.02,
+      "flow_end": 18.9,
+      "end": 19.6,
+      "quantity": {
+        "display": "0.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 25.360517
+      }
+    },
+    {
+      "ingredient_id": "svedka-blue-raspberry-vodka",
+      "ingredient": "Svedka Blue Raspberry Vodka",
+      "number": 7,
+      "container": "svedka-blue-raspberry",
+      "start": 19.6,
+      "flow_start": 20.62,
+      "flow_end": 21.5,
+      "end": 22.2,
+      "quantity": {
+        "display": "0.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 25.360517
+      }
+    },
+    {
+      "ingredient_id": "svedka-blue-raspberry-vodka",
+      "ingredient": "Svedka Blue Raspberry Vodka",
+      "number": 8,
+      "container": "svedka-blue-raspberry",
+      "start": 22.2,
+      "flow_start": 23.22,
+      "flow_end": 24.1,
+      "end": 24.8,
+      "quantity": {
+        "display": "0.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 25.360517
+      }
+    },
+    {
+      "ingredient_id": "svedka-blue-raspberry-vodka",
+      "ingredient": "Svedka Blue Raspberry Vodka",
+      "number": 9,
+      "container": "svedka-blue-raspberry",
+      "start": 24.8,
+      "flow_start": 25.82,
+      "flow_end": 26.7,
+      "end": 27.4,
+      "quantity": {
+        "display": "0.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 25.360517
+      }
+    },
+    {
+      "ingredient_id": "blue-dot-juice",
+      "ingredient": "Blue Dot Juice",
+      "number": 1,
+      "container": "pitcher",
+      "start": 33.4,
+      "flow_start": 34.42,
+      "flow_end": 36.7,
+      "end": 37.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "blue-dot-juice",
+      "ingredient": "Blue Dot Juice",
+      "number": 2,
+      "container": "pitcher",
+      "start": 37.4,
+      "flow_start": 38.42,
+      "flow_end": 40.7,
+      "end": 41.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "blue-dot-juice",
+      "ingredient": "Blue Dot Juice",
+      "number": 3,
+      "container": "pitcher",
+      "start": 41.4,
+      "flow_start": 42.42,
+      "flow_end": 44.7,
+      "end": 45.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "blue-dot-juice",
+      "ingredient": "Blue Dot Juice",
+      "number": 4,
+      "container": "pitcher",
+      "start": 45.4,
+      "flow_start": 46.42,
+      "flow_end": 48.7,
+      "end": 49.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "blue-dot-juice",
+      "ingredient": "Blue Dot Juice",
+      "number": 5,
+      "container": "pitcher",
+      "start": 49.4,
+      "flow_start": 50.42,
+      "flow_end": 52.7,
+      "end": 53.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "blue-dot-juice",
+      "ingredient": "Blue Dot Juice",
+      "number": 6,
+      "container": "pitcher",
+      "start": 53.4,
+      "flow_start": 54.42,
+      "flow_end": 56.7,
+      "end": 57.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "blue-dot-juice",
+      "ingredient": "Blue Dot Juice",
+      "number": 7,
+      "container": "pitcher",
+      "start": 57.4,
+      "flow_start": 58.42,
+      "flow_end": 60.7,
+      "end": 61.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "blue-dot-juice",
+      "ingredient": "Blue Dot Juice",
+      "number": 8,
+      "container": "pitcher",
+      "start": 61.4,
+      "flow_start": 62.42,
+      "flow_end": 64.7,
+      "end": 65.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "blue-dot-juice",
+      "ingredient": "Blue Dot Juice",
+      "number": 9,
+      "container": "pitcher",
+      "start": 65.4,
+      "flow_start": 66.42,
+      "flow_end": 68.7,
+      "end": 69.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    },
+    {
+      "ingredient_id": "lemonade",
+      "ingredient": "Lemonade",
+      "number": 1,
+      "container": "pitcher",
+      "start": 69.4,
+      "flow_start": 70.42,
+      "flow_end": 72.7,
+      "end": 73.4,
+      "quantity": {
+        "fl_oz": 128,
+        "display": "128 fl oz"
+      }
+    }
+  ],
+  "configured_yield_oz": 1508,
+  "source_flags": [
+    "Batch text is 12 US gallons (1536 fl oz); configured yield is 1508 fl oz. Do not add unlisted liquid to bridge 28 fl oz."
+  ],
+  "source_evidence": "hold-resolution.json, captured live source revision 128",
+  "quantity_resolution": null,
+  "ingredient_source_quantities": [
+    {
+      "id": "svedka-blue-raspberry-vodka",
+      "source_oz": 228
+    },
+    {
+      "id": "blue-dot-juice",
+      "source_oz": 1152
+    },
+    {
+      "id": "lemonade",
+      "source_oz": 128
+    }
+  ],
+  "validation": {
+    "individual_bottle_pours": 9,
+    "individual_pitcher_pours": 10,
+    "individual_sour_jug_pours": 0,
+    "total_pours": 19,
+    "pitcher_quantities_match_source": true,
+    "caps_removed_before_flow": true,
+    "streams_centered_in_actual_hatch": true,
+    "frame_exact_stages": true,
+    "label_on_closed_lid": true
+  }
+}

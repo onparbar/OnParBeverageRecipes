@@ -167,6 +167,7 @@ test("manager prep renders physical refill rows and falls back for already saved
       formatPrepCompletionSummary: () => "", ORDER_REHEARSAL_AVAILABLE: false,
       orderRehearsalMode: false, renderWeeklyIngredientPrep: () => "",
       renderWeeklyPlanCocktailRows: () => "",
+      renderWeeklyPrepRecipe: () => "",
       renderWeeklyPlanLiquorRefillRows: (items) => { displayed = items; throw stopAfterPrep; },
     });
     assert.throws(render, error => error === stopAfterPrep);

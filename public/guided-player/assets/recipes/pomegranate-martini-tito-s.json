@@ -1,0 +1,683 @@
+{
+  "id": "pomegranate-martini-tito-s",
+  "title": "Pomegranate Martini (Tito's)",
+  "duration": 119.80000000000001,
+  "fps": 30,
+  "video": "assets/recipes/pomegranate-martini-tito-s.mp4",
+  "poster": "assets/recipes/pomegranate-martini-tito-s.jpg",
+  "label_placement": "top of closed lid",
+  "stages": [
+    {
+      "id": "setup",
+      "title": "Open the keg",
+      "amount": "",
+      "description": "",
+      "start": 0,
+      "end": 4
+    },
+    {
+      "id": "tito-s",
+      "title": "Add Tito's",
+      "amount": "6 \u00d7 1.75 L bottles",
+      "description": "",
+      "start": 4,
+      "end": 19.6
+    },
+    {
+      "id": "pomegranate-schnapps",
+      "title": "Add Pomegranate Schnapps",
+      "amount": "22 \u00d7 1 L bottles",
+      "description": "",
+      "start": 19.6,
+      "end": 76.8
+    },
+    {
+      "id": "triple-sec",
+      "title": "Add Triple Sec",
+      "amount": "5 \u00d7 1 L bottles",
+      "description": "",
+      "start": 76.80000000000001,
+      "end": 89.8
+    },
+    {
+      "id": "lime-juice",
+      "title": "Add Lime Juice",
+      "amount": "5 \u00d7 1 L bottles",
+      "description": "",
+      "start": 89.80000000000001,
+      "end": 102.8
+    },
+    {
+      "id": "stir",
+      "title": "Stir with the paddle",
+      "amount": "",
+      "description": "",
+      "start": 102.80000000000001,
+      "end": 109.8
+    },
+    {
+      "id": "close",
+      "title": "Close the keg",
+      "amount": "",
+      "description": "",
+      "start": 109.80000000000001,
+      "end": 114.8
+    },
+    {
+      "id": "label",
+      "title": "Attach the label to the lid",
+      "amount": "",
+      "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+      "start": 114.80000000000001,
+      "end": 119.8
+    }
+  ],
+  "pours": [
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 1,
+      "container": "titos-vodka",
+      "start": 4.0,
+      "flow_start": 5.02,
+      "flow_end": 5.9,
+      "end": 6.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 2,
+      "container": "titos-vodka",
+      "start": 6.6,
+      "flow_start": 7.62,
+      "flow_end": 8.5,
+      "end": 9.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 3,
+      "container": "titos-vodka",
+      "start": 9.2,
+      "flow_start": 10.22,
+      "flow_end": 11.1,
+      "end": 11.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 4,
+      "container": "titos-vodka",
+      "start": 11.8,
+      "flow_start": 12.82,
+      "flow_end": 13.7,
+      "end": 14.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 5,
+      "container": "titos-vodka",
+      "start": 14.4,
+      "flow_start": 15.42,
+      "flow_end": 16.3,
+      "end": 17.0,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "tito-s",
+      "ingredient": "Tito's",
+      "number": 6,
+      "container": "titos-vodka",
+      "start": 17.0,
+      "flow_start": 18.02,
+      "flow_end": 18.9,
+      "end": 19.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 1,
+      "container": "dekuyper-pomegranate",
+      "start": 19.6,
+      "flow_start": 20.62,
+      "flow_end": 21.5,
+      "end": 22.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 2,
+      "container": "dekuyper-pomegranate",
+      "start": 22.2,
+      "flow_start": 23.22,
+      "flow_end": 24.1,
+      "end": 24.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 3,
+      "container": "dekuyper-pomegranate",
+      "start": 24.8,
+      "flow_start": 25.82,
+      "flow_end": 26.7,
+      "end": 27.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 4,
+      "container": "dekuyper-pomegranate",
+      "start": 27.4,
+      "flow_start": 28.42,
+      "flow_end": 29.3,
+      "end": 30.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 5,
+      "container": "dekuyper-pomegranate",
+      "start": 30.0,
+      "flow_start": 31.02,
+      "flow_end": 31.9,
+      "end": 32.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 6,
+      "container": "dekuyper-pomegranate",
+      "start": 32.6,
+      "flow_start": 33.62,
+      "flow_end": 34.5,
+      "end": 35.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 7,
+      "container": "dekuyper-pomegranate",
+      "start": 35.2,
+      "flow_start": 36.22,
+      "flow_end": 37.1,
+      "end": 37.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 8,
+      "container": "dekuyper-pomegranate",
+      "start": 37.8,
+      "flow_start": 38.82,
+      "flow_end": 39.7,
+      "end": 40.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 9,
+      "container": "dekuyper-pomegranate",
+      "start": 40.4,
+      "flow_start": 41.42,
+      "flow_end": 42.3,
+      "end": 43.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 10,
+      "container": "dekuyper-pomegranate",
+      "start": 43.0,
+      "flow_start": 44.02,
+      "flow_end": 44.9,
+      "end": 45.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 11,
+      "container": "dekuyper-pomegranate",
+      "start": 45.6,
+      "flow_start": 46.62,
+      "flow_end": 47.5,
+      "end": 48.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 12,
+      "container": "dekuyper-pomegranate",
+      "start": 48.2,
+      "flow_start": 49.22,
+      "flow_end": 50.1,
+      "end": 50.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 13,
+      "container": "dekuyper-pomegranate",
+      "start": 50.8,
+      "flow_start": 51.82,
+      "flow_end": 52.7,
+      "end": 53.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 14,
+      "container": "dekuyper-pomegranate",
+      "start": 53.4,
+      "flow_start": 54.42,
+      "flow_end": 55.3,
+      "end": 56.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 15,
+      "container": "dekuyper-pomegranate",
+      "start": 56.0,
+      "flow_start": 57.02,
+      "flow_end": 57.9,
+      "end": 58.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 16,
+      "container": "dekuyper-pomegranate",
+      "start": 58.6,
+      "flow_start": 59.62,
+      "flow_end": 60.5,
+      "end": 61.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 17,
+      "container": "dekuyper-pomegranate",
+      "start": 61.2,
+      "flow_start": 62.22,
+      "flow_end": 63.1,
+      "end": 63.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 18,
+      "container": "dekuyper-pomegranate",
+      "start": 63.8,
+      "flow_start": 64.82,
+      "flow_end": 65.7,
+      "end": 66.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 19,
+      "container": "dekuyper-pomegranate",
+      "start": 66.4,
+      "flow_start": 67.42,
+      "flow_end": 68.3,
+      "end": 69.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 20,
+      "container": "dekuyper-pomegranate",
+      "start": 69.0,
+      "flow_start": 70.02,
+      "flow_end": 70.9,
+      "end": 71.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 21,
+      "container": "dekuyper-pomegranate",
+      "start": 71.6,
+      "flow_start": 72.62,
+      "flow_end": 73.5,
+      "end": 74.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "pomegranate-schnapps",
+      "ingredient": "Pomegranate Schnapps",
+      "number": 22,
+      "container": "dekuyper-pomegranate",
+      "start": 74.2,
+      "flow_start": 75.22,
+      "flow_end": 76.1,
+      "end": 76.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 1,
+      "container": "dekuyper-triple-sec",
+      "start": 76.8,
+      "flow_start": 77.82,
+      "flow_end": 78.7,
+      "end": 79.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 2,
+      "container": "dekuyper-triple-sec",
+      "start": 79.4,
+      "flow_start": 80.42,
+      "flow_end": 81.3,
+      "end": 82.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 3,
+      "container": "dekuyper-triple-sec",
+      "start": 82.0,
+      "flow_start": 83.02,
+      "flow_end": 83.9,
+      "end": 84.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 4,
+      "container": "dekuyper-triple-sec",
+      "start": 84.6,
+      "flow_start": 85.62,
+      "flow_end": 86.5,
+      "end": 87.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 5,
+      "container": "dekuyper-triple-sec",
+      "start": 87.2,
+      "flow_start": 88.22,
+      "flow_end": 89.1,
+      "end": 89.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 1,
+      "container": "finest-call-lime-juice",
+      "start": 89.8,
+      "flow_start": 90.82,
+      "flow_end": 91.7,
+      "end": 92.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 2,
+      "container": "finest-call-lime-juice",
+      "start": 92.4,
+      "flow_start": 93.42,
+      "flow_end": 94.3,
+      "end": 95.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 3,
+      "container": "finest-call-lime-juice",
+      "start": 95.0,
+      "flow_start": 96.02,
+      "flow_end": 96.9,
+      "end": 97.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 4,
+      "container": "finest-call-lime-juice",
+      "start": 97.6,
+      "flow_start": 98.62,
+      "flow_end": 99.5,
+      "end": 100.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 5,
+      "container": "finest-call-lime-juice",
+      "start": 100.2,
+      "flow_start": 101.22,
+      "flow_end": 102.1,
+      "end": 102.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    }
+  ],
+  "configured_yield_oz": 1437,
+  "source_flags": [
+    "Batch text is 12 US gallons (1536 fl oz); configured yield is 1437 fl oz. Do not add unlisted liquid to bridge 99 fl oz.",
+    "Listed ingredient sum 1437.04 fl oz differs from configured yield 1437 fl oz by 0.04 fl oz."
+  ],
+  "source_evidence": "hold-resolution.json, captured live source revision 128",
+  "quantity_resolution": null,
+  "ingredient_source_quantities": [
+    {
+      "id": "tito-s",
+      "source_oz": 355
+    },
+    {
+      "id": "pomegranate-schnapps",
+      "source_oz": 743.9
+    },
+    {
+      "id": "triple-sec",
+      "source_oz": 169.07
+    },
+    {
+      "id": "lime-juice",
+      "source_oz": 169.07
+    }
+  ],
+  "validation": {
+    "individual_bottle_pours": 38,
+    "individual_pitcher_pours": 0,
+    "individual_sour_jug_pours": 0,
+    "total_pours": 38,
+    "pitcher_quantities_match_source": true,
+    "caps_removed_before_flow": true,
+    "streams_centered_in_actual_hatch": true,
+    "frame_exact_stages": true,
+    "label_on_closed_lid": true
+  }
+}

@@ -16,6 +16,15 @@ const nextConfig = {
         ],
       },
       {
+        // The recipe player is embedded only by this dashboard. Keep all other
+        // pages protected by the default frame restrictions above.
+        source: "/guided-player/:path*",
+        headers: [
+          { key: "Content-Security-Policy", value: "base-uri 'self'; frame-ancestors 'self'; object-src 'none'" },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+        ],
+      },
+      {
         source: "/dashboard.js",
         headers: [
           {

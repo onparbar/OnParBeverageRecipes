@@ -1,0 +1,641 @@
+{
+  "id": "crown-apple-rita",
+  "title": "Crown Apple 'Rita",
+  "duration": 114.6,
+  "fps": 30,
+  "video": "assets/recipes/crown-apple-rita.mp4",
+  "poster": "assets/recipes/crown-apple-rita.jpg",
+  "label_placement": "top of closed lid",
+  "stages": [
+    {
+      "id": "setup",
+      "title": "Open the keg",
+      "amount": "",
+      "description": "",
+      "start": 0,
+      "end": 4
+    },
+    {
+      "id": "crown-apple",
+      "title": "Add Crown Apple",
+      "amount": "10 \u00d7 1.75 L bottles",
+      "description": "",
+      "start": 4,
+      "end": 30.0
+    },
+    {
+      "id": "triple-sec",
+      "title": "Add Triple Sec",
+      "amount": "13 \u00d7 1 L bottles",
+      "description": "",
+      "start": 30.0,
+      "end": 63.8
+    },
+    {
+      "id": "lime-juice",
+      "title": "Add Lime Juice",
+      "amount": "13 \u00d7 1 L bottles",
+      "description": "",
+      "start": 63.8,
+      "end": 97.6
+    },
+    {
+      "id": "stir",
+      "title": "Stir with the paddle",
+      "amount": "",
+      "description": "",
+      "start": 97.6,
+      "end": 104.6
+    },
+    {
+      "id": "close",
+      "title": "Close the keg",
+      "amount": "",
+      "description": "",
+      "start": 104.6,
+      "end": 109.6
+    },
+    {
+      "id": "label",
+      "title": "Attach the label to the lid",
+      "amount": "",
+      "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+      "start": 109.6,
+      "end": 114.6
+    }
+  ],
+  "pours": [
+    {
+      "ingredient_id": "crown-apple",
+      "ingredient": "Crown Apple",
+      "number": 1,
+      "container": "crown-royal-apple",
+      "start": 4.0,
+      "flow_start": 5.02,
+      "flow_end": 5.9,
+      "end": 6.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-apple",
+      "ingredient": "Crown Apple",
+      "number": 2,
+      "container": "crown-royal-apple",
+      "start": 6.6,
+      "flow_start": 7.62,
+      "flow_end": 8.5,
+      "end": 9.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-apple",
+      "ingredient": "Crown Apple",
+      "number": 3,
+      "container": "crown-royal-apple",
+      "start": 9.2,
+      "flow_start": 10.22,
+      "flow_end": 11.1,
+      "end": 11.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-apple",
+      "ingredient": "Crown Apple",
+      "number": 4,
+      "container": "crown-royal-apple",
+      "start": 11.8,
+      "flow_start": 12.82,
+      "flow_end": 13.7,
+      "end": 14.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-apple",
+      "ingredient": "Crown Apple",
+      "number": 5,
+      "container": "crown-royal-apple",
+      "start": 14.4,
+      "flow_start": 15.42,
+      "flow_end": 16.3,
+      "end": 17.0,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-apple",
+      "ingredient": "Crown Apple",
+      "number": 6,
+      "container": "crown-royal-apple",
+      "start": 17.0,
+      "flow_start": 18.02,
+      "flow_end": 18.9,
+      "end": 19.6,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-apple",
+      "ingredient": "Crown Apple",
+      "number": 7,
+      "container": "crown-royal-apple",
+      "start": 19.6,
+      "flow_start": 20.62,
+      "flow_end": 21.5,
+      "end": 22.2,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-apple",
+      "ingredient": "Crown Apple",
+      "number": 8,
+      "container": "crown-royal-apple",
+      "start": 22.2,
+      "flow_start": 23.22,
+      "flow_end": 24.1,
+      "end": 24.8,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-apple",
+      "ingredient": "Crown Apple",
+      "number": 9,
+      "container": "crown-royal-apple",
+      "start": 24.8,
+      "flow_start": 25.82,
+      "flow_end": 26.7,
+      "end": 27.4,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "crown-apple",
+      "ingredient": "Crown Apple",
+      "number": 10,
+      "container": "crown-royal-apple",
+      "start": 27.4,
+      "flow_start": 28.42,
+      "flow_end": 29.3,
+      "end": 30.0,
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 1,
+      "container": "dekuyper-triple-sec",
+      "start": 30.0,
+      "flow_start": 31.02,
+      "flow_end": 31.9,
+      "end": 32.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 2,
+      "container": "dekuyper-triple-sec",
+      "start": 32.6,
+      "flow_start": 33.62,
+      "flow_end": 34.5,
+      "end": 35.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 3,
+      "container": "dekuyper-triple-sec",
+      "start": 35.2,
+      "flow_start": 36.22,
+      "flow_end": 37.1,
+      "end": 37.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 4,
+      "container": "dekuyper-triple-sec",
+      "start": 37.8,
+      "flow_start": 38.82,
+      "flow_end": 39.7,
+      "end": 40.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 5,
+      "container": "dekuyper-triple-sec",
+      "start": 40.4,
+      "flow_start": 41.42,
+      "flow_end": 42.3,
+      "end": 43.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 6,
+      "container": "dekuyper-triple-sec",
+      "start": 43.0,
+      "flow_start": 44.02,
+      "flow_end": 44.9,
+      "end": 45.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 7,
+      "container": "dekuyper-triple-sec",
+      "start": 45.6,
+      "flow_start": 46.62,
+      "flow_end": 47.5,
+      "end": 48.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 8,
+      "container": "dekuyper-triple-sec",
+      "start": 48.2,
+      "flow_start": 49.22,
+      "flow_end": 50.1,
+      "end": 50.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 9,
+      "container": "dekuyper-triple-sec",
+      "start": 50.8,
+      "flow_start": 51.82,
+      "flow_end": 52.7,
+      "end": 53.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 10,
+      "container": "dekuyper-triple-sec",
+      "start": 53.4,
+      "flow_start": 54.42,
+      "flow_end": 55.3,
+      "end": 56.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 11,
+      "container": "dekuyper-triple-sec",
+      "start": 56.0,
+      "flow_start": 57.02,
+      "flow_end": 57.9,
+      "end": 58.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 12,
+      "container": "dekuyper-triple-sec",
+      "start": 58.6,
+      "flow_start": 59.62,
+      "flow_end": 60.5,
+      "end": 61.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "triple-sec",
+      "ingredient": "Triple Sec",
+      "number": 13,
+      "container": "dekuyper-triple-sec",
+      "start": 61.2,
+      "flow_start": 62.22,
+      "flow_end": 63.1,
+      "end": 63.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 1,
+      "container": "finest-call-lime-juice",
+      "start": 63.8,
+      "flow_start": 64.82,
+      "flow_end": 65.7,
+      "end": 66.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 2,
+      "container": "finest-call-lime-juice",
+      "start": 66.4,
+      "flow_start": 67.42,
+      "flow_end": 68.3,
+      "end": 69.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 3,
+      "container": "finest-call-lime-juice",
+      "start": 69.0,
+      "flow_start": 70.02,
+      "flow_end": 70.9,
+      "end": 71.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 4,
+      "container": "finest-call-lime-juice",
+      "start": 71.6,
+      "flow_start": 72.62,
+      "flow_end": 73.5,
+      "end": 74.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 5,
+      "container": "finest-call-lime-juice",
+      "start": 74.2,
+      "flow_start": 75.22,
+      "flow_end": 76.1,
+      "end": 76.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 6,
+      "container": "finest-call-lime-juice",
+      "start": 76.8,
+      "flow_start": 77.82,
+      "flow_end": 78.7,
+      "end": 79.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 7,
+      "container": "finest-call-lime-juice",
+      "start": 79.4,
+      "flow_start": 80.42,
+      "flow_end": 81.3,
+      "end": 82.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 8,
+      "container": "finest-call-lime-juice",
+      "start": 82.0,
+      "flow_start": 83.02,
+      "flow_end": 83.9,
+      "end": 84.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 9,
+      "container": "finest-call-lime-juice",
+      "start": 84.6,
+      "flow_start": 85.62,
+      "flow_end": 86.5,
+      "end": 87.2,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 10,
+      "container": "finest-call-lime-juice",
+      "start": 87.2,
+      "flow_start": 88.22,
+      "flow_end": 89.1,
+      "end": 89.8,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 11,
+      "container": "finest-call-lime-juice",
+      "start": 89.8,
+      "flow_start": 90.82,
+      "flow_end": 91.7,
+      "end": 92.4,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 12,
+      "container": "finest-call-lime-juice",
+      "start": 92.4,
+      "flow_start": 93.42,
+      "flow_end": 94.3,
+      "end": 95.0,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    },
+    {
+      "ingredient_id": "lime-juice",
+      "ingredient": "Lime Juice",
+      "number": 13,
+      "container": "finest-call-lime-juice",
+      "start": 95.0,
+      "flow_start": 96.02,
+      "flow_end": 96.9,
+      "end": 97.6,
+      "quantity": {
+        "display": "1 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 33.814023
+      }
+    }
+  ],
+  "configured_yield_oz": 1471,
+  "source_flags": [
+    "Batch text is 12 US gallons (1536 fl oz); configured yield is 1471 fl oz. Do not add unlisted liquid to bridge 65 fl oz.",
+    "Listed ingredient sum 1470.76 fl oz differs from configured yield 1471 fl oz by -0.24 fl oz."
+  ],
+  "source_evidence": "hold-resolution.json, captured live source revision 128",
+  "quantity_resolution": null,
+  "ingredient_source_quantities": [
+    {
+      "id": "crown-apple",
+      "source_oz": 591.7
+    },
+    {
+      "id": "triple-sec",
+      "source_oz": 439.53
+    },
+    {
+      "id": "lime-juice",
+      "source_oz": 439.53
+    }
+  ],
+  "validation": {
+    "individual_bottle_pours": 36,
+    "individual_pitcher_pours": 0,
+    "individual_sour_jug_pours": 0,
+    "total_pours": 36,
+    "pitcher_quantities_match_source": true,
+    "caps_removed_before_flow": true,
+    "streams_centered_in_actual_hatch": true,
+    "frame_exact_stages": true,
+    "label_on_closed_lid": true
+  }
+}
