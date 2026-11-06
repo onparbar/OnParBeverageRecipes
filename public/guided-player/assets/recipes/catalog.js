@@ -86,7 +86,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 93.2,
           "end": 100.2
         },
@@ -164,7 +164,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 82.8,
           "end": 89.8
         },
@@ -250,7 +250,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 93.2,
           "end": 100.2
         },
@@ -336,7 +336,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 93.2,
           "end": 100.2
         },
@@ -422,7 +422,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 93.2,
           "end": 100.2
         },
@@ -508,7 +508,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 93.2,
           "end": 100.2
         },
@@ -570,7 +570,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 51.6,
           "end": 58.6
         },
@@ -658,7 +658,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 73.4,
           "end": 80.4
         },
@@ -720,7 +720,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 67.2,
           "end": 74.2
         },
@@ -806,7 +806,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 83.60000000000001,
           "end": 90.6
         },
@@ -876,7 +876,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 75.8,
           "end": 82.8
         },
@@ -954,7 +954,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 102.80000000000001,
           "end": 109.8
         },
@@ -1024,7 +1024,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 59.6,
           "end": 66.6
         },
@@ -1094,7 +1094,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 51.6,
           "end": 58.6
         },
@@ -1156,7 +1156,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 51.6,
           "end": 58.6
         },
@@ -1218,7 +1218,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 51.6,
           "end": 58.6
         },
@@ -1280,7 +1280,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 51.6,
           "end": 58.6
         },
@@ -1350,7 +1350,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 97.6,
           "end": 104.6
         },
@@ -1412,7 +1412,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 51.6,
           "end": 58.6
         },
@@ -1482,7 +1482,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 66.6,
           "end": 73.6
         },
@@ -1554,7 +1554,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 43.6,
           "end": 50.6
         },
@@ -1624,7 +1624,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 50.0,
           "end": 57.0
         },
@@ -1686,7 +1686,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 51.6,
           "end": 58.6
         },
@@ -1772,7 +1772,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 62.2,
           "end": 69.2
         },
@@ -1858,7 +1858,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 72.4,
           "end": 79.4
         },
@@ -1944,7 +1944,7 @@ window.RECIPE_CATALOG = {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
-          "description": "",
+          "description": "Stir with paddle in up and down motion to mix ingredients well",
           "start": 71.0,
           "end": 78.0
         },
