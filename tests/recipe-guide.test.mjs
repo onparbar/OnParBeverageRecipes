@@ -59,16 +59,21 @@ test("guide markup is lazy, safely escaped, and does not echo supplied HTML", ()
   assert.doesNotMatch(fallback, /<img|onerror|alert/);
 });
 
-test("compact guides open the matching player in a new tab without embedding media", () => {
+test("compact guides expand the matching player inline from a collapsed disclosure", () => {
   const markup = renderRecipeGuide({ title: "Vodka Cran (Tito's)" }, { compact: true });
-  assert.match(markup, /class="recipe-guide__open"/);
-  assert.match(markup, /href="\/guided-player\/index\.html\?recipe=vodka-cran-tito-s&amp;embed=1"/);
-  assert.match(markup, /target="_blank" rel="noopener"/);
-  assert.match(markup, />Open guide<\/a>/);
-  assert.doesNotMatch(markup, /<iframe|<video|data-recipe-guide-src/);
+  const disclosure = markup.match(/^<details\b([^>]*)>/)?.[1];
+  assert.ok(disclosure, "the compact guide uses a native disclosure");
+  assert.match(disclosure, /class="recipe-guide recipe-guide--compact"/);
+  assert.doesNotMatch(disclosure, /(?:^|\s)open(?:\s|=|$)/, "the guide starts collapsed");
+  assert.match(markup, /<summary\b[^>]*class="recipe-guide__open"/);
+  assert.match(markup, />Open guide</);
+  assert.match(markup, />Close guide</);
+  assert.match(markup, /<iframe[^>]+data-recipe-guide-src="\/guided-player\/index\.html\?recipe=vodka-cran-tito-s&amp;embed=1"/);
+  assert.match(markup, /loading="lazy"/);
+  assert.doesNotMatch(markup, /<a\b|\s(?:href|target|src)=|new tab/i);
   const missing = renderRecipeGuide("New Cocktail", { compact: true });
   assert.match(missing, /not available/);
-  assert.doesNotMatch(missing, /<a |<iframe/);
+  assert.doesNotMatch(missing, /<a\b|<summary|<iframe/);
 });
 
 const prepItems = [

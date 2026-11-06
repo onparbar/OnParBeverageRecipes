@@ -50,13 +50,15 @@ export function getRecipeGuide(recipe) {
 export function renderRecipeGuide(recipe, { compact = false } = {}) {
   const guide = getRecipeGuide(recipe);
   if (!guide) return '<section class="recipe-guide recipe-guide--unavailable"><p>A video guide is not available for this recipe yet.</p></section>';
-  if (compact) return `<section class="recipe-guide recipe-guide--compact">
-    <a class="recipe-guide__open" href="${html(guide.src)}" target="_blank" rel="noopener" aria-label="Open ${html(guide.title)} guide (opens in a new tab)">Open guide</a>
-  </section>`;
+  const player = `<p class="recipe-guide__hint">Press Next to start. Each step pauses until you’re ready. Use Back to repeat a step.</p>
+    <iframe class="recipe-guide__frame" data-recipe-guide-src="${html(guide.src)}" title="${html(guide.title)} step-by-step guide" loading="lazy" allow="fullscreen" allowfullscreen></iframe>`;
+  if (compact) return `<details class="recipe-guide recipe-guide--compact" aria-label="${html(guide.title)} video guide">
+    <summary class="recipe-guide__open"><span class="recipe-guide__show-label">Open guide</span><span class="recipe-guide__hide-label">Close guide</span></summary>
+    <div class="recipe-guide__body">${player}</div>
+  </details>`;
   return `<section class="recipe-guide" aria-label="${html(guide.title)} video guide">
     <div class="recipe-guide__heading"><strong>Step-by-step guide</strong><a href="${html(guide.src)}" target="_blank" rel="noopener">Open guide</a></div>
-    <p class="recipe-guide__hint">Press Next to start. Each step pauses until you’re ready. Use Back to repeat a step.</p>
-    <iframe class="recipe-guide__frame" data-recipe-guide-src="${html(guide.src)}" title="${html(guide.title)} step-by-step guide" loading="lazy" allow="fullscreen" allowfullscreen></iframe>
+    ${player}
   </section>`;
 }
 

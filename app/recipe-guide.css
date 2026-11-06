@@ -28,7 +28,13 @@
   font: inherit;
   font-weight: 700;
   text-decoration: none;
+  cursor: pointer;
+  list-style: none;
 }
+.recipe-guide__open::-webkit-details-marker { display: none; }
+.recipe-guide__hide-label,
+.recipe-guide--compact[open] > .recipe-guide__open .recipe-guide__show-label { display: none; }
+.recipe-guide--compact[open] > .recipe-guide__open .recipe-guide__hide-label { display: inline; }
 .recipe-guide__open:hover { background: var(--paper, #f4f5f2); }
 .recipe-guide__open:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
 .recipe-guide .recipe-guide__hint, .recipe-guide--unavailable p {

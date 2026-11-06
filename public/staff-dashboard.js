@@ -1,4 +1,4 @@
-import { createRecipeGuide } from "./recipe-guide.mjs";
+import { createRecipeGuide, initializeRecipeGuides } from "./recipe-guide.mjs";
 import { parseSmartReceivingTranscript } from "./smart-receiving.mjs";
 import { formatCalendarDate } from "./dashboard-formatters.mjs";
 import { kegDestination } from "./keg-destination.mjs";
@@ -870,6 +870,7 @@ function renderStaffPrepPlan() {
     liquorList.append(createEmptyState("No liquor needs to be added to kegs this week."));
   }
   updateStaffPrepBatchControls();
+  initializeRecipeGuides(prepList);
 }
 
 function appendStaffPrepGroups(root, items, kind, completedOpen) {
@@ -1630,6 +1631,7 @@ function renderStaffRecipes() {
   }
   renderStaffOverview();
   recipeGrid.setAttribute("aria-busy", "false");
+  initializeRecipeGuides(recipeGrid);
 }
 
 function renderStats(visibleCount) {
