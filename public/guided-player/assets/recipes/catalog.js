@@ -94,7 +94,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 100.2,
           "end": 105.2
         },
@@ -172,7 +172,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 89.8,
           "end": 94.8
         },
@@ -258,7 +258,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 100.2,
           "end": 105.2
         },
@@ -344,7 +344,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 100.2,
           "end": 105.2
         },
@@ -430,7 +430,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 100.2,
           "end": 105.2
         },
@@ -516,7 +516,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 100.2,
           "end": 105.2
         },
@@ -578,7 +578,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 58.6,
           "end": 63.6
         },
@@ -666,7 +666,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 80.4,
           "end": 85.4
         },
@@ -728,7 +728,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 74.2,
           "end": 79.2
         },
@@ -814,7 +814,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 90.60000000000001,
           "end": 95.6
         },
@@ -884,7 +884,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 82.8,
           "end": 87.8
         },
@@ -962,7 +962,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 109.80000000000001,
           "end": 114.8
         },
@@ -1032,7 +1032,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 66.6,
           "end": 71.6
         },
@@ -1102,7 +1102,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 58.6,
           "end": 63.6
         },
@@ -1164,7 +1164,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 58.6,
           "end": 63.6
         },
@@ -1226,7 +1226,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 58.6,
           "end": 63.6
         },
@@ -1288,7 +1288,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 58.6,
           "end": 63.6
         },
@@ -1358,7 +1358,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 104.6,
           "end": 109.6
         },
@@ -1420,7 +1420,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 58.6,
           "end": 63.6
         },
@@ -1490,7 +1490,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 73.6,
           "end": 78.6
         },
@@ -1562,7 +1562,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 50.6,
           "end": 55.6
         },
@@ -1632,7 +1632,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 57.0,
           "end": 62.0
         },
@@ -1694,7 +1694,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 58.6,
           "end": 63.6
         },
@@ -1780,7 +1780,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 69.2,
           "end": 74.2
         },
@@ -1866,7 +1866,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 79.4,
           "end": 84.4
         },
@@ -1952,7 +1952,7 @@ window.RECIPE_CATALOG = {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
-          "description": "",
+          "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
           "start": 78.0,
           "end": 83.0
         },

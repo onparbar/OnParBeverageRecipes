@@ -67,7 +67,7 @@
       "id": "close",
       "title": "Close the keg",
       "amount": "",
-      "description": "",
+      "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
       "start": 90.60000000000001,
       "end": 95.6
     },
