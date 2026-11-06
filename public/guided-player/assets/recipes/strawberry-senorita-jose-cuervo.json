@@ -11,7 +11,7 @@
       "id": "setup",
       "title": "Open the keg",
       "amount": "",
-      "description": "",
+      "description": "Make sure the keg is clean and sanitized before adding ingredients",
       "start": 0,
       "end": 4
     },
@@ -51,7 +51,7 @@
       "id": "label",
       "title": "Attach the label to the lid",
       "amount": "",
-      "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+      "description": "Name of cocktail, Cooler placement, total oz and date",
       "start": 63.6,
       "end": 68.6
     }

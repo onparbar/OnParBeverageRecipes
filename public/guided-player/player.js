@@ -16,7 +16,7 @@ function stepDescription(stage){
  if(description)return description.trim();
  const ingredient=(stage.title||'').replace(/^add\s+/i,'').trim().toLowerCase();
  if(['cranberry juice','lemonade','pink lemonade','strawberry lemonade'].includes(ingredient))return 'Fill the pitcher using the fountain drink machine in karaoke.';
- if(stage.id==='label'||stage.kind==='label')return 'Write the cocktail name and date on the sticker label, then write which cooler it goes in.';
+ if(stage.id==='label'||stage.kind==='label')return 'Name of cocktail, Cooler placement, total oz and date';
  return '';
 }
 function normalize(recipe){return {id:recipe.id,title:recipe.title,video:recipe.video,poster:recipe.poster||'',duration:recipe.duration||null,steps:(recipe.stages||recipe.steps).map(s=>({id:s.id||'',title:s.title||'',amount:s.amount||'',description:stepDescription(s),start:s.start,end:s.end}))};}

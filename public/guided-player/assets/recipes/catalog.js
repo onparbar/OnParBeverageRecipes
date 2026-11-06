@@ -38,7 +38,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -102,7 +102,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 105.2,
           "end": 110.2
         }
@@ -124,7 +124,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -180,7 +180,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 94.8,
           "end": 99.8
         }
@@ -202,7 +202,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -266,7 +266,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 105.2,
           "end": 110.2
         }
@@ -288,7 +288,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -352,7 +352,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 105.2,
           "end": 110.2
         }
@@ -374,7 +374,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -438,7 +438,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 105.2,
           "end": 110.2
         }
@@ -460,7 +460,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -524,7 +524,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 105.2,
           "end": 110.2
         }
@@ -546,7 +546,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -586,7 +586,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 63.6,
           "end": 68.6
         }
@@ -618,7 +618,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -674,7 +674,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 85.4,
           "end": 90.4
         }
@@ -696,7 +696,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -736,7 +736,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 79.2,
           "end": 84.2
         }
@@ -758,7 +758,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -822,7 +822,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 95.60000000000001,
           "end": 100.6
         }
@@ -844,7 +844,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -892,7 +892,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 87.8,
           "end": 92.8
         }
@@ -914,7 +914,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -970,7 +970,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 114.80000000000001,
           "end": 119.8
         }
@@ -992,7 +992,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -1040,7 +1040,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 71.6,
           "end": 76.6
         }
@@ -1062,7 +1062,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -1110,7 +1110,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 63.6,
           "end": 68.6
         }
@@ -1132,7 +1132,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -1172,7 +1172,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 63.6,
           "end": 68.6
         }
@@ -1194,7 +1194,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -1234,7 +1234,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 63.6,
           "end": 68.6
         }
@@ -1256,7 +1256,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -1296,7 +1296,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 63.6,
           "end": 68.6
         }
@@ -1318,7 +1318,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -1366,7 +1366,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 109.6,
           "end": 114.6
         }
@@ -1388,7 +1388,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -1428,7 +1428,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 63.6,
           "end": 68.6
         }
@@ -1450,7 +1450,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -1498,7 +1498,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 78.6,
           "end": 83.6
         }
@@ -1530,7 +1530,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -1570,7 +1570,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 55.6,
           "end": 60.6
         }
@@ -1592,7 +1592,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -1640,7 +1640,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 62.0,
           "end": 67.0
         }
@@ -1662,7 +1662,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -1702,7 +1702,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 63.6,
           "end": 68.6
         }
@@ -1724,7 +1724,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -1788,7 +1788,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 74.2,
           "end": 79.2
         }
@@ -1810,7 +1810,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -1874,7 +1874,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 84.4,
           "end": 89.4
         }
@@ -1896,7 +1896,7 @@ window.RECIPE_CATALOG = {
           "id": "setup",
           "title": "Open the keg",
           "amount": "",
-          "description": "",
+          "description": "Make sure the keg is clean and sanitized before adding ingredients",
           "start": 0,
           "end": 4
         },
@@ -1960,7 +1960,7 @@ window.RECIPE_CATALOG = {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in.",
+          "description": "Name of cocktail, Cooler placement, total oz and date",
           "start": 83.0,
           "end": 88.0
         }
