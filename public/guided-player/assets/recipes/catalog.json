@@ -102,7 +102,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 105.2,
           "end": 110.2
         }
@@ -180,7 +180,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 94.8,
           "end": 99.8
         }
@@ -266,7 +266,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 105.2,
           "end": 110.2
         }
@@ -352,7 +352,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 105.2,
           "end": 110.2
         }
@@ -438,7 +438,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 105.2,
           "end": 110.2
         }
@@ -524,7 +524,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 105.2,
           "end": 110.2
         }
@@ -586,7 +586,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 63.6,
           "end": 68.6
         }
@@ -674,7 +674,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 85.4,
           "end": 90.4
         }
@@ -736,7 +736,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 79.2,
           "end": 84.2
         }
@@ -822,7 +822,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 95.60000000000001,
           "end": 100.6
         }
@@ -892,7 +892,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 87.8,
           "end": 92.8
         }
@@ -970,7 +970,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 114.80000000000001,
           "end": 119.8
         }
@@ -1040,7 +1040,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 71.6,
           "end": 76.6
         }
@@ -1110,7 +1110,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 63.6,
           "end": 68.6
         }
@@ -1172,7 +1172,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 63.6,
           "end": 68.6
         }
@@ -1234,7 +1234,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 63.6,
           "end": 68.6
         }
@@ -1296,7 +1296,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 63.6,
           "end": 68.6
         }
@@ -1366,7 +1366,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 109.6,
           "end": 114.6
         }
@@ -1428,7 +1428,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 63.6,
           "end": 68.6
         }
@@ -1498,7 +1498,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 78.6,
           "end": 83.6
         }
@@ -1570,7 +1570,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 55.6,
           "end": 60.6
         }
@@ -1640,7 +1640,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 62.0,
           "end": 67.0
         }
@@ -1702,7 +1702,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 63.6,
           "end": 68.6
         }
@@ -1788,7 +1788,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 74.2,
           "end": 79.2
         }
@@ -1874,7 +1874,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 84.4,
           "end": 89.4
         }
@@ -1960,7 +1960,7 @@
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
-          "description": "Name of cocktail, Cooler placement, total oz and date",
+          "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
           "start": 83.0,
           "end": 88.0
         }

@@ -18,7 +18,8 @@ reports the current catalog; packaging is blocked until all 26 pass validation.
 
 Cranberry Juice and all lemonade steps display the instruction to fill the
 pitcher using the fountain drink machine in karaoke. The final label step says:
-Name of cocktail, Cooler placement, total oz and date. Opening steps say:
+Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.
+Opening steps say:
 Make sure the keg is clean and sanitized before adding ingredients.
 These descriptions are saved in recipe metadata and shown by the
 interactive player. They are not burned into the standalone MP4 files.
