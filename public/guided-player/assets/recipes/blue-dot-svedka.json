@@ -27,7 +27,7 @@
       "id": "blue-juice-prep",
       "title": "Prepare Blue Dot Juice",
       "amount": "9 boxes \u00b7 54 packets \u00b7 9 gallons",
-      "description": "",
+      "description": "For each gallon of blue dot juice: fill pitcher with one gallon of hot water from karaoke sink. Use scissors to cut open six individual packets of starburst powder and add them to pitcher of hot water. Mix with whisk from kitchen.",
       "start": 27.4,
       "end": 33.4
     },
@@ -35,7 +35,7 @@
       "id": "blue-dot-juice",
       "title": "Add Blue Dot Juice",
       "amount": "1152 fl oz \u00b7 9 \u00d7 4 qt pitchers",
-      "description": "",
+      "description": "For each gallon of blue dot juice: fill pitcher with one gallon of hot water from karaoke sink. Use scissors to cut open six individual packets of starburst powder and add them to pitcher of hot water. Mix with whisk from kitchen.",
       "start": 33.4,
       "end": 69.4
     },
