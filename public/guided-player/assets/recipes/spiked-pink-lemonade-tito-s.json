@@ -1,7 +1,7 @@
 {
   "id": "spiked-pink-lemonade-tito-s",
   "title": "Spiked Pink Lemonade (Tito's)",
-  "duration": 68.6,
+  "duration": 77.8,
   "fps": 30,
   "video": "assets/recipes/spiked-pink-lemonade-tito-s.mp4",
   "poster": "assets/recipes/spiked-pink-lemonade-tito-s.jpg",
@@ -19,143 +19,156 @@
       "id": "tito-s",
       "title": "Add Tito's",
       "amount": "6 \u00d7 1.75 L bottles",
-      "description": "",
+      "description": "Remove plastic insert from all bottles before pouring.",
       "start": 4,
-      "end": 19.6
+      "opening_style": "knife-insert-once",
+      "end": 28.8
     },
     {
       "id": "strawberry-lemonade",
       "title": "Add Strawberry Lemonade",
       "amount": "1024 fl oz \u00b7 8 \u00d7 4 qt pitchers",
       "description": "Fill the pitcher with Strawberry Lemonade using the fountain drink machine in karaoke.",
-      "start": 19.6,
-      "end": 51.6
+      "start": 28.8,
+      "end": 60.8
     },
     {
       "id": "stir",
       "title": "Stir with the paddle",
       "amount": "",
       "description": "Stir with paddle in up and down motion to mix ingredients well",
-      "start": 51.6,
-      "end": 58.6
+      "start": 60.8,
+      "end": 67.8
     },
     {
       "id": "close",
       "title": "Close the keg",
       "amount": "",
       "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-      "start": 58.6,
-      "end": 63.6
+      "start": 67.8,
+      "end": 72.8
     },
     {
       "id": "label",
       "title": "Attach the label to the lid",
       "amount": "",
       "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-      "start": 63.6,
-      "end": 68.6
+      "start": 72.8,
+      "end": 77.8
     }
   ],
   "pours": [
     {
       "ingredient_id": "tito-s",
       "ingredient": "Tito's",
+      "container": "titos-vodka",
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      },
       "number": 1,
-      "container": "titos-vodka",
-      "start": 4.0,
-      "flow_start": 5.02,
-      "flow_end": 5.9,
-      "end": 6.6,
-      "quantity": {
-        "display": "1.75 L bottle",
-        "full_bottle": true,
-        "package_fl_oz": 59.17454
-      }
+      "start": 12.0,
+      "end": 14.8,
+      "opening_style": "knife-insert-once",
+      "opening_demonstration_id": "tito-s-opening",
+      "flow_start": 13.02,
+      "flow_end": 14.1
     },
     {
       "ingredient_id": "tito-s",
       "ingredient": "Tito's",
+      "container": "titos-vodka",
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      },
       "number": 2,
-      "container": "titos-vodka",
-      "start": 6.6,
-      "flow_start": 7.62,
-      "flow_end": 8.5,
-      "end": 9.2,
-      "quantity": {
-        "display": "1.75 L bottle",
-        "full_bottle": true,
-        "package_fl_oz": 59.17454
-      }
+      "start": 14.8,
+      "end": 17.6,
+      "opening_style": "knife-insert-once",
+      "opening_demonstration_id": "tito-s-opening",
+      "flow_start": 15.82,
+      "flow_end": 16.9
     },
     {
       "ingredient_id": "tito-s",
       "ingredient": "Tito's",
+      "container": "titos-vodka",
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      },
       "number": 3,
-      "container": "titos-vodka",
-      "start": 9.2,
-      "flow_start": 10.22,
-      "flow_end": 11.1,
-      "end": 11.8,
-      "quantity": {
-        "display": "1.75 L bottle",
-        "full_bottle": true,
-        "package_fl_oz": 59.17454
-      }
+      "start": 17.6,
+      "end": 20.4,
+      "opening_style": "knife-insert-once",
+      "opening_demonstration_id": "tito-s-opening",
+      "flow_start": 18.62,
+      "flow_end": 19.7
     },
     {
       "ingredient_id": "tito-s",
       "ingredient": "Tito's",
+      "container": "titos-vodka",
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      },
       "number": 4,
-      "container": "titos-vodka",
-      "start": 11.8,
-      "flow_start": 12.82,
-      "flow_end": 13.7,
-      "end": 14.4,
-      "quantity": {
-        "display": "1.75 L bottle",
-        "full_bottle": true,
-        "package_fl_oz": 59.17454
-      }
+      "start": 20.4,
+      "end": 23.2,
+      "opening_style": "knife-insert-once",
+      "opening_demonstration_id": "tito-s-opening",
+      "flow_start": 21.42,
+      "flow_end": 22.5
     },
     {
       "ingredient_id": "tito-s",
       "ingredient": "Tito's",
+      "container": "titos-vodka",
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      },
       "number": 5,
-      "container": "titos-vodka",
-      "start": 14.4,
-      "flow_start": 15.42,
-      "flow_end": 16.3,
-      "end": 17.0,
-      "quantity": {
-        "display": "1.75 L bottle",
-        "full_bottle": true,
-        "package_fl_oz": 59.17454
-      }
+      "start": 23.2,
+      "end": 26.0,
+      "opening_style": "knife-insert-once",
+      "opening_demonstration_id": "tito-s-opening",
+      "flow_start": 24.22,
+      "flow_end": 25.3
     },
     {
       "ingredient_id": "tito-s",
       "ingredient": "Tito's",
-      "number": 6,
       "container": "titos-vodka",
-      "start": 17.0,
-      "flow_start": 18.02,
-      "flow_end": 18.9,
-      "end": 19.6,
       "quantity": {
         "display": "1.75 L bottle",
         "full_bottle": true,
         "package_fl_oz": 59.17454
-      }
+      },
+      "number": 6,
+      "start": 26.0,
+      "end": 28.8,
+      "opening_style": "knife-insert-once",
+      "opening_demonstration_id": "tito-s-opening",
+      "flow_start": 27.02,
+      "flow_end": 28.1
     },
     {
       "ingredient_id": "strawberry-lemonade",
       "ingredient": "Strawberry Lemonade",
       "number": 1,
       "container": "pitcher",
-      "start": 19.6,
-      "flow_start": 20.62,
-      "flow_end": 22.9,
-      "end": 23.6,
+      "start": 28.8,
+      "flow_start": 29.82,
+      "flow_end": 32.1,
+      "end": 32.8,
       "quantity": {
         "fl_oz": 128,
         "display": "128 fl oz"
@@ -166,10 +179,10 @@
       "ingredient": "Strawberry Lemonade",
       "number": 2,
       "container": "pitcher",
-      "start": 23.6,
-      "flow_start": 24.62,
-      "flow_end": 26.9,
-      "end": 27.6,
+      "start": 32.8,
+      "flow_start": 33.82,
+      "flow_end": 36.1,
+      "end": 36.8,
       "quantity": {
         "fl_oz": 128,
         "display": "128 fl oz"
@@ -180,10 +193,10 @@
       "ingredient": "Strawberry Lemonade",
       "number": 3,
       "container": "pitcher",
-      "start": 27.6,
-      "flow_start": 28.62,
-      "flow_end": 30.9,
-      "end": 31.6,
+      "start": 36.8,
+      "flow_start": 37.82,
+      "flow_end": 40.1,
+      "end": 40.8,
       "quantity": {
         "fl_oz": 128,
         "display": "128 fl oz"
@@ -194,10 +207,10 @@
       "ingredient": "Strawberry Lemonade",
       "number": 4,
       "container": "pitcher",
-      "start": 31.6,
-      "flow_start": 32.62,
-      "flow_end": 34.9,
-      "end": 35.6,
+      "start": 40.8,
+      "flow_start": 41.82,
+      "flow_end": 44.1,
+      "end": 44.8,
       "quantity": {
         "fl_oz": 128,
         "display": "128 fl oz"
@@ -208,10 +221,10 @@
       "ingredient": "Strawberry Lemonade",
       "number": 5,
       "container": "pitcher",
-      "start": 35.6,
-      "flow_start": 36.62,
-      "flow_end": 38.9,
-      "end": 39.6,
+      "start": 44.8,
+      "flow_start": 45.82,
+      "flow_end": 48.1,
+      "end": 48.8,
       "quantity": {
         "fl_oz": 128,
         "display": "128 fl oz"
@@ -222,10 +235,10 @@
       "ingredient": "Strawberry Lemonade",
       "number": 6,
       "container": "pitcher",
-      "start": 39.6,
-      "flow_start": 40.62,
-      "flow_end": 42.9,
-      "end": 43.6,
+      "start": 48.8,
+      "flow_start": 49.82,
+      "flow_end": 52.1,
+      "end": 52.8,
       "quantity": {
         "fl_oz": 128,
         "display": "128 fl oz"
@@ -236,10 +249,10 @@
       "ingredient": "Strawberry Lemonade",
       "number": 7,
       "container": "pitcher",
-      "start": 43.6,
-      "flow_start": 44.62,
-      "flow_end": 46.9,
-      "end": 47.6,
+      "start": 52.8,
+      "flow_start": 53.82,
+      "flow_end": 56.1,
+      "end": 56.8,
       "quantity": {
         "fl_oz": 128,
         "display": "128 fl oz"
@@ -250,14 +263,33 @@
       "ingredient": "Strawberry Lemonade",
       "number": 8,
       "container": "pitcher",
-      "start": 47.6,
-      "flow_start": 48.62,
-      "flow_end": 50.9,
-      "end": 51.6,
+      "start": 56.8,
+      "flow_start": 57.82,
+      "flow_end": 60.1,
+      "end": 60.8,
       "quantity": {
         "fl_oz": 128,
         "display": "128 fl oz"
       }
+    }
+  ],
+  "render_revision": "knife-insert-once-v3",
+  "opening_demonstrations": [
+    {
+      "id": "tito-s-opening",
+      "ingredient_id": "tito-s",
+      "container": "titos-vodka",
+      "start": 4,
+      "end": 12.0,
+      "instruction": "Remove plastic insert from all bottles",
+      "scope": "all bottles",
+      "bottle_count": 6,
+      "opening_style": "knife-insert-once",
+      "screw_cap_removed": 5.133333,
+      "knife_under_insert": 6.733333,
+      "pry_start": 6.866667,
+      "insert_lifted_clear": 9.466667,
+      "insert_discarded": 10.826667
     }
   ],
   "configured_yield_oz": 1379,
@@ -285,6 +317,9 @@
     "caps_removed_before_flow": true,
     "streams_centered_in_actual_hatch": true,
     "frame_exact_stages": true,
-    "label_on_closed_lid": true
+    "label_on_closed_lid": true,
+    "knife_insert_bottle_pours": 6,
+    "single_opening_demonstrations": 1,
+    "opening_demonstrated_before_each_target_pour": true
   }
 }

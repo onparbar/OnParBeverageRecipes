@@ -1,7 +1,7 @@
 {
   "id": "peach-margarita-jose-cuervo",
   "title": "Peach Margarita (Jose Cuervo)",
-  "duration": 110.2,
+  "duration": 119.8,
   "fps": 30,
   "video": "assets/recipes/peach-margarita-jose-cuervo.mp4",
   "poster": "assets/recipes/peach-margarita-jose-cuervo.jpg",
@@ -19,197 +19,214 @@
       "id": "jose-cuervo-silver",
       "title": "Add Jose Cuervo Silver",
       "amount": "8 \u00d7 1.75 L bottles",
-      "description": "",
+      "description": "Remove plastic insert from all bottles before pouring.",
       "start": 4,
-      "end": 24.8
+      "opening_style": "knife-insert-once",
+      "end": 34.4
     },
     {
       "id": "triple-sec",
       "title": "Add Triple Sec",
       "amount": "8 \u00d7 1 L bottles",
       "description": "",
-      "start": 24.8,
-      "end": 45.6
+      "start": 34.4,
+      "end": 55.2
     },
     {
       "id": "peach-schnapps",
       "title": "Add Peach Schnapps",
       "amount": "8 \u00d7 1 L bottles",
       "description": "",
-      "start": 45.6,
-      "end": 66.4
+      "start": 55.2,
+      "end": 76.0
     },
     {
       "id": "sour-mix",
       "title": "Add Sour Mix",
       "amount": "2 \u00d7 1 gallon jugs",
       "description": "",
-      "start": 66.4,
-      "end": 72.4
+      "start": 76.0,
+      "end": 82.0
     },
     {
       "id": "lime-juice",
       "title": "Add Lime Juice",
       "amount": "8 \u00d7 1 L bottles",
       "description": "",
-      "start": 72.4,
-      "end": 93.2
+      "start": 82.0,
+      "end": 102.8
     },
     {
       "id": "stir",
       "title": "Stir with the paddle",
       "amount": "",
       "description": "Stir with paddle in up and down motion to mix ingredients well",
-      "start": 93.2,
-      "end": 100.2
+      "start": 102.8,
+      "end": 109.8
     },
     {
       "id": "close",
       "title": "Close the keg",
       "amount": "",
       "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-      "start": 100.2,
-      "end": 105.2
+      "start": 109.8,
+      "end": 114.8
     },
     {
       "id": "label",
       "title": "Attach the label to the lid",
       "amount": "",
       "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-      "start": 105.2,
-      "end": 110.2
+      "start": 114.8,
+      "end": 119.8
     }
   ],
   "pours": [
     {
       "ingredient_id": "jose-cuervo-silver",
       "ingredient": "Jose Cuervo Silver",
+      "container": "jose-cuervo-silver",
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      },
       "number": 1,
-      "container": "jose-cuervo-silver",
-      "start": 4.0,
-      "flow_start": 5.02,
-      "flow_end": 5.9,
-      "end": 6.6,
-      "quantity": {
-        "display": "1.75 L bottle",
-        "full_bottle": true,
-        "package_fl_oz": 59.17454
-      }
+      "start": 12.0,
+      "end": 14.8,
+      "opening_style": "knife-insert-once",
+      "opening_demonstration_id": "jose-cuervo-silver-opening",
+      "flow_start": 13.02,
+      "flow_end": 14.1
     },
     {
       "ingredient_id": "jose-cuervo-silver",
       "ingredient": "Jose Cuervo Silver",
+      "container": "jose-cuervo-silver",
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      },
       "number": 2,
-      "container": "jose-cuervo-silver",
-      "start": 6.6,
-      "flow_start": 7.62,
-      "flow_end": 8.5,
-      "end": 9.2,
-      "quantity": {
-        "display": "1.75 L bottle",
-        "full_bottle": true,
-        "package_fl_oz": 59.17454
-      }
+      "start": 14.8,
+      "end": 17.6,
+      "opening_style": "knife-insert-once",
+      "opening_demonstration_id": "jose-cuervo-silver-opening",
+      "flow_start": 15.82,
+      "flow_end": 16.9
     },
     {
       "ingredient_id": "jose-cuervo-silver",
       "ingredient": "Jose Cuervo Silver",
+      "container": "jose-cuervo-silver",
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      },
       "number": 3,
-      "container": "jose-cuervo-silver",
-      "start": 9.2,
-      "flow_start": 10.22,
-      "flow_end": 11.1,
-      "end": 11.8,
-      "quantity": {
-        "display": "1.75 L bottle",
-        "full_bottle": true,
-        "package_fl_oz": 59.17454
-      }
+      "start": 17.6,
+      "end": 20.4,
+      "opening_style": "knife-insert-once",
+      "opening_demonstration_id": "jose-cuervo-silver-opening",
+      "flow_start": 18.62,
+      "flow_end": 19.7
     },
     {
       "ingredient_id": "jose-cuervo-silver",
       "ingredient": "Jose Cuervo Silver",
+      "container": "jose-cuervo-silver",
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      },
       "number": 4,
-      "container": "jose-cuervo-silver",
-      "start": 11.8,
-      "flow_start": 12.82,
-      "flow_end": 13.7,
-      "end": 14.4,
-      "quantity": {
-        "display": "1.75 L bottle",
-        "full_bottle": true,
-        "package_fl_oz": 59.17454
-      }
+      "start": 20.4,
+      "end": 23.2,
+      "opening_style": "knife-insert-once",
+      "opening_demonstration_id": "jose-cuervo-silver-opening",
+      "flow_start": 21.42,
+      "flow_end": 22.5
     },
     {
       "ingredient_id": "jose-cuervo-silver",
       "ingredient": "Jose Cuervo Silver",
+      "container": "jose-cuervo-silver",
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      },
       "number": 5,
-      "container": "jose-cuervo-silver",
-      "start": 14.4,
-      "flow_start": 15.42,
-      "flow_end": 16.3,
-      "end": 17.0,
-      "quantity": {
-        "display": "1.75 L bottle",
-        "full_bottle": true,
-        "package_fl_oz": 59.17454
-      }
+      "start": 23.2,
+      "end": 26.0,
+      "opening_style": "knife-insert-once",
+      "opening_demonstration_id": "jose-cuervo-silver-opening",
+      "flow_start": 24.22,
+      "flow_end": 25.3
     },
     {
       "ingredient_id": "jose-cuervo-silver",
       "ingredient": "Jose Cuervo Silver",
+      "container": "jose-cuervo-silver",
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      },
       "number": 6,
-      "container": "jose-cuervo-silver",
-      "start": 17.0,
-      "flow_start": 18.02,
-      "flow_end": 18.9,
-      "end": 19.6,
-      "quantity": {
-        "display": "1.75 L bottle",
-        "full_bottle": true,
-        "package_fl_oz": 59.17454
-      }
+      "start": 26.0,
+      "end": 28.8,
+      "opening_style": "knife-insert-once",
+      "opening_demonstration_id": "jose-cuervo-silver-opening",
+      "flow_start": 27.02,
+      "flow_end": 28.1
     },
     {
       "ingredient_id": "jose-cuervo-silver",
       "ingredient": "Jose Cuervo Silver",
+      "container": "jose-cuervo-silver",
+      "quantity": {
+        "display": "1.75 L bottle",
+        "full_bottle": true,
+        "package_fl_oz": 59.17454
+      },
       "number": 7,
-      "container": "jose-cuervo-silver",
-      "start": 19.6,
-      "flow_start": 20.62,
-      "flow_end": 21.5,
-      "end": 22.2,
-      "quantity": {
-        "display": "1.75 L bottle",
-        "full_bottle": true,
-        "package_fl_oz": 59.17454
-      }
+      "start": 28.8,
+      "end": 31.6,
+      "opening_style": "knife-insert-once",
+      "opening_demonstration_id": "jose-cuervo-silver-opening",
+      "flow_start": 29.82,
+      "flow_end": 30.9
     },
     {
       "ingredient_id": "jose-cuervo-silver",
       "ingredient": "Jose Cuervo Silver",
-      "number": 8,
       "container": "jose-cuervo-silver",
-      "start": 22.2,
-      "flow_start": 23.22,
-      "flow_end": 24.1,
-      "end": 24.8,
       "quantity": {
         "display": "1.75 L bottle",
         "full_bottle": true,
         "package_fl_oz": 59.17454
-      }
+      },
+      "number": 8,
+      "start": 31.6,
+      "end": 34.4,
+      "opening_style": "knife-insert-once",
+      "opening_demonstration_id": "jose-cuervo-silver-opening",
+      "flow_start": 32.62,
+      "flow_end": 33.7
     },
     {
       "ingredient_id": "triple-sec",
       "ingredient": "Triple Sec",
       "number": 1,
       "container": "dekuyper-triple-sec",
-      "start": 24.8,
-      "flow_start": 25.82,
-      "flow_end": 26.7,
-      "end": 27.4,
+      "start": 34.4,
+      "flow_start": 35.42,
+      "flow_end": 36.3,
+      "end": 37.0,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -221,10 +238,10 @@
       "ingredient": "Triple Sec",
       "number": 2,
       "container": "dekuyper-triple-sec",
-      "start": 27.4,
-      "flow_start": 28.42,
-      "flow_end": 29.3,
-      "end": 30.0,
+      "start": 37.0,
+      "flow_start": 38.02,
+      "flow_end": 38.9,
+      "end": 39.6,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -236,10 +253,10 @@
       "ingredient": "Triple Sec",
       "number": 3,
       "container": "dekuyper-triple-sec",
-      "start": 30.0,
-      "flow_start": 31.02,
-      "flow_end": 31.9,
-      "end": 32.6,
+      "start": 39.6,
+      "flow_start": 40.62,
+      "flow_end": 41.5,
+      "end": 42.2,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -251,10 +268,10 @@
       "ingredient": "Triple Sec",
       "number": 4,
       "container": "dekuyper-triple-sec",
-      "start": 32.6,
-      "flow_start": 33.62,
-      "flow_end": 34.5,
-      "end": 35.2,
+      "start": 42.2,
+      "flow_start": 43.22,
+      "flow_end": 44.1,
+      "end": 44.8,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -266,10 +283,10 @@
       "ingredient": "Triple Sec",
       "number": 5,
       "container": "dekuyper-triple-sec",
-      "start": 35.2,
-      "flow_start": 36.22,
-      "flow_end": 37.1,
-      "end": 37.8,
+      "start": 44.8,
+      "flow_start": 45.82,
+      "flow_end": 46.7,
+      "end": 47.4,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -281,10 +298,10 @@
       "ingredient": "Triple Sec",
       "number": 6,
       "container": "dekuyper-triple-sec",
-      "start": 37.8,
-      "flow_start": 38.82,
-      "flow_end": 39.7,
-      "end": 40.4,
+      "start": 47.4,
+      "flow_start": 48.42,
+      "flow_end": 49.3,
+      "end": 50.0,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -296,10 +313,10 @@
       "ingredient": "Triple Sec",
       "number": 7,
       "container": "dekuyper-triple-sec",
-      "start": 40.4,
-      "flow_start": 41.42,
-      "flow_end": 42.3,
-      "end": 43.0,
+      "start": 50.0,
+      "flow_start": 51.02,
+      "flow_end": 51.9,
+      "end": 52.6,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -311,10 +328,10 @@
       "ingredient": "Triple Sec",
       "number": 8,
       "container": "dekuyper-triple-sec",
-      "start": 43.0,
-      "flow_start": 44.02,
-      "flow_end": 44.9,
-      "end": 45.6,
+      "start": 52.6,
+      "flow_start": 53.62,
+      "flow_end": 54.5,
+      "end": 55.2,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -326,10 +343,10 @@
       "ingredient": "Peach Schnapps",
       "number": 1,
       "container": "dekuyper-peachtree",
-      "start": 45.6,
-      "flow_start": 46.62,
-      "flow_end": 47.5,
-      "end": 48.2,
+      "start": 55.2,
+      "flow_start": 56.22,
+      "flow_end": 57.1,
+      "end": 57.8,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -341,10 +358,10 @@
       "ingredient": "Peach Schnapps",
       "number": 2,
       "container": "dekuyper-peachtree",
-      "start": 48.2,
-      "flow_start": 49.22,
-      "flow_end": 50.1,
-      "end": 50.8,
+      "start": 57.8,
+      "flow_start": 58.82,
+      "flow_end": 59.7,
+      "end": 60.4,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -356,10 +373,10 @@
       "ingredient": "Peach Schnapps",
       "number": 3,
       "container": "dekuyper-peachtree",
-      "start": 50.8,
-      "flow_start": 51.82,
-      "flow_end": 52.7,
-      "end": 53.4,
+      "start": 60.4,
+      "flow_start": 61.42,
+      "flow_end": 62.3,
+      "end": 63.0,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -371,10 +388,10 @@
       "ingredient": "Peach Schnapps",
       "number": 4,
       "container": "dekuyper-peachtree",
-      "start": 53.4,
-      "flow_start": 54.42,
-      "flow_end": 55.3,
-      "end": 56.0,
+      "start": 63.0,
+      "flow_start": 64.02,
+      "flow_end": 64.9,
+      "end": 65.6,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -386,10 +403,10 @@
       "ingredient": "Peach Schnapps",
       "number": 5,
       "container": "dekuyper-peachtree",
-      "start": 56.0,
-      "flow_start": 57.02,
-      "flow_end": 57.9,
-      "end": 58.6,
+      "start": 65.6,
+      "flow_start": 66.62,
+      "flow_end": 67.5,
+      "end": 68.2,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -401,10 +418,10 @@
       "ingredient": "Peach Schnapps",
       "number": 6,
       "container": "dekuyper-peachtree",
-      "start": 58.6,
-      "flow_start": 59.62,
-      "flow_end": 60.5,
-      "end": 61.2,
+      "start": 68.2,
+      "flow_start": 69.22,
+      "flow_end": 70.1,
+      "end": 70.8,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -416,10 +433,10 @@
       "ingredient": "Peach Schnapps",
       "number": 7,
       "container": "dekuyper-peachtree",
-      "start": 61.2,
-      "flow_start": 62.22,
-      "flow_end": 63.1,
-      "end": 63.8,
+      "start": 70.8,
+      "flow_start": 71.82,
+      "flow_end": 72.7,
+      "end": 73.4,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -431,10 +448,10 @@
       "ingredient": "Peach Schnapps",
       "number": 8,
       "container": "dekuyper-peachtree",
-      "start": 63.8,
-      "flow_start": 64.82,
-      "flow_end": 65.7,
-      "end": 66.4,
+      "start": 73.4,
+      "flow_start": 74.42,
+      "flow_end": 75.3,
+      "end": 76.0,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -446,10 +463,10 @@
       "ingredient": "Sour Mix",
       "number": 1,
       "container": "dailys-sweet-and-sour",
-      "start": 66.4,
-      "flow_start": 67.42,
-      "flow_end": 68.7,
-      "end": 69.4,
+      "start": 76.0,
+      "flow_start": 77.02,
+      "flow_end": 78.3,
+      "end": 79.0,
       "quantity": {
         "display": "1 gallon jug",
         "full_bottle": true,
@@ -461,10 +478,10 @@
       "ingredient": "Sour Mix",
       "number": 2,
       "container": "dailys-sweet-and-sour",
-      "start": 69.4,
-      "flow_start": 70.42,
-      "flow_end": 71.7,
-      "end": 72.4,
+      "start": 79.0,
+      "flow_start": 80.02,
+      "flow_end": 81.3,
+      "end": 82.0,
       "quantity": {
         "display": "1 gallon jug",
         "full_bottle": true,
@@ -476,10 +493,10 @@
       "ingredient": "Lime Juice",
       "number": 1,
       "container": "finest-call-lime-juice",
-      "start": 72.4,
-      "flow_start": 73.42,
-      "flow_end": 74.3,
-      "end": 75.0,
+      "start": 82.0,
+      "flow_start": 83.02,
+      "flow_end": 83.9,
+      "end": 84.6,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -491,10 +508,10 @@
       "ingredient": "Lime Juice",
       "number": 2,
       "container": "finest-call-lime-juice",
-      "start": 75.0,
-      "flow_start": 76.02,
-      "flow_end": 76.9,
-      "end": 77.6,
+      "start": 84.6,
+      "flow_start": 85.62,
+      "flow_end": 86.5,
+      "end": 87.2,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -506,10 +523,10 @@
       "ingredient": "Lime Juice",
       "number": 3,
       "container": "finest-call-lime-juice",
-      "start": 77.6,
-      "flow_start": 78.62,
-      "flow_end": 79.5,
-      "end": 80.2,
+      "start": 87.2,
+      "flow_start": 88.22,
+      "flow_end": 89.1,
+      "end": 89.8,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -521,10 +538,10 @@
       "ingredient": "Lime Juice",
       "number": 4,
       "container": "finest-call-lime-juice",
-      "start": 80.2,
-      "flow_start": 81.22,
-      "flow_end": 82.1,
-      "end": 82.8,
+      "start": 89.8,
+      "flow_start": 90.82,
+      "flow_end": 91.7,
+      "end": 92.4,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -536,10 +553,10 @@
       "ingredient": "Lime Juice",
       "number": 5,
       "container": "finest-call-lime-juice",
-      "start": 82.8,
-      "flow_start": 83.82,
-      "flow_end": 84.7,
-      "end": 85.4,
+      "start": 92.4,
+      "flow_start": 93.42,
+      "flow_end": 94.3,
+      "end": 95.0,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -551,10 +568,10 @@
       "ingredient": "Lime Juice",
       "number": 6,
       "container": "finest-call-lime-juice",
-      "start": 85.4,
-      "flow_start": 86.42,
-      "flow_end": 87.3,
-      "end": 88.0,
+      "start": 95.0,
+      "flow_start": 96.02,
+      "flow_end": 96.9,
+      "end": 97.6,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -566,10 +583,10 @@
       "ingredient": "Lime Juice",
       "number": 7,
       "container": "finest-call-lime-juice",
-      "start": 88.0,
-      "flow_start": 89.02,
-      "flow_end": 89.9,
-      "end": 90.6,
+      "start": 97.6,
+      "flow_start": 98.62,
+      "flow_end": 99.5,
+      "end": 100.2,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
@@ -581,15 +598,34 @@
       "ingredient": "Lime Juice",
       "number": 8,
       "container": "finest-call-lime-juice",
-      "start": 90.6,
-      "flow_start": 91.62,
-      "flow_end": 92.5,
-      "end": 93.2,
+      "start": 100.2,
+      "flow_start": 101.22,
+      "flow_end": 102.1,
+      "end": 102.8,
       "quantity": {
         "display": "1 L bottle",
         "full_bottle": true,
         "package_fl_oz": 33.814023
       }
+    }
+  ],
+  "render_revision": "knife-insert-once-jose-full-neck-v3",
+  "opening_demonstrations": [
+    {
+      "id": "jose-cuervo-silver-opening",
+      "ingredient_id": "jose-cuervo-silver",
+      "container": "jose-cuervo-silver",
+      "start": 4,
+      "end": 12.0,
+      "instruction": "Remove plastic insert from all bottles",
+      "scope": "all bottles",
+      "bottle_count": 8,
+      "opening_style": "knife-insert-once",
+      "screw_cap_removed": 5.133333,
+      "knife_under_insert": 6.733333,
+      "pry_start": 6.866667,
+      "insert_lifted_clear": 9.466667,
+      "insert_discarded": 10.826667
     }
   ],
   "configured_yield_oz": 1540,
@@ -630,6 +666,9 @@
     "caps_removed_before_flow": true,
     "streams_centered_in_actual_hatch": true,
     "frame_exact_stages": true,
-    "label_on_closed_lid": true
+    "label_on_closed_lid": true,
+    "knife_insert_bottle_pours": 8,
+    "single_opening_demonstrations": 1,
+    "opening_demonstrated_before_each_target_pour": true
   }
 }

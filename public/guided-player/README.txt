@@ -1,4 +1,4 @@
-ON PAR COCKTAIL RECIPE PLAYER
+ON PAR COCKTAIL RECIPE PLAYER — SINGLE-OPENING RELEASE
 
 Unzip the complete package. From its top folder, run:
   python3 serve_player.py --port 8129
@@ -13,18 +13,20 @@ Back on the first step restarts it; Next on the last step replays the recipe.
 Click the video to pause/resume. Fullscreen and mute are at top right.
 
 The complete release contains 26 active recipes. Four source recipes remain
-inactive and are omitted. While authoring is in progress, PENDING-RECIPES.txt
+inactive and are omitted. Fourteen recipes are updated: seven Tito’s and seven
+Jose Cuervo recipes. Each targeted ingredient stage starts with one knife/insert
+removal and discard demonstration and the caption “Remove plastic insert from
+all bottles”. Then all 104 individual bottles pour without repeating that
+knife animation. Jose’s pouring bottle keeps its complete open glass neck. The other 12 recipe videos are unchanged.
+While authoring is in progress, PENDING-RECIPES.txt
 reports the current catalog; packaging is blocked until all 26 pass validation.
 
 Cranberry Juice and all lemonade steps display the instruction to fill the
 pitcher using the fountain drink machine in karaoke. The final label step says:
-Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.
-Opening steps say:
-Make sure the keg is clean and sanitized before adding ingredients.
-These descriptions are saved in recipe metadata and shown by the
+Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label. These descriptions are saved in recipe metadata and shown by the
 interactive player. They are not burned into the standalone MP4 files.
 
-Each stated bottle gets a separate opening and pour. Videos use the actual
+Each stated bottle gets a separate pour. Videos use the actual
 photographed keg/lid, four-quart pitcher and metal paddle. Sour mix uses the
 yellow Daily's jug. The purple sticker goes on top of the closed lid; its Date
 and Cooler fields remain blank for the operator to fill in.
@@ -35,7 +37,17 @@ and two generic bottles, Cold Brew Concentrate 32 FL OZ and Vanilla Syrup 25 FL 
 See ASSET-SOURCES.json and replica-assets/ in the package root for source URLs,
 full prompts, PNGs and cap geometry. Historical generation manifests retain
 authoring paths for provenance; portable asset paths are in ASSET-SOURCES.json.
+The five opening sprites, their prompts/geometry and reference photographs are
+in opening-assets/. The Tito’s and Jose neck sprites are intentional close-up
+crops through the lower shoulders. These opening actions appear in the MP4s;
+the instruction descriptions are supplied by the interactive player.
 
 Lemon Drop uses nine distinct full 1 L lemon juice bottles by explicit user
 instruction. Its original numeric 300 fl oz and configured dashboard yield are
 retained separately as provenance. No dashboard data was changed.
+
+DASHBOARD INTEGRATION
+The dashboard opens the matching recipe inline and preserves its step pauses,
+Back/Next controls, and pause-on-close behavior. Opening, stirring, keg exterior
+cleaning, Blue Dot preparation, and full labeling instructions are retained in
+the stage descriptions alongside the updated bottle-insert instructions.

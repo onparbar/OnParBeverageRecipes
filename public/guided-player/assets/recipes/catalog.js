@@ -32,7 +32,7 @@ window.RECIPE_CATALOG = {
       "configured_yield_oz": 1540,
       "video": "assets/recipes/blueberry-margarita-jose-cuervo.mp4",
       "poster": "assets/recipes/blueberry-margarita-jose-cuervo.jpg",
-      "duration": 110.2,
+      "duration": 119.8,
       "stages": [
         {
           "id": "setup",
@@ -46,65 +46,66 @@ window.RECIPE_CATALOG = {
           "id": "jose-cuervo-silver",
           "title": "Add Jose Cuervo Silver",
           "amount": "8 \u00d7 1.75 L bottles",
-          "description": "",
+          "description": "Remove plastic insert from all bottles before pouring.",
           "start": 4,
-          "end": 24.8
+          "opening_style": "knife-insert-once",
+          "end": 34.4
         },
         {
           "id": "triple-sec",
           "title": "Add Triple Sec",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 24.8,
-          "end": 45.6
+          "start": 34.4,
+          "end": 55.2
         },
         {
           "id": "blueberry-schnapps",
           "title": "Add Blueberry Schnapps",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 45.6,
-          "end": 66.4
+          "start": 55.2,
+          "end": 76.0
         },
         {
           "id": "sour-mix",
           "title": "Add Sour Mix",
           "amount": "2 \u00d7 1 gallon jugs",
           "description": "",
-          "start": 66.4,
-          "end": 72.4
+          "start": 76.0,
+          "end": 82.0
         },
         {
           "id": "lime-juice",
           "title": "Add Lime Juice",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 72.4,
-          "end": 93.2
+          "start": 82.0,
+          "end": 102.8
         },
         {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
           "description": "Stir with paddle in up and down motion to mix ingredients well",
-          "start": 93.2,
-          "end": 100.2
+          "start": 102.8,
+          "end": 109.8
         },
         {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
           "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-          "start": 100.2,
-          "end": 105.2
+          "start": 109.8,
+          "end": 114.8
         },
         {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
           "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-          "start": 105.2,
-          "end": 110.2
+          "start": 114.8,
+          "end": 119.8
         }
       ],
       "config": "assets/recipes/blueberry-margarita-jose-cuervo.json"
@@ -118,7 +119,7 @@ window.RECIPE_CATALOG = {
       "configured_yield_oz": 1456,
       "video": "assets/recipes/house-margarita-jose-cuervo.mp4",
       "poster": "assets/recipes/house-margarita-jose-cuervo.jpg",
-      "duration": 99.8,
+      "duration": 109.80000000000001,
       "stages": [
         {
           "id": "setup",
@@ -132,57 +133,58 @@ window.RECIPE_CATALOG = {
           "id": "jose-cuervo-silver",
           "title": "Add Jose Cuervo Silver",
           "amount": "10 \u00d7 1.75 L bottles",
-          "description": "",
+          "description": "Remove plastic insert from all bottles before pouring.",
           "start": 4,
-          "end": 30.0
+          "opening_style": "knife-insert-once",
+          "end": 40.0
         },
         {
           "id": "triple-sec",
           "title": "Add Triple Sec",
           "amount": "9 \u00d7 1 L bottles",
           "description": "",
-          "start": 30.0,
-          "end": 53.4
+          "start": 40.0,
+          "end": 63.4
         },
         {
           "id": "sour-mix",
           "title": "Add Sour Mix",
           "amount": "2 \u00d7 1 gallon jugs",
           "description": "",
-          "start": 53.4,
-          "end": 59.4
+          "start": 63.4,
+          "end": 69.4
         },
         {
           "id": "lime-juice",
           "title": "Add Lime Juice",
           "amount": "9 \u00d7 1 L bottles",
           "description": "",
-          "start": 59.4,
-          "end": 82.8
+          "start": 69.4,
+          "end": 92.8
         },
         {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
           "description": "Stir with paddle in up and down motion to mix ingredients well",
-          "start": 82.8,
-          "end": 89.8
+          "start": 92.80000000000001,
+          "end": 99.8
         },
         {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
           "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-          "start": 89.8,
-          "end": 94.8
+          "start": 99.80000000000001,
+          "end": 104.8
         },
         {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
           "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-          "start": 94.8,
-          "end": 99.8
+          "start": 104.80000000000001,
+          "end": 109.8
         }
       ],
       "config": "assets/recipes/house-margarita-jose-cuervo.json"
@@ -196,7 +198,7 @@ window.RECIPE_CATALOG = {
       "configured_yield_oz": 1540,
       "video": "assets/recipes/peach-margarita-jose-cuervo.mp4",
       "poster": "assets/recipes/peach-margarita-jose-cuervo.jpg",
-      "duration": 110.2,
+      "duration": 119.8,
       "stages": [
         {
           "id": "setup",
@@ -210,65 +212,66 @@ window.RECIPE_CATALOG = {
           "id": "jose-cuervo-silver",
           "title": "Add Jose Cuervo Silver",
           "amount": "8 \u00d7 1.75 L bottles",
-          "description": "",
+          "description": "Remove plastic insert from all bottles before pouring.",
           "start": 4,
-          "end": 24.8
+          "opening_style": "knife-insert-once",
+          "end": 34.4
         },
         {
           "id": "triple-sec",
           "title": "Add Triple Sec",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 24.8,
-          "end": 45.6
+          "start": 34.4,
+          "end": 55.2
         },
         {
           "id": "peach-schnapps",
           "title": "Add Peach Schnapps",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 45.6,
-          "end": 66.4
+          "start": 55.2,
+          "end": 76.0
         },
         {
           "id": "sour-mix",
           "title": "Add Sour Mix",
           "amount": "2 \u00d7 1 gallon jugs",
           "description": "",
-          "start": 66.4,
-          "end": 72.4
+          "start": 76.0,
+          "end": 82.0
         },
         {
           "id": "lime-juice",
           "title": "Add Lime Juice",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 72.4,
-          "end": 93.2
+          "start": 82.0,
+          "end": 102.8
         },
         {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
           "description": "Stir with paddle in up and down motion to mix ingredients well",
-          "start": 93.2,
-          "end": 100.2
+          "start": 102.8,
+          "end": 109.8
         },
         {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
           "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-          "start": 100.2,
-          "end": 105.2
+          "start": 109.8,
+          "end": 114.8
         },
         {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
           "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-          "start": 105.2,
-          "end": 110.2
+          "start": 114.8,
+          "end": 119.8
         }
       ],
       "config": "assets/recipes/peach-margarita-jose-cuervo.json"
@@ -282,7 +285,7 @@ window.RECIPE_CATALOG = {
       "configured_yield_oz": 1540,
       "video": "assets/recipes/raspberry-margarita-jose-cuervo.mp4",
       "poster": "assets/recipes/raspberry-margarita-jose-cuervo.jpg",
-      "duration": 110.2,
+      "duration": 119.8,
       "stages": [
         {
           "id": "setup",
@@ -296,65 +299,66 @@ window.RECIPE_CATALOG = {
           "id": "jose-cuervo-silver",
           "title": "Add Jose Cuervo Silver",
           "amount": "8 \u00d7 1.75 L bottles",
-          "description": "",
+          "description": "Remove plastic insert from all bottles before pouring.",
           "start": 4,
-          "end": 24.8
+          "opening_style": "knife-insert-once",
+          "end": 34.4
         },
         {
           "id": "triple-sec",
           "title": "Add Triple Sec",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 24.8,
-          "end": 45.6
+          "start": 34.4,
+          "end": 55.2
         },
         {
           "id": "raspberry-schnapps",
           "title": "Add Raspberry Schnapps",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 45.6,
-          "end": 66.4
+          "start": 55.2,
+          "end": 76.0
         },
         {
           "id": "sour-mix",
           "title": "Add Sour Mix",
           "amount": "2 \u00d7 1 gallon jugs",
           "description": "",
-          "start": 66.4,
-          "end": 72.4
+          "start": 76.0,
+          "end": 82.0
         },
         {
           "id": "lime-juice",
           "title": "Add Lime Juice",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 72.4,
-          "end": 93.2
+          "start": 82.0,
+          "end": 102.8
         },
         {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
           "description": "Stir with paddle in up and down motion to mix ingredients well",
-          "start": 93.2,
-          "end": 100.2
+          "start": 102.8,
+          "end": 109.8
         },
         {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
           "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-          "start": 100.2,
-          "end": 105.2
+          "start": 109.8,
+          "end": 114.8
         },
         {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
           "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-          "start": 105.2,
-          "end": 110.2
+          "start": 114.8,
+          "end": 119.8
         }
       ],
       "config": "assets/recipes/raspberry-margarita-jose-cuervo.json"
@@ -368,7 +372,7 @@ window.RECIPE_CATALOG = {
       "configured_yield_oz": 1540,
       "video": "assets/recipes/strawberry-margarita-jose-cuervo.mp4",
       "poster": "assets/recipes/strawberry-margarita-jose-cuervo.jpg",
-      "duration": 110.2,
+      "duration": 119.8,
       "stages": [
         {
           "id": "setup",
@@ -382,65 +386,66 @@ window.RECIPE_CATALOG = {
           "id": "jose-cuervo-silver",
           "title": "Add Jose Cuervo Silver",
           "amount": "8 \u00d7 1.75 L bottles",
-          "description": "",
+          "description": "Remove plastic insert from all bottles before pouring.",
           "start": 4,
-          "end": 24.8
+          "opening_style": "knife-insert-once",
+          "end": 34.4
         },
         {
           "id": "triple-sec",
           "title": "Add Triple Sec",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 24.8,
-          "end": 45.6
+          "start": 34.4,
+          "end": 55.2
         },
         {
           "id": "strawberry-schnapps",
           "title": "Add Strawberry Schnapps",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 45.6,
-          "end": 66.4
+          "start": 55.2,
+          "end": 76.0
         },
         {
           "id": "sour-mix",
           "title": "Add Sour Mix",
           "amount": "2 \u00d7 1 gallon jugs",
           "description": "",
-          "start": 66.4,
-          "end": 72.4
+          "start": 76.0,
+          "end": 82.0
         },
         {
           "id": "lime-juice",
           "title": "Add Lime Juice",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 72.4,
-          "end": 93.2
+          "start": 82.0,
+          "end": 102.8
         },
         {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
           "description": "Stir with paddle in up and down motion to mix ingredients well",
-          "start": 93.2,
-          "end": 100.2
+          "start": 102.8,
+          "end": 109.8
         },
         {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
           "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-          "start": 100.2,
-          "end": 105.2
+          "start": 109.8,
+          "end": 114.8
         },
         {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
           "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-          "start": 105.2,
-          "end": 110.2
+          "start": 114.8,
+          "end": 119.8
         }
       ],
       "config": "assets/recipes/strawberry-margarita-jose-cuervo.json"
@@ -454,7 +459,7 @@ window.RECIPE_CATALOG = {
       "configured_yield_oz": 1540,
       "video": "assets/recipes/watermelon-margarita-jose-cuervo.mp4",
       "poster": "assets/recipes/watermelon-margarita-jose-cuervo.jpg",
-      "duration": 110.2,
+      "duration": 119.8,
       "stages": [
         {
           "id": "setup",
@@ -468,65 +473,66 @@ window.RECIPE_CATALOG = {
           "id": "jose-cuervo-silver",
           "title": "Add Jose Cuervo Silver",
           "amount": "8 \u00d7 1.75 L bottles",
-          "description": "",
+          "description": "Remove plastic insert from all bottles before pouring.",
           "start": 4,
-          "end": 24.8
+          "opening_style": "knife-insert-once",
+          "end": 34.4
         },
         {
           "id": "triple-sec",
           "title": "Add Triple Sec",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 24.8,
-          "end": 45.6
+          "start": 34.4,
+          "end": 55.2
         },
         {
           "id": "watermelon-schnapps",
           "title": "Add Watermelon Schnapps",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 45.6,
-          "end": 66.4
+          "start": 55.2,
+          "end": 76.0
         },
         {
           "id": "sour-mix",
           "title": "Add Sour Mix",
           "amount": "2 \u00d7 1 gallon jugs",
           "description": "",
-          "start": 66.4,
-          "end": 72.4
+          "start": 76.0,
+          "end": 82.0
         },
         {
           "id": "lime-juice",
           "title": "Add Lime Juice",
           "amount": "8 \u00d7 1 L bottles",
           "description": "",
-          "start": 72.4,
-          "end": 93.2
+          "start": 82.0,
+          "end": 102.8
         },
         {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
           "description": "Stir with paddle in up and down motion to mix ingredients well",
-          "start": 93.2,
-          "end": 100.2
+          "start": 102.8,
+          "end": 109.8
         },
         {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
           "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-          "start": 100.2,
-          "end": 105.2
+          "start": 109.8,
+          "end": 114.8
         },
         {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
           "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-          "start": 105.2,
-          "end": 110.2
+          "start": 114.8,
+          "end": 119.8
         }
       ],
       "config": "assets/recipes/watermelon-margarita-jose-cuervo.json"
@@ -540,7 +546,7 @@ window.RECIPE_CATALOG = {
       "configured_yield_oz": 1379,
       "video": "assets/recipes/strawberry-senorita-jose-cuervo.mp4",
       "poster": "assets/recipes/strawberry-senorita-jose-cuervo.jpg",
-      "duration": 68.6,
+      "duration": 77.8,
       "stages": [
         {
           "id": "setup",
@@ -554,41 +560,42 @@ window.RECIPE_CATALOG = {
           "id": "jose-cuervo-silver",
           "title": "Add Jose Cuervo Silver",
           "amount": "6 \u00d7 1.75 L bottles",
-          "description": "",
+          "description": "Remove plastic insert from all bottles before pouring.",
           "start": 4,
-          "end": 19.6
+          "opening_style": "knife-insert-once",
+          "end": 28.8
         },
         {
           "id": "strawberry-lemonade",
           "title": "Add Strawberry Lemonade",
           "amount": "1024 fl oz \u00b7 8 \u00d7 4 qt pitchers",
           "description": "Fill the pitcher with Strawberry Lemonade using the fountain drink machine in karaoke.",
-          "start": 19.6,
-          "end": 51.6
+          "start": 28.8,
+          "end": 60.8
         },
         {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
           "description": "Stir with paddle in up and down motion to mix ingredients well",
-          "start": 51.6,
-          "end": 58.6
+          "start": 60.8,
+          "end": 67.8
         },
         {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
           "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-          "start": 58.6,
-          "end": 63.6
+          "start": 67.8,
+          "end": 72.8
         },
         {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
           "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-          "start": 63.6,
-          "end": 68.6
+          "start": 72.8,
+          "end": 77.8
         }
       ],
       "config": "assets/recipes/strawberry-senorita-jose-cuervo.json"
@@ -752,7 +759,7 @@ window.RECIPE_CATALOG = {
       "configured_yield_oz": 1500,
       "video": "assets/recipes/espresso-martini-tito-s.mp4",
       "poster": "assets/recipes/espresso-martini-tito-s.jpg",
-      "duration": 100.60000000000001,
+      "duration": 111.0,
       "stages": [
         {
           "id": "setup",
@@ -766,65 +773,66 @@ window.RECIPE_CATALOG = {
           "id": "tito-s",
           "title": "Add Tito's",
           "amount": "12 \u00d7 1.75 L bottles",
-          "description": "",
+          "description": "Remove plastic insert from all bottles before pouring.",
           "start": 4,
-          "end": 35.2
+          "opening_style": "knife-insert-once",
+          "end": 45.6
         },
         {
           "id": "kahlua",
           "title": "Add Kahlua",
           "amount": "6 \u00d7 1 L bottles",
           "description": "",
-          "start": 35.2,
-          "end": 50.8
+          "start": 45.6,
+          "end": 61.2
         },
         {
           "id": "creme-de-cacao",
           "title": "Add Creme de Cacao",
           "amount": "6 \u00d7 1 L bottles",
           "description": "",
-          "start": 50.800000000000004,
-          "end": 66.4
+          "start": 61.2,
+          "end": 76.8
         },
         {
           "id": "cold-brew-concentrate",
           "title": "Add Cold Brew Concentrate",
           "amount": "2 \u00d7 32 fl oz bottles",
           "description": "",
-          "start": 66.4,
-          "end": 71.6
+          "start": 76.8,
+          "end": 82.0
         },
         {
           "id": "water",
           "title": "Add Water",
           "amount": "320 fl oz \u00b7 2 full + 64 fl oz",
           "description": "",
-          "start": 71.60000000000001,
-          "end": 83.6
+          "start": 82.0,
+          "end": 94.0
         },
         {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
           "description": "Stir with paddle in up and down motion to mix ingredients well",
-          "start": 83.60000000000001,
-          "end": 90.6
+          "start": 94.0,
+          "end": 101.0
         },
         {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
           "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-          "start": 90.60000000000001,
-          "end": 95.6
+          "start": 101.0,
+          "end": 106.0
         },
         {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
           "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-          "start": 95.60000000000001,
-          "end": 100.6
+          "start": 106.0,
+          "end": 111.0
         }
       ],
       "config": "assets/recipes/espresso-martini-tito-s.json"
@@ -908,7 +916,7 @@ window.RECIPE_CATALOG = {
       "configured_yield_oz": 1437,
       "video": "assets/recipes/pomegranate-martini-tito-s.mp4",
       "poster": "assets/recipes/pomegranate-martini-tito-s.jpg",
-      "duration": 119.80000000000001,
+      "duration": 129.0,
       "stages": [
         {
           "id": "setup",
@@ -922,57 +930,58 @@ window.RECIPE_CATALOG = {
           "id": "tito-s",
           "title": "Add Tito's",
           "amount": "6 \u00d7 1.75 L bottles",
-          "description": "",
+          "description": "Remove plastic insert from all bottles before pouring.",
           "start": 4,
-          "end": 19.6
+          "opening_style": "knife-insert-once",
+          "end": 28.8
         },
         {
           "id": "pomegranate-schnapps",
           "title": "Add Pomegranate Schnapps",
           "amount": "22 \u00d7 1 L bottles",
           "description": "",
-          "start": 19.6,
-          "end": 76.8
+          "start": 28.8,
+          "end": 86.0
         },
         {
           "id": "triple-sec",
           "title": "Add Triple Sec",
           "amount": "5 \u00d7 1 L bottles",
           "description": "",
-          "start": 76.80000000000001,
-          "end": 89.8
+          "start": 86.0,
+          "end": 99.0
         },
         {
           "id": "lime-juice",
           "title": "Add Lime Juice",
           "amount": "5 \u00d7 1 L bottles",
           "description": "",
-          "start": 89.80000000000001,
-          "end": 102.8
+          "start": 99.0,
+          "end": 112.0
         },
         {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
           "description": "Stir with paddle in up and down motion to mix ingredients well",
-          "start": 102.80000000000001,
-          "end": 109.8
+          "start": 112.0,
+          "end": 119.0
         },
         {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
           "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-          "start": 109.80000000000001,
-          "end": 114.8
+          "start": 119.0,
+          "end": 124.0
         },
         {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
           "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-          "start": 114.80000000000001,
-          "end": 119.8
+          "start": 124.0,
+          "end": 129.0
         }
       ],
       "config": "assets/recipes/pomegranate-martini-tito-s.json"
@@ -986,7 +995,7 @@ window.RECIPE_CATALOG = {
       "configured_yield_oz": 1507,
       "video": "assets/recipes/spiked-arnold-palmer-tito-s.mp4",
       "poster": "assets/recipes/spiked-arnold-palmer-tito-s.jpg",
-      "duration": 76.6,
+      "duration": 85.8,
       "stages": [
         {
           "id": "setup",
@@ -1000,49 +1009,50 @@ window.RECIPE_CATALOG = {
           "id": "tito-s",
           "title": "Add Tito's",
           "amount": "6 \u00d7 1.75 L bottles",
-          "description": "",
+          "description": "Remove plastic insert from all bottles before pouring.",
           "start": 4,
-          "end": 19.6
+          "opening_style": "knife-insert-once",
+          "end": 28.8
         },
         {
           "id": "lemonade",
           "title": "Add Lemonade",
           "amount": "576 fl oz \u00b7 4 full + 64 fl oz",
           "description": "Fill the pitcher with Lemonade using the fountain drink machine in karaoke.",
-          "start": 19.6,
-          "end": 39.6
+          "start": 28.8,
+          "end": 48.8
         },
         {
           "id": "sweet-tea",
           "title": "Add Sweet Tea",
           "amount": "576 fl oz \u00b7 4 full + 64 fl oz",
           "description": "",
-          "start": 39.6,
-          "end": 59.6
+          "start": 48.8,
+          "end": 68.8
         },
         {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
           "description": "Stir with paddle in up and down motion to mix ingredients well",
-          "start": 59.6,
-          "end": 66.6
+          "start": 68.8,
+          "end": 75.8
         },
         {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
           "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-          "start": 66.6,
-          "end": 71.6
+          "start": 75.8,
+          "end": 80.8
         },
         {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
           "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-          "start": 71.6,
-          "end": 76.6
+          "start": 80.8,
+          "end": 85.8
         }
       ],
       "config": "assets/recipes/spiked-arnold-palmer-tito-s.json"
@@ -1056,7 +1066,7 @@ window.RECIPE_CATALOG = {
       "configured_yield_oz": 1379,
       "video": "assets/recipes/spiked-cranberry-lemonade-tito-s.mp4",
       "poster": "assets/recipes/spiked-cranberry-lemonade-tito-s.jpg",
-      "duration": 68.6,
+      "duration": 77.8,
       "stages": [
         {
           "id": "setup",
@@ -1070,49 +1080,50 @@ window.RECIPE_CATALOG = {
           "id": "tito-s",
           "title": "Add Tito's",
           "amount": "6 \u00d7 1.75 L bottles",
-          "description": "",
+          "description": "Remove plastic insert from all bottles before pouring.",
           "start": 4,
-          "end": 19.6
+          "opening_style": "knife-insert-once",
+          "end": 28.8
         },
         {
           "id": "lemonade",
           "title": "Add Lemonade",
           "amount": "640 fl oz \u00b7 5 \u00d7 4 qt pitchers",
           "description": "Fill the pitcher with Lemonade using the fountain drink machine in karaoke.",
-          "start": 19.6,
-          "end": 39.6
+          "start": 28.8,
+          "end": 48.8
         },
         {
           "id": "cranberry-juice",
           "title": "Add Cranberry Juice",
           "amount": "384 fl oz \u00b7 3 \u00d7 4 qt pitchers",
           "description": "Fill the pitcher with Cranberry Juice using the fountain drink machine in karaoke.",
-          "start": 39.6,
-          "end": 51.6
+          "start": 48.8,
+          "end": 60.8
         },
         {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
           "description": "Stir with paddle in up and down motion to mix ingredients well",
-          "start": 51.6,
-          "end": 58.6
+          "start": 60.8,
+          "end": 67.8
         },
         {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
           "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-          "start": 58.6,
-          "end": 63.6
+          "start": 67.8,
+          "end": 72.8
         },
         {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
           "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-          "start": 63.6,
-          "end": 68.6
+          "start": 72.8,
+          "end": 77.8
         }
       ],
       "config": "assets/recipes/spiked-cranberry-lemonade-tito-s.json"
@@ -1126,7 +1137,7 @@ window.RECIPE_CATALOG = {
       "configured_yield_oz": 1379,
       "video": "assets/recipes/spiked-pink-lemonade-tito-s.mp4",
       "poster": "assets/recipes/spiked-pink-lemonade-tito-s.jpg",
-      "duration": 68.6,
+      "duration": 77.8,
       "stages": [
         {
           "id": "setup",
@@ -1140,41 +1151,42 @@ window.RECIPE_CATALOG = {
           "id": "tito-s",
           "title": "Add Tito's",
           "amount": "6 \u00d7 1.75 L bottles",
-          "description": "",
+          "description": "Remove plastic insert from all bottles before pouring.",
           "start": 4,
-          "end": 19.6
+          "opening_style": "knife-insert-once",
+          "end": 28.8
         },
         {
           "id": "strawberry-lemonade",
           "title": "Add Strawberry Lemonade",
           "amount": "1024 fl oz \u00b7 8 \u00d7 4 qt pitchers",
           "description": "Fill the pitcher with Strawberry Lemonade using the fountain drink machine in karaoke.",
-          "start": 19.6,
-          "end": 51.6
+          "start": 28.8,
+          "end": 60.8
         },
         {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
           "description": "Stir with paddle in up and down motion to mix ingredients well",
-          "start": 51.6,
-          "end": 58.6
+          "start": 60.8,
+          "end": 67.8
         },
         {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
           "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-          "start": 58.6,
-          "end": 63.6
+          "start": 67.8,
+          "end": 72.8
         },
         {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
           "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-          "start": 63.6,
-          "end": 68.6
+          "start": 72.8,
+          "end": 77.8
         }
       ],
       "config": "assets/recipes/spiked-pink-lemonade-tito-s.json"
@@ -1188,7 +1200,7 @@ window.RECIPE_CATALOG = {
       "configured_yield_oz": 1379,
       "video": "assets/recipes/spiked-strawberry-lemonade-tito-s.mp4",
       "poster": "assets/recipes/spiked-strawberry-lemonade-tito-s.jpg",
-      "duration": 68.6,
+      "duration": 77.8,
       "stages": [
         {
           "id": "setup",
@@ -1202,41 +1214,42 @@ window.RECIPE_CATALOG = {
           "id": "tito-s",
           "title": "Add Tito's",
           "amount": "6 \u00d7 1.75 L bottles",
-          "description": "",
+          "description": "Remove plastic insert from all bottles before pouring.",
           "start": 4,
-          "end": 19.6
+          "opening_style": "knife-insert-once",
+          "end": 28.8
         },
         {
           "id": "strawberry-lemonade",
           "title": "Add Strawberry Lemonade",
           "amount": "1024 fl oz \u00b7 8 \u00d7 4 qt pitchers",
           "description": "Fill the pitcher with Strawberry Lemonade using the fountain drink machine in karaoke.",
-          "start": 19.6,
-          "end": 51.6
+          "start": 28.8,
+          "end": 60.8
         },
         {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
           "description": "Stir with paddle in up and down motion to mix ingredients well",
-          "start": 51.6,
-          "end": 58.6
+          "start": 60.8,
+          "end": 67.8
         },
         {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
           "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-          "start": 58.6,
-          "end": 63.6
+          "start": 67.8,
+          "end": 72.8
         },
         {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
           "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-          "start": 63.6,
-          "end": 68.6
+          "start": 72.8,
+          "end": 77.8
         }
       ],
       "config": "assets/recipes/spiked-strawberry-lemonade-tito-s.json"
@@ -1250,7 +1263,7 @@ window.RECIPE_CATALOG = {
       "configured_yield_oz": 1379,
       "video": "assets/recipes/vodka-cran-tito-s.mp4",
       "poster": "assets/recipes/vodka-cran-tito-s.jpg",
-      "duration": 68.6,
+      "duration": 77.8,
       "stages": [
         {
           "id": "setup",
@@ -1264,41 +1277,42 @@ window.RECIPE_CATALOG = {
           "id": "tito-s",
           "title": "Add Tito's",
           "amount": "6 \u00d7 1.75 L bottles",
-          "description": "",
+          "description": "Remove plastic insert from all bottles before pouring.",
           "start": 4,
-          "end": 19.6
+          "opening_style": "knife-insert-once",
+          "end": 28.8
         },
         {
           "id": "cranberry-juice",
           "title": "Add Cranberry Juice",
           "amount": "1024 fl oz \u00b7 8 \u00d7 4 qt pitchers",
           "description": "Fill the pitcher with Cranberry Juice using the fountain drink machine in karaoke.",
-          "start": 19.6,
-          "end": 51.6
+          "start": 28.8,
+          "end": 60.8
         },
         {
           "id": "stir",
           "title": "Stir with the paddle",
           "amount": "",
           "description": "Stir with paddle in up and down motion to mix ingredients well",
-          "start": 51.6,
-          "end": 58.6
+          "start": 60.8,
+          "end": 67.8
         },
         {
           "id": "close",
           "title": "Close the keg",
           "amount": "",
           "description": "Use sanitizer and cloth to wipe the entire exterior of the keg",
-          "start": 58.6,
-          "end": 63.6
+          "start": 67.8,
+          "end": 72.8
         },
         {
           "id": "label",
           "title": "Attach the label to the lid",
           "amount": "",
           "description": "Write the cocktail name and date on the sticker label, then write which cooler it goes in. Include the total oz on the label.",
-          "start": 63.6,
-          "end": 68.6
+          "start": 72.8,
+          "end": 77.8
         }
       ],
       "config": "assets/recipes/vodka-cran-tito-s.json"

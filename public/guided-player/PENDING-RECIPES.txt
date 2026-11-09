@@ -2,6 +2,8 @@ NO PENDING ACTIVE RECIPES
 
 All 26 active recipes are available in the validated complete release.
 
+Single-opening release: 14 recipes updated (seven Tito’s and seven Jose Cuervo). Each ingredient starts with one opening demonstration and the caption “Remove plastic insert from all bottles”, then all 104 individual bottles pour without repeating the knife animation. The other 12 videos are unchanged.
+
 Eight temporary realistic photo-based replicas fill the original product gaps; see ASSET-SOURCES.json in the package root. The 31 original photo assets are unchanged.
 
 Four recipes remain inactive in the source dashboard and are excluded:
