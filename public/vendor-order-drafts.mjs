@@ -273,13 +273,19 @@ function applyManualOrderAdjustments(plan = {}, catalog = [], adjustments = []) 
     const collection = getOrderCollection(source);
     let existingCollection = "";
     let existingIndex = -1;
-    ORDER_COLLECTIONS.some((name) => {
+    // Cabinet ingredients and tap refills can share a supplier SKU. Resolve the
+    // selected line's exact identity across all collections before SKU fallback.
+    const exactCollection = internalId && ORDER_COLLECTIONS.find(name => orders[name]
+      .some(item => normalizeVendor(item.vendor) === vendor && clean(item.id || item.internalId) === internalId));
+    (exactCollection ? [exactCollection] : ORDER_COLLECTIONS).some((name) => {
       const index = orders[name].findIndex((item) => (
         normalizeVendor(item.vendor) === vendor
         && (
           (internalId && clean(item.id || item.internalId) === internalId)
-          || (vendorSku && clean(item.vendorSku || item.preferredSku) === vendorSku)
-          || clean(item.vendorProductName || item.productName || item.name).toLowerCase() === productName.toLowerCase()
+          || (!exactCollection && (
+            (vendorSku && clean(item.vendorSku || item.preferredSku) === vendorSku)
+            || clean(item.vendorProductName || item.productName || item.name).toLowerCase() === productName.toLowerCase()
+          ))
         )
       ));
       if (index < 0) return false;

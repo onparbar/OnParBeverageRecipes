@@ -16,7 +16,6 @@ import { executeInventoryBackedOperation } from "../../../lib/inventory-backed-o
 import { recoverPendingInventoryUpdates } from "../../../lib/keg-par-agent-shared-store.mjs";
 import { applyBeerReceiptCounts } from "../../../lib/beer-receipt-counts.mjs";
 import { archiveWeeklyOrderPlacement } from "../../../lib/weekly-order-snapshot.mjs";
-import { refreshSavedIngredientPurchases } from "../../../lib/weekly-ingredient-refresh.mjs";
 
 export const runtime = "nodejs";
 
@@ -106,10 +105,8 @@ export async function POST(request) {
       effectiveBody,
       { role },
     );
-    if (["set-order-adjustment", "set-order-adjustments", "remove-order-adjustment"].includes(body.action)
-      && state.recommendations.weeklyPlanSnapshot?.ingredientPlanningVersion >= 2) {
-      updatedRecommendations = await refreshSavedIngredientPurchases(updatedRecommendations);
-    }
+    // Quantity edits apply to the locked purchase plan. Reforecasting here can
+    // remove unrelated lines when current recipe evidence needs review.
     let inventoryPlan = null;
     let blockedItems = [];
     let receiptVendorId = "";

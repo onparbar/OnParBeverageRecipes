@@ -16,6 +16,42 @@ const options = {
   now: monday,
 };
 
+for (const quantity of [0, 24, 26]) {
+  test(`a ${quantity}-bottle cabinet adjustment preserves a refill with the same supplier SKU`, () => {
+    const shared = { vendor: "OHLQ", vendorSku: "9232D", vendorProductName: "Tito's Handmade Vodka 1.75L",
+      unitCost: 34.78, hasKnownPrice: true };
+    const cabinet = { ...shared, id: "tito-s", name: "Tito's", quantity: 30, estimatedCost: 1043.4 };
+    const refill = { ...shared, id: "patio-13-tito-s-vodka-3", name: "Tito's Vodka", quantity: 2, estimatedCost: 69.56 };
+    const other = { ...shared, id: "absolut-citron", name: "Absolut Citron", vendorSku: "0028D",
+      vendorProductName: "Absolut Citron Vodka 1.75L", quantity: 14, unitCost: 31.02, estimatedCost: 434.28 };
+    const plan = { orders: { liquor: [cabinet, other], liquorTapBottles: [refill] } };
+    const before = structuredClone(plan);
+    const draft = buildUnifiedVendorOrderModel(plan, {
+      ...options,
+      orderPolicy: { cocktailIngredientMinimumOrders: [{ ...cabinet, orderCategory: "liquor" }] },
+      manualCatalog: [{ ...cabinet, catalogId: "cabinet-titos", internalId: cabinet.id, lineType: "Liquor bottle", orderCategory: "liquor" }],
+      manualAdjustments: [{ catalogId: "cabinet-titos", quantity, reason: "Cover this week's prep", adjustedBy: "Sam" }],
+    }).drafts.find(item => item.vendor === "OHLQ");
+    assert.equal(draft.lines.find(item => item.internalId === refill.id).requestedUnits, 2);
+    assert.equal(draft.lines.find(item => item.internalId === cabinet.id)?.requestedUnits || 0, quantity);
+    assert.equal(draft.lines.find(item => item.internalId === other.id).requestedUnits, 14);
+    assert.equal(draft.lines.filter(item => item.vendorSku === "9232D").reduce((sum, item) => sum + item.requestedUnits, 0), quantity + 2);
+    assert.deepEqual(plan, before);
+  });
+}
+
+test("an exact tap refill identity wins over an earlier tap with the same supplier SKU", () => {
+  const first = { id: "main-titos", name: "Tito's Main", quantity: 2, vendor: "OHLQ", vendorSku: "9232D", unitCost: 34.78, hasKnownPrice: true };
+  const second = { ...first, id: "patio-titos", name: "Tito's Patio", quantity: 4 };
+  const draft = buildVendorOrderDrafts({ orders: { liquorTapBottles: [first, second] } }, {
+    ...options,
+    manualCatalog: [{ ...second, catalogId: "patio", internalId: second.id, lineType: "Liquor tap bottle", orderCategory: "liquorTapBottles" }],
+    manualAdjustments: [{ catalogId: "patio", quantity: 6, reason: "Reviewed Patio refill", adjustedBy: "Sam" }],
+  }).drafts[0];
+  assert.equal(draft.lines.find(item => item.internalId === first.id).requestedUnits, 2);
+  assert.equal(draft.lines.find(item => item.internalId === second.id).requestedUnits, 6);
+});
+
 function inventoryPlan(overrides = {}) {
   return buildWeeklyActionPlan({
     inventoryItems: [{

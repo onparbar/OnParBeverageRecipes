@@ -25,6 +25,7 @@ function fixture({ legacy = true, placed = false, role = "owner" } = {}) {
   if (placed) recommendations = applyWeeklyOrderTrackingUpdate(recommendations,
     { action: "set-ordered", generatedAt, vendorId: vendor.id, ordered: true, orderedBy: "Sam" }, { role: "owner", now });
   if (legacy) delete recommendations.weeklyPlanSnapshot.ingredientPlanningVersion;
+  else recommendations.weeklyPlanSnapshot.ingredientPlanningVersion = 2;
   const state = { initialized: true, revision: 7, recommendations };
   const events = [];
   const writes = [];
@@ -41,7 +42,10 @@ function fixture({ legacy = true, placed = false, role = "owner" } = {}) {
     writeParAgentState: async (value, options) => { writes.push({ value, options }); return { ...value, revision: 8 }; },
     archiveWeeklyOrderPlacement: async () => { events.push("archive"); return {}; },
     recordDashboardActivity: async () => { events.push("activity"); },
-    refreshSavedIngredientPurchases: async value => { events.push("refresh-adjustment"); return value; },
+    refreshSavedIngredientPurchases: async () => {
+      events.push("refresh-adjustment");
+      throw new Error("Unrelated cranberry recipe cannot be matched.");
+    },
     planReceiptInventoryContributions: async () => { events.push("receipt-plan"); return { sources: [], unmatched: [] }; },
     assertInventoryContributionPlan: () => {},
     buildWeeklySnapshotCompletion: () => ({}), buildStaffPrepPlan: () => ({}),
@@ -112,7 +116,7 @@ test("staff order approval retains its owner-only error", async () => {
 
 for (const legacy of [true, false]) {
   for (const action of ["set-order-adjustment", "set-order-adjustments", "remove-order-adjustment"]) {
-    test(`${legacy ? "legacy" : "two-Thursday"} ${action} ${legacy ? "preserves the purchase plan" : "refreshes ingredient reviews"}`, async () => {
+    test(`${legacy ? "legacy" : "two-Thursday"} ${action} preserves the locked purchase plan`, async () => {
       const f = fixture({ legacy });
       const catalog = buildWeeklyOrderTracking(f.state.recommendations, now()).adjustmentCatalog.find(item => item.internalId === "absolut-citron");
       const adjustment = { catalogId: catalog.catalogId, vendor: "OHLQ", quantity: 12, reason: "Partial supplier availability." };
@@ -126,10 +130,10 @@ for (const legacy of [true, false]) {
         ? { action, adjustments: [adjustment] }
         : { action, ...adjustment });
       assert.equal(result.status, 200, result.body.error);
-      assert.equal(f.events.filter(event => event === "refresh-adjustment").length, legacy ? 0 : 1);
+      assert.equal(f.events.includes("refresh-adjustment"), false);
       assert.equal(f.writes.length, 1);
       assert.equal(f.writes[0].options.expectedRevision, 7);
-      if (legacy) assert.deepEqual(f.writes[0].value.recommendations.weeklyPlanSnapshot, before);
+      assert.deepEqual(f.writes[0].value.recommendations.weeklyPlanSnapshot, before);
       const tracked = buildWeeklyOrderTracking(f.writes[0].value.recommendations, now());
       assert.equal(tracked.adjustments.length, action === "remove-order-adjustment" ? 0 : 1);
       assert.equal(tracked.vendors.find(vendor => vendor.vendor === "OHLQ").items[0].quantity,
