@@ -23,6 +23,12 @@ function key(value) {
   if (/^don julio blanco(?: tequila)?$/.test(normalized)) return "don julio blanco";
   if (/^crown royal peach(?: whisk(?:e)?y)?$/.test(normalized)) return "crown royal peach";
   if (/^woodford reserve(?: bourbon)?$/.test(normalized)) return "woodford reserve";
+  if (/^buffalo trace(?: bourbon)?$/.test(normalized)) return "buffalo trace";
+  if (/^titos(?: (?:handmade )?vodka)?$/.test(normalized)) return "titos";
+  if (/^jose cuervo (?:especial )?silver(?: tequila)?$/.test(normalized)) return "jose cuervo silver";
+  if (/^patron silver(?: tequila)?$/.test(normalized)) return "patron silver";
+  if (/^crown (?:royal )?apple(?: whisk(?:e)?y)?$/.test(normalized)) return "crown apple";
+  if (/^jack daniels(?: (?:tennessee )?whisk(?:e)?y)?$/.test(normalized)) return "jack daniels";
   return /^bacardi(?: superior(?: traveler)?(?: rum)?)?$/.test(normalized) ? "bacardi superior" : normalized;
 }
 function nonnegative(value) {
