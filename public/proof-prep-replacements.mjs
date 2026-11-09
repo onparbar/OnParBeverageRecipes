@@ -2,6 +2,7 @@ import { findPlanningCocktailRecipe } from "./planning-cocktail-recipe.mjs";
 import { isKitchenManagedInventoryItem } from "./inventory-count-policy.mjs";
 import { MINIMUM_KEG_CUSHION } from "./keg-demand-policy.mjs";
 import { carryForwardPlannedProofPrep } from "./proof-planned-prep.mjs";
+import { findRecipeIngredientInventory, getRecipeIngredientInventoryUnits } from "./recipe-ingredient-inventory.mjs";
 
 export const PROOF_PREP_LOOK_AHEAD_WEEKS = 52;
 
@@ -49,6 +50,12 @@ function key(value) {
 
 function getProofInventoryItem(ingredient, inventoryItems) {
   if (isKitchenManagedInventoryItem(ingredient)) return null;
+  const linked = findRecipeIngredientInventory(ingredient, inventoryItems);
+  const explicitId = clean(ingredient?.inventoryItemId || ingredient?.inventoryId || ingredient?.itemId);
+  if (linked || explicitId) {
+    const vendor = clean(linked?.vendor || linked?.vendorProduct?.vendor || linked?.vendorProduct?.syncVendor);
+    return vendor.toLowerCase() === "proof" && !isKitchenManagedInventoryItem(linked) ? linked : null;
+  }
   const ingredientKey = key(ingredient?.inventoryId || ingredient?.name);
   if (!ingredientKey) return null;
   return inventoryItems.find((item) => {
@@ -112,6 +119,8 @@ function getProjectedProofUsage({
       projectedOzById.set(id, {
         item,
         projectedOz: (projectedOzById.get(id)?.projectedOz || 0) + (ingredientOz * batches),
+        projectedUnits: (projectedOzById.get(id)?.projectedUnits || 0)
+          + getRecipeIngredientInventoryUnits(ingredient, number(item.bottleOz || item.vendorProduct?.bottleOz)) * batches,
       });
     });
   });
@@ -134,12 +143,12 @@ function buildProofPrepOrderContextFromInputs(options = {}) {
   let unresolvedInventory = false;
   let prepPurchaseRequired = false;
 
-  const candidates = [...projectedOzById.values()].flatMap(({ item, projectedOz }) => {
+  const candidates = [...projectedOzById.values()].flatMap(({ item, projectedOz, projectedUnits }) => {
     const bottleOz = number(item?.bottleOz || item?.vendorProduct?.bottleOz);
     const packSize = Math.max(1, Math.floor(number(item?.packSize) || 1));
     const unitCost = number(item?.unitCost) || (number(item?.caseCost) / packSize);
     const vendorSku = clean(item?.vendorSku || item?.matchedSku || item?.vendorProduct?.preferredSku);
-    const projectedPrepUseUnits = bottleOz > 0 ? Math.ceil(projectedOz / bottleOz) : 0;
+    const projectedPrepUseUnits = bottleOz > 0 ? Math.ceil(projectedUnits - 1e-9) : 0;
     const rawOnHand = item?.onHandDisplay ?? item?.onHand;
     if (!(projectedPrepUseUnits > 0) || item.hasCurrentCount === false
       || clean(rawOnHand) === "" || !Number.isFinite(Number(rawOnHand)) || Number(rawOnHand) < 0) {
@@ -192,13 +201,18 @@ function buildProofLookAheadContext(options) {
   const inventoryItems = options.inventoryItems;
   let unresolved = false;
   const seen = new Set();
+  const emptyUsage = item => ({ item,
+    ounces: Array(PROOF_PREP_LOOK_AHEAD_WEEKS).fill(0),
+    units: Array(PROOF_PREP_LOOK_AHEAD_WEEKS).fill(0),
+  });
   const addRecipe = (recipe, batches, week) => {
     for (const ingredient of recipe.ingredients || []) {
       const item = getProofInventoryItem(ingredient, inventoryItems);
       if (!item || !(number(ingredient.oz) > 0)) continue;
       const id = clean(item.id);
-      const entry = usage.get(id) || { item, ounces: Array(PROOF_PREP_LOOK_AHEAD_WEEKS).fill(0) };
+      const entry = usage.get(id) || emptyUsage(item);
       entry.ounces[week] += number(ingredient.oz) * batches;
+      entry.units[week] += getRecipeIngredientInventoryUnits(ingredient, number(item.bottleOz || item.vendorProduct?.bottleOz)) * batches;
       usage.set(id, entry);
     }
   };
@@ -237,13 +251,14 @@ function buildProofLookAheadContext(options) {
   const locked = getProjectedProofUsage(options);
   unresolved ||= locked.unresolvedRecipe || !seen.size;
   for (const [id, entry] of locked.projectedOzById) {
-    const projected = usage.get(id) || { item: entry.item, ounces: Array(PROOF_PREP_LOOK_AHEAD_WEEKS).fill(0) };
+    const projected = usage.get(id) || emptyUsage(entry.item);
     projected.ounces[0] += entry.projectedOz;
+    projected.units[0] += entry.projectedUnits;
     usage.set(id, projected);
   }
   let required = false;
   const candidates = [];
-  for (const { item, ounces } of usage.values()) {
+  for (const { item, ounces, units } of usage.values()) {
     const bottleOz = number(item.bottleOz || item.vendorProduct?.bottleOz);
     const rawOnHand = item.onHandDisplay ?? item.onHand;
     if (!(bottleOz > 0) || item.hasCurrentCount === false || clean(rawOnHand) === ""
@@ -252,12 +267,13 @@ function buildProofLookAheadContext(options) {
       continue;
     }
     const onHandUnits = Number(rawOnHand);
-    let cumulativeOz = 0;
-    const forecastDemands = ounces.map((oz, week) => {
-      cumulativeOz += oz;
-      return { week, units: Math.max(0, Math.ceil(cumulativeOz / bottleOz - 1e-9)) };
+    let cumulativeUnits = 0;
+    const cumulativeOz = ounces.reduce((total, oz) => total + oz, 0);
+    const forecastDemands = units.map((needed, week) => {
+      cumulativeUnits += needed;
+      return { week, units: Math.max(0, Math.ceil(cumulativeUnits - 1e-9)) };
     });
-    if ((ounces[0] + ounces[1]) / bottleOz > onHandUnits) required = true;
+    if (units[0] + units[1] > onHandUnits + 1e-9) required = true;
     const replacementNeedUnits = Math.max(0, forecastDemands[PROOF_PREP_LOOK_AHEAD_WEEKS - 1].units - onHandUnits);
     const packSize = Math.max(1, Math.floor(number(item.packSize) || 1));
     const unitCost = number(item.unitCost) || number(item.caseCost) / packSize;
@@ -269,9 +285,9 @@ function buildProofLookAheadContext(options) {
       vendorProductName: clean(item.vendorProduct?.productName || item.name),
       casePackaged: true, shelfStable: true, packSize, unitCost,
       onHandUnits, parUnits: 0, replacementNeedUnits,
-      projectedPrepUseUnits: Math.ceil(cumulativeOz / bottleOz),
+      projectedPrepUseUnits: forecastDemands.at(-1).units,
       projectedPrepUseOz: cumulativeOz, forecastDemands,
-      forecastSource: `Per-tap Thursday prep forecast; ${PROOF_PREP_LOOK_AHEAD_WEEKS} weeks maximum; missing tap profiles use a 10% cushion and 3/7 pre-Thursday usage.`,
+      forecastSource: `Per-tap Thursday prep forecast; ${PROOF_PREP_LOOK_AHEAD_WEEKS} weeks maximum; recipe bottle counts preserved; 0.25-keg cushion and 3/7 pre-Thursday usage by default.`,
     });
   }
   // Known demand remains a valid lower bound when another tap is unresolved.

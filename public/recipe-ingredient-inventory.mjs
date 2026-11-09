@@ -89,6 +89,17 @@ export function getRecipeIngredientBottlePackage(ingredient) {
   return { count, bottleOz: /^liters?$/i.test(packageText.trim()) ? 33.814 : 0 };
 }
 
+// Recipe ounce totals and catalog bottle sizes are rounded independently.
+// Preserve a declared bottle count when both describe the same package.
+export function getRecipeIngredientInventoryUnits(ingredient, unitOz) {
+  if (!(unitOz > 0)) return 0;
+  const ounces = Math.max(0, Number(ingredient.oz) || 0);
+  const pack = getRecipeIngredientBottlePackage(ingredient);
+  if (pack?.bottleOz > 0) return Math.abs(pack.bottleOz - unitOz) <= 0.05 ? pack.count : pack.count * pack.bottleOz / unitOz;
+  if (pack?.count > 0 && Math.abs(ounces / pack.count - unitOz) <= 0.05) return pack.count;
+  return ounces / unitOz;
+}
+
 export function recipeIngredientQuantityIssue(ingredient) {
   const pack = getRecipeIngredientBottlePackage(ingredient);
   if (!(pack?.bottleOz > 0) || !(Number(ingredient.oz) > 0)) return "";

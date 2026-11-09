@@ -1,4 +1,4 @@
-import { findRecipeIngredientInventory, recipeIngredientQuantityIssue, getRecipeIngredientBottlePackage } from "./recipe-ingredient-inventory.mjs";
+import { findRecipeIngredientInventory, recipeIngredientQuantityIssue, getRecipeIngredientBottlePackage, getRecipeIngredientInventoryUnits } from "./recipe-ingredient-inventory.mjs";
 import { findPlanningCocktailRecipe } from "./planning-cocktail-recipe.mjs";
 import { MINIMUM_KEG_CUSHION } from "./keg-demand-policy.mjs";
 import { normalizeLiquorTapProductName } from "./weekly-action-plan.mjs";
@@ -40,14 +40,6 @@ function managed(item) {
   if (isKitchenManagedInventoryItem(item) || item.countSource === "soda-machine") return false;
   return /^(Liquor|Mixer) Cabinet$/i.test(item.group || "") || ["simple-syrup", "vanilla"].includes(item.id)
     || getUncountedInventoryAmount(item) !== null;
-}
-
-function ingredientUnits(ingredient, unitOz) {
-  const ounces = nonnegative(ingredient.oz) || 0;
-  const pack = getRecipeIngredientBottlePackage(ingredient);
-  if (pack?.bottleOz > 0) return Math.abs(pack.bottleOz - unitOz) <= 0.05 ? pack.count : pack.count * pack.bottleOz / unitOz;
-  if (pack?.count > 0 && Math.abs(ounces / pack.count - unitOz) <= 0.05) return pack.count;
-  return ounces / unitOz;
 }
 
 function recipeIdentity(recipe) {
@@ -114,7 +106,7 @@ export function buildRollingCocktailIngredientOrders({
       const quantityIssue = recipeIngredientQuantityIssue(ingredient);
       if (quantityIssue) { itemIssues.set(item.id, quantityIssue); continue; }
       const entry = demand.get(item.id) || { units: [0, 0], taps: new Set() };
-      const units = ingredientUnits(ingredient, unitOz) * scale;
+      const units = getRecipeIngredientInventoryUnits(ingredient, unitOz) * scale;
       const wholeBottles = (getRecipeIngredientBottlePackage(ingredient)?.count || 0) > 0;
       batches.forEach((count, week) => {
         // Syrup is made in house for the scheduled prep, not purchased ahead.
