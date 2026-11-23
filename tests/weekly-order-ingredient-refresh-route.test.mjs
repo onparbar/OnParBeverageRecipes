@@ -34,6 +34,7 @@ function fixture({ legacy = true, placed = false, role = "owner" } = {}) {
     NextResponse: { json: (body, options) => ({ body, ...options }) },
     requireDashboardRequestIdentity: async () => ({ role, name: "Sam" }),
     readParAgentState: async () => state,
+    withSavedBeerCatalog: async value => value,
     buildWeeklyOrderTracking: value => buildWeeklyOrderTracking(value, now()),
     applyWeeklyOrderTrackingUpdate: (value, body, options) => {
       events.push("apply");

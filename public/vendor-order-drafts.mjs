@@ -334,7 +334,12 @@ function applyManualOrderAdjustments(plan = {}, catalog = [], adjustments = []) 
       manualAdjustmentReason: reason,
       manualAdjustmentActor: clean(adjustment.adjustedBy),
     };
-    if (adjusted.lineType === "Beer keg"
+    if (!existing && adjusted.kegDestinations?.length) {
+      // New lines default to the first counted tap (Main first). Receiving can split the delivery.
+      adjusted.kegDestinations = adjusted.kegDestinations.map((destination, index) => ({
+        ...destination, quantity: index === 0 ? requestedUnits : 0,
+      }));
+    } else if (adjusted.lineType === "Beer keg"
       && Array.isArray(adjusted.kegDestinations) && adjusted.kegDestinations.length === 1) {
       // A single cooler receives the changed quantity. Multiple coolers still
       // need their existing allocation reviewed instead of guessing a split.

@@ -256,7 +256,6 @@ import {
 import {
   renderWeeklyIngredientPrep,
   renderWeeklyIngredientOrderReview,
-  getWeeklyPlanTapContext as getWeeklyPlanTapContextView,
   renderWeeklyPlanCocktailRows as renderWeeklyPlanCocktailRowsView,
   renderWeeklyPlanGroup as renderWeeklyPlanGroupView,
   renderWeeklyPlanInventoryRows as renderWeeklyPlanInventoryRowsView,
@@ -6125,10 +6124,6 @@ async function saveVendorHandoffEvent(view, event) {
   renderWeeklyPlan();
 }
 
-function getWeeklyPlanTapContext(item, unit, { compact = false } = {}) {
-  return getWeeklyPlanTapContextView(item, unit, { compact });
-}
-
 function renderWeeklyPlanInventoryRows(items) {
   return renderWeeklyPlanInventoryRowsView(items);
 }
@@ -8444,38 +8439,7 @@ function renderWeeklyPlanByVendor(plan, deferredOrders = []) {
   const deferredForWeek = manuallyDeferred.join("");
   return active || deferredForWeek || deferred
     ? `${active}${deferredForWeek}${deferred}`
-    : '<p class="weekly-plan-empty">No active purchasing lines. Review held and excluded items below before concluding no order is needed.</p>';
-}
-
-function renderWeeklyPlanReview(plan) {
-  if (!plan.review.heldRecommendations.length && !plan.review.excludedInventory.length) return "";
-  return `
-    <section class="weekly-plan-review" aria-labelledby="weekly-plan-review-title">
-      <div class="weekly-plan-column__header">
-        <h2 id="weekly-plan-review-title">Review Before Ordering</h2>
-      </div>
-      ${plan.review.heldRecommendations.length ? renderWeeklyPlanGroup(
-        "Held recommendations",
-        plan.review.heldRecommendations.length,
-        `<div class="weekly-plan-list">${plan.review.heldRecommendations.map((item) => `
-          <div class="weekly-plan-item weekly-plan-item--held">
-            <div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(getWeeklyPlanTapContext(item, item.category === "held-liquor-bottles" ? "oz" : "kegs"))} · ${escapeHtml(item.reasons.join(" ") || "Held for review")}</span></div>
-            <b>Held ${formatNumber(item.quantity)}</b>
-          </div>
-        `).join("")}</div>`,
-      ) : ""}
-      ${plan.review.excludedInventory.length ? renderWeeklyPlanGroup(
-        "Inventory ordering rules",
-        plan.review.excludedInventory.length,
-        `<div class="weekly-plan-list">${plan.review.excludedInventory.map((item) => `
-          <div class="weekly-plan-item weekly-plan-item--held">
-            <div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.group)} · ${formatNumber(item.onHand)} on hand / ${formatNumber(item.par)} par · ${escapeHtml(item.reason)}</span></div>
-            <b>${item.quantity > 0 ? `${formatNumber(item.quantity)} needed — held` : "Review"}</b>
-          </div>
-        `).join("")}</div>`,
-      ) : ""}
-    </section>
-  `;
+    : '<p class="weekly-plan-empty">No active purchasing lines.</p>';
 }
 
 function getCurrentVendorOrderPolicy(plan, snapshot = null) {
@@ -8681,7 +8645,7 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null, 
               ${placed ? `<details><summary>${workflow.label === "Received" ? "View received order" : "View order and receive delivery"}</summary>` : ""}
               <div class="vendor-order-draft-lines vendor-order-draft-lines--inline">
                 ${placed ? renderFinishWeekDeliveries({ available: true, vendors: [vendor] }, { showVendor: false, saving: dashboardFinishWeekSaving }) : draft.lines.map((line) => {
-                  const coolerNames = [...new Set((line.kegDestinations || []).map((destination) => {
+                  const coolerNames = [...new Set((line.kegDestinations || []).filter(destination => destination.quantity !== 0).map((destination) => {
                     const name = typeof destination === "string" ? destination : destination.cooler || destination.coolerName || destination.wall;
                     return name === "Main" ? "Main cooler" : name === "Karaoke" ? "Karaoke cooler" : clean(name);
                   }).filter(Boolean))];
@@ -8980,7 +8944,6 @@ function renderWeeklyPlan() {
     ${renderWeeklyPlanReadiness(freshness.readiness)}
     ${currentWeekPlanAvailable ? `
     ${priceNote ? `<p class="weekly-plan-cost-note">${escapeHtml(priceNote)}</p>` : ""}
-    ${renderWeeklyPlanReview(plan)}
     ${planLocked
       ? renderSupplierOrderFlow({
         ordersHtml: `<section id="weekly-plan-orders">${renderVendorOrderDraftWorkspace(plan, freshness, vendorOrderModel, { guided: true })}${renderWeeklyPlanFinishWeek(planLocked, Boolean(orderStep?.complete), "deliveries")}</section>`,

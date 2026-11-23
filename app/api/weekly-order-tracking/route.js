@@ -5,6 +5,7 @@ import {
   applyWeeklyOrderTrackingUpdate,
   buildWeeklyOrderTracking,
 } from "../../../lib/weekly-order-tracking.mjs";
+import { withSavedBeerCatalog } from "../../../lib/weekly-beer-adjustment-catalog.mjs";
 import { buildStaffPrepPlan } from "../../../lib/staff-prep-plan.mjs";
 import { buildWeeklySnapshotCompletion } from "../../../public/weekly-snapshot-completion.mjs";
 import { recordDashboardActivity } from "../../../lib/dashboard-activity-log.mjs";
@@ -63,7 +64,7 @@ function errorResponse(error) {
 
 export async function GET(request) {
   try {
-    await requireDashboardRequestRole(request);
+    const role = await requireDashboardRequestRole(request);
     const revisionParam = new URL(request.url).searchParams.get("revision");
     const knownRevision = revisionParam === null ? Number.NaN : Number(revisionParam);
     if (Number.isSafeInteger(knownRevision) && knownRevision >= 0) {
@@ -73,7 +74,8 @@ export async function GET(request) {
       }
     }
     const state = await readParAgentState();
-    const tracking = buildWeeklyOrderTracking(state?.recommendations);
+    const recommendations = role === "owner" ? await withSavedBeerCatalog(state.recommendations) : state.recommendations;
+    const tracking = buildWeeklyOrderTracking(recommendations);
     if (!state.initialized || !tracking) return jsonResponse(unavailablePlan(state));
     return jsonResponse({ available: true, message: "", stateRevision: state.revision, ...tracking });
   } catch (error) {
@@ -86,7 +88,8 @@ export async function POST(request) {
     const identity = await requireDashboardRequestIdentity(request);
     const role = identity.role;
     const state = await readParAgentState();
-    if (!state.initialized || !buildWeeklyOrderTracking(state?.recommendations)) {
+    const priorTracking = buildWeeklyOrderTracking(state?.recommendations);
+    if (!state.initialized || !priorTracking) {
       return jsonResponse(unavailablePlan(state), 409);
     }
     const submittedBody = await getBody(request);
@@ -98,10 +101,13 @@ export async function POST(request) {
       handledBy: identity.name,
       orderedBy: identity.name,
     };
-    const priorTracking = buildWeeklyOrderTracking(state.recommendations);
+    const updates = body.action === "set-order-adjustments" && Array.isArray(body.adjustments) ? body.adjustments : [body];
+    const needsBeerCatalog = role === "owner" && ["set-order-adjustment", "set-order-adjustments"].includes(body.action)
+      && updates.some(update => !priorTracking.adjustmentCatalog.some(item => item.catalogId === update?.catalogId));
+    const recommendations = needsBeerCatalog ? await withSavedBeerCatalog(state.recommendations) : state.recommendations;
     let effectiveBody = body;
     let updatedRecommendations = applyWeeklyOrderTrackingUpdate(
-      state.recommendations,
+      recommendations,
       effectiveBody,
       { role },
     );
@@ -229,7 +235,7 @@ export async function POST(request) {
       available: true,
       message: "Weekly order tracking saved.",
       stateRevision: saved.revision,
-      ...buildWeeklyOrderTracking(saved.recommendations),
+      ...buildWeeklyOrderTracking(role === "owner" ? await withSavedBeerCatalog(saved.recommendations) : saved.recommendations),
       inventoryUpdate,
       snapshotOrder,
     });
