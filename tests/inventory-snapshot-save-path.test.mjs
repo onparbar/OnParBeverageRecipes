@@ -65,3 +65,23 @@ test("guided final save captures previously verified counts and waits for a publ
   assert.equal(scope.weeklyPlanOutsideMondayReason, "verified Tuesday");
   assert.equal(attempts, 2);
 });
+
+test("snapshot pricing verification joins an ongoing live read and can retry after failure", async () => {
+  let calls = 0;
+  let finish;
+  const scope = vm.createContext({ tapPricingReadPromise: null, runTapPricingSyncAttempt: () => {
+    calls++;
+    return new Promise(resolve => { finish = resolve; });
+  } });
+  vm.runInContext(functionSource("runTapPricingSync"), scope);
+  const initial = scope.runTapPricingSync();
+  const joined = scope.runTapPricingSync();
+  assert.equal(calls, 1);
+  finish(false);
+  assert.deepEqual(await Promise.all([initial, joined]), [false, false]);
+  const retry = scope.runTapPricingSync();
+  assert.equal(calls, 2);
+  finish(true);
+  assert.equal(await retry, true);
+  assert.match(functionSource("saveInventorySnapshotAttempt"), /if \(!liveTapPricingUpdatedAt\) await runTapPricingSync\(\);\s*if \(!liveTapPricingUpdatedAt\)/);
+});

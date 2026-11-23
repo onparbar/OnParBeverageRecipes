@@ -1,3 +1,4 @@
+import { createPmbReportReader } from "../lib/pmb-report-reader.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -24,7 +25,7 @@ async function readLevels({ products = catalog, config = slots, failedTaps = [],
     .replace("export async function GET", "async function GET");
   const effects = { requests: [], snapshots: [], finished: [] };
   const dependencies = {
-    ...safety,
+    ...safety, createPmbReportReader,
     NextResponse: { json: (body, options) => Response.json(body, options) },
     process: { env: { PMB_API_BASE_URL: "http://pmb.invalid", PMB_API_USERNAME: "test", PMB_API_PASSWORD: "test" } },
     fetch: async (url, options) => {

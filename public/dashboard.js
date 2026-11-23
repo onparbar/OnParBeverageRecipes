@@ -318,7 +318,7 @@ const OPERATIONAL_SHARED_REQUEST_TIMEOUT_MS = 8000;
 // Inventory and usage requests transfer full histories. A write can also spend
 // time in several storage calls before the browser receives its acknowledgement.
 const SHARED_HISTORY_REQUEST_TIMEOUT_MS = 60_000;
-const PAR_AGENT_RUN_REQUEST_TIMEOUT_MS = 30000;
+const PAR_AGENT_RUN_REQUEST_TIMEOUT_MS = 90_000;
 const WEEKLY_USAGE_CURRENT_STORAGE_KEY = "cocktail-dashboard-weekly-usage-current";
 const WEEKLY_USAGE_HISTORY_STORAGE_KEY = "cocktail-dashboard-weekly-usage-history";
 const WEEKLY_USAGE_ARCHIVE_STORAGE_KEY = "cocktail-dashboard-weekly-usage-archive";
@@ -10664,7 +10664,7 @@ async function runPmbWeeklyUsageSyncAttempt({ automatic = false } = {}) {
           headers: {
             Accept: "application/json",
           },
-        }, 45_000);
+        }, 90_000);
       };
 
       let { response, result } = await requestWeeklyUsage();
@@ -13669,7 +13669,16 @@ function scheduleTapPricingReadRetry() {
   }, 30_000);
 }
 
+let tapPricingReadPromise = null;
+
 async function runTapPricingSync() {
+  if (!tapPricingReadPromise) {
+    tapPricingReadPromise = runTapPricingSyncAttempt().finally(() => { tapPricingReadPromise = null; });
+  }
+  return tapPricingReadPromise;
+}
+
+async function runTapPricingSyncAttempt() {
   if (tapPricingSyncLoading || dashboardSession.isBlocked()) return false;
   window.clearTimeout(tapPricingReadRetryTimer);
   tapPricingReadRetryTimer = null;
@@ -16966,6 +16975,7 @@ async function saveInventorySnapshotAttempt({ replaceExisting = false, snapshotB
       : kegSyncMessage, "PMB_LEVELS_NOT_READY");
     return false;
   }
+  if (!liveTapPricingUpdatedAt) await runTapPricingSync();
   if (!liveTapPricingUpdatedAt) {
     await failCapture("current PMB pricing has not been verified.", "PRICING_NOT_READY");
     return false;

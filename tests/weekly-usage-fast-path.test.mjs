@@ -12,7 +12,7 @@ test('weekly usage display reads return saved storage without waiting on live PM
 });
 
 test('one weekly transaction response supplies both full-week and pre-Thursday totals', () => {
-  const transactionCalls = pmbRoute.match(/postJson\(config\.baseUrl, "\/api\/transactions"/g) || [];
+  const transactionCalls = pmbRoute.match(/readReport\("\/api\/transactions"/g) || [];
   assert.equal(transactionCalls.length, 1, 'do not issue a duplicate PMB transaction request for the subset');
   assert.match(pmbRoute, /preThursdayTransactionResults = transactionResults\.map/);
   assert.match(pmbRoute, /getPreThursdayTransactionRangePayload\(ranges\[index\]\)/);

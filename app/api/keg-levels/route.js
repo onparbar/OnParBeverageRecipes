@@ -1,3 +1,4 @@
+import { createPmbReportReader } from "../../../lib/pmb-report-reader.mjs";
 import { NextResponse } from "next/server";
 import {
   readPmbLevelSnapshot,
@@ -134,13 +135,13 @@ export async function GET(request) {
   await check.start();
   try {
     const config = getConfig();
-    const token = await getAuthtoken(config);
+    const readReport = await createPmbReportReader(config, getAuthtoken, postJson);
     check.stage("configuration");
     const observedAt = new Date().toISOString();
     const cookieJar = new Map();
 
     const [products, tapConfigRows] = await Promise.all([
-      postJson(config.baseUrl, "/api/productlist", { id: String(config.clientId) }, token),
+      readReport("/api/productlist", { id: String(config.clientId) }),
       getTapConfigRows(config, { cookieJar }).catch((error) => {
         throw new PmbKegSafetyError(
           `Live PMB tap configuration could not be verified: ${error.message || "tap configuration unavailable"}`,
@@ -180,8 +181,8 @@ export async function GET(request) {
         for (let attempt = 0; attempt < 2; attempt += 1) {
           const attemptStartedAt = new Date().toISOString();
           try {
-            const response = await postJson(config.baseUrl, "/api/getkeglevels",
-              { device_id: slot.deviceId, line_num: slot.lineNum }, token);
+            const response = await readReport("/api/getkeglevels",
+              { device_id: slot.deviceId, line_num: slot.lineNum });
             levelJson = requireSuccessfulKegLevelResponse(response, slot, { requireKegSize: false });
             check.attempt(slot, attempt + 1, attemptStartedAt);
             break;

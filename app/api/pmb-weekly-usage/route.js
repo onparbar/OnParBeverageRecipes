@@ -1,3 +1,4 @@
+import { createPmbReportReader } from "../../../lib/pmb-report-reader.mjs";
 import { NextResponse } from "next/server";
 import { readWeeklyAssignmentHistory, verifyWeeklyReportZeros } from "../../../lib/pmb-weekly-zero-verification.mjs";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
@@ -416,10 +417,10 @@ export async function GET(request) {
     const role = await requireDashboardRequestRole(request, { owner: true });
     const ranges = getRequestedDateRanges(request);
     const config = getConfig();
-    const token = await getAuthtoken(config);
+    const readReport = await createPmbReportReader(config, getAuthtoken, postJson);
 
     const [products, tapLookup, sharedDashboard, approvedChangeovers] = await Promise.all([
-      postJson(config.baseUrl, "/api/productlist", { id: String(config.clientId) }, token),
+      readReport("/api/productlist", { id: String(config.clientId) }),
       getTapLookup(),
       readSharedDashboardState(),
       getApprovedWeeklyUsageChangeovers(),
@@ -478,7 +479,7 @@ export async function GET(request) {
     }
 
     const transactionResults = await Promise.all(ranges.map((range) => (
-      postJson(config.baseUrl, "/api/transactions", { id: config.clientId, ...getTransactionRangePayload(range) }, token)
+      readReport("/api/transactions", { id: config.clientId, ...getTransactionRangePayload(range) })
     )));
 
     const minimumPositiveRows = getSparseWeekPositiveRowThreshold(currentTaps.length);
