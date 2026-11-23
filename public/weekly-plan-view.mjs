@@ -167,5 +167,6 @@ export function renderWeeklyIngredientOrderReview(items = []) {
           : "Resolve the ingredient details before ordering.";
       return `<span><b>${escapeHtml([item.name, amount].filter(Boolean).join(" · "))}</b> ${escapeHtml(instruction)}${item.reason ? ` ${escapeHtml(item.reason)}` : ""}</span>`;
     }).join("")}
+    ${items.some(item => item.kind === "ingredient-data") ? '<button type="button" class="ghost-button dashboard-owner-only" data-recalculate-held-ingredients>Recalculate ingredient orders</button>' : ""}
   </div>`;
 }

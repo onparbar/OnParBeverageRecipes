@@ -15,6 +15,7 @@ function adjustmentContext(recommendations, snapshot, inventoryItems) {
   const sources = [
     ...groupWeeklyPlanOrdersByVendor(snapshot.plan).flatMap(group => group.items),
     ...(snapshot.orderCatalog || []),
+    ...(snapshot.savedBeerCatalog || []),
     ...inventoryItems,
     ...(recommendations.items || []),
   ];
@@ -22,7 +23,7 @@ function adjustmentContext(recommendations, snapshot, inventoryItems) {
     const source = sources.find(item => vendorKey(item.vendor) === vendorKey(adjustment.vendor)
       && clean(item.internalId || item.id) === clean(adjustment.internalId));
     if (!source) return [];
-    const orderCategory = source.orderCategory || source.category
+    const orderCategory = source.orderCategory || (source.lineType === "Beer keg" ? "beerKegs" : source.category)
       || (source.group === "Liquor Cabinet" ? "liquor" : source.group === "Mixer Cabinet" ? "mixers" : "supplies");
     return [{ ...source, catalogId: adjustment.catalogId, internalId: adjustment.internalId,
       orderCategory, lineType: source.lineType || (orderCategory === "liquor" ? "Liquor bottle" : orderCategory === "mixers" ? "Mixer" : "Supply") }];
@@ -111,6 +112,23 @@ export function refreshWeeklyIngredientOrders({
     });
   const managed = rolling.filter(item => item.rollingIngredientVersion === 1
     && /^(Liquor|Mixer) Cabinet$/i.test(item.group || ""));
+  const heldReviews = [];
+  const seenHolds = new Set();
+  for (const item of managed) {
+    const reason = clean(item.orderHoldReason);
+    if (!reason || seenHolds.has(reason)) continue;
+    seenHolds.add(reason);
+    heldReviews.push({ id: clean(item.id), name: "Ingredient ordering needs review", vendor: "",
+      quantity: 0, unit: "", requestedUnits: 0, kind: "ingredient-data", reason });
+  }
+  if (managed.length && managed.every(item => clean(item.orderHoldReason))) {
+    // A missing recipe match can hold the entire forecast. Keep the locked
+    // purchases until we can calculate a replacement from complete evidence.
+    const priorReviews = (snapshot.ingredientOrderReview || []).filter(item => item.kind !== "ingredient-data");
+    return { ...recommendations, weeklyPlanSnapshot: {
+      ...snapshot, ingredientOrderReview: [...priorReviews, ...heldReviews],
+    } };
+  }
   const managedIds = new Set(managed.map(item => clean(item.id)));
   const rebuilt = buildWeeklyActionPlan({ inventoryItems: managed });
   const desiredOrders = { ...snapshot.plan.orders };
@@ -165,7 +183,7 @@ export function refreshWeeklyIngredientOrders({
       desired.set(key, (desired.get(key) || 0) + number(item.quantity));
     }
   }
-  const ingredientOrderReview = [];
+  const ingredientOrderReview = [...heldReviews];
   const reviewed = new Set();
   for (const item of [...rebuilt.orders.liquor, ...rebuilt.orders.mixers]) {
     const key = productKey(item.vendor, item);
@@ -184,14 +202,6 @@ export function refreshWeeklyIngredientOrders({
           : "Additional ingredients are needed for this Thursday and next Thursday. The supplier order already placed does not include this quantity."
         : "The saved manager adjustment leaves this Thursday and next Thursday's ingredients short. Review the adjustment before ordering.",
     });
-  }
-  const seenHolds = new Set();
-  for (const item of managed) {
-    const reason = clean(item.orderHoldReason);
-    if (!reason || seenHolds.has(reason)) continue;
-    seenHolds.add(reason);
-    ingredientOrderReview.push({ id: clean(item.id), name: "Ingredient ordering needs review", vendor: "",
-      quantity: 0, unit: "", requestedUnits: 0, kind: "ingredient-data", reason });
   }
   const refreshedCatalog = createWeeklyPlanSnapshot({ generatedAt: snapshot.generatedAt, inventoryItems: rolling })?.orderCatalog || [];
   const orderCatalog = [

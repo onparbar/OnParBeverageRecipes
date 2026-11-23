@@ -5812,7 +5812,7 @@ async function loadWeeklyOrderTracking() {
     const path = knownRevision > 0 ? `/api/weekly-order-tracking?revision=${knownRevision}` : "/api/weekly-order-tracking";
     const { response, result } = await requestOperationalSharedJson(path, {
       headers: { Accept: "application/json" },
-    });
+    }, SHARED_HISTORY_REQUEST_TIMEOUT_MS);
     if (!response.ok) throw new Error(result?.error || "Weekly order tracking could not be loaded.");
     if (result?.unchanged === true) return true;
     weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
@@ -8694,6 +8694,23 @@ function bindOwnerWeeklyOrderTrackingEvents() {
       const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
       return getCurrentVendorOrderPolicy(plan, snapshot);
     },
+  });
+  weeklyPlan?.querySelectorAll("[data-recalculate-held-ingredients]").forEach(button => {
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.textContent = "Recalculating…";
+      try {
+        const { response, result } = await requestOperationalSharedJson("/api/weekly-prep-additions", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "recalculate-held-ingredients", generatedAt: parAgentState.recommendations.generatedAt }),
+        }, SHARED_HISTORY_REQUEST_TIMEOUT_MS);
+        if (!response.ok) throw new Error(result?.error || "Ingredient orders could not be recalculated.");
+        window.location.reload();
+      } catch (error) {
+        weeklyOrderTrackingMessage = error.message;
+        renderWeeklyPlan();
+      }
+    });
   });
   weeklyPlan?.querySelectorAll("[data-weekly-plan-defer-vendor]").forEach((button) => {
     button.addEventListener("click", async () => {

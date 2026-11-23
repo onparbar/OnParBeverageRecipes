@@ -17,7 +17,7 @@ export function isKitchenManagedInventoryItem(item) {
 }
 
 export function isSodaMachineInventoryItem(item) {
-  return inventoryPolicyKeys(item).some(key => ["lemonade", "strawberry-lemonade", "cranberry-juice", "sweet-tea", "blue-dot-juice"].includes(key));
+  return inventoryPolicyKeys(item).some(key => ["lemonade", "strawberry-lemonade", "cranberry", "cranberry-juice", "sweet-tea", "blue-dot-juice"].includes(key));
 }
 
 export function isInventoryCountExcluded(item) {

@@ -246,3 +246,17 @@ test("new prep against a placed supplier reports the refill reservation as an ad
   assert.equal(next.weeklyPlanSnapshot.ingredientOrderReview[0].quantity, 2);
   assert.equal(next.weeklyPlanSnapshot.ingredientOrderReview[0].kind, "additional-order");
 });
+
+test("fountain cranberry in a prep recipe leaves cabinet bottle demand calculable", () => {
+  const ingredients = [...recipe.ingredients, { name: "Cranberry", oz: 128 }];
+  const next = refresh(fixture(), { recipes: [{ ...recipe, ingredients }] });
+  assert.deepEqual(next.weeklyPlanSnapshot.ingredientOrderReview, []);
+  assert.equal(next.weeklyPlanSnapshot.plan.orders.liquor[0].quantity, 14);
+});
+
+test("a held forecast keeps existing supplier quantities until missing data is resolved", () => {
+  const state = fixture({ quantity: 6 });
+  const next = refresh(state, { tapInputs: [{ ...tap, currentStockKegs: null }] });
+  assert.deepEqual(next.weeklyPlanSnapshot.plan.orders, state.weeklyPlanSnapshot.plan.orders);
+  assert.equal(next.weeklyPlanSnapshot.ingredientOrderReview[0].kind, "ingredient-data");
+});
