@@ -47,7 +47,8 @@ function createSupabaseFetch(initialRow, { missingTable = false } = {}) {
     const initialized = String(url.searchParams.get("initialized") || "").replace(/^eq\./, "") === "true";
     if (!row || row.revision !== revision || row.initialized !== initialized) return jsonResponse([]);
     row = { ...row, ...JSON.parse(init.body) };
-    return jsonResponse([structuredClone(row)]);
+    const selected = url.searchParams.get("select").split(",");
+    return jsonResponse([Object.fromEntries(selected.map(key => [key, row[key]]))]);
   };
   fetchImpl.calls = calls;
   fetchImpl.getRow = () => structuredClone(row);
@@ -120,6 +121,23 @@ test("requires explicit revision-zero Weekly Usage initialization", async () => 
   const patch = fetchImpl.calls.find((call) => call.method === "PATCH");
   assert.equal(patch.url.searchParams.get("revision"), "eq.0");
   assert.equal(patch.url.searchParams.get("initialized"), "eq.false");
+});
+
+test("a successful report replacement returns full state with one metadata-only acknowledgement", async () => {
+  const initializedAt = "2026-07-31T16:00:00.000Z";
+  const fetchImpl = createSupabaseFetch(makeRow({ revision: 11, initialized: true, initialized_at: initializedAt }));
+  const store = createSharedWeeklyUsageStore({ env: makeEnvironment(), fetchImpl });
+  const data = { ...createEmptyWeeklyUsageData(), activeItems: [{ id: "tap-1", history: [{ value: 42 }] }] };
+  const state = await store.replace({ expectedRevision: 11, data });
+  assert.deepEqual(fetchImpl.calls.map(call => call.method), ["PATCH"]);
+  const { url } = fetchImpl.calls[0];
+  assert.equal(url.searchParams.get("revision"), "eq.11");
+  assert.equal(url.searchParams.get("initialized"), "eq.true");
+  assert.ok(!url.searchParams.get("select").split(",").includes("data"));
+  assert.equal(state.revision, 12);
+  assert.equal(state.initializedAt, initializedAt);
+  assert.equal(state.updatedByRole, "owner");
+  assert.deepEqual(state.data, data);
 });
 
 test("rejects updates before initialization and stale whole-report saves", async () => {

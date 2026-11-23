@@ -315,7 +315,9 @@ const OWNER_LOGIN_SYNC_LOCK_MAX_AGE_MS = 2 * 60 * 1000;
 const ORDER_REHEARSAL_AVAILABLE = false;
 const DASHBOARD_STATE_REQUEST_TIMEOUT_MS = 6000;
 const OPERATIONAL_SHARED_REQUEST_TIMEOUT_MS = 8000;
-const INVENTORY_SNAPSHOT_REQUEST_TIMEOUT_MS = 20000;
+// Inventory and usage requests transfer full histories. A write can also spend
+// time in several storage calls before the browser receives its acknowledgement.
+const SHARED_HISTORY_REQUEST_TIMEOUT_MS = 60_000;
 const PAR_AGENT_RUN_REQUEST_TIMEOUT_MS = 30000;
 const WEEKLY_USAGE_CURRENT_STORAGE_KEY = "cocktail-dashboard-weekly-usage-current";
 const WEEKLY_USAGE_HISTORY_STORAGE_KEY = "cocktail-dashboard-weekly-usage-history";
@@ -5722,12 +5724,12 @@ async function publishCurrentWeeklyPlanSnapshot() {
     });
     let result;
     try {
-      result = await requestParAgentState(buildPublishRequest());
+      result = await requestParAgentState(buildPublishRequest(), SHARED_HISTORY_REQUEST_TIMEOUT_MS);
     } catch (error) {
       if (error?.code !== "KEG_STATE_REVISION_CONFLICT") throw error;
       const latestState = await requestParAgentState();
       applyParAgentState(latestState);
-      result = await requestParAgentState(buildPublishRequest());
+      result = await requestParAgentState(buildPublishRequest(), SHARED_HISTORY_REQUEST_TIMEOUT_MS);
     }
     applyParAgentState(result);
     const locked = Boolean(getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations));
@@ -6784,7 +6786,9 @@ async function saveWeeklyOrderPlan(reason) {
   inventorySharedMessage = "";
   const reasonInput = document.querySelector("#inventory-snapshot-reason");
   if (reasonInput) reasonInput.value = weeklyPlanOutsideMondayReason;
-  await submitInventoryCount();
+  // Each location was already saved by Next. Capture the shared counts without
+  // submitting them all again with a new physical-count timestamp.
+  await runWeeklyPlanUpdate();
   if (!getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date())) {
     throw new Error(weeklyPlanRefreshMessage || inventorySharedMessage || "Your counts are saved. Choose Save weekly plan to try again.");
   }
@@ -10003,7 +10007,7 @@ async function requestSharedWeeklyUsage(body = null, { knownRevision = null } = 
     method: body ? "POST" : "GET",
     headers: body ? { "Content-Type": "application/json", Accept: "application/json" } : { Accept: "application/json" },
     body: body ? JSON.stringify(body) : undefined,
-  });
+  }, SHARED_HISTORY_REQUEST_TIMEOUT_MS);
   if (!response.ok) {
     const error = new Error(result.error || `Shared Weekly Usage request failed (${response.status}).`);
     error.code = result.code || "WEEKLY_USAGE_STATE_ERROR";
@@ -13499,7 +13503,7 @@ async function runWeeklyPlanUpdate() {
     lockedSuccessfully = true;
   } catch (error) {
     parAgentError = error.message || "Weekly Plan update failed.";
-    weeklyPlanRefreshMessage = `Snapshot save did not finish: ${parAgentError} Press Bottle inventory verified again to retry.`;
+    weeklyPlanRefreshMessage = `Snapshot save did not finish: ${parAgentError} Your checked counts are kept. Try saving the weekly plan again.`;
   } finally {
     weeklyPlanUpdating = false;
     inventorySharedSaving = inventoryFieldSyncPendingCount > 0 || inventoryFieldSyncTimers.size > 0;
@@ -14392,9 +14396,7 @@ async function requestSharedInventory(body = null) {
     method: body ? "POST" : "GET",
     headers: body ? { "Content-Type": "application/json", Accept: "application/json" } : { Accept: "application/json" },
     body: body ? JSON.stringify(body) : undefined,
-  }, body?.action === "save-snapshot"
-    ? INVENTORY_SNAPSHOT_REQUEST_TIMEOUT_MS
-    : OPERATIONAL_SHARED_REQUEST_TIMEOUT_MS);
+  }, SHARED_HISTORY_REQUEST_TIMEOUT_MS);
   if (!response.ok) {
     const error = new Error(result.error || `Shared inventory request failed (${response.status}).`);
     error.code = result.code || "INVENTORY_STATE_ERROR";

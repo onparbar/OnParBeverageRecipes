@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import vm from "node:vm";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../public/dashboard.js", import.meta.url), "utf8");
@@ -27,9 +28,40 @@ test("snapshot actions receive a stable id before entering durable recovery", ()
   assert.match(stage, /entry\.payload\.captureId = entry\.id/);
 });
 
-test("the snapshot commit deadline outlasts the shared store deadline", () => {
-  const request = functionSource("requestSharedInventory");
-  assert.match(source, /const INVENTORY_SNAPSHOT_REQUEST_TIMEOUT_MS = 20000/);
-  assert.match(request, /body\?\.action === "save-snapshot"/);
-  assert.match(request, /INVENTORY_SNAPSHOT_REQUEST_TIMEOUT_MS/);
+test("inventory and usage transfers allow time for shared storage and the response body", async () => {
+  const requests = [];
+  const scope = vm.createContext({
+    SHARED_HISTORY_REQUEST_TIMEOUT_MS: 60_000,
+    requestOperationalSharedJson: async (path, options, timeout) => {
+      requests.push({ path, method: options.method, timeout });
+      return { response: { ok: true }, result: { revision: 8 } };
+    },
+  });
+  vm.runInContext([functionSource("requestSharedInventory"), functionSource("requestSharedWeeklyUsage")].join("\n"), scope);
+  for (const [request, action] of [
+    [scope.requestSharedInventory, "batch-update-fields"],
+    [scope.requestSharedInventory, "save-snapshot"],
+    [scope.requestSharedWeeklyUsage, "replace"],
+  ]) {
+    await request();
+    await request({ action });
+  }
+  assert.match(source, /const SHARED_HISTORY_REQUEST_TIMEOUT_MS = 60_000/);
+  assert.deepEqual(requests.map(({ method }) => method), ["GET", "POST", "GET", "POST", "GET", "POST"]);
+  assert.ok(requests.every(({ timeout }) => timeout === 60_000));
+});
+
+test("guided final save captures previously verified counts and waits for a published plan", async () => {
+  let attempts = 0;
+  const scope = vm.createContext({
+    clean: value => String(value).trim(), parAgentState: {}, document: { querySelector: () => null },
+    getCurrentWeeklyPlanSnapshot: () => attempts === 2,
+    runWeeklyPlanUpdate: async () => { attempts++; },
+    weeklyPlanOutsideMondayReason: "", weeklyPlanRefreshMessage: "", inventorySharedMessage: "",
+  });
+  vm.runInContext(functionSource("saveWeeklyOrderPlan"), scope);
+  await assert.rejects(scope.saveWeeklyOrderPlan(""), /counts are saved/i);
+  await scope.saveWeeklyOrderPlan(" verified Tuesday ");
+  assert.equal(scope.weeklyPlanOutsideMondayReason, "verified Tuesday");
+  assert.equal(attempts, 2);
 });
