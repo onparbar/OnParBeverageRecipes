@@ -4,6 +4,7 @@ import { buildDashboardHealth } from "../../../lib/dashboard-health.mjs";
 export const runtime = "nodejs";
 
 const DEEP_HEALTH_CACHE_MS = 30_000;
+const FAILED_HEALTH_CACHE_MS = 2_000;
 const healthCheckCache = new Map();
 
 function wantsDeepCheck(request) {
@@ -32,7 +33,7 @@ export async function GET(request) {
     health = await buildDashboardHealth({ deep, storage });
     if (deep || storage) {
       healthCheckCache.set(cacheKey, {
-        expiresAt: Date.now() + DEEP_HEALTH_CACHE_MS,
+        expiresAt: Date.now() + (health.ok ? DEEP_HEALTH_CACHE_MS : FAILED_HEALTH_CACHE_MS),
         health,
       });
     }

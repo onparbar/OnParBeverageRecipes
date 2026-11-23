@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { getDashboardBuildInfo } from "../lib/dashboard-build-info.mjs";
 import { buildDashboardHealth } from "../lib/dashboard-health.mjs";
+import { checkSupabaseReadiness } from "../lib/supabase-readiness.mjs";
 
 test("sanitizes public build metadata", () => {
   assert.deepEqual(getDashboardBuildInfo({
@@ -155,7 +156,33 @@ test("storage health fails readiness when a required singleton row is missing", 
   assert.equal(health.ok, false);
   assert.equal(health.reachability.supabase.provisioned, false);
   assert.equal(health.reachability.supabase.missingResourceCount, 1);
+  assert.deepEqual(health.reachability.supabase.failureCounts, { "missing-resource": 1 });
   assert.deepEqual(health.readiness.missing, ["supabase-resources"]);
+});
+
+test("storage readiness retries transient requests and reports persistent failures by cause", async () => {
+  const requests = new Map();
+  const result = await checkSupabaseReadiness({
+    env: { SUPABASE_URL: "https://example.supabase.co", SUPABASE_SECRET_KEY: "secret" },
+    fetchImpl: async (url) => {
+      const table = url.pathname.split("/").at(-1);
+      const attempt = (requests.get(table) ?? 0) + 1;
+      requests.set(table, attempt);
+      if (table === "dashboard_shared_state" && attempt === 1) return new Response(null, { status: 503 });
+      if (table === "pmb_data_backup") return new Response(null, { status: 403 });
+      if (table === "weekly_usage_shared_state") throw new DOMException("timed out", "TimeoutError");
+      const id = url.searchParams.get("id")?.slice(3);
+      return Response.json(id ? [{ id }] : []);
+    },
+  });
+
+  assert.equal(requests.get("dashboard_shared_state"), 2);
+  assert.equal(requests.get("weekly_usage_shared_state"), 2);
+  assert.equal(requests.get("pmb_data_backup"), 1);
+  assert.equal(result.reachable, true);
+  assert.equal(result.provisioned, false);
+  assert.equal(result.missingResourceCount, 2);
+  assert.deepEqual(result.failureCounts, { authorization: 1, timeout: 1 });
 });
 
 test("health fails when authentication cannot verify sessions", async () => {

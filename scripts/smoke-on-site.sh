@@ -81,20 +81,35 @@ fi
 
 VERSION_JSON=""
 HEALTH_JSON=""
-for attempt in $(seq 1 15); do
+LAST_HEALTH_JSON=""
+for attempt in $(seq 1 4); do
   if VERSION_JSON="$(curl --fail --silent --show-error --max-time 5 "${SERVICE_URL}/api/version" 2>/dev/null)" \
-    && HEALTH_JSON="$(curl --fail --silent --show-error --max-time 10 "${SERVICE_URL}/api/health${HEALTH_SUFFIX}" 2>/dev/null)"; then
+    && HEALTH_JSON="$(curl --fail-with-body --silent --show-error --max-time 24 "${SERVICE_URL}/api/health${HEALTH_SUFFIX}" 2>/dev/null)"; then
     break
+  fi
+  if [ -n "${HEALTH_JSON}" ]; then
+    LAST_HEALTH_JSON="${HEALTH_JSON}"
   fi
   VERSION_JSON=""
   HEALTH_JSON=""
-  if [ "${attempt}" -lt 15 ]; then
+  if [ "${attempt}" -lt 4 ]; then
     sleep 2
   fi
 done
 
 if [ -z "${VERSION_JSON}" ] || [ -z "${HEALTH_JSON}" ]; then
-  echo "Dashboard smoke test failed: ${SERVICE_URL} was not healthy within 30 seconds." >&2
+  DASHBOARD_LAST_HEALTH_JSON="${LAST_HEALTH_JSON}" "${NODE_BIN}" -e '
+const health = process.env.DASHBOARD_LAST_HEALTH_JSON;
+try {
+  const storage = JSON.parse(health)?.reachability?.supabase;
+  if (storage?.checked) {
+    const failures = Object.entries(storage.failureCounts || {})
+      .filter(([reason, count]) => ["timeout", "connection", "upstream", "authorization", "missing-resource", "http-error", "invalid-response"].includes(reason) && Number.isInteger(count));
+    console.error(`Shared storage check failed for ${Number(storage.missingResourceCount) || 0} resource(s): ${JSON.stringify(Object.fromEntries(failures))}`);
+  }
+} catch { /* A non-JSON failure is covered by the message below. */ }
+'
+  echo "Dashboard smoke test failed: ${SERVICE_URL} did not pass the health check after four attempts." >&2
   exit 1
 fi
 

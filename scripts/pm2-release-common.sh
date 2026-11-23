@@ -353,7 +353,7 @@ onpar_pm2_public_smoke() {
 
   for attempt in $(seq 1 15); do
     version_status="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "${service_url}/api/version?deploy=${probe}" 2>/dev/null || true)"
-    health_status="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "${service_url}/api/health?storage=1&deploy=${probe}" 2>/dev/null || true)"
+    health_status="$(curl --silent --show-error --max-time 24 --output /dev/null --write-out '%{http_code}' "${service_url}/api/health?storage=1&deploy=${probe}" 2>/dev/null || true)"
     root_status="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "${service_url}/?deploy=${probe}" 2>/dev/null || true)"
     login_status="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "${service_url}/login?deploy=${probe}" 2>/dev/null || true)"
     valid=1
@@ -385,7 +385,7 @@ if (expected && !String(version.commit || "").toLowerCase().startsWith(expected)
 
   case "${health_status}" in
     200)
-      health_json="$(curl --fail --silent --show-error --max-time 10 "${service_url}/api/health?storage=1&deploy=${probe}")"
+      health_json="$(curl --fail --silent --show-error --max-time 24 "${service_url}/api/health?storage=1&deploy=${probe}")"
       "${node_bin}" -e '
 const health = JSON.parse(process.argv[1]);
 if (health.ok !== true) throw new Error(`Public health failed with ${health.status || "unknown"}.`);
