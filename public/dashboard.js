@@ -5818,9 +5818,11 @@ async function loadWeeklyOrderTracking() {
     weeklyOrderTracking = normalizeWeeklyOrderTracking(result);
     reconcileWeeklyOrderTrackingRevision();
     weeklyOrderTrackingMessage = weeklyOrderTracking.message;
-  } catch (error) {
-    weeklyOrderTracking = normalizeWeeklyOrderTracking();
-    weeklyOrderTrackingMessage = error?.message || "Weekly order tracking could not be loaded.";
+  } catch {
+    if (weeklyOrderTracking.generatedAt !== parAgentState?.recommendations?.generatedAt) {
+      weeklyOrderTracking = normalizeWeeklyOrderTracking();
+    }
+    weeklyOrderTrackingMessage = "Supplier orders could not be refreshed.";
   }
 }
 
@@ -8615,8 +8617,10 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null, 
   const ingredientReviews = orderRehearsalMode ? []
     : getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date())?.ingredientOrderReview || [];
   const draftVendors = new Set(model.drafts.map((draft) => draft.vendor));
+  const reloadOrders = !orderRehearsalMode && !weeklyOrderTracking.available
+    ? '<button type="button" class="ghost-button" data-reload-supplier-orders>Reload supplier orders</button>' : "";
   const unmatchedIngredientReviews = ingredientReviews.filter((item) => !draftVendors.has(item.vendor));
-  if (!model.drafts.length) return `${renderWeeklyIngredientOrderReview(ingredientReviews)}${weeklyOrderTrackingMessage ? `<p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage)}</p>` : ""}${renderVendorOrderAdjustments()}`;
+  if (!model.drafts.length) return `${reloadOrders}${renderWeeklyIngredientOrderReview(ingredientReviews)}${weeklyOrderTrackingMessage ? `<p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage)}</p>` : ""}${renderVendorOrderAdjustments()}`;
   const allOrdersPlaced = !orderRehearsalMode && model.drafts.every((draft) => vendorsByName.get(draft.vendor)?.ordered === true);
   return `
     <section class="vendor-order-drafts" ${guided ? 'aria-label="Supplier order"' : 'aria-labelledby="vendor-order-drafts-title"'}>
@@ -8625,6 +8629,7 @@ function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null, 
         <div><strong>${formatNumber(model.drafts.reduce((total, draft) => total + draft.lineCount, 0))} items</strong><span>${money(model.weeklyTotal)}</span></div>
       </header>`}
       ${weeklyOrderTrackingMessage ? `<p class="weekly-plan-live-status" role="status">${escapeHtml(weeklyOrderTrackingMessage)}</p>` : ""}
+      ${reloadOrders}
       ${renderWeeklyIngredientOrderReview(unmatchedIngredientReviews)}
       ${guided ? "" : renderVendorOrderAdjustments()}
       <div class="vendor-order-drafts__grid">
@@ -8694,6 +8699,10 @@ function bindOwnerWeeklyOrderTrackingEvents() {
       const snapshot = getCurrentWeeklyPlanSnapshot(parAgentState?.recommendations, new Date());
       return getCurrentVendorOrderPolicy(plan, snapshot);
     },
+  });
+  weeklyPlan?.querySelector("[data-reload-supplier-orders]")?.addEventListener("click", event => {
+    event.currentTarget.disabled = true;
+    void refreshWeeklyOrderTracking();
   });
   weeklyPlan?.querySelectorAll("[data-recalculate-held-ingredients]").forEach(button => {
     button.addEventListener("click", async () => {

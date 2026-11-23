@@ -14,7 +14,7 @@ import {
   planReceiptInventoryContributions,
 } from "../../../lib/inventory-contributions.mjs";
 import { executeInventoryBackedOperation } from "../../../lib/inventory-backed-operation.mjs";
-import { recoverPendingInventoryUpdates } from "../../../lib/keg-par-agent-shared-store.mjs";
+import { readSharedWeeklyOrderPlan, recoverPendingInventoryUpdates } from "../../../lib/keg-par-agent-shared-store.mjs";
 import { applyBeerReceiptCounts } from "../../../lib/beer-receipt-counts.mjs";
 import { archiveWeeklyOrderPlacement } from "../../../lib/weekly-order-snapshot.mjs";
 
@@ -73,7 +73,7 @@ export async function GET(request) {
         return jsonResponse({ unchanged: true, stateRevision: metadata.revision });
       }
     }
-    const state = await readParAgentState();
+    const state = await readSharedWeeklyOrderPlan();
     const recommendations = role === "owner" ? await withSavedBeerCatalog(state.recommendations) : state.recommendations;
     const tracking = buildWeeklyOrderTracking(recommendations);
     if (!state.initialized || !tracking) return jsonResponse(unavailablePlan(state));

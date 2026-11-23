@@ -127,3 +127,12 @@ test("Keg Levels fails closed when shared storage is unavailable", async () => {
     (error) => assertError(error, "KEG_STATE_UNAVAILABLE"),
   );
 });
+
+test("weekly order reads fetch only the published recommendations", async () => {
+  const recommendations = { generatedAt: "2026-11-23T21:45:46.089Z" };
+  const shared = store(async (url) => {
+    assert.equal(url.searchParams.get("select"), "id,revision,initialized,recommendations:data->recommendations");
+    return response([{ id: "keg-par-agent", revision: 9, initialized: true, recommendations }]);
+  });
+  assert.deepEqual(await shared.readWeeklyPlan(), { revision: 9, initialized: true, recommendations });
+});
