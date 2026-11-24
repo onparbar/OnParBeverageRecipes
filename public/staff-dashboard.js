@@ -142,13 +142,13 @@ async function initStaffRecipes() {
       headers: { Accept: "application/json" },
     });
     const session = await parseJsonResponse(sessionResponse);
-    if (!sessionResponse.ok) {
+    if (sessionResponse.status === 401) {
       window.location.replace("/login?next=/staff");
       return;
     }
+    if (!sessionResponse.ok) throw new Error("Couldn’t check your sign-in. Check your connection and try again.");
     if (!["employee", "owner"].includes(session.role)) {
-      window.location.replace("/");
-      return;
+      throw new Error("Couldn’t verify staff access. Reload to try again.");
     }
 
     staffPrepBatchName = clean(session.name || session.user?.name);
@@ -179,6 +179,12 @@ async function initStaffRecipes() {
     recipeGrid.setAttribute("aria-busy", "false");
     recipeGrid.replaceChildren(createEmptyState("Recipe data is unavailable. Ask a manager to check the dashboard service."));
     if (overviewWeek) overviewWeek.textContent = error?.message || "This week's plan could not be loaded. Reload to try again.";
+    if (overviewRetryButton) {
+      overviewRetryButton.removeEventListener("click", refreshStaffSections);
+      overviewRetryButton.hidden = false;
+      overviewRetryButton.disabled = false;
+      overviewRetryButton.addEventListener("click", () => window.location.reload(), { once: true });
+    }
     if (overviewPrepValue) overviewPrepValue.textContent = "—";
     if (overviewPrepDetail) overviewPrepDetail.textContent = "Unavailable";
     if (overviewLiquorValue) overviewLiquorValue.textContent = "—";

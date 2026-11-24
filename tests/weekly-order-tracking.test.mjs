@@ -403,3 +403,29 @@ test("quantity totals reject stale edits and can remove an item added from zero"
   const removed=applyWeeklyOrderTrackingUpdate(added,{...payload,quantity:0,expectedQuantity:1},{role:"owner",now});
   assert.equal(buildWeeklyOrderTracking(removed,now()).adjustments.find(row=>row.catalogId===item.catalogId).quantity,0);
 });
+
+test("cabinet edits keep the refill line with the same supplier SKU intact", () => {
+  const now = () => new Date(generatedAt);
+  const state = { generatedAt, items: [], weeklyPlanSnapshot: createWeeklyPlanSnapshot({ generatedAt, recommendations: [], publishedAt: generatedAt }) };
+  const orders = state.weeklyPlanSnapshot.plan.orders;
+  const product = { vendor: "OHLQ", vendorSku: "9232D", vendorProductName: "Tito's Handmade Vodka 1.75L", unitCost: 34.78 };
+  orders.liquorTapBottles = [{ ...product, id: "tap-refill", name: "Tito's", quantity: 2 }];
+  orders.liquor = [{ ...product, id: "tito-s", name: "Tito's", quantity: 30 }];
+
+  const tracking = (plan) => buildWeeklyOrderTracking(plan, now());
+  const catalog = (plan) => tracking(plan).adjustmentCatalog.filter(item => item.vendorSku === product.vendorSku);
+  const quantities = (plan) => Object.fromEntries(catalog(plan).map(item => [item.internalId, item.currentOrderQuantity]));
+  assert.deepEqual(quantities(state), { "tap-refill": 2, "tito-s": 30 });
+  const cabinet = catalog(state).find(item => item.internalId === "tito-s");
+  let updated = state;
+  for (const [expectedQuantity, quantity] of [[30, 24], [24, 0], [0, 12]]) {
+    updated = applyWeeklyOrderTrackingUpdate(updated, {
+      action: "set-order-adjustment", generatedAt: state.generatedAt, catalogId: cabinet.catalogId,
+      vendor: "OHLQ", expectedQuantity, quantity, adjustedBy: "Manager", reason: "Count correction",
+    }, { role: "owner", now });
+    assert.deepEqual(quantities(updated), { "tap-refill": 2, "tito-s": quantity });
+    const lines = tracking(updated).vendors.find(vendor => vendor.vendor === "OHLQ").items;
+    assert.equal(lines.find(line => line.inventoryItemId === "tap-refill").quantity, 2);
+    assert.equal(lines.find(line => line.inventoryItemId === "tito-s")?.quantity ?? 0, quantity);
+  }
+});

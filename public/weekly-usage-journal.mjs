@@ -1,12 +1,13 @@
 // Pending reports are independent records: acknowledging one tab's save must
 // never remove another tab's work. No report-size data is written to localStorage.
-export function createWeeklyUsageJournal({ indexedDB = globalThis.indexedDB, name = "onpar-weekly-usage", timeoutMs = 10000 } = {}) {
+export function createWeeklyUsageJournal({ indexedDB, name = "onpar-weekly-usage", timeoutMs = 10000 } = {}) {
   let connection;
   let writes = Promise.resolve();
   const superseded = new Set();
   const open = () => {
     if (connection) return connection;
     connection = new Promise((resolve, reject) => {
+      if (indexedDB === undefined) indexedDB = globalThis.indexedDB;
       if (!indexedDB) { reject(new Error("Browser recovery storage is unavailable.")); return; }
       let settled = false;
       const finish = (error, db) => {

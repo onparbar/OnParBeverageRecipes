@@ -12,6 +12,7 @@ export default async function StaffRecipePage() {
   const role = await getDashboardSessionRole(cookieStore.get(DASHBOARD_SESSION_COOKIE)?.value || "");
   return (
     <div className="shell staff-recipe-shell" data-staff-dashboard="true">
+      <Script src="/dashboard-identity.js" strategy="afterInteractive" />
       <link rel="stylesheet" href="/smart-receiving.css" />
       <link rel="stylesheet" href="/staff-receiving.css" />
       <link rel="stylesheet" href="/staff-simple.css" />

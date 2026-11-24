@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import Script from "next/script";
 
 function DashboardBrand() {
   return (
@@ -18,8 +19,8 @@ function DashboardBrand() {
 }
 
 export default function DashboardPage() {
-  const [isReady, setIsReady] = useState(false);
   const [sessionRole, setSessionRole] = useState("");
+  const [loadError, setLoadError] = useState("");
 
   const isEmployee = sessionRole === "employee";
 
@@ -28,19 +29,25 @@ export default function DashboardPage() {
 
     async function loadSessionRole() {
       try {
-        const response = await fetch("/api/session", { cache: "no-store" });
+        const response = await fetch("/api/session", { cache: "no-store", signal: AbortSignal.timeout(15000) });
+        if (!isMounted) return;
+        if (response.status === 401) {
+          window.location.assign("/login");
+          return;
+        }
         const result = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(result?.error || "Login required.");
         if (result?.role === "employee") {
           window.location.replace("/staff");
           return;
         }
+        if (result?.role !== "owner") throw new Error("Invalid session response.");
         // Retain the verified identity before dashboard requests can expire.
         // Recovery must never attach this tab's drafts to a different account.
         if (result?.user) window.onParDashboardIdentity = result.user;
         if (isMounted) setSessionRole("owner");
       } catch {
-        window.location.assign("/login");
+        if (isMounted) setLoadError("Couldn’t check your sign-in. Check your connection and try again.");
       }
     }
 
@@ -54,8 +61,6 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!sessionRole) return undefined;
 
-    setIsReady(true);
-
     const existingScript = document.querySelector('script[data-dashboard-script="true"]');
     if (existingScript) existingScript.remove();
 
@@ -64,6 +69,9 @@ export default function DashboardPage() {
     document.body.appendChild(inputGuardScript);
 
     const script = document.createElement("script");
+    const showLoadError = () => setLoadError("The dashboard couldn’t finish loading. Reload to try again.");
+    window.addEventListener("onpar:dashboard-load-error", showLoadError);
+    script.onerror = showLoadError;
     script.type = "module";
     script.src = `/dashboard.js?v=${Date.now()}`;
     script.dataset.dashboardScript = "true";
@@ -78,11 +86,23 @@ export default function DashboardPage() {
     document.body.appendChild(coolerWalkScript);
 
     return () => {
+      window.removeEventListener("onpar:dashboard-load-error", showLoadError);
+      script.onerror = null;
       script.remove();
+      inputGuardScript.remove();
+      liveSpeechScript.remove();
+      coolerWalkScript.remove();
     };
   }, [sessionRole]);
 
-  if (!isReady) {
+  const retryNotice = loadError && (
+    <div className="empty-state" role="alert">
+      <p>{loadError}</p>
+      <button className="primary-button" type="button" onClick={() => window.location.reload()}>Retry</button>
+    </div>
+  );
+
+  if (!sessionRole) {
     return (
       <div className="shell">
         <header className="topbar">
@@ -92,7 +112,7 @@ export default function DashboardPage() {
         </header>
         <main>
           <section className="panel is-active">
-            <div className="empty-state">Loading dashboard...</div>
+            {retryNotice || <div className="empty-state">Loading dashboard...</div>}
           </section>
         </main>
       </div>
@@ -101,6 +121,8 @@ export default function DashboardPage() {
 
   return (
     <div className="shell" data-dashboard-role={sessionRole}>
+      <Script src="/dashboard-identity.js" strategy="afterInteractive" />
+      {retryNotice}
       <link rel="stylesheet" href="/inventory-reality-check.css" />
       <link rel="stylesheet" href="/tap-performance.css" />
       <link rel="stylesheet" href="/weekly-order.css" />

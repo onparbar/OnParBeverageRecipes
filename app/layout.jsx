@@ -1,4 +1,3 @@
-import Script from "next/script";
 import "./globals.css";
 import "./identity.css";
 import "./recipe-guide.css";
@@ -13,7 +12,6 @@ export default function RootLayout({ children }) {
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>
         {children}
-        <Script src="/dashboard-identity.js" strategy="afterInteractive" />
       </body>
     </html>
   );

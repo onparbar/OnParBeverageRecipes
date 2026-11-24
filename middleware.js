@@ -105,7 +105,7 @@ export async function middleware(request) {
   const loginParams = new URLSearchParams();
   loginParams.set("next", `${pathname}${request.nextUrl.search}`);
   const authStatus = getDashboardAuthStatus();
-  if (!authStatus.hasOwnerPassword) {
+  if (!authStatus.ownerEnabled) {
     loginParams.set("setup", "missing-password");
   } else if (!authStatus.hasSessionSecret) {
     loginParams.set("setup", "missing-session-secret");

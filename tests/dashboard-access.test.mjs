@@ -17,6 +17,8 @@ test("employee access is restricted to the dedicated staff page and bundle", () 
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/staff", method: "GET" }), true);
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/staff", method: "POST" }), false);
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/staff-dashboard.js", method: "GET" }), true);
+  assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/dashboard-identity.js", method: "GET" }), true);
+  assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/dashboard-identity.js", method: "POST" }), false);
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/staff-resilience.mjs", method: "GET" }), true);
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/boss-demo.mjs", method: "GET" }), true);
   assert.equal(isEmployeeAllowedDashboardRequest({ pathname: "/smart-receiving.mjs", method: "GET" }), true);

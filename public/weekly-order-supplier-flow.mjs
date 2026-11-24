@@ -18,7 +18,7 @@ export function renderSupplierOrderFlow({ ordersHtml = "", prepHtml = "" } = {})
   </section>`;
 }
 
-export function createSupplierOrderFlow({ storage = globalThis.localStorage, onExit = () => {} } = {}) {
+export function createSupplierOrderFlow({ storage, onExit = () => {} } = {}) {
   let flow = null;
   let cards = [];
   let bindings = [];
@@ -26,6 +26,7 @@ export function createSupplierOrderFlow({ storage = globalThis.localStorage, onE
   let pendingTarget = "";
 
   try {
+    if (storage === undefined) storage = globalThis.localStorage;
     const saved = JSON.parse(storage?.getItem(STORAGE_KEY) || "null");
     if (typeof saved?.scope === "string" && typeof saved?.screen === "string"
       && (saved.screen === "orders" || saved.screen === "prep" || saved.screen.startsWith(SUPPLIER_PREFIX))) {

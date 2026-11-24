@@ -23,7 +23,7 @@ export function createWeeklyOrderController({
   savePlan,
   openPlan = () => {},
   exit = () => {},
-  storage = globalThis.localStorage,
+  storage,
   now = () => new Date(),
 } = {}) {
   let busy = false;
@@ -36,6 +36,7 @@ export function createWeeklyOrderController({
   }
 
   try {
+    if (storage === undefined) storage = globalThis.localStorage;
     const saved = JSON.parse(storage?.getItem(STORAGE_KEY) || "null");
     if (saved?.version === 1 && isRecommendationForOperatingWeek(saved.updatedAt, now())) {
       state = {

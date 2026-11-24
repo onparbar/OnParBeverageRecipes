@@ -38,7 +38,7 @@ test("staff bundle does not contain owner pricing, ordering, or browser-storage 
 test("authenticated staff and owners can load staff checklists regardless of browser history", async () => {
   const staffBundle = await readProjectFile("public/staff-dashboard.js");
   assert.match(staffBundle, /!\["employee", "owner"\]\.includes\(session\.role\)/);
-  assert.match(staffBundle, /if \(!sessionResponse\.ok\)\s*\{\s*window\.location\.replace\("\/login\?next=\/staff"\);\s*return;/);
+  assert.match(staffBundle, /if \(sessionResponse\.status === 401\)\s*\{\s*window\.location\.replace\("\/login\?next=\/staff"\);\s*return;/);
   assert.doesNotMatch(staffBundle, /inspectStaffBrowserProfile|lockStaffRecipesForBrowserProfile|locked in this browser profile/);
   const roleGate = staffBundle.indexOf('if (!["employee", "owner"].includes(session.role))');
   const loadChecklists = staffBundle.indexOf("await refreshStaffSections()", roleGate);

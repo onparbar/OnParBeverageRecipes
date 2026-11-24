@@ -15,6 +15,7 @@ function timestamp(value) {
 }
 
 function normalizeDeliveryItem(value = {}) {
+  if (!value) return null;
   const id = clean(value.id, 300);
   const name = clean(value.name);
   if (!id || !name) return null;
@@ -36,6 +37,7 @@ function normalizeDeliveryItem(value = {}) {
 }
 
 function normalizeDelivery(value = {}) {
+  if (!value) return null;
   const id = clean(value.id, 300);
   const vendor = clean(value.vendor, 80);
   if (!id || !vendor) return null;
@@ -55,6 +57,7 @@ function normalizeDelivery(value = {}) {
 }
 
 function normalizeCocktail(value = {}) {
+  if (!value) return null;
   const id = clean(value.id, 300);
   const name = clean(value.name);
   if (!id || !name) return null;

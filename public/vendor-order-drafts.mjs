@@ -254,6 +254,20 @@ function getOrderCollection(item = {}) {
   return "mixers";
 }
 
+// A cabinet purchase and a tap refill may use the same supplier SKU.
+// Callers supply lines from the selected order category.
+export function findVendorOrderLine(lines, source) {
+  const vendor = normalizeVendor(source.vendor);
+  const candidates = lines.filter(line => normalizeVendor(line.vendor) === vendor);
+  const id = clean(source.internalId || source.id);
+  const sku = clean(source.vendorSku || source.preferredSku);
+  const name = clean(source.vendorProductName || source.productName || source.name).toLowerCase();
+  return candidates.find(line => id && clean(line.id || line.internalId) === id)
+    || candidates.find(line => sku && clean(line.vendorSku || line.preferredSku) === sku)
+    || candidates.find(line => name && (!sku || !clean(line.vendorSku || line.preferredSku))
+      && clean(line.vendorProductName || line.productName || line.name).toLowerCase() === name);
+}
+
 function applyManualOrderAdjustments(plan = {}, catalog = [], adjustments = []) {
   const orders = { ...(plan?.orders || {}) };
   ORDER_COLLECTIONS.forEach((collection) => {
@@ -271,31 +285,10 @@ function applyManualOrderAdjustments(plan = {}, catalog = [], adjustments = []) 
     const vendorSku = clean(source.vendorSku || source.preferredSku);
     const productName = clean(source.vendorProductName || source.productName || source.name);
     const collection = getOrderCollection(source);
-    let existingCollection = "";
-    let existingIndex = -1;
-    // Cabinet ingredients and tap refills can share a supplier SKU. Resolve the
-    // selected line's exact identity across all collections before SKU fallback.
-    const exactCollection = internalId && ORDER_COLLECTIONS.find(name => orders[name]
-      .some(item => normalizeVendor(item.vendor) === vendor && clean(item.id || item.internalId) === internalId));
-    (exactCollection ? [exactCollection] : ORDER_COLLECTIONS).some((name) => {
-      const index = orders[name].findIndex((item) => (
-        normalizeVendor(item.vendor) === vendor
-        && (
-          (internalId && clean(item.id || item.internalId) === internalId)
-          || (!exactCollection && (
-            (vendorSku && clean(item.vendorSku || item.preferredSku) === vendorSku)
-            || clean(item.vendorProductName || item.productName || item.name).toLowerCase() === productName.toLowerCase()
-          ))
-        )
-      ));
-      if (index < 0) return false;
-      existingCollection = name;
-      existingIndex = index;
-      return true;
-    });
-    const existing = existingIndex >= 0 ? orders[existingCollection][existingIndex] : null;
+    const existing = findVendorOrderLine(orders[collection], source);
+    const existingIndex = orders[collection].indexOf(existing);
     if (quantity === 0) {
-      if (existingIndex >= 0) orders[existingCollection].splice(existingIndex, 1);
+      if (existingIndex >= 0) orders[collection].splice(existingIndex, 1);
       return;
     }
     const casePackaged = Boolean(source.casePackaged ?? existing?.casePackaged);
@@ -345,7 +338,7 @@ function applyManualOrderAdjustments(plan = {}, catalog = [], adjustments = []) 
       // need their existing allocation reviewed instead of guessing a split.
       adjusted.kegDestinations = [{ ...adjusted.kegDestinations[0], quantity: requestedUnits }];
     }
-    if (existingIndex >= 0) orders[existingCollection][existingIndex] = adjusted;
+    if (existingIndex >= 0) orders[collection][existingIndex] = adjusted;
     else orders[collection].push(adjusted);
   });
 

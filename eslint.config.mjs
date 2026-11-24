@@ -15,6 +15,13 @@ const config = [
     ],
   },
   ...compat.extends("next/core-web-vitals"),
+  {
+    files: ["public/**/*.{js,mjs}"],
+    rules: {
+      "import/named": "error",
+      "import/no-unresolved": "error",
+    },
+  },
 ];
 
 export default config;

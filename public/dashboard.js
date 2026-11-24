@@ -194,6 +194,7 @@ import {
 } from "./coming-soon-items.mjs";
 import {
   buildUnifiedVendorOrderModel,
+  findVendorOrderLine,
   normalizeVendorOrderPolicy,
 } from "./vendor-order-drafts.mjs";
 import { buildProofPrepOrderContext } from "./proof-prep-replacements.mjs";
@@ -1130,10 +1131,13 @@ const DASHBOARD_BACKGROUND_REFRESH_MS = 120_000;
 
 const dashboardSession = mountDashboardSessionRecovery();
 
-init().finally(() => {
+init().then(() => {
   dashboardBriefingInitialLoadPending = false;
   renderDashboardOverview();
   void retryFailedSharedReads();
+}).catch(error => {
+  console.error("Dashboard initialization failed", error);
+  window.dispatchEvent(new Event("onpar:dashboard-load-error"));
 });
 
 async function init() {
@@ -8531,9 +8535,10 @@ function renderVendorOrderAdjustments(vendorScope = "") {
         ${vendorScope ? "" : `<label data-order-adjustment-only><span>Vendor</span><select data-order-adjustment-vendor-filter><option value="">All vendors</option>${vendors.map((vendor) => `<option value="${escapeHtml(vendor)}">${escapeHtml(vendor)}</option>`).join("")}</select></label>`}
         <label data-order-adjustment-only><span>Product</span><select data-order-adjustment-product>${catalog.map((item) => {
           const saved = savedByCatalogId.get(item.catalogId);
-          const currentQuantity = saved?.quantity ?? item.currentPlanQuantity ?? 0;
+          const currentQuantity = item.currentOrderQuantity ?? saved?.quantity ?? item.currentPlanQuantity ?? 0;
           const defaultQuantity = currentQuantity;
-          return `<option value="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}" data-order-adjustment-current-quantity="${formatNumber(currentQuantity)}" data-order-adjustment-default-quantity="${formatNumber(defaultQuantity)}" data-order-adjustment-default-reason="${escapeHtml(saved?.reason || "")}" data-order-adjustment-quantity-unit="${escapeHtml(item.quantityUnit)}">${escapeHtml(vendorScope ? item.name : `${item.vendor} · ${item.name}`)}</option>`;
+          const name = item.lineType === "Liquor tap bottle" ? `${item.name} (tap refill)` : item.name;
+          return `<option value="${escapeHtml(item.catalogId)}" data-order-adjustment-vendor="${escapeHtml(item.vendor)}" data-order-adjustment-current-quantity="${formatNumber(currentQuantity)}" data-order-adjustment-default-quantity="${formatNumber(defaultQuantity)}" data-order-adjustment-default-reason="${escapeHtml(saved?.reason || "")}" data-order-adjustment-quantity-unit="${escapeHtml(item.quantityUnit)}">${escapeHtml(vendorScope ? name : `${item.vendor} · ${name}`)}</option>`;
         }).join("")}</select></label>
         <div class="vendor-order-adjustments__quantity-field" data-order-adjustment-quantity-field>
           <span>Order quantity</span>
@@ -8594,18 +8599,9 @@ function getVendorWorkflowState(draft, saved, vendor) {
 }
 
 function findDraftLineAdjustmentCatalogItem(line, vendor) {
-  const internalId = clean(line?.internalId || line?.id);
-  const vendorSku = clean(line?.vendorSku);
-  const productName = clean(line?.productName || line?.name).toLowerCase();
-  return weeklyOrderTracking.adjustmentCatalog.find((item) => (
-    item.vendor === vendor
-    && Number(item.currentPlanQuantity) > 0
-    && (
-      (internalId && clean(item.internalId) === internalId)
-      || (vendorSku && clean(item.vendorSku) === vendorSku)
-      || clean(item.vendorProductName || item.name).toLowerCase() === productName
-    )
-  )) || null;
+  const candidates = weeklyOrderTracking.adjustmentCatalog.filter(item =>
+    Number(item.currentPlanQuantity) > 0 && (!line.lineType || item.lineType === line.lineType));
+  return findVendorOrderLine(candidates, { ...line, vendor }) || null;
 }
 
 function renderVendorOrderDraftWorkspace(plan, freshness, providedModel = null, { guided = false } = {}) {
@@ -12975,9 +12971,9 @@ function applyParAgentState(state, { hydrate = false } = {}) {
   kegOnHandOverrides = { ...serverOnHand };
   kegParOverrides = { ...serverPars };
   kegOnDeckOverrides = { ...serverOnDeck };
-  saveKegOnHandOverrides();
-  saveKegParOverrides();
-  saveKegOnDeckOverrides();
+  writeDashboardLocalStorageValue(KEG_ON_HAND_STORAGE_KEY, kegOnHandOverrides);
+  writeDashboardLocalStorageValue(KEG_PAR_STORAGE_KEY, kegParOverrides);
+  writeDashboardLocalStorageValue(KEG_ON_DECK_STORAGE_KEY, kegOnDeckOverrides);
 
   parAgentMessage = getParAgentStatusMessage();
 }
@@ -14815,11 +14811,12 @@ function applySharedInventoryState(state, { rebuild = false } = {}) {
   inventoryCountedItemsAt = { ...(state.current?.countedItemsAt || {}) };
   inventoryContributions = { ...(state.current?.inventoryContributions || {}) };
   inventoryContributionShortfalls = { ...(state.current?.contributionShortfalls || {}) };
-  saveInventoryOnHandOverrides();
-  saveInventoryParOverrides();
-  saveCustomInventoryItems();
-  saveInventoryItemOrder();
-  saveInventoryHistory();
+  // These are offline copies of a successful shared read.
+  writeDashboardLocalStorageValue(INVENTORY_ON_HAND_STORAGE_KEY, inventoryOnHandOverrides);
+  writeDashboardLocalStorageValue(INVENTORY_PAR_STORAGE_KEY, inventoryParOverrides);
+  writeDashboardLocalStorageValue(CUSTOM_INVENTORY_STORAGE_KEY, customInventoryItems);
+  writeDashboardLocalStorageValue(INVENTORY_ORDER_STORAGE_KEY, inventoryItemOrder);
+  writeDashboardLocalStorageValue(INVENTORY_HISTORY_STORAGE_KEY, inventoryHistory);
 
   if (rebuild && inventorySourceRows.length) {
     inventoryItems = mergeCustomInventoryItems(parseInventory(inventorySourceRows));
@@ -20140,7 +20137,12 @@ function parseInventory(rows) {
 }
 
 function migrateInventoryOnHandOverrides(rows) {
-  if (localStorage.getItem(INVENTORY_UNIT_MODEL_STORAGE_KEY) === INVENTORY_UNIT_MODEL_VERSION) return;
+  try {
+    if (localStorage.getItem(INVENTORY_UNIT_MODEL_STORAGE_KEY) === INVENTORY_UNIT_MODEL_VERSION) return;
+  } catch {
+    // The legacy counts and their migration marker are stored on the same device.
+    return;
+  }
 
   let currentSection = "Liquor";
   let changed = false;
@@ -21361,7 +21363,11 @@ function saveWeeklyUsageArchivedItems() {
 }
 
 function loadWeeklyUsageLastSyncAt() {
-  return clean(localStorage.getItem(WEEKLY_USAGE_LAST_SYNC_STORAGE_KEY) || "");
+  try {
+    return clean(localStorage.getItem(WEEKLY_USAGE_LAST_SYNC_STORAGE_KEY) || "");
+  } catch {
+    return "";
+  }
 }
 
 function saveWeeklyUsageLastSyncAt() {
